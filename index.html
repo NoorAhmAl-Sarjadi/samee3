@@ -308,7 +308,7 @@
         <button id="side-panel-cancel-btn" class="dl-cancel-btn" onclick="hideSidePanel()">إغلاق / إلغاء</button>
     </div>
 
-    <!-- الشريط العلوي (تم تعديل ترتيب الأزرار هنا) -->
+    <!-- الشريط العلوي -->
     <nav class="navbar">
         <h1 id="site-main-title">مصحف سَمِيع</h1>
         <div class="nav-btns">
@@ -422,6 +422,8 @@
             <button class="play-pause-btn" id="play-btn-sticky" onclick="togglePlayState()">⏵</button>
         </div>
         <audio id="main-audio"></audio>
+        <!-- مشغل الصوت المخفي المخصص للآيات المفردة والدقيقة -->
+        <audio id="single-ayah-audio"></audio>
     </div>
 
     <!-- نوافذ الآيات -->
@@ -502,19 +504,18 @@
         let currentSurahPageIndex = 0;
         let rawAyahsTexts = []; 
         
-        /* === متغيرات المزامنة المُحسنة === */
         let surahTimingStats = [];
         let currentPlayingAyahIndex = -1;
-        let isPlaying = false;
-        let startDelaySeconds = 0; 
         
+        let isPlaying = false; 
         let isRepeatingVerse = false;
-        let isPlayingSingleVerse = false; // المتغير الجديد لضبط نهاية الآية المفردة
         let selectedAyahIndex = 0;
         let isDownloadingOp = false;
         let isSignUpMode = false;
         
         const audioPlayer = document.getElementById('main-audio');
+        const singleAyahAudio = document.getElementById('single-ayah-audio'); // المشغل المنفصل للآيات
+        
         const els = {
             riwayahSelect: document.getElementById('riwayah-select'),
             reciterSelect: document.getElementById('reciter-select'),
@@ -588,6 +589,7 @@
 
         function filterRecitersByRiwayah() {
             audioPlayer.pause();
+            singleAyahAudio.pause();
             els.playBtnSticky.innerHTML = "⏵";
             const selectedRiwayah = els.riwayahSelect.value;
             els.reciterSelect.innerHTML = '';
@@ -629,6 +631,7 @@
             document.getElementById('player-surah-txt').innerText = "اختر سورة للتشغيل";
             
             audioPlayer.pause();
+            singleAyahAudio.pause();
             els.playBtnSticky.innerHTML = "⏵";
             removeHighlight();
         }
@@ -653,13 +656,14 @@
 
         function padNumber(num) { return num.toString().padStart(3, '0'); }
 
+        // هذه الدالة الآن تحسب فقط للإظهار البصري أثناء الاستماع المتواصل للسورة كاملة
         function setupAyahSync() {
             if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity) return;
             
             let duration = audioPlayer.duration;
             let ayahs = currentSurahData.ayahs;
             
-            startDelaySeconds = 0;
+            let startDelaySeconds = 0;
             if (currentSurahNumber === 1) startDelaySeconds = 4.0; 
             else if (currentSurahNumber === 9) startDelaySeconds = 4.0; 
             else startDelaySeconds = 8.5; 
@@ -675,53 +679,28 @@
             surahTimingStats = rawAyahsTexts.map((txt, i) => {
                 let weight = txt.length + basePauseWeight;
                 let ratio = weight / totalChars;
-                
                 let ayahDur = activeDuration * ratio; 
-                
                 let start = currentTimeAcc;
                 let end = currentTimeAcc + ayahDur;
                 currentTimeAcc = end;
-                
                 return { start: start, end: end, index: i, page: ayahs[i].page };
             });
         }
 
-        audioPlayer.onloadedmetadata = () => {
-            setupAyahSync();
-        };
+        audioPlayer.onloadedmetadata = () => { setupAyahSync(); };
 
         audioPlayer.ontimeupdate = () => {
             if(!isPlaying) return;
-            
             if (surahTimingStats.length === 0) setupAyahSync();
             if (surahTimingStats.length === 0) return;
             
             let ct = audioPlayer.currentTime;
-            
             if (ct < surahTimingStats[0].start) {
                 if (currentPlayingAyahIndex !== -1) {
                     removeHighlight();
                     currentPlayingAyahIndex = -1;
                 }
                 return; 
-            }
-            
-            // التعديل الخاص بضبط البداية والنهاية الدقيقة
-            if (isRepeatingVerse) {
-                let targetTiming = surahTimingStats[selectedAyahIndex];
-                if (targetTiming && ct >= targetTiming.end) {
-                    audioPlayer.currentTime = targetTiming.start;
-                    ct = targetTiming.start; 
-                }
-            } else if (isPlayingSingleVerse) {
-                let targetTiming = surahTimingStats[selectedAyahIndex];
-                if (targetTiming && ct >= targetTiming.end) {
-                    audioPlayer.pause();
-                    isPlaying = false;
-                    isPlayingSingleVerse = false;
-                    els.playBtnSticky.innerHTML = "⏵";
-                    return; // إنهاء التحديث والتوقف عن إكمال السورة
-                }
             }
             
             let activeAyah = surahTimingStats.find(a => ct >= a.start && ct <= a.end);
@@ -750,15 +729,46 @@
             }
         };
 
-        async function loadSurahForReadingAndPlaying(surahNum, targetAyahNum = null) {
+        audioPlayer.onended = () => { 
+            let currentIndex = currentAvailableSurahs.indexOf(currentSurahNumber);
+            if (currentIndex !== -1 && currentIndex < currentAvailableSurahs.length - 1) {
+                let nextSurahNum = currentAvailableSurahs[currentIndex + 1];
+                showToast("جاري الانتقال للسورة التالية...");
+                loadSurahForReadingAndPlaying(nextSurahNum);
+            } else {
+                els.playBtnSticky.innerHTML = "⏵"; 
+                isPlaying = false; 
+                removeHighlight();
+                currentPlayingAyahIndex = -1;
+            }
+        };
+
+        // دالة مخصصة لربط اسم القارئ الحالي بسيرفر الآيات الدقيقة
+        function getPreciseAudioIdentifier(reciterName) {
+            const n = reciterName || "";
+            if (n.includes("منشاوي") && n.includes("مجود")) return "ar.minshawimujawwad";
+            if (n.includes("منشاوي")) return "ar.minshawi";
+            if (n.includes("حصري") && n.includes("مجود")) return "ar.husarymujawwad";
+            if (n.includes("حصري")) return "ar.husary";
+            if (n.includes("عبدالباسط") || n.includes("عبد الباسط")) return "ar.abdulsamad";
+            if (n.includes("سديس")) return "ar.abdurrahmaansudais";
+            if (n.includes("عفاسي") || n.includes("مشاري")) return "ar.alafasy";
+            if (n.includes("معيقلي")) return "ar.mahermuaiqly";
+            if (n.includes("شريم")) return "ar.saoodshuraym";
+            if (n.includes("رفاعي")) return "ar.hanirifai";
+            if (n.includes("أيوب")) return "ar.muhammadayyoub";
+            if (n.includes("جبريل")) return "ar.muhammadjibreel";
+            return "ar.alafasy"; // افتراضي دقيق
+        }
+
+        async function loadSurahForReadingAndPlaying(surahNum, targetAyahNumInSurah = null, playSingle = false) {
             if(!currentAvailableSurahs.includes(Number(surahNum))) {
                 showToast("عذراً، هذا القارئ لم يسجل هذه السورة.");
                 return;
             }
 
-            // تصفير الخواص لضمان عدم حدوث تداخل عند تغيير السورة
+            // تصفير إعدادات التكرار عند اختيار سورة
             isRepeatingVerse = false;
-            isPlayingSingleVerse = false;
             let repeatBtn = document.getElementById('btn-repeat-ayah');
             if (repeatBtn) {
                 repeatBtn.style.background = "#FEF3C7";
@@ -769,11 +779,19 @@
             const exactSurahName = SURAH_NAMES_AR[surahNum - 1]; 
             document.getElementById('player-surah-txt').innerText = `سورة ${exactSurahName}`;
             
-            const audioUrl = currentAudioServer + padNumber(surahNum) + '.mp3';
-            audioPlayer.src = audioUrl;
-            audioPlayer.play();
-            isPlaying = true;
-            els.playBtnSticky.innerHTML = "⏸";
+            // في حالة كان المطلوب تشغيل الاستماع المستمر للسورة
+            if (!playSingle) {
+                const audioUrl = currentAudioServer + padNumber(surahNum) + '.mp3';
+                audioPlayer.src = audioUrl;
+                singleAyahAudio.pause();
+                audioPlayer.play();
+                isPlaying = true;
+                els.playBtnSticky.innerHTML = "⏸";
+            } else {
+                audioPlayer.pause();
+                isPlaying = false;
+                els.playBtnSticky.innerHTML = "⏵";
+            }
             
             surahTimingStats = [];
             currentPlayingAyahIndex = -1;
@@ -816,30 +834,22 @@
                 
                 setupAyahSync();
 
-                if (targetAyahNum) {
-                    let targetAyahObj = currentSurahData.ayahs.find(a => a.numberInSurah === targetAyahNum);
+                // إذا جئنا من البحث (يجب تشغيل الآية بمفردها)
+                if (targetAyahNumInSurah) {
+                    let targetAyahObj = currentSurahData.ayahs.find(a => a.numberInSurah === targetAyahNumInSurah);
                     if (targetAyahObj) {
                         let pIndex = currentSurahPages.findIndex(p => p[0].page === targetAyahObj.page);
                         if (pIndex !== -1) {
                             currentSurahPageIndex = pIndex;
                             renderCurrentPage();
                             
-                            const playTargetAyah = () => {
-                                if (surahTimingStats.length === 0) setupAyahSync();
-                                if (surahTimingStats[targetAyahObj.globalIndex]) {
-                                    audioPlayer.currentTime = surahTimingStats[targetAyahObj.globalIndex].start;
-                                    setTimeout(() => {
-                                        let span = document.getElementById(`verse-span-${targetAyahObj.globalIndex}`);
-                                        if (span) span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                        applyHighlight(targetAyahObj.globalIndex);
-                                    }, 300);
-                                }
-                            };
-
-                            if (audioPlayer.readyState >= 1) { 
-                                playTargetAyah();
-                            } else {
-                                audioPlayer.addEventListener('loadedmetadata', playTargetAyah, { once: true });
+                            if (playSingle) {
+                                selectedAyahIndex = targetAyahObj.globalIndex;
+                                setTimeout(() => {
+                                    let span = document.getElementById(`verse-span-${targetAyahObj.globalIndex}`);
+                                    if (span) span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    playSpecificAyahModal();
+                                }, 600);
                             }
                         }
                     }
@@ -894,11 +904,27 @@
                 document.querySelector('.mushaf-inner-frame').appendChild(pageBadge);
             }
             pageBadge.innerText = pageAyahs[0].page;
+            
+            // في حال كانت هناك آية قيد التحديد أو التشغيل نبرزها مجدداً
+            if(!singleAyahAudio.paused && selectedAyahIndex >= pageAyahs[0].globalIndex && selectedAyahIndex <= pageAyahs[pageAyahs.length-1].globalIndex) {
+                 applyHighlight(selectedAyahIndex);
+            }
         }
 
         function togglePlayState() {
-            if(!audioPlayer.src) return showToast("الرجاء اختيار سورة للتشغيل.");
+            if(!audioPlayer.src && !currentAvailableSurahs.includes(currentSurahNumber)) return showToast("الرجاء اختيار سورة للتشغيل.");
+            
+            // إذا كان مشغل الآية المفردة يعمل، نوقفه فوراً ونزيل التظليل ونصفر حالة التكرار
+            if (!singleAyahAudio.paused) {
+                singleAyahAudio.pause();
+                isRepeatingVerse = false;
+                document.getElementById('btn-repeat-ayah').style.background = "#FEF3C7";
+                document.getElementById('btn-repeat-ayah').style.color = "var(--gold-premium)";
+                removeHighlight();
+            }
+
             if(audioPlayer.paused) {
+                if(!audioPlayer.src) audioPlayer.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
                 audioPlayer.play();
                 isPlaying = true;
                 els.playBtnSticky.innerHTML = "⏸";
@@ -908,35 +934,6 @@
                 els.playBtnSticky.innerHTML = "⏵";
             }
         }
-
-        // التعديل الخاص بانتهاء الملف الصوتي وحالة التكرار أو الآية المفردة
-        audioPlayer.onended = () => { 
-            if (isRepeatingVerse) {
-                let targetTiming = surahTimingStats[selectedAyahIndex];
-                if (targetTiming) {
-                    audioPlayer.currentTime = targetTiming.start;
-                    audioPlayer.play();
-                    return;
-                }
-            } else if (isPlayingSingleVerse) {
-                isPlayingSingleVerse = false;
-                isPlaying = false;
-                els.playBtnSticky.innerHTML = "⏵";
-                return;
-            }
-            
-            let currentIndex = currentAvailableSurahs.indexOf(currentSurahNumber);
-            if (currentIndex !== -1 && currentIndex < currentAvailableSurahs.length - 1) {
-                let nextSurahNum = currentAvailableSurahs[currentIndex + 1];
-                showToast("جاري الانتقال للسورة التالية...");
-                loadSurahForReadingAndPlaying(nextSurahNum);
-            } else {
-                els.playBtnSticky.innerHTML = "⏵"; 
-                isPlaying = false; 
-                removeHighlight();
-                currentPlayingAyahIndex = -1;
-            }
-        };
 
         function applyHighlight(index) {
             removeHighlight();
@@ -957,32 +954,35 @@
             document.getElementById('search-modal').style.display = 'none';
         }
 
-        // التعديل الخاص ببدء تشغيل آية واحدة فقط
+        // ==========================================
+        // النظام المستقل والدقيق لتشغيل وتكرار الآيات 
+        // ==========================================
         function playSpecificAyahModal() {
             closeModals();
             
-            if (surahTimingStats.length === 0) setupAyahSync();
-            
-            if (surahTimingStats.length > 0) {
-                showToast("جاري تشغيل الآية بصوت القارئ الحالي...");
-                const ayahTiming = surahTimingStats[selectedAyahIndex];
-                audioPlayer.currentTime = ayahTiming.start;
-                audioPlayer.play();
-                isPlaying = true;
-                els.playBtnSticky.innerHTML = "⏸";
-                
-                // في حالة التشغيل العادي (بدون تكرار) سيتم تفعيل خاصية التوقف عند نهاية الآية المحددة
-                if (!isRepeatingVerse) {
-                    isPlayingSingleVerse = true;
-                }
-            } else {
-                showToast("جاري تجهيز المقطع، يرجى المحاولة بعد قليل.");
+            // نوقف السورة كاملة ونوقف التظليل العشوائي
+            if (!audioPlayer.paused) {
+                audioPlayer.pause();
+                isPlaying = false;
+                els.playBtnSticky.innerHTML = "⏵";
             }
+            removeHighlight();
+
+            // جلب الرقم العام للآية في المصحف (من 1 إلى 6236)
+            const globalNum = currentSurahData.ayahs[selectedAyahIndex].number;
+            const reciterName = els.reciterSelect.options[els.reciterSelect.selectedIndex]?.text || "";
+            const preciseId = getPreciseAudioIdentifier(reciterName);
+
+            // جلب الآية بالضبط بصوت القارئ أو أقرب قارئ له (ملف مقصوص من المصدر 100%)
+            singleAyahAudio.src = `https://cdn.islamic.network/quran/audio/128/${preciseId}/${globalNum}.mp3`;
+            
+            showToast("جاري تشغيل الآية بدقة متناهية...");
+            singleAyahAudio.play();
+            applyHighlight(selectedAyahIndex);
         }
 
         function toggleRepeatAyah() {
             isRepeatingVerse = !isRepeatingVerse;
-            isPlayingSingleVerse = false; // التكرار يلغي حالة التشغيل الفردي
             const btn = document.getElementById('btn-repeat-ayah');
             if(isRepeatingVerse) {
                 btn.style.background = "var(--gold-premium)";
@@ -993,6 +993,17 @@
                 btn.style.color = "var(--gold-premium)";
             }
         }
+
+        // عند انتهاء تلاوة الآية المفردة من المشغل المخصص
+        singleAyahAudio.onended = () => {
+            if (isRepeatingVerse) {
+                singleAyahAudio.currentTime = 0;
+                singleAyahAudio.play();
+            } else {
+                removeHighlight();
+            }
+        };
+        // ==========================================
 
         function copyAyahText() {
             const exactSurahName = SURAH_NAMES_AR[currentSurahNumber - 1];
@@ -1037,6 +1048,7 @@
             els.homeView.style.display = 'block';
             els.heroFilters.style.display = 'block';
             audioPlayer.pause();
+            singleAyahAudio.pause();
             els.playBtnSticky.innerHTML = "⏵";
             removeHighlight();
         }
@@ -1253,14 +1265,33 @@
             showToast("تم تحديد الرواية، يمكنك الآن اختيار القارئ.");
         }
 
-        function jumpToAyahFromSearch(surahNum, ayahNum) {
+        // تم تعديل دالة القفز للآية لتشغيلها بشكل مستقل ومباشر
+        function jumpToAyahFromSearch(surahNum, ayahNumInSurah) {
             closeModals();
             if(!currentAudioServer) {
                 showToast("الرجاء اختيار القارئ أولاً من القائمة.");
                 return;
             }
             showToast("جاري فتح السورة والانتقال للآية...");
-            loadSurahForReadingAndPlaying(surahNum, ayahNum);
+            
+            if (currentSurahNumber !== surahNum) {
+                loadSurahForReadingAndPlaying(surahNum, ayahNumInSurah, true); 
+            } else {
+                let tAyah = currentSurahData.ayahs.find(a => a.numberInSurah === ayahNumInSurah);
+                if(tAyah) {
+                    let pIndex = currentSurahPages.findIndex(p => p[0].page === tAyah.page);
+                    if (pIndex !== -1) {
+                        currentSurahPageIndex = pIndex;
+                        renderCurrentPage();
+                    }
+                    selectedAyahIndex = tAyah.globalIndex;
+                    setTimeout(() => {
+                        let span = document.getElementById(`verse-span-${tAyah.globalIndex}`);
+                        if (span) span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        playSpecificAyahModal();
+                    }, 300);
+                }
+            }
         }
 
         function switchTab(tabId) {
@@ -1277,6 +1308,7 @@
                 document.getElementById(tabId).classList.remove('hidden-screen');
             }
             audioPlayer.pause();
+            singleAyahAudio.pause();
             els.playBtnSticky.innerHTML = "⏵";
         }
 
