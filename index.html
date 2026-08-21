@@ -509,6 +509,7 @@
         let startDelaySeconds = 0; 
         
         let isRepeatingVerse = false;
+        let isPlayingSingleVerse = false; // المتغير الجديد لضبط نهاية الآية المفردة
         let selectedAyahIndex = 0;
         let isDownloadingOp = false;
         let isSignUpMode = false;
@@ -705,11 +706,21 @@
                 return; 
             }
             
+            // التعديل الخاص بضبط البداية والنهاية الدقيقة
             if (isRepeatingVerse) {
                 let targetTiming = surahTimingStats[selectedAyahIndex];
-                if (targetTiming && ct >= targetTiming.end - 0.2) {
+                if (targetTiming && ct >= targetTiming.end) {
                     audioPlayer.currentTime = targetTiming.start;
                     ct = targetTiming.start; 
+                }
+            } else if (isPlayingSingleVerse) {
+                let targetTiming = surahTimingStats[selectedAyahIndex];
+                if (targetTiming && ct >= targetTiming.end) {
+                    audioPlayer.pause();
+                    isPlaying = false;
+                    isPlayingSingleVerse = false;
+                    els.playBtnSticky.innerHTML = "⏵";
+                    return; // إنهاء التحديث والتوقف عن إكمال السورة
                 }
             }
             
@@ -739,11 +750,19 @@
             }
         };
 
-        // تم تعديل هذه الدالة للقفز الصوتي التلقائي عند تحديد آية من البحث
         async function loadSurahForReadingAndPlaying(surahNum, targetAyahNum = null) {
             if(!currentAvailableSurahs.includes(Number(surahNum))) {
                 showToast("عذراً، هذا القارئ لم يسجل هذه السورة.");
                 return;
+            }
+
+            // تصفير الخواص لضمان عدم حدوث تداخل عند تغيير السورة
+            isRepeatingVerse = false;
+            isPlayingSingleVerse = false;
+            let repeatBtn = document.getElementById('btn-repeat-ayah');
+            if (repeatBtn) {
+                repeatBtn.style.background = "#FEF3C7";
+                repeatBtn.style.color = "var(--gold-premium)";
             }
 
             currentSurahNumber = surahNum;
@@ -805,7 +824,6 @@
                             currentSurahPageIndex = pIndex;
                             renderCurrentPage();
                             
-                            // دالة للقفز لزمن الآية فور جاهزية المقطع
                             const playTargetAyah = () => {
                                 if (surahTimingStats.length === 0) setupAyahSync();
                                 if (surahTimingStats[targetAyahObj.globalIndex]) {
@@ -818,7 +836,6 @@
                                 }
                             };
 
-                            // إذا تم تحميل بيانات الصوت مسبقاً، شغل فوراً، وإلا انتظر حدث التحميل
                             if (audioPlayer.readyState >= 1) { 
                                 playTargetAyah();
                             } else {
@@ -827,7 +844,6 @@
                         }
                     }
                 } else {
-                    // التمرير لأعلى الصفحة تلقائياً عند تحميل السورة من البداية
                     setTimeout(() => {
                         document.querySelector('.mushaf-page-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }, 100);
@@ -893,7 +909,22 @@
             }
         }
 
+        // التعديل الخاص بانتهاء الملف الصوتي وحالة التكرار أو الآية المفردة
         audioPlayer.onended = () => { 
+            if (isRepeatingVerse) {
+                let targetTiming = surahTimingStats[selectedAyahIndex];
+                if (targetTiming) {
+                    audioPlayer.currentTime = targetTiming.start;
+                    audioPlayer.play();
+                    return;
+                }
+            } else if (isPlayingSingleVerse) {
+                isPlayingSingleVerse = false;
+                isPlaying = false;
+                els.playBtnSticky.innerHTML = "⏵";
+                return;
+            }
+            
             let currentIndex = currentAvailableSurahs.indexOf(currentSurahNumber);
             if (currentIndex !== -1 && currentIndex < currentAvailableSurahs.length - 1) {
                 let nextSurahNum = currentAvailableSurahs[currentIndex + 1];
@@ -926,6 +957,7 @@
             document.getElementById('search-modal').style.display = 'none';
         }
 
+        // التعديل الخاص ببدء تشغيل آية واحدة فقط
         function playSpecificAyahModal() {
             closeModals();
             
@@ -938,6 +970,11 @@
                 audioPlayer.play();
                 isPlaying = true;
                 els.playBtnSticky.innerHTML = "⏸";
+                
+                // في حالة التشغيل العادي (بدون تكرار) سيتم تفعيل خاصية التوقف عند نهاية الآية المحددة
+                if (!isRepeatingVerse) {
+                    isPlayingSingleVerse = true;
+                }
             } else {
                 showToast("جاري تجهيز المقطع، يرجى المحاولة بعد قليل.");
             }
@@ -945,6 +982,7 @@
 
         function toggleRepeatAyah() {
             isRepeatingVerse = !isRepeatingVerse;
+            isPlayingSingleVerse = false; // التكرار يلغي حالة التشغيل الفردي
             const btn = document.getElementById('btn-repeat-ayah');
             if(isRepeatingVerse) {
                 btn.style.background = "var(--gold-premium)";
