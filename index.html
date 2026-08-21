@@ -60,7 +60,7 @@
         /* شريط التنقل */
         .navbar { background: var(--navbar-bg); display: flex; justify-content: space-between; align-items: center; padding: 15px 60px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); position: sticky; top: 0; z-index: 100; border-bottom: 2px solid var(--royal-blue); }
         .navbar h1 { font-family: 'Aref Ruqaa', serif; margin: 0; font-size: clamp(28px, 6vw, 44px); color: var(--royal-blue); font-weight: 700; }
-        .nav-btns { display: flex; gap: 15px; }
+        .nav-btns { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center;}
         .btn-nav { background: transparent; color: var(--royal-blue); border: 2px solid var(--royal-blue); padding: 8px 20px; border-radius: 8px; font-family: inherit; font-size: clamp(14px, 3vw, 16px); font-weight: bold; cursor: pointer; transition: 0.3s; }
         .btn-nav:hover, .btn-nav.active { background: var(--royal-blue); color: #fff; }
         .btn-login { background: var(--gold-premium); color: #fff; border: none; padding: 8px 20px; border-radius: 8px; font-family: inherit; font-size: clamp(14px, 3vw, 16px); font-weight: 800; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 15px rgba(217, 119, 6, 0.2); }
@@ -202,6 +202,10 @@
 
         .tafsir-text-box { font-family: 'Amiri', serif; font-size: clamp(18px, 4vw, 24px); line-height: 2; text-align: justify; padding: 15px; background: #F8FAFC; border-radius: 8px; margin-top: 15px; max-height: 50vh; overflow-y: auto; color: var(--text-main); border: 1px solid #E2E8F0; }
 
+        /* ستايل نتائج البحث */
+        .search-result-item { padding: 12px; border-bottom: 1px solid var(--border-light); cursor: pointer; transition: 0.3s; text-align: right; background: #fff; border-radius: 8px; margin-bottom: 5px; }
+        .search-result-item:hover { background: #F0F9FF; border-color: var(--royal-blue); transform: translateX(-5px); }
+
         .lux-divider { border: 0; height: 2px; background: linear-gradient(to right, transparent, var(--royal-blue), transparent); margin: 40px auto 20px auto; width: 50%; opacity: 0.3; }
         .footer-signature { text-align: center; padding-bottom: 30px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; }
         .signature-name { font-size: clamp(16px, 4vw, 20px); font-weight: 800; color: var(--royal-blue); }
@@ -310,6 +314,7 @@
         <h1 id="site-main-title">مصحف سَمِيع</h1>
         <div class="nav-btns">
             <button class="btn-nav active" onclick="switchTab('home-view')">الرئيسية</button>
+            <button class="btn-nav" onclick="openSearchModal()" style="background: var(--bg-main);">🔍 بحث</button>
             <button class="btn-login" onclick="switchTab('unified-login-view')" id="login-nav-btn">تسجيل الدخول</button>
         </div>
     </nav>
@@ -442,6 +447,25 @@
             <button class="close-modal" onclick="closeModals()">✖</button>
             <h3 id="tafsir-modal-title" style="color: #059669; margin-top: 0; font-weight: 800;">التفسير</h3>
             <div id="tafsir-modal-text" class="tafsir-text-box">جاري جلب التفسير...</div>
+        </div>
+    </div>
+
+    <!-- نافذة البحث الشامل -->
+    <div id="search-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 700px; padding: 30px;">
+            <button class="close-modal" onclick="closeModals()">✖</button>
+            <h3 style="color: var(--royal-blue); margin-top: 0; font-weight: 800; font-size: 24px;">نظام البحث الذكي</h3>
+            <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
+                <select id="search-type" class="filter-select" style="width: auto; flex-grow: 1; max-width: 150px;">
+                    <option value="ayah">بحث عن آية</option>
+                    <option value="reciter">بحث عن قارئ</option>
+                    <option value="riwayah">بحث عن رواية</option>
+                </select>
+                <input type="text" id="search-input" class="filter-select" style="flex-grow: 2; text-align: right;" placeholder="اكتب كلمة البحث هنا..." onkeyup="executeSearch()">
+            </div>
+            <div id="search-results" style="max-height: 350px; overflow-y: auto; text-align: right; padding: 10px; background: #F8FAFC; border-radius: 10px; border: 1px solid var(--border-light);">
+                <div style="text-align: center; color: #64748B; padding: 20px;">النتائج ستظهر هنا...</div>
+            </div>
         </div>
     </div>
 
@@ -629,7 +653,7 @@
 
         function padNumber(num) { return num.toString().padStart(3, '0'); }
 
-        /* === خوارزمية التزامن المطورة (حل مشكلة القفز السريع والاستعاذة) === */
+        /* === خوارزمية التزامن المطورة === */
         function setupAyahSync() {
             if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity) return;
             
@@ -638,9 +662,9 @@
             
             // حساب وتجاهل وقت الاستعاذة والبسملة في بداية المقطع
             startDelaySeconds = 0;
-            if (currentSurahNumber === 1) startDelaySeconds = 4.0; // الفاتحة: استعاذة فقط
-            else if (currentSurahNumber === 9) startDelaySeconds = 4.0; // التوبة: استعاذة فقط
-            else startDelaySeconds = 8.5; // باقي السور: استعاذة + بسملة
+            if (currentSurahNumber === 1) startDelaySeconds = 4.0; 
+            else if (currentSurahNumber === 9) startDelaySeconds = 4.0; 
+            else startDelaySeconds = 8.5; 
             
             let activeDuration = duration - startDelaySeconds;
             if (activeDuration < 0) activeDuration = duration;
@@ -655,7 +679,6 @@
                 let weight = txt.length + basePauseWeight;
                 let ratio = weight / totalChars;
                 
-                // نعطي الآية وقتاً كاملاً لضمان عدم القفز
                 let ayahDur = activeDuration * ratio; 
                 
                 let start = currentTimeAcc;
@@ -678,16 +701,14 @@
             
             let ct = audioPlayer.currentTime;
             
-            // 1. فحص توقيت الاستعاذة والبسملة: لا تظهر أي تظليل حتى يبدأ في الآية الأولى الفعليّة
             if (ct < surahTimingStats[0].start) {
                 if (currentPlayingAyahIndex !== -1) {
                     removeHighlight();
                     currentPlayingAyahIndex = -1;
                 }
-                return; // إيقاف تنفيذ الباقي حتى ينتهي وقت الاستعاذة/البسملة
+                return; 
             }
             
-            // 2. تكرار الآية المخصص
             if (isRepeatingVerse) {
                 let targetTiming = surahTimingStats[selectedAyahIndex];
                 if (targetTiming && ct >= targetTiming.end - 0.2) {
@@ -696,7 +717,6 @@
                 }
             }
             
-            // 3. تحديد الآية النشطة وإبرازها
             let activeAyah = surahTimingStats.find(a => ct >= a.start && ct <= a.end);
             
             if(activeAyah && activeAyah.index !== currentPlayingAyahIndex) {
@@ -715,10 +735,17 @@
                 }
                 
                 applyHighlight(currentPlayingAyahIndex);
+
+                // === التمرير التلقائي للصفحة ليتبع التظليل باستمرار ===
+                let activeSpan = document.getElementById(`verse-span-${currentPlayingAyahIndex}`);
+                if (activeSpan) {
+                    activeSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
             }
         };
 
-        async function loadSurahForReadingAndPlaying(surahNum) {
+        // دالة مجهزة للبحث للذهاب لآية محددة
+        async function loadSurahForReadingAndPlaying(surahNum, targetAyahNum = null) {
             if(!currentAvailableSurahs.includes(Number(surahNum))) {
                 showToast("عذراً، هذا القارئ لم يسجل هذه السورة.");
                 return;
@@ -774,6 +801,23 @@
                 renderCurrentPage();
                 
                 setupAyahSync();
+
+                // التمرير للآية المستهدفة إذا جاءت من البحث
+                if (targetAyahNum) {
+                    let targetAyahObj = currentSurahData.ayahs.find(a => a.numberInSurah === targetAyahNum);
+                    if (targetAyahObj) {
+                        let pIndex = currentSurahPages.findIndex(p => p[0].page === targetAyahObj.page);
+                        if (pIndex !== -1) {
+                            currentSurahPageIndex = pIndex;
+                            renderCurrentPage();
+                            setTimeout(() => {
+                                let span = document.getElementById(`verse-span-${targetAyahObj.globalIndex}`);
+                                if(span) span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                applyHighlight(targetAyahObj.globalIndex); // تمييز الآية المبحوث عنها
+                            }, 500);
+                        }
+                    }
+                }
 
             } catch (err) { els.quranDisplay.innerHTML = "حدث خطأ في تحميل السورة."; }
         }
@@ -835,11 +879,22 @@
             }
         }
 
+        // === التشغيل المتتالي (Continuous Auto-play) ===
         audioPlayer.onended = () => { 
-            els.playBtnSticky.innerHTML = "⏵"; 
-            isPlaying = false; 
-            removeHighlight();
-            currentPlayingAyahIndex = -1;
+            // البحث عن السورة التالية في قائمة السور المتاحة للقارئ الحالي
+            let currentIndex = currentAvailableSurahs.indexOf(currentSurahNumber);
+            if (currentIndex !== -1 && currentIndex < currentAvailableSurahs.length - 1) {
+                // هناك سورة تالية متوفرة
+                let nextSurahNum = currentAvailableSurahs[currentIndex + 1];
+                showToast("جاري الانتقال للسورة التالية...");
+                loadSurahForReadingAndPlaying(nextSurahNum);
+            } else {
+                // آخر سورة أو غير متوفر
+                els.playBtnSticky.innerHTML = "⏵"; 
+                isPlaying = false; 
+                removeHighlight();
+                currentPlayingAyahIndex = -1;
+            }
         };
 
         function applyHighlight(index) {
@@ -858,9 +913,9 @@
         function closeModals() {
             document.getElementById('action-modal').style.display = 'none';
             document.getElementById('tafsir-modal').style.display = 'none';
+            document.getElementById('search-modal').style.display = 'none';
         }
 
-        /* === برمجة تشغيل الآية بصوت القارئ الحالي نفسه === */
         function playSpecificAyahModal() {
             closeModals();
             
@@ -1025,7 +1080,6 @@
             }
         }
 
-        /* === برمجة إنشاء التصميم الخرافي المخفي ومشاركته (مع حل مشكلة الحروف) === */
         function shareAyahImagePanel() {
             closeModals();
             if(isDownloadingOp) return showToast("عملية جارية بالفعل...");
@@ -1038,7 +1092,6 @@
             const ayahNum = currentSurahData.ayahs[selectedAyahIndex].numberInSurah;
             const ayahText = rawAyahsTexts[selectedAyahIndex];
 
-            // استخدام وسوم <bdi> لضمان عدم تفكك الحروف العربية في التذييل
             exportDiv.innerHTML = `
                 <div class="export-inner-border">
                     <div class="export-header">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</div>
@@ -1074,6 +1127,104 @@
             }, 800); 
         }
 
+        // ==========================================
+        // وظائف البحث الشامل
+        // ==========================================
+        
+        let searchTimeout;
+
+        function openSearchModal() {
+            document.getElementById('search-modal').style.display = 'flex';
+            document.getElementById('search-input').focus();
+        }
+
+        async function executeSearch() {
+            clearTimeout(searchTimeout);
+            const type = document.getElementById('search-type').value;
+            const query = document.getElementById('search-input').value.trim();
+            const resultsBox = document.getElementById('search-results');
+
+            if(!query) { resultsBox.innerHTML = '<div style="text-align: center; color: #64748B; padding: 20px;">النتائج ستظهر هنا...</div>'; return; }
+
+            if(type === 'reciter') {
+                let matches = allMP3Reciters.filter(r => r.name.includes(query));
+                if(matches.length > 0) {
+                    resultsBox.innerHTML = matches.map(m => `
+                        <div class="search-result-item" onclick="selectReciterFromSearch('${m.riwayah}', '${m.server}')">
+                            🎤 ${m.name} <br>
+                            <small style="color:#64748B;">رواية: ${els.riwayahSelect.querySelector(`option[value="${m.riwayah}"]`).innerText}</small>
+                        </div>
+                    `).join('');
+                } else {
+                    resultsBox.innerHTML = '<div style="text-align:center; padding:20px;">لم يتم العثور على قارئ بهذا الاسم.</div>';
+                }
+            }
+            else if(type === 'riwayah') {
+                const options = Array.from(els.riwayahSelect.options);
+                let matches = options.filter(opt => opt.text.includes(query));
+                if (matches.length > 0) {
+                    resultsBox.innerHTML = matches.map(m => `
+                        <div class="search-result-item" onclick="selectRiwayahFromSearch('${m.value}')">
+                            📖 ${m.text}
+                        </div>
+                    `).join('');
+                } else {
+                    resultsBox.innerHTML = '<div style="text-align:center; padding:20px;">لم يتم العثور على رواية بهذا الاسم.</div>';
+                }
+            }
+            else if (type === 'ayah') {
+                resultsBox.innerHTML = '<div style="text-align:center; padding:20px; color: var(--royal-blue); font-weight: bold;">جاري البحث في المصحف... ⏳</div>';
+                
+                searchTimeout = setTimeout(async () => {
+                    try {
+                        let res = await fetch(`https://api.alquran.cloud/v1/search/${query}/all/quran-simple-clean`);
+                        let data = await res.json();
+                        
+                        if(data.code === 200 && data.data.matches.length > 0) {
+                            resultsBox.innerHTML = data.data.matches.slice(0, 30).map(m => `
+                                <div class="search-result-item" onclick="jumpToAyahFromSearch(${m.surah.number}, ${m.numberInSurah})">
+                                    <span style="font-family: 'Amiri Quran', serif; font-size: 18px;">﴿ ${m.text} ﴾</span> <br>
+                                    <small style="color:var(--royal-blue); font-weight:bold; margin-top: 5px; display: block;">سورة ${m.surah.name} - آية ${m.numberInSurah}</small>
+                                </div>
+                            `).join('');
+                        } else {
+                            resultsBox.innerHTML = '<div style="text-align:center; padding:20px; color: red;">لم يتم العثور على نتائج للآية.</div>';
+                        }
+                    } catch(e) {
+                         resultsBox.innerHTML = '<div style="text-align:center; padding:20px; color: red;">حدث خطأ أثناء البحث، يرجى المحاولة مرة أخرى.</div>';
+                    }
+                }, 800);
+            }
+        }
+
+        function selectReciterFromSearch(riwayah, server) {
+            els.riwayahSelect.value = riwayah;
+            filterRecitersByRiwayah();
+            els.reciterSelect.value = server;
+            onReciterChange();
+            closeModals();
+            showToast("تم تحديد القارئ بنجاح!");
+        }
+
+        function selectRiwayahFromSearch(riwayahVal) {
+            els.riwayahSelect.value = riwayahVal;
+            filterRecitersByRiwayah();
+            closeModals();
+            showToast("تم تحديد الرواية، يمكنك الآن اختيار القارئ.");
+        }
+
+        function jumpToAyahFromSearch(surahNum, ayahNum) {
+            closeModals();
+            if(!currentAudioServer) {
+                showToast("الرجاء اختيار القارئ أولاً من القائمة.");
+                return;
+            }
+            showToast("جاري فتح السورة والانتقال للآية...");
+            loadSurahForReadingAndPlaying(surahNum, ayahNum);
+        }
+
+        // ==========================================
+        // وظائف التنقل وتسجيل الدخول
         // ==========================================
 
         function switchTab(tabId) {
