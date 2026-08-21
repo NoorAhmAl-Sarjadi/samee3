@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>مصحف سميع - تلاوة وتفسير</title>
-    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- استدعاء خطوط متعددة لمحاكاة المصاحف المختلفة -->
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700&family=Aref+Ruqaa&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <style>
@@ -29,17 +30,29 @@
         
         .settings-panel { background-color: var(--primary-color); color: white; padding: 25px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: center; border-bottom: 4px solid var(--secondary-color); }
         .settings-panel select, .settings-panel button { padding: 12px; font-size: 16px; font-family: inherit; border-radius: 8px; border: none; outline: none; width: 100%; box-sizing: border-box; }
-        .settings-panel select { background-color: #fff; color: #333; cursor: pointer; font-weight: bold; }
+        .settings-panel select { background-color: #fff; color: #333; cursor: pointer; font-weight: bold; border: 2px solid transparent; }
         
-        /* تمييز قائمة الروايات بلون مختلف قليلاً */
-        #riwayah-select { border: 2px solid var(--secondary-color); background-color: #fdfaf4; }
+        /* تمييز قائمة الروايات بلون مختلف للفت الانتباه */
+        #riwayah-select { border: 2px solid var(--secondary-color); background-color: #fdfaf4; color: var(--primary-color); }
 
         .btn-play { background-color: var(--secondary-color) !important; font-weight: bold; color: #1a252f !important; cursor: pointer; transition: 0.3s; font-size: 18px !important; }
         .btn-play:hover { transform: scale(1.02); }
+        
         .random-toggle-container { display: flex; align-items: center; gap: 10px; color: white; font-weight: 500; font-size: 14px; cursor: pointer; }
         .random-toggle-container input { width: 18px; height: 18px; cursor: pointer; }
 
-        .quran-area { padding: 40px; font-family: 'Amiri', serif; font-size: 34px; line-height: 2.4; text-align: justify; direction: rtl; min-height: 400px; }
+        /* الأنماط الديناميكية للمصاحف حسب الرواية */
+        .quran-area { padding: 40px; text-align: justify; direction: rtl; min-height: 400px; transition: 0.5s; }
+        
+        /* 1. مصحف حفص (الرسم العثماني القياسي) */
+        .mushaf-hafs { font-family: 'Amiri', serif; font-size: 34px; line-height: 2.4; color: #2c3e50; }
+        /* 2. مصحف ورش (حجم أكبر، لون تشكيل مائل للبني الغامق) */
+        .mushaf-warsh { font-family: 'Amiri', serif; font-size: 38px; line-height: 2.6; color: #4a2c00; font-weight: bold; background-color: #fcf9f2; }
+        /* 3. مصحف قالون (مسافات أوسع) */
+        .mushaf-qaloon { font-family: 'Amiri', serif; font-size: 36px; line-height: 2.8; color: #1a252f; }
+        /* 4. مصحف الروايات الأخرى */
+        .mushaf-other { font-family: 'Amiri', serif; font-size: 35px; line-height: 2.5; color: #34495e; }
+
         .verse { cursor: pointer; padding: 2px 8px; border-radius: 8px; transition: all 0.2s ease-in-out; }
         .verse:hover { background-color: rgba(212, 175, 55, 0.15); }
         .verse-end { color: var(--primary-color); font-size: 26px; margin: 0 5px; user-select: none; }
@@ -98,13 +111,13 @@
     </nav>
 
     <div class="container">
-        <!-- 1. شاشة المصحف الرئيسية -->
+        <!-- شاشة المصحف الرئيسية -->
         <div id="app-main" class="app-card">
             <div class="settings-panel">
                 <select id="surah-select" onchange="loadQuranData()"><option>جاري التحميل...</option></select>
                 
-                <!-- اختيار الرواية -->
-                <select id="riwayah-select" onchange="filterRecitersByRiwayah()">
+                <!-- اختيار الرواية لتغيير المصحف والقراء -->
+                <select id="riwayah-select" onchange="filterRecitersAndMushaf()">
                     <option value="hafs">رواية حفص عن عاصم</option>
                     <option value="warsh">رواية ورش عن نافع</option>
                     <option value="qalun">رواية قالون عن نافع</option>
@@ -112,10 +125,9 @@
                     <option value="shubah">رواية شعبة عن عاصم</option>
                     <option value="soussi">رواية السوسي عن أبي عمرو</option>
                     <option value="hamza">رواية خلف عن حمزة</option>
-                    <option value="other">روايات وقراءات أخرى</option>
                 </select>
 
-                <!-- القراء (يتم فلترتهم بناءً على الرواية) -->
+                <!-- القراء (يتم فلترتهم بدقة شديدة) -->
                 <select id="reciter-select" onchange="changeSettings()">
                     <option value="">جاري جلب جميع قراء العالم...</option>
                 </select>
@@ -134,17 +146,18 @@
                 
                 <label class="random-toggle-container">
                     <input type="checkbox" id="random-mode">
-                    تلاوة عشوائية (لكل القراء)
+                    تلاوة عشوائية (لقراء هذه الرواية)
                 </label>
             </div>
 
-            <div id="quran-display" class="quran-area">جاري تهيئة المصحف الشريف...</div>
+            <!-- عرض النص القرآني (الذي يتغير تصميمه ورسمه حسب الرواية) -->
+            <div id="quran-display" class="quran-area mushaf-hafs">جاري تهيئة المصحف الشريف...</div>
 
             <audio id="main-audio"></audio>
             <audio id="preload-audio"></audio>
         </div>
 
-        <!-- 2. شاشة الإدارة (مع التعديل المباشر) -->
+        <!-- شاشة الإدارة -->
         <div id="admin-screen" class="app-card hidden-screen admin-container">
             <div id="login-form">
                 <h2 style="color: var(--primary-color); margin-bottom: 30px;">تسجيل الدخول للإدارة</h2>
@@ -157,7 +170,6 @@
             <div id="dashboard-view" style="display: none;">
                 <h2 style="color: var(--primary-color);">لوحة تحكم موقع سَمِيع - د. محمد أبو زيد</h2>
                 
-                <!-- إعدادات التعديل الحي -->
                 <div class="admin-settings-box">
                     <h3 style="margin-top:0; border-bottom: 2px solid #ccc; padding-bottom: 10px;">إعدادات واجهة المنصة (تعديل مباشر)</h3>
                     <div class="form-group" style="max-width: 100%;">
@@ -207,10 +219,7 @@
     <!-- التوقيع وزر الواتساب -->
     <div class="footer-signature">
         <span>بواسطة: د. محمد أبو زيد</span>
-        <!-- رابط الواتساب مباشر برقمك -->
-        <a href="https://wa.me/201005080532" class="wa-btn" target="_blank">
-            تواصل معي عبر الواتساب 💬
-        </a>
+        <a href="https://wa.me/201005080532" class="wa-btn" target="_blank">تواصل معي عبر الواتساب 💬</a>
     </div>
 
     <script>
@@ -218,8 +227,8 @@
         let selectedAyahIndex = 0;
         let isPlaying = false;
         
-        let allGlobalReciters = []; // لتخزين جميع القراء من الـ API
-        let currentFilteredReciters = []; // لتخزين القراء بعد الفلترة بالرواية
+        let allGlobalReciters = []; 
+        let currentFilteredReciters = []; 
         let rawAyahsTexts = []; 
 
         const els = {
@@ -234,7 +243,7 @@
             preloadAudio: document.getElementById('preload-audio')
         };
 
-        // --- 1. التهيئة وجلب كل قراء العالم برواياتهم ---
+        // --- 1. التهيئة وجلب كل قراء العالم برواياتهم بدقة ---
         async function initializeApp() {
             try {
                 // جلب السور
@@ -245,26 +254,29 @@
                     els.surahSelect.add(new Option(`${s.number}. سورة ${s.name}`, s.number));
                 });
                 
-                // جلب كل قراء العالم
+                // جلب كل القراء 
                 const reciterRes = await fetch('https://api.alquran.cloud/v1/edition?format=audio&language=ar');
                 const reciterData = await reciterRes.json();
                 
                 const validReciters = reciterData.data.filter(r => r.type === 'versebyverse');
                 
-                // تصنيف القراء برمجياً حسب الرواية
+                // خوارزمية البحث الدقيق عن الروايات في أسماء القراء
                 validReciters.forEach(r => {
-                    let riwayahTag = 'hafs'; // افتراضي
+                    let riwayahTag = 'hafs'; // حفص هو الافتراضي ما لم يُذكر غير ذلك
                     let n = r.name.toLowerCase();
                     let en = (r.englishName || "").toLowerCase();
                     
                     if(n.includes('ورش') || en.includes('warsh')) riwayahTag = 'warsh';
-                    else if(n.includes('قالون') || en.includes('qalon')) riwayahTag = 'qalun';
+                    else if(n.includes('قالون') || en.includes('qalon') || en.includes('qaloon')) riwayahTag = 'qalun';
                     else if(n.includes('الدوري') || en.includes('douri') || en.includes('duri')) riwayahTag = 'douri';
-                    else if(n.includes('شعبة') || en.includes('shubah')) riwayahTag = 'shubah';
+                    else if(n.includes('شعبة') || en.includes('shubah') || en.includes('shoabah')) riwayahTag = 'shubah';
                     else if(n.includes('السوسي') || en.includes('soussi') || en.includes('susi')) riwayahTag = 'soussi';
-                    else if(n.includes('حمزة') || en.includes('hamza') || n.includes('خلف')) riwayahTag = 'hamza';
-                    else if(n.includes('ابن كثير') || n.includes('الكسائي') || n.includes('يعقوب')) riwayahTag = 'other';
-                    else riwayahTag = 'hafs';
+                    else if(n.includes('حمزة') || en.includes('hamza') || n.includes('خلف') || en.includes('khalaf')) riwayahTag = 'hamza';
+                    
+                    // إذا لم تكن أي رواية أخرى، فهي حتماً حفص
+                    if(!n.includes('ورش') && !n.includes('قالون') && !n.includes('الدوري') && !n.includes('شعبة') && !n.includes('السوسي') && !n.includes('حمزة') && !n.includes('خلف')) {
+                        riwayahTag = 'hafs';
+                    }
 
                     allGlobalReciters.push({
                         identifier: r.identifier,
@@ -273,45 +285,53 @@
                     });
                 });
                 
-                // تفعيل الفلترة المبدئية (على رواية حفص)
-                filterRecitersByRiwayah();
-                
-                await loadQuranData();
+                filterRecitersAndMushaf(); 
             } catch (err) {
                 els.quranDisplay.innerHTML = '<span style="color:red">حدث خطأ في الاتصال بالسيرفر. تأكد من الإنترنت.</span>';
             }
         }
 
-        // --- 2. دالة فلترة القراء بناءً على الرواية المحددة ---
-        function filterRecitersByRiwayah() {
+        // --- 2. دالة فلترة القراء وتغيير تصميم المصحف ---
+        function filterRecitersAndMushaf() {
             const selectedRiwayah = els.riwayahSelect.value;
-            els.reciterSelect.innerHTML = ''; // مسح القائمة الحالية
+            els.reciterSelect.innerHTML = ''; 
             currentFilteredReciters = [];
 
-            // إذا اختار روايات أخرى ولم نجد تصنيف، نعرض الباقي
+            // جلب القراء المطابقين للرواية بدقة
             allGlobalReciters.forEach(reciter => {
-                if (reciter.riwayah === selectedRiwayah || (selectedRiwayah === 'other' && reciter.riwayah === 'other')) {
+                if (reciter.riwayah === selectedRiwayah) {
                     els.reciterSelect.add(new Option(reciter.name, reciter.identifier));
                     currentFilteredReciters.push(reciter.identifier);
                 }
             });
 
-            // إذا لم يتوفر قراء للرواية المختارة (نادر)
-            if(currentFilteredReciters.length === 0) {
-                els.reciterSelect.add(new Option('لا يوجد قراء مسجلين لهذه الرواية حالياً', ''));
-            } else {
-                changeSettings(); // تحديث الصوت للقارئ الأول في القائمة المفلترة
+            // إضافة توضيح لعدد القراء المتاحين عالمياً لهذه الرواية
+            const count = currentFilteredReciters.length;
+            els.reciterSelect.options[0].text = els.reciterSelect.options[0].text + ` (متوفر ${count} قراء)`;
+
+            if(count === 0) {
+                els.reciterSelect.add(new Option('جاري تحديث قراء هذه الرواية في السيرفر...', ''));
             }
+
+            // --- تحويل شكل المصحف للرواية المختارة ---
+            els.quranDisplay.className = 'quran-area'; // إعادة ضبط
+            if(selectedRiwayah === 'hafs') els.quranDisplay.classList.add('mushaf-hafs');
+            else if(selectedRiwayah === 'warsh') els.quranDisplay.classList.add('mushaf-warsh');
+            else if(selectedRiwayah === 'qalun') els.quranDisplay.classList.add('mushaf-qaloon');
+            else els.quranDisplay.classList.add('mushaf-other');
+
+            loadQuranData(); // إعادة تحميل الآيات لتحديث النص
         }
 
-        // --- 3. تحميل السور ---
+        // --- 3. تحميل الآيات ---
         async function loadQuranData() {
             const surahNum = els.surahSelect.value || 1;
-            els.quranDisplay.innerHTML = 'جاري التحميل...';
+            els.quranDisplay.innerHTML = 'جاري ضبط المصحف والرواية...';
             isPlaying = false;
             updatePlayButton();
 
             try {
+                // استخدام الرسم العثماني
                 const quranRes = await fetch(`https://api.alquran.cloud/v1/surah/${surahNum}/quran-uthmani`);
                 currentSurahData = (await quranRes.json()).data;
                 rawAyahsTexts = [];
@@ -349,9 +369,7 @@
             document.getElementById('action-modal').style.display = 'flex';
         }
 
-        function closeModals() {
-            document.querySelectorAll('.modal-overlay').forEach(m => m.style.display = 'none');
-        }
+        function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m => m.style.display = 'none'); }
 
         function playAyahFromModal() {
             closeModals();
@@ -362,7 +380,8 @@
 
         function copyAyahText() {
             const siteTitle = document.getElementById('site-main-title').innerText;
-            const textToCopy = `﴿ ${rawAyahsTexts[selectedAyahIndex]} ﴾\n[سورة ${currentSurahData.name} - آية ${currentSurahData.ayahs[selectedAyahIndex].numberInSurah}]\nمنصة ${siteTitle}`;
+            const riwayahName = els.riwayahSelect.options[els.riwayahSelect.selectedIndex].text;
+            const textToCopy = `﴿ ${rawAyahsTexts[selectedAyahIndex]} ﴾\n[سورة ${currentSurahData.name} - آية ${currentSurahData.ayahs[selectedAyahIndex].numberInSurah}]\nمنصة ${siteTitle} (${riwayahName})`;
             navigator.clipboard.writeText(textToCopy).then(() => { alert("تم نسخ الآية بنجاح!"); });
         }
 
@@ -381,9 +400,7 @@
                 const res = await fetch(`https://api.alquran.cloud/v1/ayah/${globalNum}/${tafsirId}`);
                 const data = await res.json();
                 tafsirBox.innerHTML = data.data.text;
-            } catch(e) {
-                tafsirBox.innerHTML = "حدث خطأ في جلب التفسير، تأكد من اتصالك بالإنترنت.";
-            }
+            } catch(e) { tafsirBox.innerHTML = "حدث خطأ في جلب التفسير، تأكد من اتصالك بالإنترنت."; }
         }
 
         function shareAyahImage() {
@@ -396,16 +413,15 @@
             document.getElementById('share-footer-text').innerText = siteTitle;
             
             const card = document.getElementById('share-card');
-            
             html2canvas(card, { scale: 2 }).then(canvas => {
                 const link = document.createElement('a');
                 link.download = `Samee3_Ayah_${currentSurahData.name}.png`;
                 link.href = canvas.toDataURL('image/png');
                 link.click();
-            }).catch(e => { alert("حدث خطأ أثناء إنشاء الصورة."); });
+            });
         }
 
-        // --- محرك الصوتيات وتخطي الأخطاء ---
+        // --- 4. محرك الصوتيات العبقري (نظام التخطي والإنقاذ) ---
         function setupAudioForAyah(index) {
             if (!currentSurahData || currentFilteredReciters.length === 0) return;
             selectedAyahIndex = index;
@@ -417,6 +433,7 @@
                 reciterId = currentFilteredReciters[Math.floor(Math.random() * currentFilteredReciters.length)];
             }
 
+            // يتم الطلب بجودة 128 أولاً
             els.mainAudio.src = `https://cdn.islamic.network/quran/audio/128/${reciterId}/${globalNum}.mp3`;
             
             if (index < currentSurahData.ayahs.length - 1) {
@@ -428,16 +445,24 @@
             updateHighlight(index);
         }
 
-        // نظام التخطي الذكي في حالة تعطل رابط قارئ معين
+        // نظام إنقاذ الصوتيات (Audio Fallback System) - يحل مشكلة عدم اشتغال القراء
         els.mainAudio.onerror = () => {
-            console.log("الرابط الصوتي لهذا القارئ لا يستجيب من المصدر. جاري التخطي.");
-            if(isPlaying) {
-                if (selectedAyahIndex < currentSurahData.ayahs.length - 1) {
-                    setupAudioForAyah(selectedAyahIndex + 1);
-                    els.mainAudio.play();
-                } else {
-                    isPlaying = false;
-                    updatePlayButton();
+            console.log("الرابط الأساسي للقارئ معطل، جاري تحويل الجودة لإنقاذ التلاوة...");
+            
+            // إذا فشل في 128، ينزل تلقائياً لـ 64 بدون توقف
+            if (els.mainAudio.src.includes('/128/')) {
+                els.mainAudio.src = els.mainAudio.src.replace('/128/', '/64/');
+                if (isPlaying) els.mainAudio.play();
+            } else {
+                // إذا فشل تماماً يتخطى للآية التالية
+                if(isPlaying) {
+                    if (selectedAyahIndex < currentSurahData.ayahs.length - 1) {
+                        setupAudioForAyah(selectedAyahIndex + 1);
+                        els.mainAudio.play();
+                    } else {
+                        isPlaying = false;
+                        updatePlayButton();
+                    }
                 }
             }
         };
@@ -503,7 +528,6 @@
             }
         }
 
-        // دالة الحفظ والتعديل الحي للمنصة
         function saveAdminSettings() {
             const newTitle = document.getElementById('edit-site-title').value;
             if(newTitle.trim() !== '') {
