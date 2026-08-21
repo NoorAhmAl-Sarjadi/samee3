@@ -5,11 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>مصحف سميع - تلاوة وتفسير</title>
     <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
-    <!-- استدعاء مكتبة تحويل الأكواد إلى صور احترافية للمشاركة -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <style>
-        /* المتغيرات والألوان الأساسية (نفس التصميم المعتمد) */
         :root {
             --primary-color: #8b5a2b; 
             --secondary-color: #d4af37; 
@@ -22,20 +20,24 @@
         body { font-family: 'Tajawal', sans-serif; background-color: var(--bg-color); margin: 0; color: var(--text-color); }
         
         .navbar { background-color: #1a252f; color: white; display: flex; justify-content: space-between; align-items: center; padding: 15px 40px; box-shadow: 0 4px 10px rgba(0,0,0,0.15); position: sticky; top: 0; z-index: 100; }
-        .navbar h1 { font-family: 'Amiri', serif; margin: 0; font-size: 32px; color: var(--secondary-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.5); }
+        .navbar h1 { font-family: 'Amiri', serif; margin: 0; font-size: 32px; color: var(--secondary-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.5); transition: 0.3s; }
         .nav-btns button { padding: 8px 20px; font-size: 16px; font-family: inherit; font-weight: bold; background: var(--secondary-color); color: #1a252f; border: none; border-radius: 5px; cursor: pointer; transition: 0.3s; margin-right: 10px; }
         .nav-btns button:hover { background: #b5952f; }
 
         .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
         .app-card { background-color: #fff; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.08); border: 1px solid rgba(212, 175, 55, 0.3); overflow: hidden; min-height: 500px;}
         
-        .settings-panel { background-color: var(--primary-color); color: white; padding: 25px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; align-items: center; border-bottom: 4px solid var(--secondary-color); }
+        .settings-panel { background-color: var(--primary-color); color: white; padding: 25px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: center; border-bottom: 4px solid var(--secondary-color); }
         .settings-panel select, .settings-panel button { padding: 12px; font-size: 16px; font-family: inherit; border-radius: 8px; border: none; outline: none; width: 100%; box-sizing: border-box; }
-        .settings-panel select { background-color: #fff; color: #333; cursor: pointer; }
+        .settings-panel select { background-color: #fff; color: #333; cursor: pointer; font-weight: bold; }
+        
+        /* تمييز قائمة الروايات بلون مختلف قليلاً */
+        #riwayah-select { border: 2px solid var(--secondary-color); background-color: #fdfaf4; }
+
         .btn-play { background-color: var(--secondary-color) !important; font-weight: bold; color: #1a252f !important; cursor: pointer; transition: 0.3s; font-size: 18px !important; }
         .btn-play:hover { transform: scale(1.02); }
-        .random-toggle-container { display: flex; align-items: center; gap: 10px; color: white; font-weight: 500; font-size: 16px; cursor: pointer; }
-        .random-toggle-container input { width: 20px; height: 20px; cursor: pointer; }
+        .random-toggle-container { display: flex; align-items: center; gap: 10px; color: white; font-weight: 500; font-size: 14px; cursor: pointer; }
+        .random-toggle-container input { width: 18px; height: 18px; cursor: pointer; }
 
         .quran-area { padding: 40px; font-family: 'Amiri', serif; font-size: 34px; line-height: 2.4; text-align: justify; direction: rtl; min-height: 400px; }
         .verse { cursor: pointer; padding: 2px 8px; border-radius: 8px; transition: all 0.2s ease-in-out; }
@@ -43,12 +45,11 @@
         .verse-end { color: var(--primary-color); font-size: 26px; margin: 0 5px; user-select: none; }
         .active-verse { background-color: var(--highlight-bg); color: var(--highlight-text); font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
 
-        /* النوافذ المنبثقة (Modals) للآيات والتفسير والمشاركة */
+        /* النوافذ المنبثقة للآيات */
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); display: none; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(5px); }
         .modal-content { background: #fff; padding: 30px; border-radius: 15px; width: 90%; max-width: 600px; text-align: center; border: 3px solid var(--secondary-color); position: relative; box-shadow: 0 15px 30px rgba(0,0,0,0.3); }
         .close-modal { position: absolute; top: 15px; left: 15px; font-size: 24px; cursor: pointer; color: #e74c3c; background: none; border: none; font-weight: bold; }
         
-        /* أزرار خيارات الآية */
         .ayah-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
         .action-btn { padding: 15px; font-size: 18px; font-family: inherit; font-weight: bold; border-radius: 8px; border: none; cursor: pointer; transition: 0.3s; display: flex; align-items: center; justify-content: center; gap: 10px; }
         .action-play { background: var(--primary-color); color: white; }
@@ -57,11 +58,10 @@
         .action-share { background: var(--secondary-color); color: #1a252f; }
         .action-btn:hover { filter: brightness(1.1); transform: translateY(-2px); }
 
-        /* صندوق نص التفسير المنبثق */
         .tafsir-text-box { font-family: 'Amiri', serif; font-size: 24px; line-height: 2; text-align: justify; padding: 20px; background: #f9f9f9; border-radius: 10px; margin-top: 15px; border-right: 5px solid var(--secondary-color); max-height: 350px; overflow-y: auto; }
 
-        /* تصميم بطاقة المشاركة (الصورة) */
-        #share-card-container { position: absolute; top: -9999px; left: -9999px; } /* مخفي عن العرض ولكنه موجود للتصوير */
+        /* بطاقة المشاركة المخفية */
+        #share-card-container { position: absolute; top: -9999px; left: -9999px; } 
         .share-card { width: 800px; padding: 50px; background: linear-gradient(135deg, #fcf8f2, #fff); border: 15px solid var(--primary-color); box-sizing: border-box; text-align: center; font-family: 'Amiri', serif; position: relative; }
         .share-card::after { content: ''; position: absolute; top: 10px; left: 10px; right: 10px; bottom: 10px; border: 2px dashed var(--secondary-color); pointer-events: none; }
         .share-card-title { color: var(--primary-color); font-size: 30px; margin-bottom: 30px; font-family: 'Tajawal', sans-serif; }
@@ -72,18 +72,25 @@
         .hidden-screen { display: none; }
         .admin-container { padding: 40px; text-align: center; }
         .form-group { margin-bottom: 20px; text-align: right; max-width: 400px; margin: 0 auto 20px auto; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; }
-        .form-group input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-family: inherit; box-sizing: border-box; font-size: 16px; direction: ltr; }
-        .auth-btn { background: var(--primary-color); color: white; padding: 12px 30px; font-size: 18px; border: none; border-radius: 5px; cursor: pointer; width: 100%; max-width: 400px; font-family: inherit; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; color: var(--primary-color); }
+        .form-group input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-family: inherit; box-sizing: border-box; font-size: 16px; direction: rtl; }
+        .form-group input.ltr { direction: ltr; }
+        .auth-btn { background: var(--primary-color); color: white; padding: 12px 30px; font-size: 18px; border: none; border-radius: 5px; cursor: pointer; width: 100%; max-width: 400px; font-family: inherit; transition: 0.3s; font-weight: bold; }
+        .auth-btn:hover { background: #6b4420; }
         .error-msg { color: #e74c3c; margin-top: 15px; font-weight: bold; display: none; }
 
-        .footer-signature { text-align: center; padding: 20px; color: #888; font-size: 14px; margin-top: 20px; }
+        .admin-settings-box { background: #fdfbf7; padding: 30px; border: 2px solid var(--secondary-color); border-radius: 10px; max-width: 600px; margin: 0 auto; text-align: right; }
+
+        /* التوقيع وزر الواتساب */
+        .footer-signature { text-align: center; padding: 25px; color: #555; font-size: 16px; font-weight: bold; display: flex; justify-content: center; align-items: center; gap: 15px; flex-wrap: wrap; }
+        .wa-btn { background-color: #25D366; color: white; padding: 8px 20px; border-radius: 20px; text-decoration: none; display: flex; align-items: center; gap: 8px; font-size: 15px; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .wa-btn:hover { background-color: #128C7E; transform: translateY(-2px); }
     </style>
 </head>
 <body>
 
     <nav class="navbar">
-        <h1>مصحف سَمِيع</h1>
+        <h1 id="site-main-title">مصحف سَمِيع</h1>
         <div class="nav-btns">
             <button onclick="switchTab('app-main')">المصحف</button>
             <button onclick="switchTab('admin-screen')" style="background: transparent; color: var(--secondary-color); border: 1px solid var(--secondary-color);">الإدارة</button>
@@ -96,18 +103,30 @@
             <div class="settings-panel">
                 <select id="surah-select" onchange="loadQuranData()"><option>جاري التحميل...</option></select>
                 
-                <!-- القراء والروايات -->
+                <!-- اختيار الرواية -->
+                <select id="riwayah-select" onchange="filterRecitersByRiwayah()">
+                    <option value="hafs">رواية حفص عن عاصم</option>
+                    <option value="warsh">رواية ورش عن نافع</option>
+                    <option value="qalun">رواية قالون عن نافع</option>
+                    <option value="douri">رواية الدوري عن أبي عمرو</option>
+                    <option value="shubah">رواية شعبة عن عاصم</option>
+                    <option value="soussi">رواية السوسي عن أبي عمرو</option>
+                    <option value="hamza">رواية خلف عن حمزة</option>
+                    <option value="other">روايات وقراءات أخرى</option>
+                </select>
+
+                <!-- القراء (يتم فلترتهم بناءً على الرواية) -->
                 <select id="reciter-select" onchange="changeSettings()">
                     <option value="">جاري جلب جميع قراء العالم...</option>
                 </select>
 
-                <!-- أمهات كتب التفسير لأهل السنة والجماعة -->
+                <!-- أمهات كتب التفسير -->
                 <select id="tafsir-select">
-                    <option value="ar.ibnkathir">تفسير ابن كثير (عماد أهل السنة)</option>
-                    <option value="ar.saadi">تفسير السعدي (تيسير الكريم الرحمن)</option>
-                    <option value="ar.tabari">تفسير الطبري (جامع البيان)</option>
-                    <option value="ar.qurtubi">تفسير القرطبي (الجامع لأحكام القرآن)</option>
-                    <option value="ar.baghawi">تفسير البغوي (معالم التنزيل)</option>
+                    <option value="ar.ibnkathir">تفسير ابن كثير</option>
+                    <option value="ar.saadi">تفسير السعدي</option>
+                    <option value="ar.tabari">تفسير الطبري</option>
+                    <option value="ar.qurtubi">تفسير القرطبي</option>
+                    <option value="ar.baghawi">تفسير البغوي</option>
                     <option value="ar.muyassar">التفسير الميسر</option>
                 </select>
 
@@ -115,52 +134,60 @@
                 
                 <label class="random-toggle-container">
                     <input type="checkbox" id="random-mode">
-                    تلاوة عشوائية لكل آية
+                    تلاوة عشوائية (لكل القراء)
                 </label>
             </div>
 
-            <div id="quran-display" class="quran-area">جاري تهيئة المصحف...</div>
+            <div id="quran-display" class="quran-area">جاري تهيئة المصحف الشريف...</div>
 
             <audio id="main-audio"></audio>
             <audio id="preload-audio"></audio>
         </div>
 
-        <!-- 2. شاشة الإدارة -->
+        <!-- 2. شاشة الإدارة (مع التعديل المباشر) -->
         <div id="admin-screen" class="app-card hidden-screen admin-container">
             <div id="login-form">
                 <h2 style="color: var(--primary-color); margin-bottom: 30px;">تسجيل الدخول للإدارة</h2>
-                <div class="form-group"><label>البريد الإلكتروني</label><input type="email" id="admin-email" placeholder="admin@samee3.com"></div>
-                <div class="form-group"><label>كلمة المرور</label><input type="password" id="admin-pass" placeholder="••••••••"></div>
+                <div class="form-group"><label>البريد الإلكتروني</label><input type="email" id="admin-email" class="ltr" placeholder="admin@samee3.com"></div>
+                <div class="form-group"><label>كلمة المرور</label><input type="password" id="admin-pass" class="ltr" placeholder="••••••••"></div>
                 <button class="auth-btn" onclick="loginAdmin()">تسجيل الدخول</button>
                 <p id="login-error" class="error-msg">البيانات غير صحيحة!</p>
             </div>
+            
             <div id="dashboard-view" style="display: none;">
-                <h2 style="color: var(--primary-color);">مرحباً بك د. محمد أبو زيد في لوحة تحكم موقع سَمِيع</h2>
-                <p style="font-size: 18px; color: #555;">النظام يعمل بكفاءة، وجميع التفاسير والقراء متصلة بنجاح.</p>
+                <h2 style="color: var(--primary-color);">لوحة تحكم موقع سَمِيع - د. محمد أبو زيد</h2>
+                
+                <!-- إعدادات التعديل الحي -->
+                <div class="admin-settings-box">
+                    <h3 style="margin-top:0; border-bottom: 2px solid #ccc; padding-bottom: 10px;">إعدادات واجهة المنصة (تعديل مباشر)</h3>
+                    <div class="form-group" style="max-width: 100%;">
+                        <label>اسم المنصة العلوي (اللوجو النصي)</label>
+                        <input type="text" id="edit-site-title" value="مصحف سَمِيع">
+                    </div>
+                    <button class="auth-btn" style="width: auto; padding: 10px 20px;" onclick="saveAdminSettings()">حفظ التعديلات في المنصة</button>
+                    <p id="save-msg" style="color: green; font-weight: bold; display: none;">تم حفظ التعديلات وتطبيقها بنجاح!</p>
+                </div>
+
                 <button class="auth-btn" style="background-color: #e74c3c; margin-top: 30px;" onclick="logoutAdmin()">تسجيل الخروج</button>
             </div>
         </div>
     </div>
 
-    <!-- === النوافذ المنبثقة (Modals) === -->
-    
-    <!-- نافذة خيارات الآية -->
+    <!-- النوافذ المنبثقة -->
     <div id="action-modal" class="modal-overlay">
         <div class="modal-content">
             <button class="close-modal" onclick="closeModals()">✖</button>
             <h3 style="color: var(--primary-color); margin-top: 0;">خيارات الآية</h3>
             <p id="selected-ayah-preview" style="font-family: 'Amiri', serif; font-size: 24px; color: #333;"></p>
-            
             <div class="ayah-actions">
-                <button class="action-btn action-play" onclick="playAyahFromModal()">⏵ تشغيل من هنا</button>
-                <button class="action-btn action-tafsir" onclick="openTafsirModal()">📖 عرض التفسير</button>
-                <button class="action-btn action-copy" onclick="copyAyahText()">📋 نسخ الآية</button>
-                <button class="action-btn action-share" onclick="shareAyahImage()">🖼️ مشاركة بتصميم</button>
+                <button class="action-btn action-play" onclick="playAyahFromModal()">⏵ تشغيل</button>
+                <button class="action-btn action-tafsir" onclick="openTafsirModal()">📖 التفسير</button>
+                <button class="action-btn action-copy" onclick="copyAyahText()">📋 النسخ</button>
+                <button class="action-btn action-share" onclick="shareAyahImage()">🖼️ مشاركة صورة</button>
             </div>
         </div>
     </div>
 
-    <!-- نافذة التفسير -->
     <div id="tafsir-modal" class="modal-overlay">
         <div class="modal-content" style="max-width: 800px;">
             <button class="close-modal" onclick="closeModals()">✖</button>
@@ -169,26 +196,35 @@
         </div>
     </div>
 
-    <!-- بطاقة المشاركة المخفية (للتصوير) -->
     <div id="share-card-container">
         <div id="share-card" class="share-card">
             <div class="share-card-title" id="share-surah-name">سورة الفاتحة</div>
             <div class="share-card-ayah" id="share-ayah-text">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div>
-            <div class="share-card-footer">منصة سَمِيع للقرآن الكريم والتفسير</div>
+            <div class="share-card-footer" id="share-footer-text">منصة سَمِيع للقرآن الكريم والتفسير</div>
         </div>
     </div>
 
-    <div class="footer-signature">بواسطة: د. محمد أبو زيد</div>
+    <!-- التوقيع وزر الواتساب -->
+    <div class="footer-signature">
+        <span>بواسطة: د. محمد أبو زيد</span>
+        <!-- رابط الواتساب مباشر برقمك -->
+        <a href="https://wa.me/201005080532" class="wa-btn" target="_blank">
+            تواصل معي عبر الواتساب 💬
+        </a>
+    </div>
 
     <script>
         let currentSurahData = null;
         let selectedAyahIndex = 0;
         let isPlaying = false;
-        let allReciters = []; 
-        let rawAyahsTexts = []; // لتخزين النص الصافي للنسخ والمشاركة
+        
+        let allGlobalReciters = []; // لتخزين جميع القراء من الـ API
+        let currentFilteredReciters = []; // لتخزين القراء بعد الفلترة بالرواية
+        let rawAyahsTexts = []; 
 
         const els = {
             surahSelect: document.getElementById('surah-select'),
+            riwayahSelect: document.getElementById('riwayah-select'),
             reciterSelect: document.getElementById('reciter-select'),
             tafsirSelect: document.getElementById('tafsir-select'),
             randomMode: document.getElementById('random-mode'),
@@ -198,35 +234,77 @@
             preloadAudio: document.getElementById('preload-audio')
         };
 
+        // --- 1. التهيئة وجلب كل قراء العالم برواياتهم ---
         async function initializeApp() {
             try {
+                // جلب السور
                 const res = await fetch('https://api.alquran.cloud/v1/meta');
                 const data = await res.json();
-                
                 els.surahSelect.innerHTML = '';
                 data.data.surahs.references.forEach(s => {
                     els.surahSelect.add(new Option(`${s.number}. سورة ${s.name}`, s.number));
                 });
                 
+                // جلب كل قراء العالم
                 const reciterRes = await fetch('https://api.alquran.cloud/v1/edition?format=audio&language=ar');
                 const reciterData = await reciterRes.json();
                 
-                els.reciterSelect.innerHTML = ''; 
-                allReciters.length = 0;
-                
                 const validReciters = reciterData.data.filter(r => r.type === 'versebyverse');
-                validReciters.forEach(reciter => {
-                    els.reciterSelect.add(new Option(reciter.name, reciter.identifier));
-                    allReciters.push(reciter.identifier); 
+                
+                // تصنيف القراء برمجياً حسب الرواية
+                validReciters.forEach(r => {
+                    let riwayahTag = 'hafs'; // افتراضي
+                    let n = r.name.toLowerCase();
+                    let en = (r.englishName || "").toLowerCase();
+                    
+                    if(n.includes('ورش') || en.includes('warsh')) riwayahTag = 'warsh';
+                    else if(n.includes('قالون') || en.includes('qalon')) riwayahTag = 'qalun';
+                    else if(n.includes('الدوري') || en.includes('douri') || en.includes('duri')) riwayahTag = 'douri';
+                    else if(n.includes('شعبة') || en.includes('shubah')) riwayahTag = 'shubah';
+                    else if(n.includes('السوسي') || en.includes('soussi') || en.includes('susi')) riwayahTag = 'soussi';
+                    else if(n.includes('حمزة') || en.includes('hamza') || n.includes('خلف')) riwayahTag = 'hamza';
+                    else if(n.includes('ابن كثير') || n.includes('الكسائي') || n.includes('يعقوب')) riwayahTag = 'other';
+                    else riwayahTag = 'hafs';
+
+                    allGlobalReciters.push({
+                        identifier: r.identifier,
+                        name: r.name,
+                        riwayah: riwayahTag
+                    });
                 });
                 
-                els.reciterSelect.value = 'ar.husary';
+                // تفعيل الفلترة المبدئية (على رواية حفص)
+                filterRecitersByRiwayah();
+                
                 await loadQuranData();
             } catch (err) {
-                els.quranDisplay.innerHTML = '<span style="color:red">حدث خطأ في الاتصال. يرجى التأكد من الإنترنت.</span>';
+                els.quranDisplay.innerHTML = '<span style="color:red">حدث خطأ في الاتصال بالسيرفر. تأكد من الإنترنت.</span>';
             }
         }
 
+        // --- 2. دالة فلترة القراء بناءً على الرواية المحددة ---
+        function filterRecitersByRiwayah() {
+            const selectedRiwayah = els.riwayahSelect.value;
+            els.reciterSelect.innerHTML = ''; // مسح القائمة الحالية
+            currentFilteredReciters = [];
+
+            // إذا اختار روايات أخرى ولم نجد تصنيف، نعرض الباقي
+            allGlobalReciters.forEach(reciter => {
+                if (reciter.riwayah === selectedRiwayah || (selectedRiwayah === 'other' && reciter.riwayah === 'other')) {
+                    els.reciterSelect.add(new Option(reciter.name, reciter.identifier));
+                    currentFilteredReciters.push(reciter.identifier);
+                }
+            });
+
+            // إذا لم يتوفر قراء للرواية المختارة (نادر)
+            if(currentFilteredReciters.length === 0) {
+                els.reciterSelect.add(new Option('لا يوجد قراء مسجلين لهذه الرواية حالياً', ''));
+            } else {
+                changeSettings(); // تحديث الصوت للقارئ الأول في القائمة المفلترة
+            }
+        }
+
+        // --- 3. تحميل السور ---
         async function loadQuranData() {
             const surahNum = els.surahSelect.value || 1;
             els.quranDisplay.innerHTML = 'جاري التحميل...';
@@ -234,11 +312,9 @@
             updatePlayButton();
 
             try {
-                // دمجنا الرسم العثماني الشامل لكل الروايات
                 const quranRes = await fetch(`https://api.alquran.cloud/v1/surah/${surahNum}/quran-uthmani`);
                 currentSurahData = (await quranRes.json()).data;
                 rawAyahsTexts = [];
-                
                 renderQuranText();
             } catch (err) {
                 console.error("Error loading quran", err);
@@ -253,22 +329,19 @@
                     text = text.replace('بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ ', '');
                 }
                 
-                rawAyahsTexts.push(text); // حفظ النص الصافي
+                rawAyahsTexts.push(text); 
 
                 const span = document.createElement('span');
                 span.className = 'verse';
                 span.id = `v-${index}`;
                 span.innerHTML = `${text} <span class="verse-end">﴿${ayah.numberInSurah}﴾</span> `;
-                
-                // عند الضغط على الآية، تظهر القائمة المنبثقة بدلاً من التشغيل المباشر
                 span.onclick = () => { openActionModal(index); };
-                
                 els.quranDisplay.appendChild(span);
             });
             updateHighlight(selectedAyahIndex);
         }
 
-        // --- نظام النوافذ المنبثقة (Modals) ---
+        // --- النوافذ والمشاركة ---
         function openActionModal(index) {
             selectedAyahIndex = index;
             const ayahText = rawAyahsTexts[index];
@@ -288,13 +361,11 @@
         }
 
         function copyAyahText() {
-            const textToCopy = `﴿ ${rawAyahsTexts[selectedAyahIndex]} ﴾\n[سورة ${currentSurahData.name} - آية ${currentSurahData.ayahs[selectedAyahIndex].numberInSurah}]\nتطبيق سَمِيع`;
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                alert("تم نسخ الآية بنجاح!");
-            });
+            const siteTitle = document.getElementById('site-main-title').innerText;
+            const textToCopy = `﴿ ${rawAyahsTexts[selectedAyahIndex]} ﴾\n[سورة ${currentSurahData.name} - آية ${currentSurahData.ayahs[selectedAyahIndex].numberInSurah}]\nمنصة ${siteTitle}`;
+            navigator.clipboard.writeText(textToCopy).then(() => { alert("تم نسخ الآية بنجاح!"); });
         }
 
-        // جلب التفسير للآية المحددة فقط (أسرع وأخف)
         async function openTafsirModal() {
             document.getElementById('action-modal').style.display = 'none';
             document.getElementById('tafsir-modal').style.display = 'flex';
@@ -315,56 +386,52 @@
             }
         }
 
-        // توليد صورة احترافية للمشاركة
         function shareAyahImage() {
             closeModals();
-            alert("جاري تجهيز التصميم الاحترافي للصورة، يرجى الانتظار لحظات...");
+            alert("جاري تجهيز التصميم الاحترافي للصورة، يرجى الانتظار...");
             
-            // تجهيز البيانات في البطاقة المخفية
+            const siteTitle = document.getElementById('site-main-title').innerText;
             document.getElementById('share-surah-name').innerText = `سورة ${currentSurahData.name} - آية ${currentSurahData.ayahs[selectedAyahIndex].numberInSurah}`;
             document.getElementById('share-ayah-text').innerText = `﴿ ${rawAyahsTexts[selectedAyahIndex]} ﴾`;
+            document.getElementById('share-footer-text').innerText = siteTitle;
             
             const card = document.getElementById('share-card');
             
-            // استخدام مكتبة html2canvas لتحويل الـ HTML لصورة
             html2canvas(card, { scale: 2 }).then(canvas => {
                 const link = document.createElement('a');
                 link.download = `Samee3_Ayah_${currentSurahData.name}.png`;
                 link.href = canvas.toDataURL('image/png');
                 link.click();
-            }).catch(e => {
-                alert("حدث خطأ أثناء إنشاء الصورة.");
-            });
+            }).catch(e => { alert("حدث خطأ أثناء إنشاء الصورة."); });
         }
 
-        // --- محرك الصوتيات (مع حل مشكلة القراء المعطلين) ---
+        // --- محرك الصوتيات وتخطي الأخطاء ---
         function setupAudioForAyah(index) {
-            if (!currentSurahData) return;
+            if (!currentSurahData || currentFilteredReciters.length === 0) return;
             selectedAyahIndex = index;
             
             const globalNum = currentSurahData.ayahs[index].number;
             let reciterId = els.reciterSelect.value;
             
-            if (els.randomMode.checked && allReciters.length > 0) {
-                reciterId = allReciters[Math.floor(Math.random() * allReciters.length)];
+            if (els.randomMode.checked && currentFilteredReciters.length > 0) {
+                reciterId = currentFilteredReciters[Math.floor(Math.random() * currentFilteredReciters.length)];
             }
 
             els.mainAudio.src = `https://cdn.islamic.network/quran/audio/128/${reciterId}/${globalNum}.mp3`;
             
             if (index < currentSurahData.ayahs.length - 1) {
                 const nextGlobalNum = currentSurahData.ayahs[index + 1].number;
-                let nextReciterId = els.randomMode.checked ? allReciters[Math.floor(Math.random() * allReciters.length)] : els.reciterSelect.value;
+                let nextReciterId = els.randomMode.checked ? currentFilteredReciters[Math.floor(Math.random() * currentFilteredReciters.length)] : els.reciterSelect.value;
                 els.preloadAudio.src = `https://cdn.islamic.network/quran/audio/128/${nextReciterId}/${nextGlobalNum}.mp3`;
                 els.preloadAudio.load();
             }
             updateHighlight(index);
         }
 
-        // معالجة الأخطاء إذا كان الرابط الصوتي للقارئ معطلاً من المصدر
+        // نظام التخطي الذكي في حالة تعطل رابط قارئ معين
         els.mainAudio.onerror = () => {
-            console.log("خطأ في تشغيل هذا القارئ، جاري التخطي...");
+            console.log("الرابط الصوتي لهذا القارئ لا يستجيب من المصدر. جاري التخطي.");
             if(isPlaying) {
-                // إذا كان التشغيل مستمراً، تخطى للآية التالية أو القارئ التالي
                 if (selectedAyahIndex < currentSurahData.ayahs.length - 1) {
                     setupAudioForAyah(selectedAyahIndex + 1);
                     els.mainAudio.play();
@@ -372,8 +439,6 @@
                     isPlaying = false;
                     updatePlayButton();
                 }
-            } else {
-                alert("عذراً، التلاوة لهذه الآية غير متوفرة بصوت هذا القارئ في قاعدة البيانات حالياً.");
             }
         };
 
@@ -387,13 +452,11 @@
         }
 
         function togglePlayGlobal() {
+            if(currentFilteredReciters.length === 0) return alert("لا يوجد قراء متاحين للرواية المحددة.");
             if(!els.mainAudio.src) setupAudioForAyah(selectedAyahIndex);
             
-            if (isPlaying) {
-                els.mainAudio.pause();
-            } else {
-                els.mainAudio.play();
-            }
+            if (isPlaying) { els.mainAudio.pause(); } 
+            else { els.mainAudio.play(); }
             isPlaying = !isPlaying;
             updatePlayButton();
         }
@@ -427,6 +490,7 @@
             document.getElementById(tabId).classList.remove('hidden-screen');
         }
 
+        // --- دوال الإدارة والتعديل الحي ---
         function loginAdmin() {
             const email = document.getElementById('admin-email').value;
             const pass = document.getElementById('admin-pass').value;
@@ -436,6 +500,17 @@
                 document.getElementById('login-error').style.display = 'none';
             } else {
                 document.getElementById('login-error').style.display = 'block';
+            }
+        }
+
+        // دالة الحفظ والتعديل الحي للمنصة
+        function saveAdminSettings() {
+            const newTitle = document.getElementById('edit-site-title').value;
+            if(newTitle.trim() !== '') {
+                document.getElementById('site-main-title').innerText = newTitle;
+                const msg = document.getElementById('save-msg');
+                msg.style.display = 'block';
+                setTimeout(() => { msg.style.display = 'none'; }, 3000);
             }
         }
 
