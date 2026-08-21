@@ -270,7 +270,6 @@
             border-radius: 50px;
             border: 1px solid #D97706;
         }
-        /* الضبط المطور لمنع تفكك الحروف العربية */
         .export-footer {
             font-family: 'Tajawal', sans-serif;
             font-size: 35px;
@@ -740,6 +739,7 @@
             }
         };
 
+        // تم تعديل هذه الدالة للقفز الصوتي التلقائي عند تحديد آية من البحث
         async function loadSurahForReadingAndPlaying(surahNum, targetAyahNum = null) {
             if(!currentAvailableSurahs.includes(Number(surahNum))) {
                 showToast("عذراً، هذا القارئ لم يسجل هذه السورة.");
@@ -797,11 +797,6 @@
                 
                 setupAyahSync();
 
-                // التمرير لأعلى الصفحة تلقائياً عند تحميل السورة بالكامل (بما فيها الانتقال المتتالي التلقائي)
-                setTimeout(() => {
-                    document.querySelector('.mushaf-page-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 100);
-
                 if (targetAyahNum) {
                     let targetAyahObj = currentSurahData.ayahs.find(a => a.numberInSurah === targetAyahNum);
                     if (targetAyahObj) {
@@ -809,13 +804,33 @@
                         if (pIndex !== -1) {
                             currentSurahPageIndex = pIndex;
                             renderCurrentPage();
-                            setTimeout(() => {
-                                let span = document.getElementById(`verse-span-${targetAyahObj.globalIndex}`);
-                                if(span) span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                applyHighlight(targetAyahObj.globalIndex); 
-                            }, 500);
+                            
+                            // دالة للقفز لزمن الآية فور جاهزية المقطع
+                            const playTargetAyah = () => {
+                                if (surahTimingStats.length === 0) setupAyahSync();
+                                if (surahTimingStats[targetAyahObj.globalIndex]) {
+                                    audioPlayer.currentTime = surahTimingStats[targetAyahObj.globalIndex].start;
+                                    setTimeout(() => {
+                                        let span = document.getElementById(`verse-span-${targetAyahObj.globalIndex}`);
+                                        if (span) span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        applyHighlight(targetAyahObj.globalIndex);
+                                    }, 300);
+                                }
+                            };
+
+                            // إذا تم تحميل بيانات الصوت مسبقاً، شغل فوراً، وإلا انتظر حدث التحميل
+                            if (audioPlayer.readyState >= 1) { 
+                                playTargetAyah();
+                            } else {
+                                audioPlayer.addEventListener('loadedmetadata', playTargetAyah, { once: true });
+                            }
                         }
                     }
+                } else {
+                    // التمرير لأعلى الصفحة تلقائياً عند تحميل السورة من البداية
+                    setTimeout(() => {
+                        document.querySelector('.mushaf-page-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 100);
                 }
 
             } catch (err) { els.quranDisplay.innerHTML = "حدث خطأ في تحميل السورة."; }
