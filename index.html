@@ -309,13 +309,13 @@
         <button id="side-panel-cancel-btn" class="dl-cancel-btn" onclick="hideSidePanel()">إغلاق / إلغاء</button>
     </div>
 
-    <!-- الشريط العلوي -->
+    <!-- الشريط العلوي (تم تعديل ترتيب الأزرار هنا) -->
     <nav class="navbar">
         <h1 id="site-main-title">مصحف سَمِيع</h1>
         <div class="nav-btns">
             <button class="btn-nav active" onclick="switchTab('home-view')">الرئيسية</button>
-            <button class="btn-nav" onclick="openSearchModal()" style="background: var(--bg-main);">🔍 بحث</button>
             <button class="btn-login" onclick="switchTab('unified-login-view')" id="login-nav-btn">تسجيل الدخول</button>
+            <button class="btn-nav" onclick="openSearchModal()" style="background: var(--bg-main);">🔍 بحث</button>
         </div>
     </nav>
 
@@ -507,7 +507,7 @@
         let surahTimingStats = [];
         let currentPlayingAyahIndex = -1;
         let isPlaying = false;
-        let startDelaySeconds = 0; // لحفظ وقت البسملة والاستعاذة
+        let startDelaySeconds = 0; 
         
         let isRepeatingVerse = false;
         let selectedAyahIndex = 0;
@@ -653,14 +653,12 @@
 
         function padNumber(num) { return num.toString().padStart(3, '0'); }
 
-        /* === خوارزمية التزامن المطورة === */
         function setupAyahSync() {
             if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity) return;
             
             let duration = audioPlayer.duration;
             let ayahs = currentSurahData.ayahs;
             
-            // حساب وتجاهل وقت الاستعاذة والبسملة في بداية المقطع
             startDelaySeconds = 0;
             if (currentSurahNumber === 1) startDelaySeconds = 4.0; 
             else if (currentSurahNumber === 9) startDelaySeconds = 4.0; 
@@ -669,7 +667,6 @@
             let activeDuration = duration - startDelaySeconds;
             if (activeDuration < 0) activeDuration = duration;
             
-            // زيادة وزن الوقفات (Pause) بين الآيات لمنع قفز التظليل قبل إنهاء الآية
             let basePauseWeight = 25; 
             let totalChars = rawAyahsTexts.reduce((acc, txt) => acc + txt.length + basePauseWeight, 0);
             
@@ -736,7 +733,6 @@
                 
                 applyHighlight(currentPlayingAyahIndex);
 
-                // === التمرير التلقائي للصفحة ليتبع التظليل باستمرار ===
                 let activeSpan = document.getElementById(`verse-span-${currentPlayingAyahIndex}`);
                 if (activeSpan) {
                     activeSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -744,7 +740,6 @@
             }
         };
 
-        // دالة مجهزة للبحث للذهاب لآية محددة
         async function loadSurahForReadingAndPlaying(surahNum, targetAyahNum = null) {
             if(!currentAvailableSurahs.includes(Number(surahNum))) {
                 showToast("عذراً، هذا القارئ لم يسجل هذه السورة.");
@@ -802,7 +797,11 @@
                 
                 setupAyahSync();
 
-                // التمرير للآية المستهدفة إذا جاءت من البحث
+                // التمرير لأعلى الصفحة تلقائياً عند تحميل السورة بالكامل (بما فيها الانتقال المتتالي التلقائي)
+                setTimeout(() => {
+                    document.querySelector('.mushaf-page-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+
                 if (targetAyahNum) {
                     let targetAyahObj = currentSurahData.ayahs.find(a => a.numberInSurah === targetAyahNum);
                     if (targetAyahObj) {
@@ -813,7 +812,7 @@
                             setTimeout(() => {
                                 let span = document.getElementById(`verse-span-${targetAyahObj.globalIndex}`);
                                 if(span) span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                applyHighlight(targetAyahObj.globalIndex); // تمييز الآية المبحوث عنها
+                                applyHighlight(targetAyahObj.globalIndex); 
                             }, 500);
                         }
                     }
@@ -879,17 +878,13 @@
             }
         }
 
-        // === التشغيل المتتالي (Continuous Auto-play) ===
         audioPlayer.onended = () => { 
-            // البحث عن السورة التالية في قائمة السور المتاحة للقارئ الحالي
             let currentIndex = currentAvailableSurahs.indexOf(currentSurahNumber);
             if (currentIndex !== -1 && currentIndex < currentAvailableSurahs.length - 1) {
-                // هناك سورة تالية متوفرة
                 let nextSurahNum = currentAvailableSurahs[currentIndex + 1];
                 showToast("جاري الانتقال للسورة التالية...");
                 loadSurahForReadingAndPlaying(nextSurahNum);
             } else {
-                // آخر سورة أو غير متوفر
                 els.playBtnSticky.innerHTML = "⏵"; 
                 isPlaying = false; 
                 removeHighlight();
@@ -992,10 +987,6 @@
             els.playBtnSticky.innerHTML = "⏵";
             removeHighlight();
         }
-
-        // ==========================================
-        // وظائف اللوحة الجانبية (تنزيل الصورة والصوت)
-        // ==========================================
         
         function initSidePanel(title) {
             els.sidePanelTitle.innerText = title;
@@ -1126,10 +1117,6 @@
                 });
             }, 800); 
         }
-
-        // ==========================================
-        // وظائف البحث الشامل
-        // ==========================================
         
         let searchTimeout;
 
@@ -1222,10 +1209,6 @@
             showToast("جاري فتح السورة والانتقال للآية...");
             loadSurahForReadingAndPlaying(surahNum, ayahNum);
         }
-
-        // ==========================================
-        // وظائف التنقل وتسجيل الدخول
-        // ==========================================
 
         function switchTab(tabId) {
             document.getElementById('home-view').style.display = 'none';
