@@ -205,7 +205,6 @@
         .lux-divider { border: 0; height: 2px; background: linear-gradient(to right, transparent, var(--royal-blue), transparent); margin: 40px auto 20px auto; width: 50%; opacity: 0.3; }
         .footer-signature { text-align: center; padding-bottom: 30px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; }
         .signature-name { font-size: clamp(16px, 4vw, 20px); font-weight: 800; color: var(--royal-blue); }
-        .whatsapp-btn { display: inline-flex; align-items: center; gap: 8px; background: #25D366; color: white; padding: 8px 20px; border-radius: 100px; text-decoration: none; font-weight: bold; font-size: clamp(14px, 3vw, 16px); box-shadow: 0 4px 10px rgba(37, 211, 102, 0.3); }
 
         /* =========================================
            تصميم الصورة المصدرة (التصميم الخرافي الجديد للآية)
@@ -267,16 +266,18 @@
             border-radius: 50px;
             border: 1px solid #D97706;
         }
+        /* الضبط المطور لمنع تفكك الحروف العربية */
         .export-footer {
             font-family: 'Tajawal', sans-serif;
             font-size: 35px;
             font-weight: 800;
             color: #94A3B8;
             margin-top: 40px;
-            letter-spacing: 2px;
-        }
-        .export-footer span {
-            color: #D97706;
+            direction: rtl;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
         }
 
         /* Media Queries لدعم الشاشات الصغيرة وتنسيق الشريط السفلي */
@@ -295,7 +296,7 @@
 
     <div id="toast">رسالة تنبيهية</div>
 
-    <!-- اللوحة الجانبية للتحميلات (اليمين) -->
+    <!-- اللوحة الجانبية للتحميلات -->
     <div id="side-progress-panel" class="side-panel">
         <h4 id="side-panel-title">جاري التجهيز...</h4>
         <div class="progress-bar-bg"><div id="side-panel-bar" class="progress-bar-fill"></div></div>
@@ -477,12 +478,12 @@
         let currentSurahPages = [];
         let currentSurahPageIndex = 0;
         let rawAyahsTexts = []; 
-        let audioQueue = [];
         
-        /* === متغيرات تظليل الآيات والمزامنة === */
+        /* === متغيرات المزامنة المُحسنة === */
         let surahTimingStats = [];
         let currentPlayingAyahIndex = -1;
         let isPlaying = false;
+        let startDelaySeconds = 0; // لحفظ وقت البسملة والاستعاذة
         
         let isRepeatingVerse = false;
         let selectedAyahIndex = 0;
@@ -628,30 +629,34 @@
 
         function padNumber(num) { return num.toString().padStart(3, '0'); }
 
-        /* === خوارزمية التزامن وبناء الظل التلقائي للآيات === */
+        /* === خوارزمية التزامن المطورة (حل مشكلة القفز السريع والاستعاذة) === */
         function setupAyahSync() {
             if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity) return;
             
             let duration = audioPlayer.duration;
             let ayahs = currentSurahData.ayahs;
             
-            let basePauseWeight = 15; 
+            // حساب وتجاهل وقت الاستعاذة والبسملة في بداية المقطع
+            startDelaySeconds = 0;
+            if (currentSurahNumber === 1) startDelaySeconds = 4.0; // الفاتحة: استعاذة فقط
+            else if (currentSurahNumber === 9) startDelaySeconds = 4.0; // التوبة: استعاذة فقط
+            else startDelaySeconds = 8.5; // باقي السور: استعاذة + بسملة
+            
+            let activeDuration = duration - startDelaySeconds;
+            if (activeDuration < 0) activeDuration = duration;
+            
+            // زيادة وزن الوقفات (Pause) بين الآيات لمنع قفز التظليل قبل إنهاء الآية
+            let basePauseWeight = 25; 
             let totalChars = rawAyahsTexts.reduce((acc, txt) => acc + txt.length + basePauseWeight, 0);
             
-            let currentTimeAcc = 0;
-            if(currentSurahNumber !== 1 && currentSurahNumber !== 9) {
-                currentTimeAcc = 6.0; 
-            } else if (currentSurahNumber === 1) {
-                currentTimeAcc = 3.0; 
-            }
-            
-            let activeDuration = duration - currentTimeAcc;
-            if(activeDuration < 0) activeDuration = duration; 
+            let currentTimeAcc = startDelaySeconds;
             
             surahTimingStats = rawAyahsTexts.map((txt, i) => {
                 let weight = txt.length + basePauseWeight;
                 let ratio = weight / totalChars;
-                let ayahDur = activeDuration * ratio;
+                
+                // نعطي الآية وقتاً كاملاً لضمان عدم القفز
+                let ayahDur = activeDuration * ratio; 
                 
                 let start = currentTimeAcc;
                 let end = currentTimeAcc + ayahDur;
@@ -673,17 +678,25 @@
             
             let ct = audioPlayer.currentTime;
             
-            // --- إضافة التكرار المخصص للآية باستخدام القارئ الحالي ---
+            // 1. فحص توقيت الاستعاذة والبسملة: لا تظهر أي تظليل حتى يبدأ في الآية الأولى الفعليّة
+            if (ct < surahTimingStats[0].start) {
+                if (currentPlayingAyahIndex !== -1) {
+                    removeHighlight();
+                    currentPlayingAyahIndex = -1;
+                }
+                return; // إيقاف تنفيذ الباقي حتى ينتهي وقت الاستعاذة/البسملة
+            }
+            
+            // 2. تكرار الآية المخصص
             if (isRepeatingVerse) {
                 let targetTiming = surahTimingStats[selectedAyahIndex];
-                // نعطي مساحة صغيرة 0.2 ثانية عشان يكمل نطق آخر حرف براحته قبل ما يعيد
                 if (targetTiming && ct >= targetTiming.end - 0.2) {
                     audioPlayer.currentTime = targetTiming.start;
                     ct = targetTiming.start; 
                 }
             }
-            // ---------------------------------------------------------
             
+            // 3. تحديد الآية النشطة وإبرازها
             let activeAyah = surahTimingStats.find(a => ct >= a.start && ct <= a.end);
             
             if(activeAyah && activeAyah.index !== currentPlayingAyahIndex) {
@@ -851,14 +864,11 @@
         function playSpecificAyahModal() {
             closeModals();
             
-            // لو لم يتم حساب التوقيتات لسبب ما
             if (surahTimingStats.length === 0) setupAyahSync();
             
             if (surahTimingStats.length > 0) {
                 showToast("جاري تشغيل الآية بصوت القارئ الحالي...");
                 const ayahTiming = surahTimingStats[selectedAyahIndex];
-                
-                // الانتقال اللحظي لموضع الآية داخل الملف الصوتي المشغل حالياً
                 audioPlayer.currentTime = ayahTiming.start;
                 audioPlayer.play();
                 isPlaying = true;
@@ -1015,6 +1025,7 @@
             }
         }
 
+        /* === برمجة إنشاء التصميم الخرافي المخفي ومشاركته (مع حل مشكلة الحروف) === */
         function shareAyahImagePanel() {
             closeModals();
             if(isDownloadingOp) return showToast("عملية جارية بالفعل...");
@@ -1027,12 +1038,17 @@
             const ayahNum = currentSurahData.ayahs[selectedAyahIndex].numberInSurah;
             const ayahText = rawAyahsTexts[selectedAyahIndex];
 
+            // استخدام وسوم <bdi> لضمان عدم تفكك الحروف العربية في التذييل
             exportDiv.innerHTML = `
                 <div class="export-inner-border">
                     <div class="export-header">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</div>
                     <div class="export-ayah">﴿ ${ayahText} ﴾</div>
                     <div class="export-surah-info">سورة ${exactSurahName} ❖ آية ${ayahNum}</div>
-                    <div class="export-footer">مصحف سَمِيع <span>❖</span> Samee3 Quran</div>
+                    <div class="export-footer">
+                        <bdi style="color:#FFFFFF;">مصحف سَمِيع</bdi>
+                        <span style="color:#D97706; margin:0 15px;">❖</span>
+                        <bdi style="color:#FFFFFF;">Samee3 Quran</bdi>
+                    </div>
                 </div>
             `;
             document.body.appendChild(exportDiv);
