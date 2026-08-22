@@ -288,7 +288,7 @@
             .navbar { padding: 15px 20px; flex-direction: column; gap: 15px; }
             .sticky-player { flex-direction: column; padding: 15px; border-radius: 20px 20px 0 0; gap: 10px; }
             body { padding-bottom: 160px; }
-            .player-info { text-align: center; }
+            .player-info { text-align: center; max-width: 100% !important; }
             .player-controls { width: 100%; justify-content: center; }
             .side-panel { width: 90%; right: 5%; }
             #selected-ayah-preview { font-size: 22px !important; }
@@ -412,10 +412,26 @@
 
     <!-- شريط التشغيل السفلي المتجاوب -->
     <div class="sticky-player">
-        <div class="player-info">
-            <p class="p-surah" id="player-surah-txt">اختر سورة للتشغيل</p>
-            <p class="p-reciter" id="player-reciter-txt">--</p>
+        <div class="player-info" style="flex: 1; max-width: 450px; width: 100%;">
+            <!-- تم إخفاء النصوص الأصلية بدلاً من حذفها للحفاظ على الكود البرمجي كما طلبت -->
+            <p class="p-surah" id="player-surah-txt" style="display: none;">اختر سورة للتشغيل</p>
+            <p class="p-reciter" id="player-reciter-txt" style="display: none;">--</p>
+            
+            <!-- القوائم المنسدلة الجديدة الخاصة بالشريط السفلي -->
+            <select id="bottom-reciter-select" class="filter-select" style="margin-bottom: 8px; padding: 6px 10px; font-size: clamp(12px, 3vw, 14px); width: 100%; border-color: var(--border-light); background-color: #fff; box-sizing: border-box;" onchange="onBottomReciterChange()">
+                <option value="">اختر القارئ...</option>
+            </select>
+            
+            <div style="display: flex; gap: 8px; width: 100%; box-sizing: border-box;">
+                <select id="bottom-juz-select" class="filter-select" style="padding: 6px 10px; font-size: clamp(12px, 3vw, 14px); flex: 1; border-color: var(--border-light); background-color: #fff; box-sizing: border-box;" onchange="onBottomJuzChange()">
+                    <option value="">تحديد الجزء</option>
+                </select>
+                <select id="bottom-surah-select" class="filter-select" style="padding: 6px 10px; font-size: clamp(12px, 3vw, 14px); flex: 1.5; border-color: var(--border-light); background-color: #fff; box-sizing: border-box;" onchange="onBottomSurahChange()">
+                    <option value="">تحديد السورة</option>
+                </select>
+            </div>
         </div>
+        
         <div class="player-controls">
             <button class="action-btn-sm" onclick="downloadSingleSurahPanel()">تنزيل السورة</button>
             <button class="action-btn-sm dl-all-btn" onclick="downloadFullMushafZipPanel()">تنزيل المصحف كامل</button>
@@ -492,6 +508,13 @@
 
         const JUZ_NAMES_AR = ["", "الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر", "الثالث عشر", "الرابع عشر", "الخامس عشر", "السادس عشر", "السابع عشر", "الثامن عشر", "التاسع عشر", "العشرون", "الحادي والعشرون", "الثاني والعشرون", "الثالث والعشرون", "الرابع والعشرون", "الخامس والعشرون", "السادس والعشرون", "السابع والعشرون", "الثامن والعشرون", "التاسع والعشرون", "الثلاثون"];
 
+        // خريطة لتحديد بداية السورة لكل جزء (للاستخدام السريع في الشريط السفلي)
+        const JUZ_START_SURAHS_MAP = {
+            1:1, 2:2, 3:2, 4:3, 5:4, 6:4, 7:5, 8:6, 9:7, 10:8, 
+            11:10, 12:11, 13:12, 14:15, 15:17, 16:18, 17:21, 18:23, 19:25, 20:27, 
+            21:29, 22:33, 23:36, 24:39, 25:41, 26:46, 27:51, 28:58, 29:67, 30:78
+        };
+
         let allMP3Reciters = []; 
         let globalSurahsList = []; 
         let currentAudioServer = ""; 
@@ -532,6 +555,63 @@
             sidePanelBtn: document.getElementById('side-panel-download-btn'),
             sidePanelCancel: document.getElementById('side-panel-cancel-btn')
         };
+
+        // --- وظائف الشريط السفلي المضافة حديثاً ---
+        function syncBottomControls() {
+            const topReciter = document.getElementById('reciter-select');
+            const botReciter = document.getElementById('bottom-reciter-select');
+            if (botReciter && topReciter) {
+                botReciter.innerHTML = topReciter.innerHTML;
+                botReciter.value = topReciter.value;
+            }
+            
+            const botSurah = document.getElementById('bottom-surah-select');
+            if (botSurah && globalSurahsList.length > 0) {
+                botSurah.innerHTML = '<option value="">تحديد السورة...</option>';
+                globalSurahsList.forEach((s, index) => {
+                    if (currentAvailableSurahs.length === 0 || currentAvailableSurahs.includes(s.number)) {
+                        botSurah.add(new Option(`سورة ${SURAH_NAMES_AR[index]}`, s.number));
+                    }
+                });
+                if(currentSurahNumber) botSurah.value = currentSurahNumber;
+            }
+            
+            const botJuz = document.getElementById('bottom-juz-select');
+            if (botJuz && botJuz.options.length <= 1) {
+                for(let i = 1; i <= 30; i++) {
+                    botJuz.add(new Option(`الجزء ${JUZ_NAMES_AR[i]}`, i));
+                }
+            }
+        }
+
+        function onBottomReciterChange() {
+            const topReciter = document.getElementById('reciter-select');
+            const botReciter = document.getElementById('bottom-reciter-select');
+            if (topReciter && botReciter) {
+                topReciter.value = botReciter.value;
+                onReciterChange(); 
+            }
+        }
+        
+        function onBottomSurahChange() {
+            const botSurah = document.getElementById('bottom-surah-select');
+            if(botSurah && botSurah.value) {
+                loadSurahForReadingAndPlaying(Number(botSurah.value));
+            }
+        }
+
+        function onBottomJuzChange() {
+            const juzNum = document.getElementById('bottom-juz-select').value;
+            if(juzNum) {
+                const startSurah = JUZ_START_SURAHS_MAP[juzNum];
+                if(startSurah) {
+                    const botSurah = document.getElementById('bottom-surah-select');
+                    if (botSurah) botSurah.value = startSurah;
+                    loadSurahForReadingAndPlaying(startSurah);
+                }
+            }
+        }
+        // ----------------------------------------
 
         function showToast(msg) {
             const toast = document.getElementById("toast");
@@ -631,6 +711,7 @@
             removeHighlight();
             
             renderSurahGrid(); 
+            syncBottomControls(); // مزامنة خيارات الشريط السفلي
         }
 
         function renderSurahGrid() {
@@ -762,6 +843,10 @@
             currentSurahNumber = surahNum;
             const exactSurahName = SURAH_NAMES_AR[surahNum - 1]; 
             document.getElementById('player-surah-txt').innerText = `سورة ${exactSurahName}`;
+            
+            // مزامنة السورة المحددة مع قائمة الشريط السفلي
+            const botSurah = document.getElementById('bottom-surah-select');
+            if (botSurah) botSurah.value = surahNum;
             
             const audioUrl = currentAudioServer + padNumber(surahNum) + '.mp3';
             audioPlayer.src = audioUrl;
