@@ -800,54 +800,120 @@
 
         function padNumber(num) { return num.toString().padStart(3, '0'); }
 
-        // ----- محلل التجويد المصغر (Mini-Analyzer) -----
-        function calculateAyahWeight(text) {
-            let weight = 0;
-            for (let i = 0; i < text.length; i++) {
-                const char = text[i];
-                if (['~', 'ٓ', 'آ'].includes(char)) weight += 6; // علامات المد وزن ثقيل
-                else if (char === 'ّ') weight += 2; // الشدة
-                else if (['ا', 'و', 'ي'].includes(char)) weight += 2; // حروف العلة
-                else if (char === ' ') weight += 3; // المسافات (سكتة خفيفة)
-                else weight += 1; // الحروف العادية
+        // ----- نظام المزامنة الهجين (Hybrid Sync) -----
+        let isSyncingTimings = false; // لمنع تكرار التنفيذ
+
+        // خريطة القراء المشاهير (لربط اسم القارئ بملف التوقيتات الدقيقة)
+        const EXACT_TIMING_RECITERS = {
+            "العفاسي": 7,       
+            "الحصري": 12,       
+            "المنشاوي": 9,      
+            "عبدالباسط": 2,     
+            "السديس": 3,
+            "الشريم": 4
+        };
+
+        function getReciterIdForTimings(reciterName) {
+            for (const [key, id] of Object.entries(EXACT_TIMING_RECITERS)) {
+                if (reciterName.includes(key) && !reciterName.includes("مجود")) return id;
             }
-            return weight;
+            return null; 
         }
 
-        function setupAyahSync() {
-            if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity) return;
+        // محلل التجويد الذكي (الخطة ب)
+        function calculateAyahWeight(text, reciterType = 'murattal') {
+            let weight = 0;
+            let words = text.split(' ').length;
+            weight += words * (reciterType === 'mujawwad' ? 4.0 : 2.0);
+
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                if (['~', 'ٓ', 'آ'].includes(char)) weight += (reciterType === 'mujawwad' ? 6 : 3);
+                if (char === 'ّ') {
+                    if (i > 0 && ['ن', 'م'].includes(text[i-1])) weight += 2.5; 
+                    else weight += 1; 
+                }
+                if (['ا', 'و', 'ي', 'ى'].includes(char)) weight += 1;
+            }
+            let pauseWeight = (reciterType === 'mujawwad') ? 12 : 5; 
+            return weight + pauseWeight;
+        }
+
+        async function setupAyahSync() {
+            if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity || isSyncingTimings) return;
+            isSyncingTimings = true;
             
+            let reciterName = document.getElementById('player-reciter-txt').innerText;
+            let quranComReciterId = getReciterIdForTimings(reciterName);
             let duration = audioPlayer.duration;
             let ayahs = currentSurahData.ayahs;
+            surahTimingStats = []; 
             
-            startDelaySeconds = 0;
-            if (currentSurahNumber === 1) startDelaySeconds = 4.0; 
-            else if (currentSurahNumber === 9) startDelaySeconds = 4.0; 
-            else startDelaySeconds = 8.5; 
+            // ==========================================
+            // الخطة (أ): جلب التوقيتات الدقيقة جداً 100%
+            // ==========================================
+            if (quranComReciterId) {
+                try {
+                    let res = await fetch(`https://api.quran.com/api/v4/recitations/${quranComReciterId}/by_chapter/${currentSurahNumber}`);
+                    let data = await res.json();
+                    
+                    if (data && data.audio_files && data.audio_files[0] && data.audio_files[0].verse_timings) {
+                        let timings = data.audio_files[0].verse_timings;
+                        
+                        surahTimingStats = timings.map((t, i) => {
+                            return {
+                                start: t.timestamp_from / 1000, 
+                                end: t.timestamp_to / 1000,
+                                index: i,
+                                page: ayahs[i].page
+                            };
+                        });
+                        
+                        console.log("✅ تم تفعيل التوقيت الدقيق 100% لهذا القارئ");
+                        isSyncingTimings = false;
+                        return; 
+                    }
+                } catch (err) {
+                    console.log("⚠️ فشل جلب التوقيت الدقيق، سيتم الانتقال للتخمين الذكي");
+                }
+            }
             
-            let activeDuration = duration - startDelaySeconds;
-            if (activeDuration < 0) activeDuration = duration;
-            
-            // رفع وزن السكتة في نهاية الآية
-            let basePauseWeight = 45; 
-            
-            // حساب الإجمالي باستخدام محلل التجويد
-            let totalChars = rawAyahsTexts.reduce((acc, txt) => acc + calculateAyahWeight(txt) + basePauseWeight, 0);
-            
-            let currentTimeAcc = startDelaySeconds;
-            
-            surahTimingStats = rawAyahsTexts.map((txt, i) => {
-                let weight = calculateAyahWeight(txt) + basePauseWeight;
-                let ratio = weight / totalChars;
+            // ==========================================
+            // الخطة (ب): التخمين الذكي (في حال القارئ غير مدعوم)
+            // ==========================================
+            try {
+                let reciterType = reciterName.includes('مجود') ? 'mujawwad' : (reciterName.includes('معلم') ? 'muallim' : 'murattal');
                 
-                let ayahDur = activeDuration * ratio; 
+                startDelaySeconds = 0;
+                if (currentSurahNumber === 1 || currentSurahNumber === 9) {
+                    startDelaySeconds = (reciterType === 'mujawwad') ? 7.0 : 4.0;
+                } else {
+                    startDelaySeconds = (reciterType === 'mujawwad') ? 14.0 : 8.5; 
+                }
                 
-                let start = currentTimeAcc;
-                let end = currentTimeAcc + ayahDur;
-                currentTimeAcc = end;
+                let activeDuration = duration - startDelaySeconds;
+                if (activeDuration < 0) activeDuration = duration;
                 
-                return { start: start, end: end, index: i, page: ayahs[i].page };
-            });
+                let totalWeight = rawAyahsTexts.reduce((acc, txt) => acc + calculateAyahWeight(txt, reciterType), 0);
+                let currentTimeAcc = startDelaySeconds;
+                
+                surahTimingStats = rawAyahsTexts.map((txt, i) => {
+                    let weight = calculateAyahWeight(txt, reciterType);
+                    let ratio = weight / totalWeight;
+                    let ayahDur = activeDuration * ratio; 
+                    
+                    let start = currentTimeAcc;
+                    let end = currentTimeAcc + ayahDur;
+                    currentTimeAcc = end;
+                    
+                    return { start: start, end: end, index: i, page: ayahs[i].page };
+                });
+                console.log("⚙️ تم تفعيل التخمين الذكي للتجويد");
+            } catch (error) {
+                console.error("حدث خطأ في مزامنة الآيات:", error);
+            } finally {
+                isSyncingTimings = false;
+            }
         }
 
         audioPlayer.onloadedmetadata = () => {
