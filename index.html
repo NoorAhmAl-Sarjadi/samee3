@@ -628,7 +628,8 @@
         }
 
         function onBottomJuzChange() {
-            const juzNum = document.getElementById('bottom-juz-select').value;
+            const botJuz = document.getElementById('bottom-juz-select');
+            const juzNum = botJuz.value;
             if(juzNum) {
                 const startData = JUZ_START_MAP[juzNum];
                 if(startData) {
@@ -637,6 +638,9 @@
                     // يتم تمرير السورة والآية معاً لضمان فتح المصحف على الآية المحددة وبدء التلاوة منها
                     loadSurahForReadingAndPlaying(startData.surah, startData.ayah);
                 }
+                
+                // تفريغ الاختيار عشان لو اختار نفس الجزء تاني المتصفح يستجيب
+                setTimeout(() => { botJuz.value = ""; }, 500);
             }
         }
         // ----------------------------------------
@@ -726,7 +730,7 @@
             }
         }
 
-        // تم تعديل الدالة لكي تحدث صوت القارئ الفعلي فوراً إذا كان المستخدم داخل سورة
+        // تم تعديل الدالة لكي تحتفظ بالآية الحالية وتمنع التعليق
         function onReciterChange() {
             const selectedOption = els.reciterSelect.options[els.reciterSelect.selectedIndex];
             currentAudioServer = selectedOption.value;
@@ -736,6 +740,21 @@
             
             // حفظ حالة التشغيل الحالية لكي يكمل تلقائياً لو كان الصوت يعمل
             let wasPlaying = (isPlaying || !audioPlayer.paused);
+
+            // احفظ الآية الحالية لو كنا جوه المصحف
+            let savedAyahNum = null;
+            if (els.mushafView.style.display === 'block' && currentSurahNumber && currentSurahData) {
+                // لو شغالين بلاي نجيب الآية اللي شغالة، لو واقفين نجيب أول آية في الصفحة المعروضة
+                if (currentPlayingAyahIndex !== -1) {
+                    savedAyahNum = currentSurahData.ayahs[currentPlayingAyahIndex].numberInSurah;
+                } else if (currentSurahPages[currentSurahPageIndex]) {
+                    savedAyahNum = currentSurahPages[currentSurahPageIndex][0].numberInSurah;
+                }
+            }
+
+            // تفريغ اختيار الجزء عشان ميحصلش مشكلة التعليق (Glitch)
+            const botJuz = document.getElementById('bottom-juz-select');
+            if (botJuz) botJuz.value = "";
 
             audioPlayer.pause();
             isPlaying = false;
@@ -749,19 +768,8 @@
             if (els.mushafView.style.display === 'block' && currentSurahNumber) {
                 document.getElementById('player-surah-txt').innerText = `سورة ${SURAH_NAMES_AR[currentSurahNumber - 1]}`;
                 
-                // تحديث الـ src الخاص بمشغل الصوت فوراً ليعمل القارئ الجديد
-                audioPlayer.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                
-                // تصفير المزامنة ليتم حساب أوقات الآيات بدقة بناءً على سرعة القارئ الجديد
-                surahTimingStats = []; 
-                currentPlayingAyahIndex = -1;
-                
-                // لو كان الصوت شغال قبل ما نغير القارئ، خليه يشتغل تلقائي بالقارئ الجديد
-                if (wasPlaying) {
-                    audioPlayer.play();
-                    isPlaying = true;
-                    els.playBtnSticky.innerHTML = "⏸";
-                }
+                // نستخدم الدالة الأساسية لتحميل السورة والانتقال للآية مع تشغيل الصوت بناءً على الحالة السابقة
+                loadSurahForReadingAndPlaying(currentSurahNumber, savedAyahNum, wasPlaying);
             } else {
                 document.getElementById('player-surah-txt').innerText = "اختر سورة للتشغيل";
             }
@@ -792,6 +800,20 @@
 
         function padNumber(num) { return num.toString().padStart(3, '0'); }
 
+        // ----- محلل التجويد المصغر (Mini-Analyzer) -----
+        function calculateAyahWeight(text) {
+            let weight = 0;
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                if (['~', 'ٓ', 'آ'].includes(char)) weight += 6; // علامات المد وزن ثقيل
+                else if (char === 'ّ') weight += 2; // الشدة
+                else if (['ا', 'و', 'ي'].includes(char)) weight += 2; // حروف العلة
+                else if (char === ' ') weight += 3; // المسافات (سكتة خفيفة)
+                else weight += 1; // الحروف العادية
+            }
+            return weight;
+        }
+
         function setupAyahSync() {
             if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity) return;
             
@@ -806,13 +828,16 @@
             let activeDuration = duration - startDelaySeconds;
             if (activeDuration < 0) activeDuration = duration;
             
-            let basePauseWeight = 25; 
-            let totalChars = rawAyahsTexts.reduce((acc, txt) => acc + txt.length + basePauseWeight, 0);
+            // رفع وزن السكتة في نهاية الآية
+            let basePauseWeight = 45; 
+            
+            // حساب الإجمالي باستخدام محلل التجويد
+            let totalChars = rawAyahsTexts.reduce((acc, txt) => acc + calculateAyahWeight(txt) + basePauseWeight, 0);
             
             let currentTimeAcc = startDelaySeconds;
             
             surahTimingStats = rawAyahsTexts.map((txt, i) => {
-                let weight = txt.length + basePauseWeight;
+                let weight = calculateAyahWeight(txt) + basePauseWeight;
                 let ratio = weight / totalChars;
                 
                 let ayahDur = activeDuration * ratio; 
