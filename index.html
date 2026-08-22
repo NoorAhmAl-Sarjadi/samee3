@@ -508,11 +508,38 @@
 
         const JUZ_NAMES_AR = ["", "الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر", "الثالث عشر", "الرابع عشر", "الخامس عشر", "السادس عشر", "السابع عشر", "الثامن عشر", "التاسع عشر", "العشرون", "الحادي والعشرون", "الثاني والعشرون", "الثالث والعشرون", "الرابع والعشرون", "الخامس والعشرون", "السادس والعشرون", "السابع والعشرون", "الثامن والعشرون", "التاسع والعشرون", "الثلاثون"];
 
-        // خريطة لتحديد بداية السورة لكل جزء (للاستخدام السريع في الشريط السفلي)
-        const JUZ_START_SURAHS_MAP = {
-            1:1, 2:2, 3:2, 4:3, 5:4, 6:4, 7:5, 8:6, 9:7, 10:8, 
-            11:10, 12:11, 13:12, 14:15, 15:17, 16:18, 17:21, 18:23, 19:25, 20:27, 
-            21:29, 22:33, 23:36, 24:39, 25:41, 26:46, 27:51, 28:58, 29:67, 30:78
+        // خريطة دقيقة تحتوي على رقم السورة ورقم الآية التي يبدأ منها كل جزء لضمان الانتقال الدقيق
+        const JUZ_START_MAP = {
+            1: { surah: 1, ayah: 1 },
+            2: { surah: 2, ayah: 142 },
+            3: { surah: 2, ayah: 253 },
+            4: { surah: 3, ayah: 93 },
+            5: { surah: 4, ayah: 24 },
+            6: { surah: 4, ayah: 148 },
+            7: { surah: 5, ayah: 82 },
+            8: { surah: 6, ayah: 111 },
+            9: { surah: 7, ayah: 88 },
+            10: { surah: 8, ayah: 41 },
+            11: { surah: 9, ayah: 93 },
+            12: { surah: 11, ayah: 6 },
+            13: { surah: 12, ayah: 53 },
+            14: { surah: 15, ayah: 1 },
+            15: { surah: 17, ayah: 1 },
+            16: { surah: 18, ayah: 75 },
+            17: { surah: 21, ayah: 1 },
+            18: { surah: 23, ayah: 1 },
+            19: { surah: 25, ayah: 21 },
+            20: { surah: 27, ayah: 56 },
+            21: { surah: 29, ayah: 46 },
+            22: { surah: 33, ayah: 31 },
+            23: { surah: 36, ayah: 28 },
+            24: { surah: 39, ayah: 32 },
+            25: { surah: 41, ayah: 47 },
+            26: { surah: 46, ayah: 1 },
+            27: { surah: 51, ayah: 31 },
+            28: { surah: 58, ayah: 1 },
+            29: { surah: 67, ayah: 1 },
+            30: { surah: 78, ayah: 1 }
         };
 
         let allMP3Reciters = []; 
@@ -556,7 +583,7 @@
             sidePanelCancel: document.getElementById('side-panel-cancel-btn')
         };
 
-        // --- وظائف الشريط السفلي المضافة حديثاً ---
+        // --- وظائف الشريط السفلي المحدثة ---
         function syncBottomControls() {
             const topReciter = document.getElementById('reciter-select');
             const botReciter = document.getElementById('bottom-reciter-select');
@@ -603,11 +630,12 @@
         function onBottomJuzChange() {
             const juzNum = document.getElementById('bottom-juz-select').value;
             if(juzNum) {
-                const startSurah = JUZ_START_SURAHS_MAP[juzNum];
-                if(startSurah) {
+                const startData = JUZ_START_MAP[juzNum];
+                if(startData) {
                     const botSurah = document.getElementById('bottom-surah-select');
-                    if (botSurah) botSurah.value = startSurah;
-                    loadSurahForReadingAndPlaying(startSurah);
+                    if (botSurah) botSurah.value = startData.surah;
+                    // يتم تمرير السورة والآية معاً لضمان فتح المصحف على الآية المحددة وبدء التلاوة منها
+                    loadSurahForReadingAndPlaying(startData.surah, startData.ayah);
                 }
             }
         }
@@ -698,20 +726,45 @@
             }
         }
 
+        // تم تعديل الدالة لكي تحدث صوت القارئ الفعلي فوراً إذا كان المستخدم داخل سورة
         function onReciterChange() {
             const selectedOption = els.reciterSelect.options[els.reciterSelect.selectedIndex];
             currentAudioServer = selectedOption.value;
             currentAvailableSurahs = selectedOption.dataset.surahList ? selectedOption.dataset.surahList.split(',').map(Number) : [];
-            
+
             document.getElementById('player-reciter-txt').innerText = selectedOption.text.split(' (')[0];
-            document.getElementById('player-surah-txt').innerText = "اختر سورة للتشغيل";
             
+            // حفظ حالة التشغيل الحالية لكي يكمل تلقائياً لو كان الصوت يعمل
+            let wasPlaying = (isPlaying || !audioPlayer.paused);
+
             audioPlayer.pause();
+            isPlaying = false;
             els.playBtnSticky.innerHTML = "⏵";
             removeHighlight();
-            
+
             renderSurahGrid(); 
-            syncBottomControls(); // مزامنة خيارات الشريط السفلي
+            syncBottomControls(); 
+
+            // فحص ذكي: هل المستخدم يقرأ سورة الآن وتم تغيير القارئ؟
+            if (els.mushafView.style.display === 'block' && currentSurahNumber) {
+                document.getElementById('player-surah-txt').innerText = `سورة ${SURAH_NAMES_AR[currentSurahNumber - 1]}`;
+                
+                // تحديث الـ src الخاص بمشغل الصوت فوراً ليعمل القارئ الجديد
+                audioPlayer.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+                
+                // تصفير المزامنة ليتم حساب أوقات الآيات بدقة بناءً على سرعة القارئ الجديد
+                surahTimingStats = []; 
+                currentPlayingAyahIndex = -1;
+                
+                // لو كان الصوت شغال قبل ما نغير القارئ، خليه يشتغل تلقائي بالقارئ الجديد
+                if (wasPlaying) {
+                    audioPlayer.play();
+                    isPlaying = true;
+                    els.playBtnSticky.innerHTML = "⏸";
+                }
+            } else {
+                document.getElementById('player-surah-txt').innerText = "اختر سورة للتشغيل";
+            }
         }
 
         function renderSurahGrid() {
