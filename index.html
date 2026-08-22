@@ -628,8 +628,7 @@
         }
 
         function onBottomJuzChange() {
-            const botJuz = document.getElementById('bottom-juz-select');
-            const juzNum = botJuz.value;
+            const juzNum = document.getElementById('bottom-juz-select').value;
             if(juzNum) {
                 const startData = JUZ_START_MAP[juzNum];
                 if(startData) {
@@ -638,9 +637,6 @@
                     // يتم تمرير السورة والآية معاً لضمان فتح المصحف على الآية المحددة وبدء التلاوة منها
                     loadSurahForReadingAndPlaying(startData.surah, startData.ayah);
                 }
-                
-                // تفريغ الاختيار عشان لو اختار نفس الجزء تاني المتصفح يستجيب
-                setTimeout(() => { botJuz.value = ""; }, 500);
             }
         }
         // ----------------------------------------
@@ -730,7 +726,7 @@
             }
         }
 
-        // تم تعديل الدالة لكي تحتفظ بالآية الحالية وتمنع التعليق
+        // تم تعديل الدالة لكي تحدث صوت القارئ الفعلي فوراً إذا كان المستخدم داخل سورة
         function onReciterChange() {
             const selectedOption = els.reciterSelect.options[els.reciterSelect.selectedIndex];
             currentAudioServer = selectedOption.value;
@@ -740,21 +736,6 @@
             
             // حفظ حالة التشغيل الحالية لكي يكمل تلقائياً لو كان الصوت يعمل
             let wasPlaying = (isPlaying || !audioPlayer.paused);
-
-            // احفظ الآية الحالية لو كنا جوه المصحف
-            let savedAyahNum = null;
-            if (els.mushafView.style.display === 'block' && currentSurahNumber && currentSurahData) {
-                // لو شغالين بلاي نجيب الآية اللي شغالة، لو واقفين نجيب أول آية في الصفحة المعروضة
-                if (currentPlayingAyahIndex !== -1) {
-                    savedAyahNum = currentSurahData.ayahs[currentPlayingAyahIndex].numberInSurah;
-                } else if (currentSurahPages[currentSurahPageIndex]) {
-                    savedAyahNum = currentSurahPages[currentSurahPageIndex][0].numberInSurah;
-                }
-            }
-
-            // تفريغ اختيار الجزء عشان ميحصلش مشكلة التعليق (Glitch)
-            const botJuz = document.getElementById('bottom-juz-select');
-            if (botJuz) botJuz.value = "";
 
             audioPlayer.pause();
             isPlaying = false;
@@ -768,8 +749,19 @@
             if (els.mushafView.style.display === 'block' && currentSurahNumber) {
                 document.getElementById('player-surah-txt').innerText = `سورة ${SURAH_NAMES_AR[currentSurahNumber - 1]}`;
                 
-                // نستخدم الدالة الأساسية لتحميل السورة والانتقال للآية مع تشغيل الصوت بناءً على الحالة السابقة
-                loadSurahForReadingAndPlaying(currentSurahNumber, savedAyahNum, wasPlaying);
+                // تحديث الـ src الخاص بمشغل الصوت فوراً ليعمل القارئ الجديد
+                audioPlayer.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+                
+                // تصفير المزامنة ليتم حساب أوقات الآيات بدقة بناءً على سرعة القارئ الجديد
+                surahTimingStats = []; 
+                currentPlayingAyahIndex = -1;
+                
+                // لو كان الصوت شغال قبل ما نغير القارئ، خليه يشتغل تلقائي بالقارئ الجديد
+                if (wasPlaying) {
+                    audioPlayer.play();
+                    isPlaying = true;
+                    els.playBtnSticky.innerHTML = "⏸";
+                }
             } else {
                 document.getElementById('player-surah-txt').innerText = "اختر سورة للتشغيل";
             }
@@ -800,120 +792,37 @@
 
         function padNumber(num) { return num.toString().padStart(3, '0'); }
 
-        // ----- نظام المزامنة الهجين (Hybrid Sync) -----
-        let isSyncingTimings = false; // لمنع تكرار التنفيذ
-
-        // خريطة القراء المشاهير (لربط اسم القارئ بملف التوقيتات الدقيقة)
-        const EXACT_TIMING_RECITERS = {
-            "العفاسي": 7,       
-            "الحصري": 12,       
-            "المنشاوي": 9,      
-            "عبدالباسط": 2,     
-            "السديس": 3,
-            "الشريم": 4
-        };
-
-        function getReciterIdForTimings(reciterName) {
-            for (const [key, id] of Object.entries(EXACT_TIMING_RECITERS)) {
-                if (reciterName.includes(key) && !reciterName.includes("مجود")) return id;
-            }
-            return null; 
-        }
-
-        // محلل التجويد الذكي (الخطة ب)
-        function calculateAyahWeight(text, reciterType = 'murattal') {
-            let weight = 0;
-            let words = text.split(' ').length;
-            weight += words * (reciterType === 'mujawwad' ? 4.0 : 2.0);
-
-            for (let i = 0; i < text.length; i++) {
-                const char = text[i];
-                if (['~', 'ٓ', 'آ'].includes(char)) weight += (reciterType === 'mujawwad' ? 6 : 3);
-                if (char === 'ّ') {
-                    if (i > 0 && ['ن', 'م'].includes(text[i-1])) weight += 2.5; 
-                    else weight += 1; 
-                }
-                if (['ا', 'و', 'ي', 'ى'].includes(char)) weight += 1;
-            }
-            let pauseWeight = (reciterType === 'mujawwad') ? 12 : 5; 
-            return weight + pauseWeight;
-        }
-
-        async function setupAyahSync() {
-            if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity || isSyncingTimings) return;
-            isSyncingTimings = true;
+        function setupAyahSync() {
+            if(!currentSurahData || !audioPlayer.duration || audioPlayer.duration === Infinity) return;
             
-            let reciterName = document.getElementById('player-reciter-txt').innerText;
-            let quranComReciterId = getReciterIdForTimings(reciterName);
             let duration = audioPlayer.duration;
             let ayahs = currentSurahData.ayahs;
-            surahTimingStats = []; 
             
-            // ==========================================
-            // الخطة (أ): جلب التوقيتات الدقيقة جداً 100%
-            // ==========================================
-            if (quranComReciterId) {
-                try {
-                    let res = await fetch(`https://api.quran.com/api/v4/recitations/${quranComReciterId}/by_chapter/${currentSurahNumber}`);
-                    let data = await res.json();
-                    
-                    if (data && data.audio_files && data.audio_files[0] && data.audio_files[0].verse_timings) {
-                        let timings = data.audio_files[0].verse_timings;
-                        
-                        surahTimingStats = timings.map((t, i) => {
-                            return {
-                                start: t.timestamp_from / 1000, 
-                                end: t.timestamp_to / 1000,
-                                index: i,
-                                page: ayahs[i].page
-                            };
-                        });
-                        
-                        console.log("✅ تم تفعيل التوقيت الدقيق 100% لهذا القارئ");
-                        isSyncingTimings = false;
-                        return; 
-                    }
-                } catch (err) {
-                    console.log("⚠️ فشل جلب التوقيت الدقيق، سيتم الانتقال للتخمين الذكي");
-                }
-            }
+            startDelaySeconds = 0;
+            if (currentSurahNumber === 1) startDelaySeconds = 4.0; 
+            else if (currentSurahNumber === 9) startDelaySeconds = 4.0; 
+            else startDelaySeconds = 8.5; 
             
-            // ==========================================
-            // الخطة (ب): التخمين الذكي (في حال القارئ غير مدعوم)
-            // ==========================================
-            try {
-                let reciterType = reciterName.includes('مجود') ? 'mujawwad' : (reciterName.includes('معلم') ? 'muallim' : 'murattal');
+            let activeDuration = duration - startDelaySeconds;
+            if (activeDuration < 0) activeDuration = duration;
+            
+            let basePauseWeight = 25; 
+            let totalChars = rawAyahsTexts.reduce((acc, txt) => acc + txt.length + basePauseWeight, 0);
+            
+            let currentTimeAcc = startDelaySeconds;
+            
+            surahTimingStats = rawAyahsTexts.map((txt, i) => {
+                let weight = txt.length + basePauseWeight;
+                let ratio = weight / totalChars;
                 
-                startDelaySeconds = 0;
-                if (currentSurahNumber === 1 || currentSurahNumber === 9) {
-                    startDelaySeconds = (reciterType === 'mujawwad') ? 7.0 : 4.0;
-                } else {
-                    startDelaySeconds = (reciterType === 'mujawwad') ? 14.0 : 8.5; 
-                }
+                let ayahDur = activeDuration * ratio; 
                 
-                let activeDuration = duration - startDelaySeconds;
-                if (activeDuration < 0) activeDuration = duration;
+                let start = currentTimeAcc;
+                let end = currentTimeAcc + ayahDur;
+                currentTimeAcc = end;
                 
-                let totalWeight = rawAyahsTexts.reduce((acc, txt) => acc + calculateAyahWeight(txt, reciterType), 0);
-                let currentTimeAcc = startDelaySeconds;
-                
-                surahTimingStats = rawAyahsTexts.map((txt, i) => {
-                    let weight = calculateAyahWeight(txt, reciterType);
-                    let ratio = weight / totalWeight;
-                    let ayahDur = activeDuration * ratio; 
-                    
-                    let start = currentTimeAcc;
-                    let end = currentTimeAcc + ayahDur;
-                    currentTimeAcc = end;
-                    
-                    return { start: start, end: end, index: i, page: ayahs[i].page };
-                });
-                console.log("⚙️ تم تفعيل التخمين الذكي للتجويد");
-            } catch (error) {
-                console.error("حدث خطأ في مزامنة الآيات:", error);
-            } finally {
-                isSyncingTimings = false;
-            }
+                return { start: start, end: end, index: i, page: ayahs[i].page };
+            });
         }
 
         audioPlayer.onloadedmetadata = () => {
