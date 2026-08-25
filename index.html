@@ -301,6 +301,18 @@
             gap: 15px;
         }
 
+        /* ================= الإضافة الجديدة: تنسيقات جدول الإدارة وتجاوبها ================= */
+        #admin-view { max-width: 800px !important; }
+        .admin-users-section { width: 100%; overflow: hidden; }
+        .table-responsive { width: 100%; overflow-x: auto; background: #fff; border-radius: 10px; border: 1px solid var(--border-light); box-shadow: 0 4px 10px rgba(0,0,0,0.02); }
+        .admin-users-table { width: 100%; border-collapse: collapse; text-align: right; font-size: clamp(12px, 3vw, 15px); }
+        .admin-users-table th { background: var(--royal-blue); color: #fff; padding: 12px 15px; font-weight: bold; white-space: nowrap; }
+        .admin-users-table td { padding: 12px 15px; border-bottom: 1px solid var(--border-light); color: var(--text-main); }
+        .admin-users-table tr:last-child td { border-bottom: none; }
+        .admin-users-table tr:hover { background-color: #F8FAFC; }
+        .user-date-badge { background: #E0F2FE; color: var(--royal-blue); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; white-space: nowrap; }
+        /* ======================================================================= */
+
         /* Media Queries لدعم الشاشات الصغيرة وتنسيق الشريط السفلي */
         @media (max-width: 768px) {
             .navbar { padding: 15px 20px; flex-direction: column; gap: 15px; }
@@ -424,6 +436,28 @@
                 <div class="form-group"><label>تعديل اسم المنصة</label><input type="text" id="edit-site-title" value="مصحف سَمِيع"></div>
                 <button class="auth-submit-btn" onclick="saveAdminSettings()">تطبيق التعديلات</button>
             </div>
+            
+            <!-- ================= الإضافة الجديدة: جدول بيانات المستخدمين ================= -->
+            <div class="admin-users-section">
+                <h3 style="color: var(--gold-premium); margin-top: 30px; margin-bottom: 15px; border-bottom: 2px solid var(--border-light); padding-bottom: 10px; font-weight: 800; text-align: right;">👥 قائمة المستخدمين المسجلين</h3>
+                <div class="table-responsive">
+                    <table class="admin-users-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>الاسم</th>
+                                <th>البريد الإلكتروني</th>
+                                <th>تاريخ التسجيل</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-users-tbody">
+                            <!-- سيتم ملء البيانات هنا برمجياً -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- ========================================================================== -->
+
             <button class="btn-nav" style="color: #ef4444; border-color: #ef4444; margin-top: 20px; width: 100%;" onclick="logoutSystem()">تسجيل الخروج</button>
         </div>
     </div>
@@ -509,6 +543,61 @@
     </div>
 
     <script>
+        // ================= الإضافات الجديدة: PWA وتطبيق الويب المدمج =================
+        (function initPWA() {
+            // تصميم احترافي للأيقونة بصيغة SVG وتشفيرها لتعمل داخل الكود مباشرة
+            const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><rect width="512" height="512" rx="112" fill="#0284C7"/><rect x="32" y="32" width="448" height="448" rx="80" fill="none" stroke="#D97706" stroke-width="16"/><text x="256" y="270" font-family="Tajawal, Arial, sans-serif" font-size="130" font-weight="bold" fill="#FFFFFF" text-anchor="middle">مصحف</text><text x="256" y="400" font-family="Tajawal, Arial, sans-serif" font-size="110" font-weight="bold" fill="#FCD34D" text-anchor="middle">سَمِيع</text></svg>`;
+            const iconUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgIcon);
+
+            // إنشاء ملف manifest.json برمجياً بدون ملفات خارجية
+            const manifest = {
+                name: "مصحف سميع",
+                short_name: "مصحف سميع",
+                description: "المنصة القرآنية الشاملة",
+                start_url: ".",
+                display: "standalone",
+                background_color: "#F4F9FE",
+                theme_color: "#0284C7",
+                icons: [
+                    {
+                        src: iconUrl,
+                        sizes: "512x512",
+                        type: "image/svg+xml",
+                        purpose: "any maskable"
+                    }
+                ]
+            };
+
+            const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+            const manifestUrl = URL.createObjectURL(manifestBlob);
+
+            const linkManifest = document.createElement('link');
+            linkManifest.rel = 'manifest';
+            linkManifest.href = manifestUrl;
+            document.head.appendChild(linkManifest);
+
+            const metaTheme = document.createElement('meta');
+            metaTheme.name = 'theme-color';
+            metaTheme.content = '#0284C7';
+            document.head.appendChild(metaTheme);
+
+            const appleIcon = document.createElement('link');
+            appleIcon.rel = 'apple-touch-icon';
+            appleIcon.href = iconUrl;
+            document.head.appendChild(appleIcon);
+
+            const appleCapable = document.createElement('meta');
+            appleCapable.name = 'apple-mobile-web-app-capable';
+            appleCapable.content = 'yes';
+            document.head.appendChild(appleCapable);
+
+            const appleTitle = document.createElement('meta');
+            appleTitle.name = 'apple-mobile-web-app-title';
+            appleTitle.content = 'مصحف سميع';
+            document.head.appendChild(appleTitle);
+        })();
+        // ==============================================================================
+
         const SURAH_NAMES_AR = [
             "الفاتحة", "البقرة", "آل عمران", "النساء", "المائدة", "الأنعام", "الأعراف", "الأنفال", "التوبة", "يونس", 
             "هود", "يوسف", "الرعد", "إبراهيم", "الحجر", "النحل", "الإسراء", "الكهف", "مريم", "طه", 
@@ -1484,15 +1573,30 @@
             }
         }
 
+        // ================= الإضافات الجديدة: تحديث نظام تسجيل الدخول =================
         function handleUnifiedLogin() {
             const email = document.getElementById('user-email').value;
             const pass = document.getElementById('user-pass').value;
+            const name = document.getElementById('user-name').value || 'مستخدم غير معروف';
+
             if(email === 'admin@samee3.com' && pass === '123456') {
                 showToast("تم الدخول بصلاحيات الإدارة");
                 document.getElementById('user-email').value = '';
                 document.getElementById('user-pass').value = '';
+                renderAdminUsersTable(); // الإضافة الجديدة: تحميل وعرض جدول المستخدمين
                 switchTab('admin-view');
             } else {
+                // حفظ بيانات المستخدم الجديد في الذاكرة المحلية (بدون قاعدة بيانات خارجية)
+                if(email) {
+                    let users = JSON.parse(localStorage.getItem('samee3_users') || '[]');
+                    let existingUser = users.find(u => u.email === email);
+                    
+                    if(!existingUser) {
+                        users.push({ name: name, email: email, date: new Date().toLocaleDateString('ar-EG') });
+                        localStorage.setItem('samee3_users', JSON.stringify(users));
+                    }
+                }
+
                 if(isSignUpMode) showToast("تم إنشاء الحساب بنجاح. سيتم حفظ تقدمك تلقائياً.");
                 else showToast("تم تسجيل الدخول كمستخدم.");
                 localStorage.setItem('userLoggedIn', 'true');
@@ -1500,6 +1604,31 @@
                 switchTab('home-view');
             }
         }
+
+        // دالة جديدة تقوم بقراءة بيانات المستخدمين وعرضها بجدول جميل داخل لوحة الإدارة
+        function renderAdminUsersTable() {
+            const tbody = document.getElementById('admin-users-tbody');
+            if(!tbody) return;
+            const users = JSON.parse(localStorage.getItem('samee3_users') || '[]');
+            tbody.innerHTML = '';
+            
+            if(users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px; font-weight:bold; color: #64748B;">لا يوجد مستخدمين مسجلين حتى الآن</td></tr>';
+                return;
+            }
+            
+            users.forEach((u, i) => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>${u.name}</td>
+                        <td dir="ltr" style="text-align: right;">${u.email}</td>
+                        <td><span class="user-date-badge">${u.date}</span></td>
+                    </tr>
+                `;
+            });
+        }
+        // ==============================================================================
 
         function saveAdminSettings() {
             const newTitle = document.getElementById('edit-site-title').value;
