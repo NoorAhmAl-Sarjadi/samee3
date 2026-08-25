@@ -4,7 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
-    <!-- ================= Meta Tags & SEO (الإضافات الجديدة لتحسين محركات البحث) ================= -->
+    <!-- ================= إعدادات تطبيق الويب (PWA) للأيقونة والاسم ================= -->
+    <meta name="application-name" content="مصحف سميع">
+    <meta name="apple-mobile-web-app-title" content="مصحف سميع">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0284C7">
+    <link rel="icon" href="https://i.postimg.cc/cJd4cPwr/IMG-5346.jpg">
+    <link rel="apple-touch-icon" href="https://i.postimg.cc/cJd4cPwr/IMG-5346.jpg">
+    <link rel="manifest" href='data:application/manifest+json,{"name":"مصحف سميع","short_name":"مصحف سميع","description":"المنصة القرآنية الشاملة","display":"standalone","start_url":".","background_color":"#F4F9FE","theme_color":"#0284C7","icons":[{"src":"https://i.postimg.cc/cJd4cPwr/IMG-5346.jpg","sizes":"192x192","type":"image/jpeg"},{"src":"https://i.postimg.cc/cJd4cPwr/IMG-5346.jpg","sizes":"512x512","type":"image/jpeg","purpose":"any maskable"}]}'>
+    <!-- ========================================================================= -->
+
+    <!-- ================= Meta Tags & SEO ================= -->
     <meta name="description" content="موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي بروايات متعددة (حفص، ورش، قالون وغيرها). يضم الموقع سور القرآن الكريم كاملة، أحاديث نبوية مسموعة، صحيح البخاري ومسلم، وتلاوات خاشعة.">
     <meta name="keywords" content="سميع, موقع سميع, منصة سميع, قرآن, القرآن الكريم, قرآن مسموع, تسميع, تلاوات خاشعة, استماع للقرآن, المصحف المرتل, المصحف المعلم, أحاديث, أحاديث مسموعة, أحاديث نبوية, صحيح البخاري, صحيح مسلم, السنة النبوية, سورة البقرة, سورة الكهف, سورة الملك, سورة يس, سورة الواقعة, عبد الباسط عبد الصمد, محمد صديق المنشاوي, محمود خليل الحصري, مشاري العفاسي, عبد الرحمن السديس, ياسر الدوسري, ماهر المعيقلي, سعد الغامدي, فارس عباد, إدريس أبكر, إسلام صبحي, هزاع البلوشي, رعد الكردي, مصطفى إسماعيل, محمد محمود الطبلاوي, سعود الشريم, رواية حفص عن عاصم, رواية ورش عن نافع, قالون, قراءة حمزة, شعبة, قرآن قبل النوم, راديو قرآن, رقية شرعية مسموعة">
     <meta name="author" content="دكتور محمد أبوزيد">
@@ -24,9 +34,9 @@
 
     <title>مصحف سميع | المنصة القرآنية الشاملة</title>
     
-    <!-- Supabase JS Library (الرابط الصحيح للعمل في المتصفح) -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-
+    <!-- مكتبة Supabase -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    
     <!-- خطوط مجمع الملك فهد والرسم العثماني -->
     <link href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700;800&family=Aref+Ruqaa:wght@400;700&display=swap" rel="stylesheet">
     
@@ -546,61 +556,7 @@
     </div>
 
     <script>
-        // ================= الإضافات الجديدة: PWA وتطبيق الويب المدمج =================
-        (function initPWA() {
-            // استخدام رابط الصورة المباشر الذي أرسلته
-            const iconUrl = 'https://i.postimg.cc/cJd4cPwr/IMG-5346.jpg';
-
-            // إنشاء ملف manifest.json برمجياً بدون ملفات خارجية
-            const manifest = {
-                name: "مصحف سميع",
-                short_name: "مصحف سميع",
-                description: "المنصة القرآنية الشاملة",
-                start_url: ".",
-                display: "standalone",
-                background_color: "#F4F9FE",
-                theme_color: "#0284C7",
-                icons: [
-                    {
-                        src: iconUrl,
-                        sizes: "512x512",
-                        type: "image/jpeg",
-                        purpose: "any maskable"
-                    }
-                ]
-            };
-
-            const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-            const manifestUrl = URL.createObjectURL(manifestBlob);
-
-            const linkManifest = document.createElement('link');
-            linkManifest.rel = 'manifest';
-            linkManifest.href = manifestUrl;
-            document.head.appendChild(linkManifest);
-
-            const metaTheme = document.createElement('meta');
-            metaTheme.name = 'theme-color';
-            metaTheme.content = '#0284C7';
-            document.head.appendChild(metaTheme);
-
-            const appleIcon = document.createElement('link');
-            appleIcon.rel = 'apple-touch-icon';
-            appleIcon.href = iconUrl;
-            document.head.appendChild(appleIcon);
-
-            const appleCapable = document.createElement('meta');
-            appleCapable.name = 'apple-mobile-web-app-capable';
-            appleCapable.content = 'yes';
-            document.head.appendChild(appleCapable);
-
-            const appleTitle = document.createElement('meta');
-            appleTitle.name = 'apple-mobile-web-app-title';
-            appleTitle.content = 'مصحف سميع';
-            document.head.appendChild(appleTitle);
-        })();
-        // ==============================================================================
-
-        // ================= إعدادات قاعدة بيانات SUPABASE مع نظام الحماية =================
+        // ================= إعدادات قاعدة بيانات SUPABASE =================
         const SUPABASE_URL = 'https://wndzautzfpmycdesrbvs.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduZHphdXR6ZnBteWNkZXNyYnZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNzk2NzUsImV4cCI6MjEwMjg1NTY3NX0.EVUiKwmXjvAOYPqvWZx45c1cOcJHDvxufGtKEICJJms';
         
@@ -609,35 +565,32 @@
             if (window.supabase) {
                 supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             }
-        } catch(e) {
-            console.warn("Supabase Init Warning (Fallback to LocalStorage):", e);
+        } catch (e) {
+            console.error("Supabase load error:", e);
         }
 
-        // دالة جلب المستخدمين مدعومة بنظام حماية ذكي
+        // دالة جلب المستخدمين (تعمل دائماً سواء كان السيرفر متاحاً أم لا)
         async function getDBUsers() {
-            if (!supabaseClient) {
-                return JSON.parse(localStorage.getItem('samee3_users') || '[]');
-            }
             try {
-                const { data, error } = await supabaseClient.from('store').select('value').eq('key', 'samee3_users').single();
-                if (data && data.value) return data.value;
-                return JSON.parse(localStorage.getItem('samee3_users') || '[]');
+                if (supabaseClient) {
+                    const { data, error } = await supabaseClient.from('store').select('value').eq('key', 'samee3_users').single();
+                    if (data && data.value) return data.value;
+                }
             } catch (e) {
-                return JSON.parse(localStorage.getItem('samee3_users') || '[]');
+                console.error("Supabase Error on GET:", e);
             }
+            return JSON.parse(localStorage.getItem('samee3_users') || '[]');
         }
 
-        // دالة حفظ المستخدمين مدعومة بنظام حماية ذكي
+        // دالة حفظ المستخدمين (تحفظ محلياً دائماً، وتحدث السيرفر في الخلفية)
         async function setDBUsers(usersArray) {
-            // الحفظ المحلي دائماً لضمان عدم فقدان البيانات
             localStorage.setItem('samee3_users', JSON.stringify(usersArray));
-            
-            if (supabaseClient) {
-                try {
+            try {
+                if (supabaseClient) {
                     await supabaseClient.from('store').upsert({ key: 'samee3_users', value: usersArray });
-                } catch (e) {
-                    console.warn("Failed to sync with server, data saved locally.");
                 }
+            } catch (e) {
+                console.error("Supabase Error on SET:", e);
             }
         }
         // =================================================================
@@ -1617,7 +1570,6 @@
             }
         }
 
-        // ================= الإضافات الجديدة: تحديث نظام تسجيل الدخول مع Supabase =================
         async function handleUnifiedLogin() {
             const email = document.getElementById('user-email').value;
             const pass = document.getElementById('user-pass').value;
@@ -1630,7 +1582,6 @@
                 await renderAdminUsersTable(); 
                 switchTab('admin-view');
             } else {
-                // التعامل مع قاعدة البيانات
                 if(email) {
                     let users = await getDBUsers();
                     let existingUser = users.find(u => u.email === email);
@@ -1644,15 +1595,12 @@
                 if(isSignUpMode) showToast("تم إنشاء الحساب بنجاح. سيتم حفظ تقدمك تلقائياً.");
                 else showToast("تم تسجيل الدخول كمستخدم.");
                 
-                // حفظ حالة الدخول محلياً
                 localStorage.setItem('userLoggedIn', 'true');
-                
                 document.getElementById('login-nav-btn').innerText = "تم الدخول";
                 switchTab('home-view');
             }
         }
 
-        // دالة جديدة تقوم بقراءة بيانات المستخدمين وعرضها بجدول جميل داخل لوحة الإدارة
         async function renderAdminUsersTable() {
             const tbody = document.getElementById('admin-users-tbody');
             if(!tbody) return;
@@ -1675,7 +1623,6 @@
                 `;
             });
         }
-        // ==============================================================================
 
         function saveAdminSettings() {
             const newTitle = document.getElementById('edit-site-title').value;
