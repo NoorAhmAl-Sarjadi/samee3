@@ -505,7 +505,7 @@
     <!-- التوقيع الرسمي -->
     <hr class="lux-divider">
     <div class="footer-signature">
-        <span class="signature-name">بواسطة: د. محمد أبو زيد</span>
+        <span class="signature-name">بواسطة: دكتور محمد أبوزيد</span>
     </div>
 
     <script>
@@ -1294,33 +1294,35 @@
             ayahText = ayahText.replace(/^أعوذ بالله من الشيطان الرجيم\s*/g, '');
             ayahText = ayahText.trim();
 
-            // === [بداية التعديل: حساب حجم الخط الديناميكي بناءً على طول الآية] ===
+            // === [تحديث جديد: مقاسات أكبر لتعبئة الصورة بشكل متناسق] ===
             let ayahLength = ayahText.length;
             let dynamicFontSize = 65; // الحجم الافتراضي للآيات القصيرة
-            let dynamicLineHeight = 1.8; // ارتفاع السطر الافتراضي
+            let dynamicLineHeight = 1.8;
 
-            if (ayahLength > 500) {
-                dynamicFontSize = 26;
-                dynamicLineHeight = 1.4;
-            } else if (ayahLength > 350) {
-                dynamicFontSize = 32;
-                dynamicLineHeight = 1.5;
-            } else if (ayahLength > 250) {
-                dynamicFontSize = 38;
+            if (ayahLength > 700) { 
+                // للآيات الضخمة جداً (مثل آية الدين)
+                dynamicFontSize = 36;
                 dynamicLineHeight = 1.6;
-            } else if (ayahLength > 150) {
+            } else if (ayahLength > 500) {
+                dynamicFontSize = 42;
+                dynamicLineHeight = 1.6;
+            } else if (ayahLength > 350) { 
+                // للآيات الطويلة نسبياً (مثل آية 2 من سورة المائدة الموجودة في الصورة)
                 dynamicFontSize = 48;
-                dynamicLineHeight = 1.7;
-            } else if (ayahLength > 80) {
+                dynamicLineHeight = 1.6;
+            } else if (ayahLength > 200) {
                 dynamicFontSize = 55;
                 dynamicLineHeight = 1.7;
+            } else if (ayahLength > 100) {
+                dynamicFontSize = 60;
+                dynamicLineHeight = 1.7;
             }
-            // === [نهاية التعديل] ===
+            // === [نهاية التحديث] ===
 
             exportDiv.innerHTML = `
                 <div class="export-inner-border">
                     <div class="export-header">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</div>
-                    <!-- تمت إضافة حجم الخط الديناميكي هنا في ستايل الآية -->
+                    <!-- ستايل الآية مع المقاسات الجديدة -->
                     <div class="export-ayah" style="font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight};">﴿ ${ayahText} ﴾</div>
                     <div class="export-surah-info">سورة ${exactSurahName} ❖ آية ${ayahNum}</div>
                     <div class="export-footer">
