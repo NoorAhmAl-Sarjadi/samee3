@@ -545,9 +545,8 @@
     <script>
         // ================= الإضافات الجديدة: PWA وتطبيق الويب المدمج =================
         (function initPWA() {
-            // تصميم احترافي للأيقونة بصيغة SVG وتشفيرها لتعمل داخل الكود مباشرة
-            const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><rect width="512" height="512" rx="112" fill="#0284C7"/><rect x="32" y="32" width="448" height="448" rx="80" fill="none" stroke="#D97706" stroke-width="16"/><text x="256" y="270" font-family="Tajawal, Arial, sans-serif" font-size="130" font-weight="bold" fill="#FFFFFF" text-anchor="middle">مصحف</text><text x="256" y="400" font-family="Tajawal, Arial, sans-serif" font-size="110" font-weight="bold" fill="#FCD34D" text-anchor="middle">سَمِيع</text></svg>`;
-            const iconUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgIcon);
+            // استخدام رابط الصورة المباشر الذي أرسلته
+            const iconUrl = 'https://i.postimg.cc/5ySd1XLC/Design-Image.png';
 
             // إنشاء ملف manifest.json برمجياً بدون ملفات خارجية
             const manifest = {
@@ -562,7 +561,7 @@
                     {
                         src: iconUrl,
                         sizes: "512x512",
-                        type: "image/svg+xml",
+                        type: "image/png",
                         purpose: "any maskable"
                     }
                 ]
