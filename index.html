@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
-    <!-- ================= Meta Tags & SEO ================= -->
+    <!-- ================= Meta Tags & SEO (الإضافات الجديدة لتحسين محركات البحث) ================= -->
     <meta name="description" content="موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي بروايات متعددة (حفص، ورش، قالون وغيرها). يضم الموقع سور القرآن الكريم كاملة، أحاديث نبوية مسموعة، صحيح البخاري ومسلم، وتلاوات خاشعة.">
     <meta name="keywords" content="سميع, موقع سميع, منصة سميع, قرآن, القرآن الكريم, قرآن مسموع, تسميع, تلاوات خاشعة, استماع للقرآن, المصحف المرتل, المصحف المعلم, أحاديث, أحاديث مسموعة, أحاديث نبوية, صحيح البخاري, صحيح مسلم, السنة النبوية, سورة البقرة, سورة الكهف, سورة الملك, سورة يس, سورة الواقعة, عبد الباسط عبد الصمد, محمد صديق المنشاوي, محمود خليل الحصري, مشاري العفاسي, عبد الرحمن السديس, ياسر الدوسري, ماهر المعيقلي, سعد الغامدي, فارس عباد, إدريس أبكر, إسلام صبحي, هزاع البلوشي, رعد الكردي, مصطفى إسماعيل, محمد محمود الطبلاوي, سعود الشريم, رواية حفص عن عاصم, رواية ورش عن نافع, قالون, قراءة حمزة, شعبة, قرآن قبل النوم, راديو قرآن, رقية شرعية مسموعة">
     <meta name="author" content="دكتور محمد أبوزيد">
     <meta name="robots" content="index, follow">
     
-    <!-- Open Graph / Facebook / WhatsApp -->
+    <!-- Open Graph / Facebook / WhatsApp (لتحسين شكل الرابط عند المشاركة) -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="مصحف سميع | المنصة القرآنية الشاملة">
     <meta property="og:description" content="استمع للقرآن الكريم بأصوات أشهر القراء، وأحاديث نبوية مسموعة عبر منصة سميع الشاملة.">
@@ -24,9 +24,9 @@
 
     <title>مصحف سميع | المنصة القرآنية الشاملة</title>
     
-    <!-- Supabase JS Library -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    
+    <!-- Supabase JS Library (الرابط الصحيح للعمل في المتصفح) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
     <!-- خطوط مجمع الملك فهد والرسم العثماني -->
     <link href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700;800&family=Aref+Ruqaa:wght@400;700&display=swap" rel="stylesheet">
     
@@ -546,40 +546,15 @@
     </div>
 
     <script>
-        // ================= إعدادات قاعدة بيانات SUPABASE =================
-        const SUPABASE_URL = 'https://wndzautzfpmycdesrbvs.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpY2dvZWxtZG5neGdxdGF3c2tlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNzk2NzUsImV4cCI6MjEwMjg1NTY3NX0.EVUiKwmXjvAOYPqvWZx45c1cOcJHDvxufGtKEICJJms';
-        
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        // دوال للتعامل مع قاعدة البيانات لجلب وحفظ المستخدمين
-        async function getDBUsers() {
-            try {
-                const { data, error } = await supabase.from('store').select('value').eq('key', 'samee3_users').single();
-                if (data && data.value) return data.value;
-                return [];
-            } catch (e) {
-                console.error("Supabase Error on GET:", e);
-                return [];
-            }
-        }
-
-        async function setDBUsers(usersArray) {
-            try {
-                await supabase.from('store').upsert({ key: 'samee3_users', value: usersArray });
-            } catch (e) {
-                console.error("Supabase Error on SET:", e);
-            }
-        }
-        // =================================================================
-
-        // ================= PWA وتطبيق الويب المدمج =================
+        // ================= الإضافات الجديدة: PWA وتطبيق الويب المدمج =================
         (function initPWA() {
+            // استخدام رابط الصورة المباشر الذي أرسلته
             const iconUrl = 'https://i.postimg.cc/cJd4cPwr/IMG-5346.jpg';
 
+            // إنشاء ملف manifest.json برمجياً بدون ملفات خارجية
             const manifest = {
-                name: "منصة تعليمية",
-                short_name: "منصة تعليمية",
+                name: "مصحف سميع",
+                short_name: "مصحف سميع",
                 description: "المنصة القرآنية الشاملة",
                 start_url: ".",
                 display: "standalone",
@@ -620,10 +595,52 @@
 
             const appleTitle = document.createElement('meta');
             appleTitle.name = 'apple-mobile-web-app-title';
-            appleTitle.content = 'منصة تعليمية';
+            appleTitle.content = 'مصحف سميع';
             document.head.appendChild(appleTitle);
         })();
         // ==============================================================================
+
+        // ================= إعدادات قاعدة بيانات SUPABASE مع نظام الحماية =================
+        const SUPABASE_URL = 'https://wndzautzfpmycdesrbvs.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduZHphdXR6ZnBteWNkZXNyYnZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNzk2NzUsImV4cCI6MjEwMjg1NTY3NX0.EVUiKwmXjvAOYPqvWZx45c1cOcJHDvxufGtKEICJJms';
+        
+        let supabaseClient = null;
+        try {
+            if (window.supabase) {
+                supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            }
+        } catch(e) {
+            console.warn("Supabase Init Warning (Fallback to LocalStorage):", e);
+        }
+
+        // دالة جلب المستخدمين مدعومة بنظام حماية ذكي
+        async function getDBUsers() {
+            if (!supabaseClient) {
+                return JSON.parse(localStorage.getItem('samee3_users') || '[]');
+            }
+            try {
+                const { data, error } = await supabaseClient.from('store').select('value').eq('key', 'samee3_users').single();
+                if (data && data.value) return data.value;
+                return JSON.parse(localStorage.getItem('samee3_users') || '[]');
+            } catch (e) {
+                return JSON.parse(localStorage.getItem('samee3_users') || '[]');
+            }
+        }
+
+        // دالة حفظ المستخدمين مدعومة بنظام حماية ذكي
+        async function setDBUsers(usersArray) {
+            // الحفظ المحلي دائماً لضمان عدم فقدان البيانات
+            localStorage.setItem('samee3_users', JSON.stringify(usersArray));
+            
+            if (supabaseClient) {
+                try {
+                    await supabaseClient.from('store').upsert({ key: 'samee3_users', value: usersArray });
+                } catch (e) {
+                    console.warn("Failed to sync with server, data saved locally.");
+                }
+            }
+        }
+        // =================================================================
 
         const SURAH_NAMES_AR = [
             "الفاتحة", "البقرة", "آل عمران", "النساء", "المائدة", "الأنعام", "الأعراف", "الأنفال", "التوبة", "يونس", 
@@ -1410,18 +1427,20 @@
             ayahText = ayahText.replace(/^أعوذ بالله من الشيطان الرجيم\s*/g, '');
             ayahText = ayahText.trim();
 
-            // === [مقاسات الآية] ===
+            // === [تحديث جديد: مقاسات أكبر لتعبئة الصورة بشكل متناسق] ===
             let ayahLength = ayahText.length;
-            let dynamicFontSize = 65; 
+            let dynamicFontSize = 65; // الحجم الافتراضي للآيات القصيرة
             let dynamicLineHeight = 1.8;
 
             if (ayahLength > 700) { 
+                // للآيات الضخمة جداً (مثل آية الدين)
                 dynamicFontSize = 36;
                 dynamicLineHeight = 1.6;
             } else if (ayahLength > 500) {
                 dynamicFontSize = 42;
                 dynamicLineHeight = 1.6;
             } else if (ayahLength > 350) { 
+                // للآيات الطويلة نسبياً (مثل آية 2 من سورة المائدة الموجودة في الصورة)
                 dynamicFontSize = 48;
                 dynamicLineHeight = 1.6;
             } else if (ayahLength > 200) {
@@ -1431,10 +1450,12 @@
                 dynamicFontSize = 60;
                 dynamicLineHeight = 1.7;
             }
+            // === [نهاية التحديث] ===
 
             exportDiv.innerHTML = `
                 <div class="export-inner-border">
                     <div class="export-header">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</div>
+                    <!-- ستايل الآية مع المقاسات الجديدة -->
                     <div class="export-ayah" style="font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight};">﴿ ${ayahText} ﴾</div>
                     <div class="export-surah-info">سورة ${exactSurahName} ❖ آية ${ayahNum}</div>
                     <div class="export-footer">
@@ -1623,11 +1644,15 @@
                 if(isSignUpMode) showToast("تم إنشاء الحساب بنجاح. سيتم حفظ تقدمك تلقائياً.");
                 else showToast("تم تسجيل الدخول كمستخدم.");
                 
+                // حفظ حالة الدخول محلياً
+                localStorage.setItem('userLoggedIn', 'true');
+                
                 document.getElementById('login-nav-btn').innerText = "تم الدخول";
                 switchTab('home-view');
             }
         }
 
+        // دالة جديدة تقوم بقراءة بيانات المستخدمين وعرضها بجدول جميل داخل لوحة الإدارة
         async function renderAdminUsersTable() {
             const tbody = document.getElementById('admin-users-tbody');
             if(!tbody) return;
@@ -1659,6 +1684,7 @@
         }
 
         function logoutSystem() {
+            localStorage.removeItem('userLoggedIn');
             document.getElementById('login-nav-btn').innerText = "تسجيل الدخول";
             showToast("تم تسجيل الخروج");
             switchTab('home-view');
