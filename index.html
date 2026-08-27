@@ -238,9 +238,18 @@
         .search-result-item { padding: 12px; border-bottom: 1px solid var(--border-light); cursor: pointer; transition: 0.3s; text-align: right; background: #fff; border-radius: 8px; margin-bottom: 5px; }
         .search-result-item:hover { background: #F0F9FF; border-color: var(--royal-blue); transform: translateX(-5px); }
 
-        .lux-divider { border: 0; height: 2px; background: linear-gradient(to right, transparent, var(--royal-blue), transparent); margin: 40px auto 20px auto; width: 50%; opacity: 0.3; }
-        .footer-signature { text-align: center; padding-bottom: 30px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; }
-        .signature-name { font-size: clamp(16px, 4vw, 20px); font-weight: 800; color: var(--royal-blue); }
+        /* ستايل نافذة التثبيت الاحترافية */
+        .install-steps-container { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; text-align: right; }
+        .install-card { background: #F8FAFC; border: 1px solid var(--border-light); border-radius: 12px; padding: 20px; transition: 0.3s; position: relative; overflow: hidden; }
+        .install-card:hover { border-color: var(--royal-blue); transform: translateY(-3px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+        .install-card::before { content: ''; position: absolute; top: 0; right: 0; width: 4px; height: 100%; background: var(--royal-blue); }
+        .install-card.android::before { background: #10B981; }
+        .install-card.desktop::before { background: var(--gold-premium); }
+        .install-card h4 { margin-top: 0; margin-bottom: 15px; font-size: 18px; color: var(--text-main); display: flex; align-items: center; gap: 8px; }
+        .install-card ol { margin: 0; padding-right: 20px; color: #475569; font-size: 15px; line-height: 1.8; font-weight: 500; }
+        .install-card ol li { margin-bottom: 8px; }
+        .install-card ol li b { color: var(--royal-blue); }
+        @media (max-width: 768px) { .install-steps-container { grid-template-columns: 1fr; } }
 
         /* =========================================
            تصميم الصورة المصدرة (التصميم الخرافي الجديد للآية)
@@ -356,6 +365,7 @@
         <h1 id="site-main-title">مصحف سَمِيع</h1>
         <div class="nav-btns">
             <button class="btn-nav active" onclick="switchTab('home-view')">الرئيسية</button>
+            <button class="btn-nav" onclick="openInstallModal()" style="background: var(--gold-premium); color: #fff; border-color: var(--gold-premium);">📲 تثبيت</button>
             <button class="btn-login" onclick="switchTab('unified-login-view')" id="login-nav-btn">تسجيل الدخول</button>
             <button class="btn-nav" onclick="openSearchModal()" style="background: var(--bg-main);">🔍 بحث</button>
         </div>
@@ -549,10 +559,45 @@
         </div>
     </div>
 
-    <!-- التوقيع الرسمي -->
-    <hr class="lux-divider">
-    <div class="footer-signature">
-        <span class="signature-name">بواسطة: دكتور محمد أبوزيد</span>
+    <!-- نافذة التثبيت (PWA Modal) -->
+    <div id="install-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 800px; padding: 35px;">
+            <button class="close-modal" onclick="closeModals()">✖</button>
+            <h3 style="color: var(--royal-blue); margin-top: 0; font-weight: 800; font-size: 26px;">📲 كيفية تثبيت التطبيق على جهازك</h3>
+            <p style="color: #64748B; font-size: 16px; margin-bottom: 30px; font-weight: bold;">لتجربة أسرع وأفضل، أضف المنصة لشاشتك الرئيسية واستخدمها كتطبيق مستقل.</p>
+            
+            <div class="install-steps-container">
+                <!-- أندرويد -->
+                <div class="install-card android">
+                    <h4>🤖 أجهزة الأندرويد (Android)</h4>
+                    <ol>
+                        <li>افتح الموقع من متصفح <b>Google Chrome</b>.</li>
+                        <li>اضغط على أيقونة القائمة (الثلاث نقاط ⋮) بالأعلى.</li>
+                        <li>اختر <b>"تثبيت التطبيق"</b> (Install App) أو <b>"إضافة للشاشة الرئيسية"</b>.</li>
+                    </ol>
+                </div>
+                
+                <!-- آيفون -->
+                <div class="install-card">
+                    <h4>🍎 أجهزة الآيفون (iOS)</h4>
+                    <ol>
+                        <li>افتح الموقع من متصفح <b>Safari</b>.</li>
+                        <li>اضغط على أيقونة المشاركة (مربع داخله سهم لأعلى) بأسفل الشاشة.</li>
+                        <li>مرر لأسفل واختر <b>"إضافة إلى الصفحة الرئيسية"</b> (Add to Home Screen).</li>
+                    </ol>
+                </div>
+
+                <!-- كمبيوتر -->
+                <div class="install-card desktop" style="grid-column: 1 / -1;">
+                    <h4>💻 أجهزة الكمبيوتر (ويندوز / ماك)</h4>
+                    <ol>
+                        <li>افتح الموقع من متصفح <b>Google Chrome</b> أو <b>Microsoft Edge</b>.</li>
+                        <li>في شريط العنوان (مكان كتابة الرابط) بالأعلى، ستجد أيقونة تثبيت صغيرة بجوار النجمة (أو شكل شاشة عليها سهم).</li>
+                        <li>اضغط عليها ثم اختر <b>"تثبيت"</b> (Install).</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -1179,10 +1224,16 @@
             document.getElementById('action-modal').style.display = 'flex';
         }
 
+        // إظهار نافذة التثبيت
+        function openInstallModal() {
+            document.getElementById('install-modal').style.display = 'flex';
+        }
+
         function closeModals() {
             document.getElementById('action-modal').style.display = 'none';
             document.getElementById('tafsir-modal').style.display = 'none';
             document.getElementById('search-modal').style.display = 'none';
+            document.getElementById('install-modal').style.display = 'none';
         }
 
         function playSpecificAyahModal() {
