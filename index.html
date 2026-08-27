@@ -7,12 +7,14 @@
     <link rel="manifest" href='data:application/manifest+json,{"name":"مصحف سميع","short_name":"مصحف سميع","description":"المنصة القرآنية الشاملة","display":"standalone","start_url":".","background_color":"#F4F9FE","theme_color":"#0284C7","icons":[{"src":"https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png","sizes":"192x192","type":"image/png"},{"src":"https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}'>
     <meta name="description" content="موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.">
     <title>مصحف سميع | المنصة القرآنية الشاملة</title>
+    <!-- تسريع تحميل الخطوط -->
     <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <link href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700;800&family=Aref+Ruqaa:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     
     <style>
+        /* تم دمج وضغط أكواد الـ CSS لتسريع التحميل */
         :root{--bg-main:#F4F9FE;--navbar-bg:#FFFFFF;--royal-blue:#0284C7;--gold-premium:#D97706;--mushaf-paper:#FCFBF8;--mushaf-border:#0EA5E9;--text-main:#0F172A;--card-bg:#FFFFFF;--border-light:#E2E8F0}
         body{font-family:'Tajawal',sans-serif;background-color:var(--bg-main);background-image:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%230284C7' fill-opacity='0.03'%3E%3Cpath d='M30 30l-5-5 5-5 5 5-5 5z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");margin:0;padding-bottom:120px;color:var(--text-main);overflow-x:hidden}
         #toast{visibility:hidden;min-width:250px;max-width:90%;background:var(--royal-blue);color:#fff;text-align:center;border-radius:12px;padding:16px 20px;position:fixed;z-index:10000;left:50%;bottom:120px;transform:translateX(-50%);font-size:clamp(14px,4vw,18px);font-weight:800;box-shadow:0 10px 30px rgba(0,0,0,.15)}
@@ -35,12 +37,7 @@
         .modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);display:none;justify-content:center;align-items:center;z-index:1001;backdrop-filter:blur(5px)}.modal-content{background:var(--card-bg);padding:clamp(20px,5vw,35px);border-radius:20px;width:90%;max-width:600px;text-align:center;position:relative;box-shadow:0 20px 50px rgba(0,0,0,.2);border:2px solid var(--royal-blue);max-height:90vh;overflow-y:auto}.close-modal{position:absolute;top:10px;left:10px;font-size:24px;cursor:pointer;color:#64748B;background:0 0;border:none;transition:.3s}
         .ayah-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:20px}.modal-action-btn{padding:12px;font-size:clamp(14px,3vw,16px);font-family:inherit;font-weight:700;border-radius:8px;border:none;cursor:pointer;transition:.3s;display:flex;align-items:center;justify-content:center;gap:8px}.action-play{background:#E0F2FE;color:var(--royal-blue)}.action-repeat{background:#FEF3C7;color:var(--gold-premium)}.action-tafsir{background:#D1FAE5;color:#059669}.action-copy{background:#F1F5F9;color:var(--text-main)}.action-share,.action-share-tafsir{grid-column:1/-1;width:100%;margin-top:5px}.action-share{background:var(--royal-blue);color:#fff}.action-share-tafsir{background:var(--gold-premium);color:#fff}
         .tafsir-text-box{font-family:'Amiri',serif;font-size:clamp(18px,4vw,24px);line-height:2;text-align:justify;padding:15px;background:#F8FAFC;border-radius:8px;margin-top:15px;max-height:50vh;overflow-y:auto;color:var(--text-main);border:1px solid #E2E8F0}
-        
-        /* تنسيق نتائج البحث حصرياً كما طلبت لإصلاح التداخل */
-        .search-result-item{padding:12px;border-bottom:1px solid var(--border-light);cursor:pointer;transition:.3s;text-align:right;background:#fff;border-radius:8px;margin-bottom:5px}.search-result-item:hover{background:#F0F9FF;border-color:var(--royal-blue);transform:translateX(-5px)}
-        .search-ayah-text{font-family:'Amiri Quran',serif;font-size:18px;line-height:1.8;word-spacing:normal!important;letter-spacing:normal!important;color:#0F172A;display:block}
-        .search-surah-info{color:var(--royal-blue);font-weight:700;margin-top:8px;display:block;font-family:'Tajawal',sans-serif;letter-spacing:normal!important;word-spacing:normal!important;font-size:14px}
-        
+        .search-result-item{padding:12px;border-bottom:1px solid var(--border-light);cursor:pointer;transition:.3s;text-align:right;background:#fff;border-radius:8px;margin-bottom:5px}.search-result-item:hover{background:#F0F9FF;border-color:var(--royal-blue);transform:translateX(-5px)}.search-ayah-text{font-family:'Amiri Quran',serif;font-size:18px;line-height:1.8;word-spacing:2px;color:#0F172A;display:block}.search-surah-info{color:var(--royal-blue);font-weight:700;margin-top:8px;display:block;font-family:'Tajawal',sans-serif;letter-spacing:0!important;word-spacing:normal!important;font-size:14px}
         .install-steps-container{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-top:20px;text-align:right}.install-card{background:#F8FAFC;border:1px solid var(--border-light);border-radius:12px;padding:20px;transition:.3s;position:relative;overflow:hidden}.install-card:hover{border-color:var(--royal-blue);transform:translateY(-3px);box-shadow:0 10px 20px rgba(0,0,0,.05)}.install-card::before{content:'';position:absolute;top:0;right:0;width:4px;height:100%;background:var(--royal-blue)}.install-card.android::before{background:#10B981}.install-card.desktop::before{background:var(--gold-premium)}.install-card h4{margin-top:0;margin-bottom:15px;font-size:18px;color:var(--text-main);display:flex;align-items:center;gap:8px}.install-card ol{margin:0;padding-right:20px;color:#475569;font-size:15px;line-height:1.8;font-weight:500}.install-card ol li{margin-bottom:8px}.install-card ol li b{color:var(--royal-blue)}
         #admin-view{max-width:800px!important}.admin-users-section{width:100%;overflow:hidden}.table-responsive{width:100%;overflow-x:auto;background:#fff;border-radius:10px;border:1px solid var(--border-light);box-shadow:0 4px 10px rgba(0,0,0,.02)}.admin-users-table{width:100%;border-collapse:collapse;text-align:right;font-size:clamp(12px,3vw,15px)}.admin-users-table th{background:var(--royal-blue);color:#fff;padding:12px 15px;font-weight:700;white-space:nowrap}.admin-users-table td{padding:12px 15px;border-bottom:1px solid var(--border-light);color:var(--text-main)}.admin-users-table tr:last-child td{border-bottom:none}.admin-users-table tr:hover{background-color:#F8FAFC}.user-date-badge{background:#E0F2FE;color:var(--royal-blue);padding:4px 8px;border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap}
         @media (max-width:768px){.install-steps-container{grid-template-columns:1fr}.navbar{padding:10px 15px;flex-direction:column;gap:8px}.navbar h1{font-size:26px}.nav-btns{gap:6px;flex-wrap:wrap}.btn-nav,.btn-login{padding:5px 12px;font-size:13px!important;border-width:1px}.sticky-player{flex-direction:column;padding:10px;border-radius:15px 15px 0 0;gap:8px;min-height:auto}body{padding-bottom:150px}.player-info{text-align:center;max-width:100%!important;margin-bottom:5px}.player-controls{width:100%;justify-content:center;gap:8px}#bottom-juz-select,#bottom-reciter-select,#bottom-surah-select,#bottom-tafsir-select{padding:4px 8px!important;font-size:12px!important;margin-bottom:4px!important}.action-btn-sm{padding:6px 10px;font-size:12px!important;border-width:1px}.play-pause-btn{width:40px;height:40px;font-size:20px}.side-panel{width:90%;right:5%}#selected-ayah-preview{font-size:22px!important}}
@@ -96,23 +93,14 @@
                 <option value="">جاري الاتصال بخوادم الصوت...</option>
             </select>
 
-            <!-- التفسير الميسر هو الافتراضي وتم إضافة كتب أكثر وأسباب النزول -->
+            <!-- التفسير الميسر هو الافتراضي -->
             <select class="filter-select" id="tafsir-select" onchange="if(typeof syncTopTafsirToBottom === 'function') syncTopTafsirToBottom()">
-                <optgroup label="التفاسير المعتمدة">
-                    <option value="ar.muyassar" selected>التفسير الميسر</option>
-                    <option value="ar.ibnkathir">تفسير ابن كثير</option>
-                    <option value="ar.saadi">تفسير السعدي</option>
-                    <option value="ar.tabari">تفسير الطبري</option>
-                    <option value="ar.qurtubi">تفسير القرطبي</option>
-                    <option value="ar.baghawi">تفسير البغوي</option>
-                    <option value="ar.jalalayn">تفسير الجلالين</option>
-                    <option value="ar.miqbas">تفسير ابن عباس (تنوير المقباس)</option>
-                    <option value="ar.waseet">التفسير الوسيط (طنطاوي)</option>
-                </optgroup>
-                <optgroup label="أسباب النزول والمعاني">
-                    <option value="ar.asbab">أسباب النزول</option>
-                    <option value="ar.maany">معاني القرآن</option>
-                </optgroup>
+                <option value="ar.muyassar" selected>التفسير الميسر</option>
+                <option value="ar.ibnkathir">تفسير ابن كثير</option>
+                <option value="ar.saadi">تفسير السعدي</option>
+                <option value="ar.tabari">تفسير الطبري</option>
+                <option value="ar.qurtubi">تفسير القرطبي</option>
+                <option value="ar.baghawi">تفسير البغوي</option>
             </select>
         </div>
     </div>
@@ -310,8 +298,6 @@
         let surahTimingStats = [], currentPlayingAyahIndex = -1, isPlaying = false, startDelaySeconds = 0;
         let isRepeatingVerse = false, selectedAyahIndex = 0, isDownloadingOp = false, isSignUpMode = false;
         
-        let pendingJumpAyahIndex = -1; // متغير لحفظ موقع الآية عند التغيير
-
         const audioPlayer = document.getElementById('main-audio');
         const els = {
             riwayahSelect: document.getElementById('riwayah-select'),
@@ -408,7 +394,7 @@
                 const splash = document.getElementById('splash-screen');
                 if(splash) {
                     splash.style.opacity = '0';
-                    setTimeout(() => splash.remove(), 400);
+                    setTimeout(() => splash.remove(), 400); // إزالة العنصر لتخفيف الصفحة
                 }
             } catch (err) { 
                 els.surahGrid.innerHTML = '<p style="text-align:center; color:red;">خطأ في الاتصال بالخوادم.</p>'; 
@@ -442,43 +428,23 @@
             } else { els.reciterSelect.add(new Option("عفواً، لا يوجد قراء لهذه الرواية", "")); }
         }
 
-        // تم إضافة ميزة الاستكمال من نفس الآية عند تغيير القارئ
         function onReciterChange() {
             const selectedOption = els.reciterSelect.options[els.reciterSelect.selectedIndex];
             currentAudioServer = selectedOption.value;
             currentAvailableSurahs = selectedOption.dataset.surahList ? selectedOption.dataset.surahList.split(',').map(Number) : [];
 
             document.getElementById('player-reciter-txt').innerText = selectedOption.text.split(' (')[0];
-            
             let wasPlaying = (isPlaying || !audioPlayer.paused);
-            let savedAyahIndex = currentPlayingAyahIndex; // حفظ مكان الآية الحالي
+            audioPlayer.pause(); isPlaying = false; els.playBtnSticky.innerHTML = "⏵"; removeHighlight();
 
-            audioPlayer.pause();
-            isPlaying = false;
-            els.playBtnSticky.innerHTML = "⏵";
-
-            renderSurahGrid(); 
-            syncBottomControls(); 
+            renderSurahGrid(); syncBottomControls(); 
 
             if (els.mushafView.style.display === 'block' && currentSurahNumber) {
                 document.getElementById('player-surah-txt').innerText = `سورة ${SURAH_NAMES_AR[currentSurahNumber - 1]}`;
-                
                 audioPlayer.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                surahTimingStats = []; 
-                currentPlayingAyahIndex = -1;
-                
-                if (savedAyahIndex !== -1) {
-                    pendingJumpAyahIndex = savedAyahIndex; // تمرير أمر الانتقال لحدث التحميل
-                }
-
-                if (wasPlaying) {
-                    audioPlayer.play();
-                    isPlaying = true;
-                    els.playBtnSticky.innerHTML = "⏸";
-                }
-            } else {
-                document.getElementById('player-surah-txt').innerText = "اختر سورة للتشغيل";
-            }
+                surahTimingStats = []; currentPlayingAyahIndex = -1;
+                if (wasPlaying) { audioPlayer.play(); isPlaying = true; els.playBtnSticky.innerHTML = "⏸"; }
+            } else { document.getElementById('player-surah-txt').innerText = "اختر سورة للتشغيل"; }
         }
 
         function renderSurahGrid() {
@@ -510,15 +476,7 @@
             });
         }
 
-        audioPlayer.onloadedmetadata = () => { 
-            setupAyahSync(); 
-            // إذا كان هناك طلب قفز لآية (بسبب تغيير القارئ)، نقوم بالانتقال إليها فوراً
-            if (pendingJumpAyahIndex !== -1 && surahTimingStats[pendingJumpAyahIndex]) {
-                audioPlayer.currentTime = surahTimingStats[pendingJumpAyahIndex].start;
-                pendingJumpAyahIndex = -1;
-            }
-        };
-        
+        audioPlayer.onloadedmetadata = () => { setupAyahSync(); };
         audioPlayer.ontimeupdate = () => {
             if(!isPlaying) return;
             if (surahTimingStats.length === 0) setupAyahSync();
@@ -675,32 +633,15 @@
             navigator.clipboard.writeText(textToCopy).then(() => { closeModals(); showToast("تم نسخ الآية بنجاح!"); });
         }
 
-        // دالة عرض التفسير مع نظام البديل التلقائي إذا لم يكن التفسير متوفراً
         async function openTafsirModal() {
             document.getElementById('action-modal').style.display = 'none'; document.getElementById('tafsir-modal').style.display = 'flex';
             const tafsirBox = document.getElementById('tafsir-modal-text');
-            const tafsirName = document.getElementById('tafsir-select').options[document.getElementById('tafsir-select').selectedIndex].text;
-            document.getElementById('tafsir-modal-title').innerText = tafsirName;
+            document.getElementById('tafsir-modal-title').innerText = document.getElementById('tafsir-select').options[document.getElementById('tafsir-select').selectedIndex].text;
             tafsirBox.innerHTML = "جاري جلب التفسير...";
-            
-            const globalNum = currentSurahData.ayahs[selectedAyahIndex].number;
             try {
-                const res = await fetch(`https://api.alquran.cloud/v1/ayah/${globalNum}/${document.getElementById('tafsir-select').value}`);
-                const data = await res.json();
-                if(data.code === 200 && data.data && data.data.text && data.data.text.trim() !== "") {
-                    tafsirBox.innerHTML = data.data.text;
-                } else {
-                    throw new Error("Empty Tafsir");
-                }
-            } catch(e) { 
-                try {
-                    const fallbackRes = await fetch(`https://api.alquran.cloud/v1/ayah/${globalNum}/ar.muyassar`);
-                    const fallbackData = await fallbackRes.json();
-                    tafsirBox.innerHTML = `<span style="color:#DC2626; font-size:16px; display:block; margin-bottom:15px; border-bottom:1px solid #DC2626; padding-bottom:5px;">(عذراً، ${tafsirName} غير متوفر لهذه الآية في قاعدة البيانات، تم عرض "التفسير الميسر" كبديل)</span>` + fallbackData.data.text;
-                } catch(err) {
-                    tafsirBox.innerHTML = "عذراً، حدث خطأ عام في جلب التفسير."; 
-                }
-            }
+                const res = await fetch(`https://api.alquran.cloud/v1/ayah/${currentSurahData.ayahs[selectedAyahIndex].number}/${document.getElementById('tafsir-select').value}`);
+                tafsirBox.innerHTML = (await res.json()).data.text;
+            } catch(e) { tafsirBox.innerHTML = "حدث خطأ في جلب التفسير."; }
         }
 
         function nextPage() { if(currentSurahPageIndex < currentSurahPages.length - 1) { currentSurahPageIndex++; renderCurrentPage(); document.querySelector('.mushaf-page-container').scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
