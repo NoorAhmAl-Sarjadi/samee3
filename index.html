@@ -230,7 +230,6 @@
         .action-repeat { background: #FEF3C7; color: var(--gold-premium); }
         .action-tafsir { background: #D1FAE5; color: #059669; }
         .action-copy { background: #F1F5F9; color: var(--text-main); }
-        /* تم تغيير زر "تصميم للمشاركة" إلى الأزرار الجديدة بالأسفل في قسم الـ HTML */
 
         .tafsir-text-box { font-family: 'Amiri', serif; font-size: clamp(18px, 4vw, 24px); line-height: 2; text-align: justify; padding: 15px; background: #F8FAFC; border-radius: 8px; margin-top: 15px; max-height: 50vh; overflow-y: auto; color: var(--text-main); border: 1px solid #E2E8F0; }
 
@@ -251,78 +250,6 @@
         .install-card ol li b { color: var(--royal-blue); }
         @media (max-width: 768px) { .install-steps-container { grid-template-columns: 1fr; } }
 
-        /* =========================================
-           تصميم الصورة المصدرة (التصميم الخرافي الجديد للآية)
-           ========================================= */
-        #export-canvas-container {
-            position: fixed;
-            left: -9999px;
-            top: -9999px;
-            width: 1080px;
-            height: 1080px;
-            background: linear-gradient(135deg, #0f172a 0%, #082f49 100%);
-            color: #FFFFFF;
-            display: flex;
-            padding: 40px;
-            box-sizing: border-box;
-            direction: rtl;
-            z-index: -100;
-        }
-        .export-inner-border {
-            width: 100%;
-            height: 100%;
-            border: 4px solid #D97706; /* لون ذهبي */
-            border-radius: 30px;
-            padding: 60px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: center;
-            background-image: radial-gradient(circle at center, rgba(217, 119, 6, 0.1) 0%, transparent 70%);
-            box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
-            box-sizing: border-box;
-        }
-        .export-header {
-            font-family: 'Amiri Quran', serif;
-            font-size: 35px;
-            color: #FCD34D;
-            opacity: 0.8;
-        }
-        .export-ayah {
-            font-family: 'Amiri Quran', serif;
-            /* تم إزالة الحجم الثابت من هنا ليتم التحكم به برمجياً */
-            color: #FFFFFF;
-            text-align: center;
-            text-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-grow: 1;
-            padding: 0 40px;
-        }
-        .export-surah-info {
-            font-family: 'Aref Ruqaa', serif;
-            font-size: 45px;
-            color: #D97706;
-            margin-top: 20px;
-            background: rgba(0, 0, 0, 0.4);
-            padding: 10px 40px;
-            border-radius: 50px;
-            border: 1px solid #D97706;
-        }
-        .export-footer {
-            font-family: 'Tajawal', sans-serif;
-            font-size: 35px;
-            font-weight: 800;
-            color: #94A3B8;
-            margin-top: 40px;
-            direction: rtl;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 15px;
-        }
-
         /* ================= الإضافة الجديدة: تنسيقات جدول الإدارة وتجاوبها ================= */
         #admin-view { max-width: 800px !important; }
         .admin-users-section { width: 100%; overflow: hidden; }
@@ -337,26 +264,22 @@
 
         /* ================= تحديثات الموبايل (الشريط العلوي والسفلي) ================= */
         @media (max-width: 768px) {
-            /* 1. تظبيط الشريط العلوي (تصغير الأزرار ولمها) */
             .navbar { padding: 10px 15px; flex-direction: column; gap: 8px; }
             .navbar h1 { font-size: 26px; }
             .nav-btns { gap: 6px; flex-wrap: wrap; }
             .btn-nav, .btn-login { padding: 5px 12px; font-size: 13px !important; border-width: 1px; }
             
-            /* 2. تظبيط الشريط السفلي (تصغير أزرار التشغيل والتحميل والقوائم) */
             .sticky-player { flex-direction: column; padding: 10px; border-radius: 15px 15px 0 0; gap: 8px; min-height: auto; }
             body { padding-bottom: 130px; }
             .player-info { text-align: center; max-width: 100% !important; margin-bottom: 5px; }
             .player-controls { width: 100%; justify-content: center; gap: 8px; }
             
-            /* تصغير القوائم المنسدلة في الشريط السفلي باستخدام important لتخطي الـ inline-style */
-            #bottom-reciter-select, #bottom-juz-select, #bottom-surah-select {
+            #bottom-reciter-select, #bottom-juz-select, #bottom-surah-select, #bottom-tafsir-select {
                 padding: 4px 8px !important;
                 font-size: 12px !important;
                 margin-bottom: 4px !important;
             }
             
-            /* تصغير أزرار التحميل وزر التشغيل */
             .action-btn-sm { padding: 6px 10px; font-size: 12px !important; border-width: 1px; }
             .play-pause-btn { width: 40px; height: 40px; font-size: 20px; }
             
@@ -364,16 +287,25 @@
             #selected-ayah-preview { font-size: 22px !important; }
         }
 
-        /* ================= تعديلات التصميم الإضافية (إضافات فقط) ================= */
-        .search-result-item .search-ayah-text { font-family: 'Amiri Quran', serif; font-size: 18px; line-height: 1.8; word-spacing: 2px; color: #0F172A; display: block; }
-        .search-result-item .search-surah-info { color: var(--royal-blue); font-weight: bold; margin-top: 8px; display: block; font-family: 'Tajawal', sans-serif; letter-spacing: 0px; font-size: 14px; }
-        .action-share, .action-share-tafsir { grid-column: 1 / -1; } /* لجعل الأزرار عريضة ومتطابقة */
+        /* ================= إضافات التصميم الجديدة ================= */
+        .spinner { width: 50px; height: 50px; border: 5px solid rgba(2, 132, 199, 0.2); border-top-color: var(--royal-blue); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .action-share, .action-share-tafsir { grid-column: 1 / -1 !important; width: 100% !important; margin-top: 5px; }
+        .action-share { background: var(--royal-blue); color: #fff; }
         .action-share-tafsir { background: var(--gold-premium); color: #fff; }
-        #export-canvas-container, #export-tafsir-canvas-container { height: auto !important; min-height: 1080px !important; }
-        .export-inner-border { height: auto !important; min-height: 100% !important; gap: 40px; justify-content: center !important; }
+        .search-ayah-text { font-family: 'Amiri Quran', serif; font-size: 18px; line-height: 1.8; word-spacing: 2px; color: #0F172A; display: block; }
+        .search-surah-info { color: var(--royal-blue); font-weight: bold; margin-top: 8px; display: block; font-family: 'Tajawal', sans-serif; letter-spacing: 0px; font-size: 14px; }
     </style>
 </head>
 <body>
+
+    <!-- شاشة التحميل (Splash Screen) -->
+    <div id="splash-screen" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-main); z-index: 99999; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.5s ease;">
+        <img src="https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png" alt="مصحف سميع" style="width: 140px; height: 140px; margin-bottom: 25px; border-radius: 25px; box-shadow: 0 10px 30px rgba(2, 132, 199, 0.2);">
+        <h1 style="font-family: 'Aref Ruqaa', serif; font-size: 45px; color: var(--royal-blue); margin: 0 0 20px 0;">مصحف سَمِيع</h1>
+        <div class="spinner"></div>
+        <p style="color: #64748B; font-weight: bold; font-size: 18px; margin-top: 20px;">جاري تجهيز المنصة...</p>
+    </div>
 
     <div id="toast">رسالة تنبيهية</div>
 
@@ -486,7 +418,6 @@
                 <button class="auth-submit-btn" onclick="saveAdminSettings()">تطبيق التعديلات</button>
             </div>
             
-            <!-- ================= الإضافة الجديدة: جدول بيانات المستخدمين ================= -->
             <div class="admin-users-section">
                 <h3 style="color: var(--gold-premium); margin-top: 30px; margin-bottom: 15px; border-bottom: 2px solid var(--border-light); padding-bottom: 10px; font-weight: 800; text-align: right;">👥 قائمة المستخدمين المسجلين</h3>
                 <div class="table-responsive">
@@ -505,7 +436,6 @@
                     </table>
                 </div>
             </div>
-            <!-- ========================================================================== -->
 
             <button class="btn-nav" style="color: #ef4444; border-color: #ef4444; margin-top: 20px; width: 100%;" onclick="logoutSystem()">تسجيل الخروج</button>
         </div>
@@ -514,11 +444,9 @@
     <!-- شريط التشغيل السفلي المتجاوب -->
     <div class="sticky-player">
         <div class="player-info" style="flex: 1; max-width: 450px; width: 100%;">
-            <!-- تم إخفاء النصوص الأصلية بدلاً من حذفها للحفاظ على الكود البرمجي كما طلبت -->
             <p class="p-surah" id="player-surah-txt" style="display: none;">اختر سورة للتشغيل</p>
             <p class="p-reciter" id="player-reciter-txt" style="display: none;">--</p>
             
-            <!-- القوائم المنسدلة الجديدة الخاصة بالشريط السفلي -->
             <div style="display: flex; gap: 8px; width: 100%; box-sizing: border-box; margin-bottom: 8px;">
                 <select id="bottom-reciter-select" class="filter-select" style="padding: 6px 10px; font-size: clamp(12px, 3vw, 14px); flex: 1; border-color: var(--border-light); background-color: #fff; box-sizing: border-box;" onchange="onBottomReciterChange()">
                     <option value="">اختر القارئ...</option>
@@ -599,7 +527,6 @@
             <p style="color: #64748B; font-size: 16px; margin-bottom: 30px; font-weight: bold;">لتجربة أسرع وأفضل، أضف المنصة لشاشتك الرئيسية واستخدمها كتطبيق مستقل.</p>
             
             <div class="install-steps-container">
-                <!-- أندرويد -->
                 <div class="install-card android">
                     <h4>🤖 أجهزة الأندرويد (Android)</h4>
                     <ol>
@@ -609,7 +536,6 @@
                     </ol>
                 </div>
                 
-                <!-- آيفون -->
                 <div class="install-card">
                     <h4>🍎 أجهزة الآيفون (iOS)</h4>
                     <ol>
@@ -619,7 +545,6 @@
                     </ol>
                 </div>
 
-                <!-- كمبيوتر -->
                 <div class="install-card desktop" style="grid-column: 1 / -1;">
                     <h4>💻 أجهزة الكمبيوتر (ويندوز / ماك)</h4>
                     <ol>
@@ -633,7 +558,6 @@
     </div>
 
     <script>
-        // ================= إعدادات قاعدة بيانات SUPABASE =================
         const SUPABASE_URL = 'https://wndzautzfpmycdesrbvs.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduZHphdXR6ZnBteWNkZXNyYnZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNzk2NzUsImV4cCI6MjEwMjg1NTY3NX0.EVUiKwmXjvAOYPqvWZx45c1cOcJHDvxufGtKEICJJms';
         
@@ -646,7 +570,6 @@
             console.error("Supabase load error:", e);
         }
 
-        // دالة جلب المستخدمين (تعمل دائماً سواء كان السيرفر متاحاً أم لا)
         async function getDBUsers() {
             try {
                 if (supabaseClient) {
@@ -659,7 +582,6 @@
             return JSON.parse(localStorage.getItem('samee3_users') || '[]');
         }
 
-        // دالة حفظ المستخدمين (تحفظ محلياً دائماً، وتحدث السيرفر في الخلفية)
         async function setDBUsers(usersArray) {
             localStorage.setItem('samee3_users', JSON.stringify(usersArray));
             try {
@@ -670,7 +592,6 @@
                 console.error("Supabase Error on SET:", e);
             }
         }
-        // =================================================================
 
         const SURAH_NAMES_AR = [
             "الفاتحة", "البقرة", "آل عمران", "النساء", "المائدة", "الأنعام", "الأعراف", "الأنفال", "التوبة", "يونس", 
@@ -689,7 +610,6 @@
 
         const JUZ_NAMES_AR = ["", "الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر", "الثالث عشر", "الرابع عشر", "الخامس عشر", "السادس عشر", "السابع عشر", "الثامن عشر", "التاسع عشر", "العشرون", "الحادي والعشرون", "الثاني والعشرون", "الثالث والعشرون", "الرابع والعشرون", "الخامس والعشرون", "السادس والعشرون", "السابع والعشرون", "الثامن والعشرون", "التاسع والعشرون", "الثلاثون"];
 
-        // خريطة دقيقة تحتوي على رقم السورة ورقم الآية التي يبدأ منها كل جزء لضمان الانتقال الدقيق
         const JUZ_START_MAP = {
             1: { surah: 1, ayah: 1 },
             2: { surah: 2, ayah: 142 },
@@ -733,7 +653,6 @@
         let currentSurahPageIndex = 0;
         let rawAyahsTexts = []; 
         
-        /* === متغيرات المزامنة المُحسنة === */
         let surahTimingStats = [];
         let currentPlayingAyahIndex = -1;
         let isPlaying = false;
@@ -764,7 +683,6 @@
             sidePanelCancel: document.getElementById('side-panel-cancel-btn')
         };
 
-        // --- وظائف الشريط السفلي المحدثة ---
         function syncBottomControls() {
             const topReciter = document.getElementById('reciter-select');
             const botReciter = document.getElementById('bottom-reciter-select');
@@ -838,12 +756,10 @@
                 if(startData) {
                     const botSurah = document.getElementById('bottom-surah-select');
                     if (botSurah) botSurah.value = startData.surah;
-                    // يتم تمرير السورة والآية معاً لضمان فتح المصحف على الآية المحددة وبدء التلاوة منها
                     loadSurahForReadingAndPlaying(startData.surah, startData.ayah);
                 }
             }
         }
-        // ----------------------------------------
 
         function showToast(msg) {
             const toast = document.getElementById("toast");
@@ -892,8 +808,21 @@
                 });
 
                 filterRecitersByRiwayah();
+                
+                // إخفاء شاشة التحميل بذكاء بعد الانتهاء
+                setTimeout(() => {
+                    const splash = document.getElementById('splash-screen');
+                    if(splash) {
+                        splash.style.opacity = '0';
+                        setTimeout(() => splash.style.display = 'none', 500);
+                    }
+                }, 800);
 
-            } catch (err) { els.surahGrid.innerHTML = '<p style="text-align:center; color:red;">خطأ في الاتصال بالخوادم.</p>'; }
+            } catch (err) { 
+                els.surahGrid.innerHTML = '<p style="text-align:center; color:red;">خطأ في الاتصال بالخوادم.</p>'; 
+                const splash = document.getElementById('splash-screen');
+                if(splash) splash.style.display = 'none';
+            }
         }
 
         function filterRecitersByRiwayah() {
@@ -930,7 +859,6 @@
             }
         }
 
-        // تم تعديل الدالة لكي تحدث صوت القارئ الفعلي فوراً إذا كان المستخدم داخل سورة
         function onReciterChange() {
             const selectedOption = els.reciterSelect.options[els.reciterSelect.selectedIndex];
             currentAudioServer = selectedOption.value;
@@ -938,7 +866,6 @@
 
             document.getElementById('player-reciter-txt').innerText = selectedOption.text.split(' (')[0];
             
-            // حفظ حالة التشغيل الحالية لكي يكمل تلقائياً لو كان الصوت يعمل
             let wasPlaying = (isPlaying || !audioPlayer.paused);
 
             audioPlayer.pause();
@@ -949,18 +876,14 @@
             renderSurahGrid(); 
             syncBottomControls(); 
 
-            // فحص ذكي: هل المستخدم يقرأ سورة الآن وتم تغيير القارئ؟
             if (els.mushafView.style.display === 'block' && currentSurahNumber) {
                 document.getElementById('player-surah-txt').innerText = `سورة ${SURAH_NAMES_AR[currentSurahNumber - 1]}`;
                 
-                // تحديث الـ src الخاص بمشغل الصوت فوراً ليعمل القارئ الجديد
                 audioPlayer.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
                 
-                // تصفير المزامنة ليتم حساب أوقات الآيات بدقة بناءً على سرعة القارئ الجديد
                 surahTimingStats = []; 
                 currentPlayingAyahIndex = -1;
                 
-                // لو كان الصوت شغال قبل ما نغير القارئ، خليه يشتغل تلقائي بالقارئ الجديد
                 if (wasPlaying) {
                     audioPlayer.play();
                     isPlaying = true;
@@ -1089,7 +1012,6 @@
                 return;
             }
 
-            // إيقاف التكرار الإجباري وتصفير الزر لتجنب مشكلة التعليق والانقطاع
             isRepeatingVerse = false;
             const btnRepeat = document.getElementById('btn-repeat-ayah');
             if (btnRepeat) {
@@ -1101,7 +1023,6 @@
             const exactSurahName = SURAH_NAMES_AR[surahNum - 1]; 
             document.getElementById('player-surah-txt').innerText = `سورة ${exactSurahName}`;
             
-            // مزامنة السورة المحددة مع قائمة الشريط السفلي
             const botSurah = document.getElementById('bottom-surah-select');
             if (botSurah) botSurah.value = surahNum;
             
@@ -1279,7 +1200,6 @@
             document.getElementById('action-modal').style.display = 'flex';
         }
 
-        // إظهار نافذة التثبيت
         function openInstallModal() {
             document.getElementById('install-modal').style.display = 'flex';
         }
@@ -1293,8 +1213,6 @@
 
         function playSpecificAyahModal() {
             closeModals();
-            
-            // تصفير أمر التكرار عند تشغيل الآية بشكل فردي لتلعب للنهاية
             isRepeatingVerse = false;
             const btnRepeat = document.getElementById('btn-repeat-ayah');
             if (btnRepeat) {
@@ -1323,7 +1241,7 @@
                 btn.style.background = "var(--gold-premium)";
                 btn.style.color = "#fff";
                 playSpecificAyahModal(); 
-                isRepeatingVerse = true; // التأكيد على التفعيل بعد تصفير التشغيل الفردي
+                isRepeatingVerse = true; 
             } else {
                 btn.style.background = "#FEF3C7";
                 btn.style.color = "var(--gold-premium)";
@@ -1376,7 +1294,6 @@
             els.playBtnSticky.innerHTML = "⏵";
             removeHighlight();
 
-            // تصفير زر التكرار عند إغلاق المصحف
             isRepeatingVerse = false;
             const btnRepeat = document.getElementById('btn-repeat-ayah');
             if (btnRepeat) {
@@ -1468,6 +1385,9 @@
             }
         }
 
+        // =====================================================================
+        // دالة تصميم صورة الآية فقط (بحجم ديناميكي وتصميم متطابق)
+        // =====================================================================
         function shareAyahImagePanel() {
             closeModals();
             if(isDownloadingOp) return showToast("عملية جارية بالفعل...");
@@ -1475,6 +1395,7 @@
             
             const exportDiv = document.createElement('div');
             exportDiv.id = 'export-canvas-container';
+            exportDiv.style.cssText = 'position: fixed; left: -9999px; top: -9999px; width: 1080px; height: auto; background: linear-gradient(135deg, #0f172a 0%, #082f49 100%); color: #FFFFFF; display: flex; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -100;';
             
             const exactSurahName = SURAH_NAMES_AR[currentSurahNumber - 1];
             const ayahNum = currentSurahData.ayahs[selectedAyahIndex].numberInSurah;
@@ -1486,38 +1407,22 @@
             ayahText = ayahText.replace(/^أعوذ بالله من الشيطان الرجيم\s*/g, '');
             ayahText = ayahText.trim();
 
-            // === [تحديث جديد: مقاسات أكبر لتعبئة الصورة بشكل متناسق] ===
             let ayahLength = ayahText.length;
-            let dynamicFontSize = 65; // الحجم الافتراضي للآيات القصيرة
+            let dynamicFontSize = 65; 
             let dynamicLineHeight = 1.8;
 
-            if (ayahLength > 700) { 
-                // للآيات الضخمة جداً (مثل آية الدين)
-                dynamicFontSize = 36;
-                dynamicLineHeight = 1.6;
-            } else if (ayahLength > 500) {
-                dynamicFontSize = 42;
-                dynamicLineHeight = 1.6;
-            } else if (ayahLength > 350) { 
-                // للآيات الطويلة نسبياً (مثل آية 2 من سورة المائدة الموجودة في الصورة)
-                dynamicFontSize = 48;
-                dynamicLineHeight = 1.6;
-            } else if (ayahLength > 200) {
-                dynamicFontSize = 55;
-                dynamicLineHeight = 1.7;
-            } else if (ayahLength > 100) {
-                dynamicFontSize = 60;
-                dynamicLineHeight = 1.7;
-            }
-            // === [نهاية التحديث] ===
+            if (ayahLength > 700) { dynamicFontSize = 36; dynamicLineHeight = 1.6; } 
+            else if (ayahLength > 500) { dynamicFontSize = 42; dynamicLineHeight = 1.6; } 
+            else if (ayahLength > 350) { dynamicFontSize = 48; dynamicLineHeight = 1.6; } 
+            else if (ayahLength > 200) { dynamicFontSize = 55; dynamicLineHeight = 1.7; } 
+            else if (ayahLength > 100) { dynamicFontSize = 60; dynamicLineHeight = 1.7; }
 
             exportDiv.innerHTML = `
-                <div class="export-inner-border">
-                    <div class="export-header">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</div>
-                    <!-- ستايل الآية مع المقاسات الجديدة -->
-                    <div class="export-ayah" style="font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight};">﴿ ${ayahText} ﴾</div>
-                    <div class="export-surah-info">سورة ${exactSurahName} ❖ آية ${ayahNum}</div>
-                    <div class="export-footer">
+                <div style="width: 100%; height: auto; border: 4px solid #D97706; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 40px; background-image: radial-gradient(circle at center, rgba(217, 119, 6, 0.1) 0%, transparent 70%); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
+                    <div style="font-family: 'Amiri Quran', serif; font-size: 35px; color: #FCD34D; opacity: 0.8;">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</div>
+                    <div style="font-family: 'Amiri Quran', serif; font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight}; color: #FFFFFF; text-align: center; text-shadow: 0 10px 30px rgba(0,0,0,0.5);">﴿ ${ayahText} ﴾</div>
+                    <div style="font-family: 'Aref Ruqaa', serif; font-size: 45px; color: #D97706; background: rgba(0, 0, 0, 0.4); padding: 10px 40px; border-radius: 50px; border: 1px solid #D97706;">سورة ${exactSurahName} ❖ آية ${ayahNum}</div>
+                    <div style="font-family: 'Tajawal', sans-serif; font-size: 35px; font-weight: 800; color: #94A3B8; direction: rtl; display: flex; justify-content: center; align-items: center; gap: 15px;">
                         <bdi style="color:#FFFFFF;">مصحف سَمِيع</bdi>
                         <span style="color:#D97706; margin:0 15px;">❖</span>
                         <bdi style="color:#FFFFFF;">Samee3 Quran</bdi>
@@ -1529,11 +1434,7 @@
             updateSidePanel(40, "جاري إنشاء التصميم الاحترافي...");
             
             setTimeout(() => {
-                html2canvas(exportDiv, { 
-                    scale: 2, 
-                    backgroundColor: null,
-                    useCORS: true
-                }).then(canvas => {
+                html2canvas(exportDiv, { scale: 2, backgroundColor: null, useCORS: true }).then(canvas => {
                     updateSidePanel(80, "تجهيز الصورة...");
                     canvas.toBlob(blob => {
                         finishSidePanel(blob, `Ayah_${exactSurahName}_${ayahNum}.png`);
@@ -1547,6 +1448,9 @@
             }, 800); 
         }
 
+        // =====================================================================
+        // دالة تصميم صورة مع التفسير (بحجم ديناميكي وبدون فراغات سفلية)
+        // =====================================================================
         async function shareAyahWithTafsirPanel() {
             closeModals();
             if(isDownloadingOp) return showToast("عملية جارية بالفعل...");
@@ -1597,25 +1501,24 @@
 
             const exportDiv = document.createElement('div');
             exportDiv.id = 'export-tafsir-canvas-container';
+            exportDiv.style.cssText = 'position: fixed; left: -9999px; top: -9999px; width: 1080px; height: auto; background: linear-gradient(135deg, #0f172a 0%, #082f49 100%); color: #FFFFFF; display: flex; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -100;';
 
             let dynamicFontSize = 55;
             if (ayahText.length > 300) dynamicFontSize = 45;
             if (ayahText.length > 500) dynamicFontSize = 38;
 
             exportDiv.innerHTML = `
-                <div class="export-inner-border">
-                    <div class="export-header">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</div>
-                    <div class="export-ayah" style="font-size: ${dynamicFontSize}px; line-height: 1.8;">﴿ ${ayahText} ﴾</div>
-                    <div class="export-surah-info">سورة ${exactSurahName} ❖ آية ${ayahNum}</div>
+                <div style="width: 100%; height: auto; border: 4px solid #D97706; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 40px; background-image: radial-gradient(circle at center, rgba(217, 119, 6, 0.1) 0%, transparent 70%); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
+                    <div style="font-family: 'Amiri Quran', serif; font-size: 35px; color: #FCD34D; opacity: 0.8;">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</div>
+                    <div style="font-family: 'Amiri Quran', serif; font-size: ${dynamicFontSize}px; line-height: 1.8; color: #FFFFFF; text-align: center; text-shadow: 0 10px 30px rgba(0,0,0,0.5);">﴿ ${ayahText} ﴾</div>
+                    <div style="font-family: 'Aref Ruqaa', serif; font-size: 40px; color: #D97706; background: rgba(0, 0, 0, 0.4); padding: 10px 40px; border-radius: 50px; border: 1px solid #D97706;">سورة ${exactSurahName} ❖ آية ${ayahNum}</div>
                     
-                    <div style="font-family: 'Amiri', serif; font-size: 32px; line-height: 2.2; color: #F8FAFC; text-align: justify; background: rgba(15, 23, 42, 0.6); padding: 40px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); width: 100%; box-sizing: border-box; box-shadow: 0 10px 30px rgba(0,0,0,0.3); margin-top: 20px;">
+                    <div style="font-family: 'Amiri', serif; font-size: 32px; line-height: 2.2; color: #F8FAFC; text-align: justify; background: rgba(15, 23, 42, 0.6); padding: 40px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); width: 100%; box-sizing: border-box; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
                         ${finalTafsirText}
-                        <div style="text-align: left; color: #FCD34D; font-size: 26px; margin-top: 25px; font-weight: bold; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
-                            — من كتاب ${finalTafsirName}
-                        </div>
+                        <div style="text-align: left; color: #FCD34D; font-size: 26px; margin-top: 25px; font-weight: bold; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">— من كتاب ${finalTafsirName}</div>
                     </div>
                     
-                    <div class="export-footer">
+                    <div style="font-family: 'Tajawal', sans-serif; font-size: 35px; font-weight: 800; color: #94A3B8; direction: rtl; display: flex; justify-content: center; align-items: center; gap: 15px;">
                         <bdi style="color:#FFFFFF;">مصحف سَمِيع</bdi>
                         <span style="color:#D97706; margin:0 15px;">❖</span>
                         <bdi style="color:#FFFFFF;">Samee3 Quran</bdi>
@@ -1640,7 +1543,7 @@
                 });
             }, 1000); 
         }
-        
+
         let searchTimeout;
 
         function openSearchModal() {
@@ -1698,7 +1601,8 @@
                                     <span class="search-ayah-text">﴿ ${m.text} ﴾</span>
                                     <small class="search-surah-info">سورة ${cleanSurahName} - آية ${m.numberInSurah}</small>
                                 </div>
-                                `}).join('');
+                                `;
+                            }).join('');
                         } else {
                             resultsBox.innerHTML = '<div style="text-align:center; padding:20px; color: red;">لم يتم العثور على نتائج للآية.</div>';
                         }
