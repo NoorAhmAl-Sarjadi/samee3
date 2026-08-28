@@ -42,11 +42,23 @@
         #admin-view{max-width:800px!important}.admin-users-section{width:100%;overflow:hidden}.table-responsive{width:100%;overflow-x:auto;background:#fff;border-radius:10px;border:1px solid var(--border-light);box-shadow:0 4px 10px rgba(0,0,0,.02)}.admin-users-table{width:100%;border-collapse:collapse;text-align:right;font-size:clamp(12px,3vw,15px)}.admin-users-table th{background:var(--royal-blue);color:#fff;padding:12px 15px;font-weight:700;white-space:nowrap}.admin-users-table td{padding:12px 15px;border-bottom:1px solid var(--border-light);color:var(--text-main)}.admin-users-table tr:last-child td{border-bottom:none}.admin-users-table tr:hover{background-color:#F8FAFC}.user-date-badge{background:#E0F2FE;color:var(--royal-blue);padding:4px 8px;border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap}
         @media (max-width:768px){.install-steps-container{grid-template-columns:1fr}.navbar{padding:10px 15px;flex-direction:column;gap:8px}.navbar h1{font-size:26px}.nav-btns{gap:6px;flex-wrap:wrap}.btn-nav,.btn-login{padding:5px 12px;font-size:13px!important;border-width:1px}.sticky-player{flex-direction:column;padding:10px;border-radius:15px 15px 0 0;gap:8px;min-height:auto}body{padding-bottom:150px}.player-info{text-align:center;max-width:100%!important;margin-bottom:5px}.player-controls{width:100%;justify-content:center;gap:8px}#bottom-juz-select,#bottom-reciter-select,#bottom-surah-select,#bottom-tafsir-select{padding:4px 8px!important;font-size:12px!important;margin-bottom:4px!important}.action-btn-sm{padding:6px 10px;font-size:12px!important;border-width:1px}.play-pause-btn{width:40px;height:40px;font-size:20px}.side-panel{width:90%;right:5%}#selected-ayah-preview{font-size:22px!important}}
         .spinner{width:50px;height:50px;border:5px solid rgba(2,132,199,.2);border-top-color:var(--royal-blue);border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{100%{transform:rotate(360deg)}}
+        
+        /* === تنسيقات إضافية لقسم الحديث الشريف === */
+        .hadith-book-card { background: var(--card-bg); border: 2px solid var(--gold-premium); border-radius: 15px; padding: 30px; text-align: center; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 15px rgba(217,119,6,0.1); }
+        .hadith-book-card:hover { transform: translateY(-5px); background: #FEF3C7; box-shadow: 0 10px 25px rgba(217,119,6,0.2); }
+        .hadith-book-card h3 { font-family: 'Aref Ruqaa', serif; font-size: 32px; color: var(--gold-premium); margin: 0; }
+        .hadith-chapter-item { padding: 15px; background: #fff; border: 1px solid var(--border-light); border-radius: 10px; margin-bottom: 10px; cursor: pointer; transition: 0.3s; font-weight: 700; color: var(--royal-blue); font-size: 18px; }
+        .hadith-chapter-item:hover { background: var(--bg-main); border-color: var(--royal-blue); transform: translateX(-5px); }
+        .hadith-text-block { background: var(--mushaf-paper); border: 1px solid var(--mushaf-border); border-radius: 12px; padding: 20px; margin-bottom: 20px; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 10px rgba(0,0,0,0.05); text-align: justify; direction: rtl; line-height: 2.2; }
+        .hadith-text-block:hover { border-color: var(--gold-premium); box-shadow: 0 8px 20px rgba(217,119,6,0.15); }
+        .hadith-number-badge { display: inline-block; background: var(--gold-premium); color: #fff; padding: 2px 10px; border-radius: 20px; font-size: 14px; font-weight: bold; margin-bottom: 10px; }
+        .hadith-content { font-family: 'Amiri', serif; font-size: 22px; color: #111; }
+        /* ========================================= */
     </style>
 </head>
 <body>
 
-    <!-- شاشة التحميل السريعة (تختفي فوراً بعد جلب البيانات) -->
+    <!-- شاشة التحميل السريعة -->
     <div id="splash-screen" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-main); z-index: 99999; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.4s ease;">
         <img src="https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png" alt="مصحف سميع" style="width: 140px; height: 140px; margin-bottom: 25px; border-radius: 25px; box-shadow: 0 10px 30px rgba(2, 132, 199, 0.2);">
         <h1 style="font-family: 'Aref Ruqaa', serif; font-size: 45px; color: var(--royal-blue); margin: 0 0 20px 0;">مصحف سَمِيع</h1>
@@ -70,6 +82,7 @@
         <h1 id="site-main-title">مصحف سَمِيع</h1>
         <div class="nav-btns">
             <button class="btn-nav active" onclick="switchTab('home-view')">الرئيسية</button>
+            <button class="btn-nav" onclick="switchTab('hadith-view')" style="border-color: var(--gold-premium); color: var(--gold-premium);">📚 الحديث</button>
             <button class="btn-nav" onclick="openInstallModal()" style="background: var(--gold-premium); color: #fff; border-color: var(--gold-premium);">📲 تثبيت</button>
             <button class="btn-login" onclick="switchTab('unified-login-view')" id="login-nav-btn">تسجيل الدخول</button>
             <button class="btn-nav" onclick="openSearchModal()" style="background: var(--bg-main);">🔍 بحث</button>
@@ -93,7 +106,6 @@
                 <option value="">جاري الاتصال بخوادم الصوت...</option>
             </select>
 
-            <!-- التفسير الميسر هو الافتراضي -->
             <select class="filter-select" id="tafsir-select" onchange="if(typeof syncTopTafsirToBottom === 'function') syncTopTafsirToBottom()">
                 <option value="ar.muyassar" selected>التفسير الميسر</option>
                 <option value="ar.ibnkathir">تفسير ابن كثير</option>
@@ -106,10 +118,48 @@
     </div>
 
     <div class="container">
-        <!-- شبكة السور -->
+        <!-- شبكة السور القرآنية -->
         <div id="home-view">
             <div class="surah-grid" id="surah-grid-container"></div>
         </div>
+
+        <!-- ============================================== -->
+        <!-- قسم الحديث الشريف المضاف حديثاً (لا يتعارض مع القرآن) -->
+        <!-- ============================================== -->
+        <div id="hadith-view" class="hidden-screen" style="max-width: 900px; margin: 0 auto;">
+            <!-- أدوات التحكم والرجوع -->
+            <div class="mushaf-toolbar" id="hadith-toolbar" style="display: none; justify-content: right; margin-bottom: 20px;">
+                <button class="btn-nav" onclick="goBackHadith()" style="border-color: var(--gold-premium); color: var(--gold-premium);">⬅ العودة للكتب</button>
+            </div>
+            <div class="mushaf-toolbar" id="hadith-toolbar-main" style="display: none; justify-content: right; margin-bottom: 20px;">
+                <button class="btn-nav" onclick="showHadithBooks()" style="border-color: var(--gold-premium); color: var(--gold-premium);">⬅ العودة للرئيسية</button>
+            </div>
+
+            <h2 id="hadith-main-title" style="color: var(--gold-premium); text-align: center; font-family: 'Aref Ruqaa', serif; font-size: 38px; margin-bottom: 30px;">المكتبة النبوية</h2>
+
+            <!-- المستوى الأول: اختيار صحيح البخاري أو مسلم -->
+            <div id="hadith-level-1" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+                <div class="hadith-book-card" onclick="loadHadithBook('ara-bukhari', 'صحيح البخاري')">
+                    <h3>صحيح البخاري</h3>
+                    <p style="color: #64748B; margin-top: 10px; font-weight: bold;">أصح الكتب بعد كتاب الله</p>
+                </div>
+                <div class="hadith-book-card" onclick="loadHadithBook('ara-muslim', 'صحيح مسلم')">
+                    <h3>صحيح مسلم</h3>
+                    <p style="color: #64748B; margin-top: 10px; font-weight: bold;">الجامع الصحيح للإمام مسلم</p>
+                </div>
+            </div>
+
+            <!-- المستوى الثاني: اختيار الكتاب / الباب -->
+            <div id="hadith-level-2" style="display: none;">
+                <div id="hadith-chapters-list"></div>
+            </div>
+
+            <!-- المستوى الثالث: عرض الأحاديث -->
+            <div id="hadith-level-3" style="display: none;">
+                <div id="hadith-items-list"></div>
+            </div>
+        </div>
+        <!-- ============================================== -->
 
         <!-- وضعية المصحف المدني المتجاوبة -->
         <div id="mushaf-view" class="mushaf-view">
@@ -143,7 +193,7 @@
             </div>
         </div>
 
-        <!-- شاشات الدخول -->
+        <!-- شاشات الدخول والإدارة -->
         <div id="unified-login-view" class="auth-container hidden-screen">
             <h2 id="auth-title" style="color: var(--royal-blue); margin-top: 0; font-weight: 800;">بوابة الدخول</h2>
             <div class="form-group" id="name-group" style="display: none;">
@@ -158,7 +208,6 @@
             </div>
         </div>
 
-        <!-- لوحة الإدارة -->
         <div id="admin-view" class="auth-container hidden-screen" style="max-width: 600px;">
             <h2 style="color: var(--royal-blue); margin-top: 0; font-weight: 800;">لوحة تحكم المنصة</h2>
             <div style="background: #F8FAFC; padding: 25px; border-radius: 12px; border: 1px solid #E2E8F0; text-align: right;">
@@ -220,12 +269,26 @@
         </div>
     </div>
 
-    <!-- نافذة التفسير -->
+    <!-- نافذة خيارات الحديث الشريف (مستقلة) -->
+    <div id="hadith-action-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModals()">✖</button>
+            <h3 style="color: var(--gold-premium); margin-top: 0; font-weight: 800; font-size: clamp(18px, 4vw, 24px);">خيارات الحديث</h3>
+            <p id="selected-hadith-preview" style="font-family: 'Amiri', serif; font-size: clamp(18px, 4vw, 24px); color: var(--text-main); margin: 20px 0; line-height: 2; text-align: justify;"></p>
+            <div class="ayah-actions">
+                <button class="modal-action-btn action-tafsir" onclick="openHadithSharhModal()" style="grid-column: span 2;">📖 تخريج وشرح الحديث</button>
+                <button class="modal-action-btn action-copy" onclick="copyHadithText()">📋 نسخ</button>
+                <button class="modal-action-btn action-share-tafsir" onclick="shareHadithImagePanel()" style="grid-column: 1/-1;">🖼 تصميم صورة للحديث</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- نافذة التفسير/الشرح -->
     <div id="tafsir-modal" class="modal-overlay">
         <div class="modal-content" style="max-width: 800px;">
             <button class="close-modal" onclick="closeModals()">✖</button>
-            <h3 id="tafsir-modal-title" style="color: #059669; margin-top: 0; font-weight: 800;">التفسير</h3>
-            <div id="tafsir-modal-text" class="tafsir-text-box">جاري جلب التفسير...</div>
+            <h3 id="tafsir-modal-title" style="color: #059669; margin-top: 0; font-weight: 800;">التفسير / الشرح</h3>
+            <div id="tafsir-modal-text" class="tafsir-text-box">جاري جلب البيانات...</div>
         </div>
     </div>
 
@@ -267,6 +330,9 @@
     </div>
 
     <script>
+        // =====================================================================
+        // الأكواد الأساسية للقرآن الكريم (بدون أي تعديل)
+        // =====================================================================
         const SUPABASE_URL = 'https://wndzautzfpmycdesrbvs.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduZHphdXR6ZnBteWNkZXNyYnZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNzk2NzUsImV4cCI6MjEwMjg1NTY3NX0.EVUiKwmXjvAOYPqvWZx45c1cOcJHDvxufGtKEICJJms';
         let supabaseClient = null;
@@ -360,7 +426,6 @@
             setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
         }
 
-        // تم استخدام Promise.all لتسريع سحب البيانات (Parallel Fetching)
         async function initializeApp() {
             try {
                 const [resMeta, resMp3] = await Promise.all([
@@ -390,11 +455,10 @@
 
                 filterRecitersByRiwayah();
                 
-                // إخفاء شاشة التحميل فوراً بنعومة
                 const splash = document.getElementById('splash-screen');
                 if(splash) {
                     splash.style.opacity = '0';
-                    setTimeout(() => splash.remove(), 400); // إزالة العنصر لتخفيف الصفحة
+                    setTimeout(() => splash.remove(), 400);
                 }
             } catch (err) { 
                 els.surahGrid.innerHTML = '<p style="text-align:center; color:red;">خطأ في الاتصال بالخوادم.</p>'; 
@@ -518,6 +582,9 @@
             surahTimingStats = []; currentPlayingAyahIndex = -1; removeHighlight();
             els.homeView.style.display = 'none'; els.heroFilters.style.display = 'none'; els.mushafView.style.display = 'block';
             document.getElementById('pagination-controls').style.display = 'none'; els.quranDisplay.innerHTML = 'جاري تحميل النص...';
+            
+            // التأكد من إخفاء قسم الحديث لو كان مفتوحاً
+            document.getElementById('hadith-view').classList.add('hidden-screen');
 
             try {
                 let textEdition = els.riwayahSelect.value !== 'hafs' ? 'quran-simple' : 'quran-uthmani'; 
@@ -684,10 +751,6 @@
             } catch(e) { if(e.message !== "تم الإلغاء") els.sidePanelText.innerText = "فشل التحميل!"; }
         }
 
-        // =====================================================================
-        // دوال إنشاء الصورة المحدثة - إصلاح مشكلة عدم الظهور بشكل كامل
-        // =====================================================================
-        
         function cleanAyahTextForDesign(text) {
             return text.replace(/^بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ\s*/g, '').replace(/^بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ\s*/g, '').replace(/^بسم الله الرحمن الرحيم\s*/g, '').replace(/^أعوذ بالله من الشيطان الرجيم\s*/g, '').trim();
         }
@@ -702,7 +765,6 @@
 
             exportDiv = document.createElement('div');
             exportDiv.id = 'export-canvas-container';
-            // السر في الإصلاح: fixed وليس absolute لضمان وجوده ضمن أبعاد يمكن قراءتها، و left بعيد جداً
             exportDiv.style.cssText = 'position: fixed; left: -3000px; top: 0; width: 1080px; background: linear-gradient(135deg, #0f172a 0%, #082f49 100%); display: flex; flex-direction: column; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -9999;';
             
             const exactSurahName = SURAH_NAMES_AR[currentSurahNumber - 1];
@@ -865,11 +927,29 @@
         function jumpToAyahFromSearch(surahNum, ayahNum) { closeModals(); if(!currentAudioServer) return showToast("الرجاء اختيار القارئ أولاً من القائمة."); showToast("جاري فتح السورة والانتقال للآية..."); loadSurahForReadingAndPlaying(surahNum, ayahNum, false); }
 
         function switchTab(tabId) {
-            ['home-view', 'mushaf-view', 'hero-filters'].forEach(id => document.getElementById(id).style.display = 'none');
-            ['unified-login-view', 'admin-view'].forEach(id => document.getElementById(id).classList.add('hidden-screen'));
-            if (tabId === 'home-view') { document.getElementById('home-view').style.display = 'block'; document.getElementById('hero-filters').style.display = 'block'; } 
-            else document.getElementById(tabId).classList.remove('hidden-screen');
-            audioPlayer.pause(); els.playBtnSticky.innerHTML = "⏵";
+            ['home-view', 'mushaf-view', 'hero-filters', 'hadith-view'].forEach(id => document.getElementById(id).classList.add('hidden-screen'));
+            document.getElementById('home-view').style.display = 'none';
+            document.getElementById('mushaf-view').style.display = 'none';
+            document.getElementById('hero-filters').style.display = 'none';
+            
+            if (tabId === 'home-view') { 
+                document.getElementById('home-view').classList.remove('hidden-screen');
+                document.getElementById('home-view').style.display = 'block'; 
+                document.getElementById('hero-filters').style.display = 'block'; 
+            } else if (tabId === 'hadith-view') {
+                document.getElementById('hadith-view').classList.remove('hidden-screen');
+                document.getElementById('hadith-view').style.display = 'block';
+                showHadithBooks(); // للتأكد من الرجوع للصفحة الرئيسية للحديث
+            } else {
+                document.getElementById(tabId).classList.remove('hidden-screen');
+            }
+
+            // تحديث الأزرار العلوية
+            document.querySelectorAll('.navbar .btn-nav').forEach(btn => btn.classList.remove('active'));
+            if(tabId === 'home-view') document.querySelectorAll('.navbar .btn-nav')[0].classList.add('active');
+            else if(tabId === 'hadith-view') document.querySelectorAll('.navbar .btn-nav')[1].classList.add('active');
+
+            if(tabId !== 'mushaf-view') { audioPlayer.pause(); els.playBtnSticky.innerHTML = "⏵"; }
         }
 
         function toggleAuthMode() {
@@ -903,6 +983,198 @@
 
         function saveAdminSettings() { const newTitle = document.getElementById('edit-site-title').value; if(newTitle.trim() !== '') document.getElementById('site-main-title').innerText = newTitle; showToast('تم تطبيق التعديلات بنجاح!'); }
         function logoutSystem() { localStorage.removeItem('userLoggedIn'); document.getElementById('login-nav-btn').innerText = "تسجيل الدخول"; showToast("تم تسجيل الخروج"); switchTab('home-view'); }
+
+
+        // =====================================================================
+        // الأكواد الخاصة بقسم الحديث الشريف والشرح والتصميم
+        // =====================================================================
+        let currentHadithBookId = "";
+        let currentHadithBookName = "";
+        let currentHadithChapterName = "";
+        let fetchedHadithData = null; // تخزين البيانات لتجنب التحميل المتكرر
+        let selectedHadithItem = null;
+
+        function showHadithBooks() {
+            document.getElementById('hadith-level-1').style.display = 'grid';
+            document.getElementById('hadith-level-2').style.display = 'none';
+            document.getElementById('hadith-level-3').style.display = 'none';
+            document.getElementById('hadith-toolbar').style.display = 'none';
+            document.getElementById('hadith-toolbar-main').style.display = 'none';
+            document.getElementById('hadith-main-title').innerText = "المكتبة النبوية";
+        }
+
+        async function loadHadithBook(bookId, bookName) {
+            currentHadithBookId = bookId;
+            currentHadithBookName = bookName;
+            document.getElementById('hadith-level-1').style.display = 'none';
+            document.getElementById('hadith-level-2').style.display = 'block';
+            document.getElementById('hadith-toolbar-main').style.display = 'flex';
+            document.getElementById('hadith-main-title').innerText = bookName;
+            
+            const chaptersContainer = document.getElementById('hadith-chapters-list');
+            chaptersContainer.innerHTML = '<div style="text-align:center; padding: 40px;"><div class="spinner" style="margin: 0 auto 20px;"></div><p style="color:var(--royal-blue); font-weight:bold;">جاري جلب الفهارس...</p></div>';
+
+            try {
+                // استخدام API Fawaz Ahmed السريع جداً والمجاني
+                const res = await fetch(`https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/${bookId}.json`);
+                fetchedHadithData = await res.json();
+                
+                chaptersContainer.innerHTML = '';
+                const sections = fetchedHadithData.metadata.sections;
+                
+                for (const [key, value] of Object.entries(sections)) {
+                    if(value.trim() !== "") {
+                        const chapterDiv = document.createElement('div');
+                        chapterDiv.className = 'hadith-chapter-item';
+                        chapterDiv.innerText = value;
+                        chapterDiv.onclick = () => openHadithChapter(key, value);
+                        chaptersContainer.appendChild(chapterDiv);
+                    }
+                }
+            } catch (err) {
+                chaptersContainer.innerHTML = '<p style="text-align:center; color:red;">تعذر تحميل الكتاب. تحقق من اتصالك.</p>';
+            }
+        }
+
+        function openHadithChapter(sectionId, sectionName) {
+            currentHadithChapterName = sectionName;
+            document.getElementById('hadith-level-2').style.display = 'none';
+            document.getElementById('hadith-level-3').style.display = 'block';
+            document.getElementById('hadith-toolbar').style.display = 'flex';
+            document.getElementById('hadith-toolbar-main').style.display = 'none';
+            document.getElementById('hadith-main-title').innerText = sectionName;
+
+            const itemsContainer = document.getElementById('hadith-items-list');
+            itemsContainer.innerHTML = '';
+
+            // فلترة الأحاديث التابعة لهذا الباب فقط
+            const chapterHadiths = fetchedHadithData.hadiths.filter(h => h.reference && h.reference.book == sectionId);
+            
+            if (chapterHadiths.length === 0) {
+                itemsContainer.innerHTML = '<p style="text-align:center; color:#64748B;">لا يوجد أحاديث في هذا الباب حالياً.</p>';
+                return;
+            }
+
+            chapterHadiths.forEach((hadith) => {
+                const hDiv = document.createElement('div');
+                hDiv.className = 'hadith-text-block';
+                hDiv.innerHTML = `
+                    <div class="hadith-number-badge">رقم الحديث: ${hadith.hadithnumber}</div>
+                    <div class="hadith-content">« ${hadith.text} »</div>
+                `;
+                hDiv.onclick = () => openHadithActionModal(hadith);
+                itemsContainer.appendChild(hDiv);
+            });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function goBackHadith() {
+            document.getElementById('hadith-level-3').style.display = 'none';
+            document.getElementById('hadith-level-2').style.display = 'block';
+            document.getElementById('hadith-toolbar').style.display = 'none';
+            document.getElementById('hadith-toolbar-main').style.display = 'flex';
+            document.getElementById('hadith-main-title').innerText = currentHadithBookName;
+        }
+
+        function openHadithActionModal(hadithObj) {
+            selectedHadithItem = hadithObj;
+            let previewText = hadithObj.text;
+            if(previewText.length > 200) previewText = previewText.substring(0, 200) + "...";
+            document.getElementById('selected-hadith-preview').innerText = `« ${previewText} »`;
+            document.getElementById('hadith-action-modal').style.display = 'flex';
+        }
+
+        function copyHadithText() {
+            const textToCopy = `« ${selectedHadithItem.text} »\n[${currentHadithBookName} - ${currentHadithChapterName} - حديث رقم ${selectedHadithItem.hadithnumber}]`;
+            navigator.clipboard.writeText(textToCopy).then(() => { closeModals(); showToast("تم نسخ الحديث بنجاح!"); });
+        }
+
+        async function openHadithSharhModal() {
+            document.getElementById('hadith-action-modal').style.display = 'none'; 
+            document.getElementById('tafsir-modal').style.display = 'flex';
+            const tafsirBox = document.getElementById('tafsir-modal-text');
+            document.getElementById('tafsir-modal-title').innerText = "تخريج وشرح الحديث (الدرر السنية)";
+            tafsirBox.innerHTML = '<div style="text-align:center;"><div class="spinner" style="margin: 0 auto;"></div><p style="margin-top:15px; color:#059669; font-weight:bold;">جاري البحث في موقع الدرر السنية...</p></div>';
+            
+            // استخدام أول 6 كلمات للبحث الدقيق
+            let searchWords = selectedHadithItem.text.split(' ').slice(0, 7).join(' ');
+            let dorarUrl = `https://dorar.net/dorar_api.json?skey=${encodeURIComponent(searchWords)}`;
+            // استخدام Proxy لتجاوز الـ CORS بطريقة مجانية ومستقرة
+            let proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(dorarUrl)}`;
+
+            try {
+                let res = await fetch(proxyUrl);
+                let data = await res.json();
+                let parsedContents = JSON.parse(data.contents);
+                
+                if (parsedContents && parsedContents.ahadith && parsedContents.ahadith.result) {
+                    // التنظيف والتنسيق للعرض داخل التطبيق
+                    let htmlResult = parsedContents.ahadith.result;
+                    if(htmlResult.includes("لا يوجد أحاديث مطابقة")) {
+                        tafsirBox.innerHTML = "<p style='text-align:center; color:#64748B;'>عذراً، لم يتم العثور على شرح مفصل لهذا الحديث في قواعد الدرر السنية.</p>";
+                    } else {
+                        tafsirBox.innerHTML = htmlResult;
+                        // تحسين تصميم الروابط الداخلية الناتجة من الدرر السنية
+                        tafsirBox.querySelectorAll('a').forEach(a => { a.style.color = "var(--royal-blue)"; a.style.textDecoration = "none"; a.removeAttribute('href'); });
+                    }
+                } else {
+                    throw new Error("No Data");
+                }
+            } catch(e) { 
+                tafsirBox.innerHTML = "<p style='text-align:center; color:red;'>تعذر الاتصال بخوادم الدرر السنية في الوقت الحالي.</p>"; 
+            }
+        }
+
+        function shareHadithImagePanel() {
+            closeModals();
+            if(isDownloadingOp) return showToast("عملية جارية بالفعل...");
+            initSidePanel("تصميم صورة الحديث");
+            
+            let exportDiv = document.getElementById('export-hadith-canvas-container');
+            if (exportDiv) exportDiv.remove();
+
+            exportDiv = document.createElement('div');
+            exportDiv.id = 'export-hadith-canvas-container';
+            exportDiv.style.cssText = 'position: fixed; left: -3000px; top: 0; width: 1080px; background: linear-gradient(135deg, #022c22 0%, #064e3b 100%); display: flex; flex-direction: column; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -9999;';
+            
+            let hadithText = selectedHadithItem.text;
+            let hadithNum = selectedHadithItem.hadithnumber;
+
+            let dynamicFontSize = 55, dynamicLineHeight = 1.8;
+            if (hadithText.length > 1000) { dynamicFontSize = 30; dynamicLineHeight = 1.6; } 
+            else if (hadithText.length > 700) { dynamicFontSize = 36; dynamicLineHeight = 1.6; } 
+            else if (hadithText.length > 500) { dynamicFontSize = 42; dynamicLineHeight = 1.6; } 
+            else if (hadithText.length > 300) { dynamicFontSize = 48; dynamicLineHeight = 1.7; } 
+
+            exportDiv.innerHTML = `
+                <div style="width: 100%; border: 4px solid #D97706; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: rgba(6, 78, 59, 0.8); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
+                    <div style="font-family: 'Aref Ruqaa', serif; font-size: 45px; color: #FCD34D; opacity: 0.9; margin-bottom: 20px;">قال رسول الله ﷺ</div>
+                    <div style="font-family: 'Amiri', serif; font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight}; color: #FFFFFF; text-align: justify; text-shadow: 0 10px 30px rgba(0,0,0,0.5); margin: 30px 0 50px 0;">« ${hadithText} »</div>
+                    <div style="font-family: 'Aref Ruqaa', serif; font-size: 35px; color: #D97706; background: rgba(0, 0, 0, 0.4); padding: 15px 40px; border-radius: 50px; border: 1px solid #D97706;">${currentHadithBookName} ❖ ${currentHadithChapterName} ❖ رقم ${hadithNum}</div>
+                    
+                    <div style="font-family: 'Tajawal', sans-serif; font-size: 35px; font-weight: 800; color: #94A3B8; direction: rtl; display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 50px;">
+                        <bdi style="color:#FFFFFF;">مصحف سَمِيع</bdi>
+                        <span style="color:#D97706; margin:0 15px;">❖</span>
+                        <bdi style="color:#FFFFFF;">Samee3 Quran</bdi>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(exportDiv);
+
+            updateSidePanel(40, "جاري إنشاء التصميم الاحترافي...");
+            
+            setTimeout(() => {
+                html2canvas(exportDiv, { scale: 2, useCORS: true, backgroundColor: '#022c22' }).then(canvas => {
+                    updateSidePanel(80, "تجهيز الصورة...");
+                    canvas.toBlob(blob => {
+                        finishSidePanel(blob, `Hadith_${currentHadithBookName}_${hadithNum}.png`);
+                        exportDiv.remove();
+                    });
+                }).catch(err => {
+                    els.sidePanelText.innerText = "فشل التصميم!"; isDownloadingOp = false; exportDiv.remove();
+                });
+            }, 1200); 
+        }
 
         window.onload = initializeApp;
     </script>
