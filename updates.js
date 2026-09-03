@@ -1,56 +1,137 @@
 // =========================================================
-// 1. تسريع فتح الصفحة بشكل صاروخي (حفظ نصوص القرآن والقراء)
+// 1. تسريع جلب بيانات القراء والسور (لتعمل الواجهة بدون نت)
 // =========================================================
 const originalFetch = window.fetch;
 window.fetch = async function(...args) {
     const request = new Request(args[0], args[1]);
     const url = request.url;
-
-    // استهداف روابط النصوص والبيانات فقط لتسريعها
     if (url.includes('api.alquran.cloud') || url.includes('mp3quran.net')) {
         try {
             const cache = await caches.open('samee3-data-cache-v1');
             const cachedResponse = await cache.match(request);
-            
             if (cachedResponse) {
-                // إذا كانت البيانات محفوظة، نعرضها فوراً بلمح البصر
-                // ثم نحدثها في الخلفية بصمت للزيارات القادمة
-                originalFetch(request).then(networkResponse => {
-                    if (networkResponse.ok) cache.put(request, networkResponse.clone());
-                }).catch(() => {});
-                
+                originalFetch(request).then(res => { if (res.ok) cache.put(request, res.clone()); }).catch(() => {});
                 return cachedResponse;
             } else {
-                // إذا كانت أول زيارة، نجلبها ونحفظها
                 const networkResponse = await originalFetch(request);
                 if (networkResponse.ok) cache.put(request, networkResponse.clone());
                 return networkResponse;
             }
-        } catch (e) {
-            return originalFetch(...args);
-        }
+        } catch (e) { return originalFetch(...args); }
     }
     return originalFetch(...args);
 };
 
 // =========================================================
-// 2. تفعيل مشغل الصوتيات بدون إنترنت (الربط مع Service Worker)
+// 2. تسجيل نظام الأوفلاين (Service Worker)
 // =========================================================
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        // نستدعي عامل الخلفية الذي سيقوم بتحميل الصوتيات
-        navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('✅ تم تفعيل وضع الأوفلاين بنجاح.'))
-            .catch(err => console.log('❌ خطأ في تفعيل الأوفلاين:', err));
+        navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW Error:', err));
     });
+}
+
+// =========================================================
+// 3. حقن أزرار (التحميل الاستباقي للمنصة) بدون لمس الـ HTML
+// =========================================================
+window.addEventListener('DOMContentLoaded', () => {
+    const controlsContainer = document.querySelector('.player-controls');
     
-    // إضافة رسالة تنبيه للمستخدم عندما ينقطع الإنترنت
-    window.addEventListener('offline', () => {
-        const toast = document.getElementById("toast");
-        if (toast) {
-            toast.innerText = "أنت الآن بدون إنترنت. يمكنك تشغيل السور التي استمعت لها مسبقاً بحرية.";
-            toast.className = "show";
-            setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 4000);
+    if(controlsContainer) {
+        // إنشاء زر حفظ السورة الحالية
+        const saveSurahBtn = document.createElement('button');
+        saveSurahBtn.className = 'action-btn-sm';
+        saveSurahBtn.style.cssText = 'background: #10B981; color: white; border-color: #10B981; margin: 2px;';
+        saveSurahBtn.innerHTML = '☁️ حفظ السورة للمنصة';
+        saveSurahBtn.onclick = cacheCurrentSurahForOffline;
+        
+        // إنشاء زر حفظ المصحف كاملاً
+        const saveMushafBtn = document.createElement('button');
+        saveMushafBtn.className = 'action-btn-sm';
+        saveMushafBtn.style.cssText = 'background: #059669; color: white; border-color: #059669; margin: 2px;';
+        saveMushafBtn.innerHTML = '☁️ حفظ المصحف للمنصة';
+        saveMushafBtn.onclick = cacheFullMushafForOffline;
+        
+        // إضافتهم بجوار أزرار التنزيل الأصلية
+        controlsContainer.prepend(saveMushafBtn);
+        controlsContainer.prepend(saveSurahBtn);
+    }
+});
+
+// =========================================================
+// 4. دوال الحفظ الصامت داخل ذاكرة المتصفح (Cache API)
+// =========================================================
+
+// دالة حفظ سورة واحدة
+async function cacheCurrentSurahForOffline() {
+    if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
+    if(isDownloadingOp) return showToast("عملية جارية حالياً...");
+
+    initSidePanel("حفظ السورة للاستماع بدون نت");
+    els.sidePanelCancel.innerText = 'إلغاء العملية';
+    
+    try {
+        updateSidePanel(30, "جاري الحفظ داخل المنصة...");
+        const url = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+        const cache = await caches.open('samee3-audio-cache-v1');
+        
+        const response = await fetch(url);
+        if(response.ok) {
+            await cache.put(url, response);
+            updateSidePanel(100, "تم الحفظ بنجاح! السورة تعمل الآن بدون نت.");
+            els.sidePanelBtn.classList.add('hidden'); // إخفاء زر التنزيل لعدم الحاجة إليه
+            setTimeout(() => hideSidePanel(), 3500);
+        } else {
+            throw new Error("فشل الاتصال");
         }
-    });
+    } catch(e) {
+        els.sidePanelText.innerText = "فشل الحفظ!";
+        isDownloadingOp = false;
+    }
+}
+
+// دالة حفظ المصحف كاملاً (تتطلب مساحة)
+async function cacheFullMushafForOffline() {
+    if(!currentAudioServer || currentAvailableSurahs.length === 0) return showToast("اختر قارئ أولاً.");
+    if(isDownloadingOp) return showToast("عملية جارية حالياً...");
+
+    const confirmMsg = "تنبيه: حفظ المصحف كاملاً للعمل بدون إنترنت قد يستهلك مساحة تخزين (حوالي 500 ميجابايت). هل ترغب بالمتابعة؟";
+    if(!confirm(confirmMsg)) return;
+
+    initSidePanel("حفظ المصحف كاملاً للعمل بدون نت");
+    els.sidePanelCancel.innerText = 'إيقاف / إلغاء';
+    
+    let downloadedCount = 0;
+    let totalSurahs = currentAvailableSurahs.length;
+    
+    try {
+        const cache = await caches.open('samee3-audio-cache-v1');
+        for (let i = 0; i < totalSurahs; i++) {
+            // السماح للمستخدم بإلغاء العملية
+            if(!isDownloadingOp) throw new Error("تم الإلغاء");
+            
+            let surahNum = currentAvailableSurahs[i];
+            const url = currentAudioServer + padNumber(surahNum) + '.mp3';
+            
+            // التحقق مما إذا كانت السورة محفوظة مسبقاً لتوفير البيانات
+            const existing = await cache.match(url);
+            if(!existing) {
+                const response = await fetch(url);
+                if (response.ok) await cache.put(url, response);
+            }
+            
+            downloadedCount++;
+            let percent = Math.floor((downloadedCount / totalSurahs) * 100);
+            updateSidePanel(percent, `تم حفظ ${downloadedCount} من ${totalSurahs} سورة`);
+        }
+        
+        updateSidePanel(100, "اكتمل الحفظ! المصحف متاح بدون نت.");
+        els.sidePanelBtn.classList.add('hidden');
+        setTimeout(() => hideSidePanel(), 4000);
+        
+    } catch(e) {
+        if(e.message !== "تم الإلغاء") {
+            els.sidePanelText.innerText = "فشل الحفظ.. قد تكون المساحة ممتلئة!";
+        }
+    }
 }
