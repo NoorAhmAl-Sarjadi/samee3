@@ -1,62 +1,116 @@
+// =========================================================
 // 1. تسجيل نظام الأوفلاين (Service Worker)
+// =========================================================
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW Error:', err));
     });
 }
 
+// =========================================================
 // 2. التحميل الخفي الصامت لنصوص القرآن كاملة
+// =========================================================
 window.addEventListener('load', () => {
-    // الانتظار 3 ثوانٍ حتى يفتح الموقع بالكامل ثم يبدأ التحميل في الخلفية
     setTimeout(silentlyCacheAllQuranText, 3000);
 });
 
 async function silentlyCacheAllQuranText() {
     const isCached = localStorage.getItem('quran_text_fully_cached_v2');
-    if (isCached === 'true') return; // توقف إذا تم التحميل مسبقاً
+    if (isCached === 'true') return; 
     
     try {
         const editions = ['quran-uthmani', 'quran-simple'];
         for (let surah = 1; surah <= 114; surah++) {
             for (let edition of editions) {
                 const url = `https://api.alquran.cloud/v1/surah/${surah}/${edition}`;
-                // جلب صامت (عامل الخلفية سيلتقطه ويحفظه تلقائياً)
                 await fetch(url).catch(() => {});
-                // استراحة 200 جزء من الثانية لمنع اختناق الإنترنت
                 await new Promise(r => setTimeout(r, 200));
             }
         }
         localStorage.setItem('quran_text_fully_cached_v2', 'true');
-        console.log("تم تحميل المصحف المكتوب للعمل بدون إنترنت.");
     } catch (e) {}
 }
 
-// 3. حقن أزرار حفظ الصوت للمنصة (بدون لمس الـ HTML)
+// =========================================================
+// 3. حقن أزرار التحميل (للعمل بدون نت) وتصليح خلل انقطاع النت
+// =========================================================
 window.addEventListener('DOMContentLoaded', () => {
     const controlsContainer = document.querySelector('.player-controls');
     if(controlsContainer) {
+        // زر تحميل السورة (باسم جديد ومميز)
         const saveSurahBtn = document.createElement('button');
         saveSurahBtn.className = 'action-btn-sm';
         saveSurahBtn.style.cssText = 'background: #10B981; color: white; border-color: #10B981; margin: 2px;';
-        saveSurahBtn.innerHTML = '☁️ حفظ السورة للمنصة';
+        saveSurahBtn.innerHTML = '☁️ تحميل السورة (بدون نت)';
         saveSurahBtn.onclick = cacheCurrentSurahForOffline;
         
+        // زر تحميل المصحف (باسم جديد ومميز)
         const saveMushafBtn = document.createElement('button');
         saveMushafBtn.className = 'action-btn-sm';
         saveMushafBtn.style.cssText = 'background: #059669; color: white; border-color: #059669; margin: 2px;';
-        saveMushafBtn.innerHTML = '☁️ حفظ المصحف للمنصة';
+        saveMushafBtn.innerHTML = '☁️ تحميل المصحف (بدون نت)';
         saveMushafBtn.onclick = cacheFullMushafForOffline;
         
         controlsContainer.prepend(saveMushafBtn);
         controlsContainer.prepend(saveSurahBtn);
     }
+
+    // --- الحل الجذري لمشكلة التشغيل بدون إنترنت ---
+    const mainAudio = document.getElementById('main-audio');
+    if (mainAudio) {
+        mainAudio.addEventListener('error', () => {
+            if (!navigator.onLine) {
+                showToast("عذراً، السورة غير محملة ❌ يرجى الاتصال بالإنترنت لتحميلها أولاً.");
+                if(typeof isPlaying !== 'undefined') window.isPlaying = false;
+                const playBtn = document.getElementById('play-btn-sticky');
+                if (playBtn) playBtn.innerHTML = "⏵";
+            }
+        });
+    }
 });
 
+// --- تصليح خلل (جاري تجهيز المقطع) عند عودة الإنترنت ---
+// نقوم بتعديل دوال التشغيل الأساسية لتنعش نفسها تلقائياً
+if (typeof window.togglePlayState === 'function') {
+    const originalToggle = window.togglePlayState;
+    window.togglePlayState = function() {
+        const audio = document.getElementById('main-audio');
+        // إذا كان هناك خطأ بسبب انقطاع سابق، أو المقطع معلق
+        if (audio && (audio.error || audio.readyState === 0) && audio.src) {
+            if (!navigator.onLine) {
+                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
+            } else {
+                audio.load(); // إنعاش المشغل لتنظيف الخطأ وبدء التحميل من جديد
+            }
+        }
+        originalToggle();
+    };
+}
+
+if (typeof window.playSpecificAyahModal === 'function') {
+    const originalPlayAyah = window.playSpecificAyahModal;
+    window.playSpecificAyahModal = function() {
+        const audio = document.getElementById('main-audio');
+        if (audio && (audio.error || audio.readyState === 0) && audio.src) {
+            if (!navigator.onLine) {
+                if(typeof closeModals === 'function') closeModals();
+                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
+            } else {
+                audio.load(); // إنعاش المشغل
+            }
+        }
+        originalPlayAyah();
+    };
+}
+
+// =========================================================
+// 4. دوال تحميل الصوتيات للعمل بدون نت 
+// =========================================================
 async function cacheCurrentSurahForOffline() {
     if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
     if(isDownloadingOp) return showToast("عملية جارية حالياً...");
 
-    initSidePanel("حفظ السورة للاستماع بدون نت");
+    initSidePanel("تحميل السورة للعمل بدون نت");
     els.sidePanelCancel.innerText = 'إلغاء العملية';
     
     try {
@@ -66,21 +120,21 @@ async function cacheCurrentSurahForOffline() {
         const response = await fetch(url);
         if(response.ok) {
             await cache.put(url, response);
-            updateSidePanel(100, "تم الحفظ بنجاح! السورة تعمل الآن بدون نت.");
+            updateSidePanel(100, "تم التحميل! السورة تعمل الآن بدون نت.");
             els.sidePanelBtn.classList.add('hidden'); 
             setTimeout(() => hideSidePanel(), 3500);
         } else { throw new Error("فشل"); }
-    } catch(e) { els.sidePanelText.innerText = "فشل الحفظ!"; isDownloadingOp = false; }
+    } catch(e) { els.sidePanelText.innerText = "فشل التحميل!"; isDownloadingOp = false; }
 }
 
 async function cacheFullMushafForOffline() {
     if(!currentAudioServer || currentAvailableSurahs.length === 0) return showToast("اختر قارئ أولاً.");
     if(isDownloadingOp) return showToast("عملية جارية حالياً...");
 
-    const confirmMsg = "تنبيه: سيتم حفظ المصحف كاملاً داخل المنصة ليعمل بدون نت. هل ترغب بالمتابعة؟";
+    const confirmMsg = "تنبيه: سيتم تحميل المصحف كاملاً داخل المنصة ليعمل بدون نت. هل ترغب بالمتابعة؟";
     if(!confirm(confirmMsg)) return;
 
-    initSidePanel("حفظ المصحف للعمل بدون نت");
+    initSidePanel("تحميل المصحف للعمل بدون نت");
     els.sidePanelCancel.innerText = 'إيقاف / إلغاء';
     
     let downloadedCount = 0; let totalSurahs = currentAvailableSurahs.length;
@@ -97,10 +151,10 @@ async function cacheFullMushafForOffline() {
             }
             downloadedCount++;
             let percent = Math.floor((downloadedCount / totalSurahs) * 100);
-            updateSidePanel(percent, `تم حفظ ${downloadedCount} من ${totalSurahs} سورة`);
+            updateSidePanel(percent, `تم التحميل ${downloadedCount} من ${totalSurahs} سورة`);
         }
-        updateSidePanel(100, "اكتمل الحفظ! المصحف متاح بدون نت.");
+        updateSidePanel(100, "اكتمل التحميل! المصحف متاح بدون نت.");
         els.sidePanelBtn.classList.add('hidden');
         setTimeout(() => hideSidePanel(), 4000);
-    } catch(e) { if(e.message !== "تم الإلغاء") els.sidePanelText.innerText = "فشل الحفظ.. قد تكون المساحة ممتلئة!"; }
+    } catch(e) { if(e.message !== "تم الإلغاء") els.sidePanelText.innerText = "فشل التحميل.. قد تكون المساحة ممتلئة!"; }
 }
