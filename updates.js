@@ -11,7 +11,6 @@ if ('serviceWorker' in navigator) {
 // 2. التحميل الصامت لنصوص القرآن (لكي يفتح بدون نت)
 // =========================================================
 window.addEventListener('load', () => {
-    // تبدأ العملية بعد 4 ثوانٍ بهدوء تام
     setTimeout(silentlyCacheAllQuranText, 4000);
 });
 
@@ -21,9 +20,7 @@ async function silentlyCacheAllQuranText() {
         const editions = ['quran-uthmani', 'quran-simple'];
         for (let surah = 1; surah <= 114; surah++) {
             for (let edition of editions) {
-                // هذا الطلب سيلتقطه sw.js ويحفظه في الذاكرة
                 fetch(`https://api.alquran.cloud/v1/surah/${surah}/${edition}`).catch(() => {});
-                // استراحة خفيفة لمنع اختناق المتصفح
                 await new Promise(r => setTimeout(r, 150));
             }
         }
@@ -32,7 +29,7 @@ async function silentlyCacheAllQuranText() {
 }
 
 // =========================================================
-// 3. حقن الأزرار وإصلاح مشغل الصوت باحترافية
+// 3. حقن الأزرار وإصلاح مشغل الصوت بشكل احترافي وهادئ
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
     const controlsContainer = document.querySelector('.player-controls');
@@ -52,39 +49,32 @@ window.addEventListener('DOMContentLoaded', () => {
         controlsContainer.prepend(saveMushafBtn);
         controlsContainer.prepend(saveSurahBtn);
     }
-
-    // مراقبة أخطاء المشغل (عند انقطاع النت)
-    const mainAudio = document.getElementById('main-audio');
-    if (mainAudio) {
-        mainAudio.addEventListener('error', () => {
-            if (!navigator.onLine || mainAudio.error) {
-                showToast("عذراً، السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
-                if(typeof isPlaying !== 'undefined') window.isPlaying = false;
-                const playBtn = document.getElementById('play-btn-sticky');
-                if (playBtn) playBtn.innerHTML = "⏵";
-            }
-        });
-    }
 });
 
-// --- الحل الجذري والاحترافي للتشغيل بعد عودة الإنترنت ---
+// --- التحكم الذكي في زر التشغيل (يظهر رسالة واحدة فقط لو مفيش نت، ويشتغل فورا لو فيه نت) ---
 if (typeof window.togglePlayState === 'function') {
     const originalToggle = window.togglePlayState;
     window.togglePlayState = function() {
         const audio = document.getElementById('main-audio');
-        // إذا كان المشغل في حالة "خطأ" (بسبب انقطاع نت سابق)
-        if (audio && audio.error) {
-            if (!navigator.onLine) {
-                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
-            } else {
-                // مسح حالة الخطأ تماماً وبناء الاتصال من الصفر!
+        if (audio) {
+            // 1. لو مفيش نت، والصوت مش شغال أو فيه خطأ
+            if (!navigator.onLine && (audio.error || audio.readyState === 0)) {
+                if(typeof window.isPlaying !== 'undefined') window.isPlaying = false;
+                const playBtn = document.getElementById('play-btn-sticky');
+                if (playBtn) playBtn.innerHTML = "⏵";
+                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً."); // رسالة واحدة فقط وتتوقف الدالة
+            }
+            
+            // 2. لو النت رجع، والمشغل كان معلق من قبل
+            if (navigator.onLine && audio.error) {
                 if(typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
+                    // تنظيف المشغل وإعادة ربطه فورا بدون تأخير
                     audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                    audio.load(); // إعادة تهيئة المشغل
+                    audio.load();
                 }
             }
         }
-        originalToggle();
+        originalToggle(); // تشغيل طبيعي
     };
 }
 
@@ -92,12 +82,12 @@ if (typeof window.playSpecificAyahModal === 'function') {
     const originalPlayAyah = window.playSpecificAyahModal;
     window.playSpecificAyahModal = function() {
         const audio = document.getElementById('main-audio');
-        if (audio && audio.error) {
-            if (!navigator.onLine) {
+        if (audio) {
+            if (!navigator.onLine && (audio.error || audio.readyState === 0)) {
                 if(typeof closeModals === 'function') closeModals();
                 return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
-            } else {
-                // إعادة الاتصال من الصفر عند تشغيل آية بعد عودة النت
+            }
+            if (navigator.onLine && audio.error) {
                 if(typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
                     audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
                     audio.load();
