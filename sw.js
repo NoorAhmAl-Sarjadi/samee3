@@ -1,6 +1,5 @@
-const CACHE_NAME = 'samee3-audio-cache-v2'; // قمنا بتغيير الإصدار لتحديث النظام فوراً
+const CACHE_NAME = 'samee3-cache-v3';
 
-// التفعيل الفوري
 self.addEventListener('install', event => { 
     self.skipWaiting(); 
 });
@@ -9,20 +8,40 @@ self.addEventListener('activate', event => {
     event.waitUntil(clients.claim()); 
 });
 
-// اعتراض الطلبات بشكل آمن
 self.addEventListener('fetch', event => {
-    // 1. التعامل مع ملفات الصوت
-    if (event.request.url.endsWith('.mp3')) {
+    const url = event.request.url;
+
+    // 1. تسريع فتح الصفحة وجلب بيانات السور والقراء (نصوص)
+    if (url.includes('api.alquran.cloud') || url.includes('mp3quran.net')) {
         event.respondWith(
             caches.match(event.request).then(cachedResponse => {
-                // إذا قام المستخدم بحفظ السورة من الزر الأخضر، شغلها من الذاكرة (بدون نت)
+                const fetchPromise = fetch(event.request).then(networkResponse => {
+                    if (networkResponse.ok) {
+                        caches.open(CACHE_NAME).then(cache => {
+                            cache.put(event.request, networkResponse.clone());
+                        });
+                    }
+                    return networkResponse;
+                }).catch(() => {
+                    return cachedResponse; // إذا لم يوجد إنترنت، اعرض المحفوظ مسبقاً
+                });
+                
+                // إذا كانت البيانات محفوظة، نعرضها في أجزاء من الثانية (تسريع خيالي) ونحدثها في الخلفية
+                return cachedResponse || fetchPromise;
+            })
+        );
+        return;
+    }
+
+    // 2. التعامل مع ملفات الصوت
+    if (url.endsWith('.mp3')) {
+        event.respondWith(
+            caches.match(event.request).then(cachedResponse => {
+                // إذا قام المستخدم بحفظ السورة من الزر الأخضر، ستعمل من الذاكرة (بدون نت)
                 if (cachedResponse) {
                     return cachedResponse;
                 }
-                // إذا لم يحفظها، دع المشغل يتصل بالإنترنت بشكل طبيعي جداً للتدفق السريع
-                return fetch(event.request);
-            }).catch(() => {
-                // في حالة فشل الاتصال وعدم وجود نت
+                // إذا لم يحفظها، تشتغل من الإنترنت مباشرة بشكل طبيعي
                 return fetch(event.request);
             })
         );
