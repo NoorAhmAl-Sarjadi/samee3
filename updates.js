@@ -8,7 +8,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // =========================================================
-// 2. التحميل الصامت لنصوص القرآن (لكي يفتح بدون نت)
+// 2. التحميل الصامت لنصوص القرآن في الخلفية
 // =========================================================
 window.addEventListener('load', () => {
     setTimeout(silentlyCacheAllQuranText, 4000);
@@ -29,7 +29,7 @@ async function silentlyCacheAllQuranText() {
 }
 
 // =========================================================
-// 3. حقن الأزرار وإصلاح مشغل الصوت بشكل احترافي وهادئ
+// 3. حقن الأزرار وإدارة التشغيل بسلاسة تامة بدون أي رسائل مزعجة
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
     const controlsContainer = document.querySelector('.player-controls');
@@ -51,46 +51,57 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// --- التحكم الذكي في زر التشغيل (يظهر رسالة واحدة فقط لو مفيش نت، ويشتغل فورا لو فيه نت) ---
+// --- التحكم الذكي بالزر السفلي (تشغيل فوراً عند عودة النت، وتنبيه ثابت لو مقطوع) ---
 if (typeof window.togglePlayState === 'function') {
     const originalToggle = window.togglePlayState;
     window.togglePlayState = function() {
         const audio = document.getElementById('main-audio');
         if (audio) {
-            // 1. لو مفيش نت، والصوت مش شغال أو فيه خطأ
-            if (!navigator.onLine && (audio.error || audio.readyState === 0)) {
-                if(typeof window.isPlaying !== 'undefined') window.isPlaying = false;
-                const playBtn = document.getElementById('play-btn-sticky');
-                if (playBtn) playBtn.innerHTML = "⏵";
-                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً."); // رسالة واحدة فقط وتتوقف الدالة
+            // لو النت مش موجود والسورة مش محملة -> رسالة ثابتة واحدة فقط
+            if (!navigator.onLine && (audio.error || audio.readyState === 0 || audio.paused)) {
+                // فحص دقيق هل السورة مخزنة محلياً أم لا
+                const currentUrl = audio.src;
+                caches.match(currentUrl).then(cached => {
+                    if (!cached) {
+                        if(typeof window.isPlaying !== 'undefined') window.isPlaying = false;
+                        const playBtn = document.getElementById('play-btn-sticky');
+                        if (playBtn) playBtn.innerHTML = "⏵";
+                        showToast("عذراً، السورة غير محملة ❌ يرجى الاتصال بالإنترنت.");
+                    } else {
+                        originalToggle(); // لو مخزنة محلياً تشتغل عادي جداً بدون نت
+                    }
+                }).catch(() => {
+                    showToast("عذراً، السورة غير محملة ❌ يرجى الاتصال بالإنترنت.");
+                });
+                return;
             }
             
-            // 2. لو النت رجع، والمشغل كان معلق من قبل
+            // لو النت رجع وجاوب المشغل -> تنظيف حالة الخطأ والتشغيل فوراً بدون أي رسائل أو تأخير
             if (navigator.onLine && audio.error) {
+                audio.removeAttribute('src'); // تفريغ الخطأ القديم
                 if(typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
-                    // تنظيف المشغل وإعادة ربطه فورا بدون تأخير
                     audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                    audio.load();
                 }
             }
         }
-        originalToggle(); // تشغيل طبيعي
+        originalToggle();
     };
 }
 
+// --- التحكم الذكي بزر الآيات (تشغيل فوري عند عودة النت) ---
 if (typeof window.playSpecificAyahModal === 'function') {
     const originalPlayAyah = window.playSpecificAyahModal;
     window.playSpecificAyahModal = function() {
         const audio = document.getElementById('main-audio');
         if (audio) {
-            if (!navigator.onLine && (audio.error || audio.readyState === 0)) {
+            if (!navigator.onLine && audio.error) {
                 if(typeof closeModals === 'function') closeModals();
-                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
+                return showToast("عذراً، السورة غير محملة ❌ يرجى الاتصال بالإنترنت.");
             }
             if (navigator.onLine && audio.error) {
+                audio.removeAttribute('src');
                 if(typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
                     audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                    audio.load();
                 }
             }
         }
@@ -99,7 +110,7 @@ if (typeof window.playSpecificAyahModal === 'function') {
 }
 
 // =========================================================
-// 4. دوال تحميل الصوتيات للعمل بدون نت 
+// 4. دوال التحميل للعمل بدون نت
 // =========================================================
 async function cacheCurrentSurahForOffline() {
     if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
