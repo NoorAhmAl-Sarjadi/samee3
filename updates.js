@@ -1,29 +1,5 @@
 // =========================================================
-// 1. تسريع جلب بيانات القراء والسور (لتعمل الواجهة بدون نت)
-// =========================================================
-const originalFetch = window.fetch;
-window.fetch = async function(...args) {
-    const request = new Request(args[0], args[1]);
-    const url = request.url;
-    if (url.includes('api.alquran.cloud') || url.includes('mp3quran.net')) {
-        try {
-            const cache = await caches.open('samee3-data-cache-v1');
-            const cachedResponse = await cache.match(request);
-            if (cachedResponse) {
-                originalFetch(request).then(res => { if (res.ok) cache.put(request, res.clone()); }).catch(() => {});
-                return cachedResponse;
-            } else {
-                const networkResponse = await originalFetch(request);
-                if (networkResponse.ok) cache.put(request, networkResponse.clone());
-                return networkResponse;
-            }
-        } catch (e) { return originalFetch(...args); }
-    }
-    return originalFetch(...args);
-};
-
-// =========================================================
-// 2. تسجيل نظام الأوفلاين (Service Worker)
+// 1. تسجيل نظام الأوفلاين (Service Worker)
 // =========================================================
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
@@ -32,7 +8,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // =========================================================
-// 3. حقن أزرار (التحميل الاستباقي للمنصة) بدون لمس الـ HTML
+// 2. حقن أزرار (التحميل الاستباقي للمنصة) بدون لمس الـ HTML
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
     const controlsContainer = document.querySelector('.player-controls');
@@ -59,10 +35,8 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // =========================================================
-// 4. دوال الحفظ الصامت داخل ذاكرة المتصفح (Cache API)
+// 3. دوال الحفظ الصامت داخل ذاكرة المتصفح (Cache API)
 // =========================================================
-
-// دالة حفظ سورة واحدة
 async function cacheCurrentSurahForOffline() {
     if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
     if(isDownloadingOp) return showToast("عملية جارية حالياً...");
@@ -73,13 +47,13 @@ async function cacheCurrentSurahForOffline() {
     try {
         updateSidePanel(30, "جاري الحفظ داخل المنصة...");
         const url = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-        const cache = await caches.open('samee3-audio-cache-v1');
+        const cache = await caches.open('samee3-cache-v3'); // تم توحيد اسم الذاكرة
         
         const response = await fetch(url);
         if(response.ok) {
             await cache.put(url, response);
             updateSidePanel(100, "تم الحفظ بنجاح! السورة تعمل الآن بدون نت.");
-            els.sidePanelBtn.classList.add('hidden'); // إخفاء زر التنزيل لعدم الحاجة إليه
+            els.sidePanelBtn.classList.add('hidden'); 
             setTimeout(() => hideSidePanel(), 3500);
         } else {
             throw new Error("فشل الاتصال");
@@ -90,12 +64,11 @@ async function cacheCurrentSurahForOffline() {
     }
 }
 
-// دالة حفظ المصحف كاملاً (تتطلب مساحة)
 async function cacheFullMushafForOffline() {
     if(!currentAudioServer || currentAvailableSurahs.length === 0) return showToast("اختر قارئ أولاً.");
     if(isDownloadingOp) return showToast("عملية جارية حالياً...");
 
-    const confirmMsg = "تنبيه: حفظ المصحف كاملاً للعمل بدون إنترنت قد يستهلك مساحة تخزين (حوالي 500 ميجابايت). هل ترغب بالمتابعة؟";
+    const confirmMsg = "تنبيه: حفظ المصحف كاملاً للعمل بدون إنترنت قد يستهلك مساحة تخزين. هل ترغب بالمتابعة؟";
     if(!confirm(confirmMsg)) return;
 
     initSidePanel("حفظ المصحف كاملاً للعمل بدون نت");
@@ -105,15 +78,13 @@ async function cacheFullMushafForOffline() {
     let totalSurahs = currentAvailableSurahs.length;
     
     try {
-        const cache = await caches.open('samee3-audio-cache-v1');
+        const cache = await caches.open('samee3-cache-v3');
         for (let i = 0; i < totalSurahs; i++) {
-            // السماح للمستخدم بإلغاء العملية
             if(!isDownloadingOp) throw new Error("تم الإلغاء");
             
             let surahNum = currentAvailableSurahs[i];
             const url = currentAudioServer + padNumber(surahNum) + '.mp3';
             
-            // التحقق مما إذا كانت السورة محفوظة مسبقاً لتوفير البيانات
             const existing = await cache.match(url);
             if(!existing) {
                 const response = await fetch(url);
