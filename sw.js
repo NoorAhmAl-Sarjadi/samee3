@@ -1,21 +1,29 @@
-const CACHE_NAME = 'samee3-audio-cache-v1';
+const CACHE_NAME = 'samee3-audio-cache-v2'; // قمنا بتغيير الإصدار لتحديث النظام فوراً
 
-self.addEventListener('install', event => { self.skipWaiting(); });
-self.addEventListener('activate', event => { event.waitUntil(clients.claim()); });
+// التفعيل الفوري
+self.addEventListener('install', event => { 
+    self.skipWaiting(); 
+});
 
+self.addEventListener('activate', event => { 
+    event.waitUntil(clients.claim()); 
+});
+
+// اعتراض الطلبات بشكل آمن
 self.addEventListener('fetch', event => {
-    const url = event.request.url;
-    // اعتراض ملفات الصوت والنصوص لتعمل بدون نت
-    if (url.endsWith('.mp3') || url.includes('api.alquran.cloud') || url.includes('mp3quran.net')) {
+    // 1. التعامل مع ملفات الصوت
+    if (event.request.url.endsWith('.mp3')) {
         event.respondWith(
             caches.match(event.request).then(cachedResponse => {
-                if (cachedResponse) return cachedResponse;
-                return fetch(event.request).then(networkResponse => {
-                    return caches.open(CACHE_NAME).then(cache => {
-                        cache.put(event.request, networkResponse.clone());
-                        return networkResponse;
-                    });
-                });
+                // إذا قام المستخدم بحفظ السورة من الزر الأخضر، شغلها من الذاكرة (بدون نت)
+                if (cachedResponse) {
+                    return cachedResponse;
+                }
+                // إذا لم يحفظها، دع المشغل يتصل بالإنترنت بشكل طبيعي جداً للتدفق السريع
+                return fetch(event.request);
+            }).catch(() => {
+                // في حالة فشل الاتصال وعدم وجود نت
+                return fetch(event.request);
             })
         );
     }
