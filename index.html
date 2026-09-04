@@ -196,11 +196,8 @@
         </div>
         
         <div class="player-controls">
-            <!-- أزرار الحفظ للعمل بدون إنترنت (داخل المنصة) -->
-            <button class="action-btn-sm" style="background:#10B981; color:white; border-color:#10B981;" onclick="cacheSingleSurah()">☁️ حفظ السورة بالمنصة</button>
-            <button class="action-btn-sm" style="background:#059669; color:white; border-color:#059669;" onclick="cacheFullMushaf()">☁️ حفظ المصحف بالمنصة</button>
-            
-            <!-- أزرار التحميل كملفات فعلية (على الجهاز) -->
+            <!-- تمت إزالة الأزرار الزائدة، والإبقاء فقط على أزرار التحميل للجهاز -->
+            <!-- أزرار الأوفلاين (تحميل بدون نت) سيتم ضخها تلقائياً من ملف updates.js -->
             <button class="action-btn-sm" onclick="downloadSingleSurahToDevice()">⬇️ تنزيل السورة للجهاز</button>
             <button class="action-btn-sm dl-all-btn" onclick="downloadFullMushafToDevice()">⬇️ تنزيل المصحف (ZIP)</button>
             
@@ -701,13 +698,14 @@
 
         // =========================================================
         // 1. دوال الحفظ داخل المنصة (لتعمل بدون إنترنت)
+        // (تم إعادة تسميتها لتطابق الأزرار التي يتم إنشاؤها من updates.js)
         // =========================================================
-        async function cacheSingleSurah() {
+        async function cacheCurrentSurahForOffline() {
             if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
             if(isDownloadingOp) return showToast("عملية جارية حالياً...");
 
             isDownloadingOp = true;
-            initSidePanel("حفظ السورة (لعملها بدون نت)");
+            initSidePanel("تحميل السورة (بدون نت)");
             if(els.sidePanelCancel) els.sidePanelCancel.innerText = 'إلغاء العملية';
             
             try {
@@ -726,7 +724,7 @@
             } finally { isDownloadingOp = false; }
         }
 
-        async function cacheFullMushaf() {
+        async function cacheFullMushafForOffline() {
             if(!currentAudioServer) return showToast("اختر قارئ أولاً.");
             if(isDownloadingOp) return showToast("عملية جارية حالياً...");
 
@@ -734,7 +732,7 @@
             if(!confirm("سيتم حفظ المصحف كاملاً داخل المنصة ليعمل بدون نت. هل ترغب بالمتابعة؟")) return;
 
             isDownloadingOp = true; 
-            initSidePanel("حفظ المصحف (لعمله بدون نت)");
+            initSidePanel("تحميل المصحف (بدون نت)");
             if (els.sidePanelCancel) els.sidePanelCancel.innerText = 'إيقاف / إلغاء';
             
             let downloadedCount = 0; let totalSurahs = surahsToDownload.length;
