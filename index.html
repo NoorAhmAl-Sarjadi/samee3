@@ -267,6 +267,29 @@
     </div>
 
     <script>
+        // ==========================================
+        // 1. تسجيل الأوفلاين وتحميل نصوص القرآن
+        // ==========================================
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW Error:', err));
+                setTimeout(silentlyCacheAllQuranText, 4000);
+            });
+        }
+        async function silentlyCacheAllQuranText() {
+            if (localStorage.getItem('samee3_text_cached_v3') === 'true') return; 
+            try {
+                const editions = ['quran-uthmani', 'quran-simple'];
+                for (let surah = 1; surah <= 114; surah++) {
+                    for (let edition of editions) {
+                        fetch(`https://api.alquran.cloud/v1/surah/${surah}/${edition}`).catch(() => {});
+                        await new Promise(r => setTimeout(r, 150));
+                    }
+                }
+                localStorage.setItem('samee3_text_cached_v3', 'true');
+            } catch (e) {}
+        }
+
         const SUPABASE_URL = 'https://wndzautzfpmycdesrbvs.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduZHphdXR6ZnBteWNkZXNyYnZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNzk2NzUsImV4cCI6MjEwMjg1NTY3NX0.EVUiKwmXjvAOYPqvWZx45c1cOcJHDvxufGtKEICJJms';
         let supabaseClient = null;
@@ -360,7 +383,6 @@
             setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
         }
 
-        // تم استخدام Promise.all لتسريع سحب البيانات (Parallel Fetching)
         async function initializeApp() {
             try {
                 const [resMeta, resMp3] = await Promise.all([
@@ -390,11 +412,10 @@
 
                 filterRecitersByRiwayah();
                 
-                // إخفاء شاشة التحميل فوراً بنعومة
                 const splash = document.getElementById('splash-screen');
                 if(splash) {
                     splash.style.opacity = '0';
-                    setTimeout(() => splash.remove(), 400); // إزالة العنصر لتخفيف الصفحة
+                    setTimeout(() => splash.remove(), 400); 
                 }
             } catch (err) { 
                 els.surahGrid.innerHTML = '<p style="text-align:center; color:red;">خطأ في الاتصال بالخوادم.</p>'; 
@@ -592,6 +613,16 @@
 
         function togglePlayState() {
             if(!audioPlayer.src) return showToast("الرجاء اختيار سورة للتشغيل.");
+            
+            if (!navigator.onLine && (audioPlayer.error || audioPlayer.readyState === 0)) {
+                audioPlayer.pause(); isPlaying = false; els.playBtnSticky.innerHTML = "⏵";
+                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً."); 
+            }
+            if (navigator.onLine && audioPlayer.error) {
+                audioPlayer.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+                audioPlayer.load();
+            }
+
             if(audioPlayer.paused) { audioPlayer.play(); isPlaying = true; els.playBtnSticky.innerHTML = "⏸"; } 
             else { audioPlayer.pause(); isPlaying = false; els.playBtnSticky.innerHTML = "⏵"; }
         }
@@ -614,6 +645,15 @@
             closeModals(); isRepeatingVerse = false;
             const btnRepeat = document.getElementById('btn-repeat-ayah');
             if (btnRepeat) { btnRepeat.style.background = "#FEF3C7"; btnRepeat.style.color = "var(--gold-premium)"; }
+            
+            if (!navigator.onLine && (audioPlayer.error || audioPlayer.readyState === 0)) {
+                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً."); 
+            }
+            if (navigator.onLine && audioPlayer.error) {
+                audioPlayer.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+                audioPlayer.load();
+            }
+
             if (surahTimingStats.length === 0) setupAyahSync();
             if (surahTimingStats.length > 0) {
                 showToast("جاري تشغيل الآية بصوت القارئ الحالي...");
@@ -654,38 +694,87 @@
         function hideSidePanel() { els.sidePanel.classList.remove('show'); isDownloadingOp = false; }
 
         async function downloadSingleSurahPanel() {
-            if(!currentAudioServer) return showToast("اختر سورة أولاً.");
+            if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
             if(isDownloadingOp) return showToast("عملية تحميل جارية...");
-            initSidePanel("تنزيل السورة (صوت)");
+
+            isDownloadingOp = true;
+            initSidePanel("تحميل السورة للعمل بدون نت");
+            els.sidePanelCancel.innerText = 'إلغاء العملية';
+            
             try {
-                updateSidePanel(50, "جاري سحب الملف...");
-                const response = await fetch(currentAudioServer + padNumber(currentSurahNumber) + '.mp3');
-                finishSidePanel(await response.blob(), `Surah_${padNumber(currentSurahNumber)}_${SURAH_NAMES_AR[currentSurahNumber - 1]}.mp3`);
-            } catch(e) { els.sidePanelText.innerText = "فشل التحميل!"; isDownloadingOp = false; }
+                updateSidePanel(30, "جاري الحفظ داخل المنصة...");
+                const url = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+                const cache = await caches.open('samee3-cache-v6');
+                const response = await fetch(url);
+                if(response.ok) {
+                    await cache.put(url, response);
+                    updateSidePanel(100, "تم التحميل! السورة تعمل الآن بدون نت.");
+                    if (els.sidePanelBtn) els.sidePanelBtn.classList.add('hidden'); 
+                    setTimeout(() => hideSidePanel(), 3500);
+                } else { throw new Error("فشل"); }
+            } catch(e) { 
+                if (els.sidePanelText) els.sidePanelText.innerText = "فشل التحميل!"; 
+            } finally {
+                isDownloadingOp = false;
+            }
         }
 
         async function downloadFullMushafZipPanel() {
-            if(!currentAudioServer || currentAvailableSurahs.length === 0) return showToast("اختر قارئ أولاً.");
+            if(!currentAudioServer) return showToast("اختر قارئ أولاً.");
             if(isDownloadingOp) return showToast("عملية تحميل جارية...");
-            initSidePanel("تجهيز المصحف (ZIP)");
-            const zip = new JSZip(); let downloadedCount = 0; let totalSurahs = currentAvailableSurahs.length;
+
+            const surahsToDownload = (currentAvailableSurahs && currentAvailableSurahs.length > 0) 
+                                     ? currentAvailableSurahs 
+                                     : Array.from({length: 114}, (_, i) => i + 1);
+
+            const confirmMsg = "تنبيه: سيتم تحميل المصحف كاملاً داخل المنصة ليعمل بدون نت. هل ترغب بالمتابعة؟";
+            if(!confirm(confirmMsg)) return;
+
+            isDownloadingOp = true; 
+            initSidePanel("تحميل المصحف للعمل بدون نت");
+            if (els.sidePanelCancel) els.sidePanelCancel.innerText = 'إيقاف / إلغاء';
+            
+            let downloadedCount = 0; 
+            let totalSurahs = surahsToDownload.length;
+            
             try {
+                const cache = await caches.open('samee3-cache-v6');
                 for (let i = 0; i < totalSurahs; i++) {
-                    if(!isDownloadingOp) throw new Error("تم الإلغاء");
-                    let surahNum = currentAvailableSurahs[i];
-                    const response = await fetch(currentAudioServer + padNumber(surahNum) + '.mp3');
-                    if (!response.ok) throw new Error("فشل الاتصال");
-                    zip.file(`Surah_${padNumber(surahNum)}_${SURAH_NAMES_AR[surahNum-1]}.mp3`, await response.blob());
+                    if(!isDownloadingOp) throw new Error("تم الإلغاء"); 
+
+                    let surahNum = surahsToDownload[i];
+                    const url = currentAudioServer + padNumber(surahNum) + '.mp3';
+                    const existing = await cache.match(url);
+                    
+                    if(!existing) {
+                        try {
+                            const response = await fetch(url);
+                            if (response.ok) await cache.put(url, response);
+                        } catch(fetchErr) {
+                            console.log("تخطي خطأ في السورة: " + surahNum);
+                        }
+                    }
                     downloadedCount++;
-                    updateSidePanel(Math.floor((downloadedCount / totalSurahs) * 80), `تم سحب ${downloadedCount} من ${totalSurahs} سورة`);
+                    let percent = Math.floor((downloadedCount / totalSurahs) * 100);
+                    updateSidePanel(percent, `تم التحميل ${downloadedCount} من ${totalSurahs} سورة`);
                 }
-                updateSidePanel(90, "جاري الضغط...");
-                finishSidePanel(await zip.generateAsync({ type: "blob" }), `Mushaf_${document.getElementById('player-reciter-txt').innerText}.zip`);
-            } catch(e) { if(e.message !== "تم الإلغاء") els.sidePanelText.innerText = "فشل التحميل!"; }
+                updateSidePanel(100, "اكتمل التحميل! المصحف متاح بدون نت.");
+                if (els.sidePanelBtn) els.sidePanelBtn.classList.add('hidden');
+                setTimeout(() => hideSidePanel(), 4000);
+            } catch(e) { 
+                if(e.message !== "تم الإلغاء") {
+                    if (els.sidePanelText) els.sidePanelText.innerText = "فشل التحميل.. تأكد من اتصالك أو مساحة جهازك!"; 
+                } else {
+                    if (els.sidePanelText) els.sidePanelText.innerText = "تم إلغاء التحميل.";
+                    setTimeout(() => hideSidePanel(), 2000);
+                }
+            } finally {
+                isDownloadingOp = false;
+            }
         }
 
         // =====================================================================
-        // دوال إنشاء الصورة المحدثة - إصلاح مشكلة عدم الظهور بشكل كامل
+        // دوال إنشاء الصورة المحدثة
         // =====================================================================
         
         function cleanAyahTextForDesign(text) {
@@ -702,7 +791,6 @@
 
             exportDiv = document.createElement('div');
             exportDiv.id = 'export-canvas-container';
-            // السر في الإصلاح: fixed وليس absolute لضمان وجوده ضمن أبعاد يمكن قراءتها، و left بعيد جداً
             exportDiv.style.cssText = 'position: fixed; left: -3000px; top: 0; width: 1080px; background: linear-gradient(135deg, #0f172a 0%, #082f49 100%); display: flex; flex-direction: column; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -9999;';
             
             const exactSurahName = SURAH_NAMES_AR[currentSurahNumber - 1];
