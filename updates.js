@@ -266,7 +266,40 @@ async function cacheFullMushafForOffline() {
 }
 
 // =========================================================
-// 6. نظام البحث الشامل المعدل (قرآن + قراء + أحاديث)
+// 6. القاموس الذكي لكتب الأحاديث والترجمة الدقيقة 
+// =========================================================
+const bukhariBooks = {
+    "1": "بدء الوحي", "2": "الإيمان", "3": "العلم", "4": "الوضوء", "5": "الغسل", "6": "الحيض", "7": "التيمم", "8": "الصلاة", "9": "مواقيت الصلاة", "10": "الأذان",
+    "11": "الجمعة", "12": "صلاة الخوف", "13": "العيدين", "14": "الوتر", "15": "الاستسقاء", "16": "الكسوف", "17": "سجود القرآن", "18": "تقصير الصلاة", "19": "التهجد", "20": "فضل الصلاة بمكة والمدينة",
+    "21": "العمل في الصلاة", "22": "السهو", "23": "الجنائز", "24": "الزكاة", "25": "الحج", "26": "العمرة", "27": "المحصر", "28": "جزاء الصيد", "29": "فضائل المدينة", "30": "الصوم",
+    "31": "صلاة التراويح", "32": "فضل ليلة القدر", "33": "الاعتكاف", "34": "البيوع", "35": "السلم", "36": "الشفعة", "37": "الإجارة", "38": "الحوالات", "39": "الكفالة", "40": "الوكالة",
+    "41": "المزارعة", "42": "المساقاة", "43": "الاستقراض", "44": "الخصومات", "45": "اللقطة", "46": "المظالم", "47": "الشركة", "48": "الرهن", "49": "العتق", "50": "المكاتب",
+    "51": "الهبة", "52": "الشهادات", "53": "الصلح", "54": "الشروط", "55": "الوصايا", "56": "الجهاد والسير", "57": "فرض الخمس", "58": "الجزية والموادعة", "59": "بدء الخلق", "60": "أحاديث الأنبياء",
+    "61": "المناقب", "62": "فضائل أصحاب النبي", "63": "مناقب الأنصار", "64": "المغازي", "65": "التفسير", "66": "فضائل القرآن", "67": "النكاح", "68": "الطلاق", "69": "النفقات", "70": "الأطعمة",
+    "71": "العقيقة", "72": "الذبائح والصيد", "73": "الأضاحي", "74": "الأشربة", "75": "المرضى", "76": "الطب", "77": "اللباس", "78": "الأدب", "79": "الاستئذان", "80": "الدعوات",
+    "81": "الرقاق", "82": "القدر", "83": "الأيمان والنذور", "84": "كفارات الأيمان", "85": "الفرائض", "86": "الحدود", "87": "الديات", "88": "استتابة المرتدين", "89": "الإكراه", "90": "الحيل",
+    "91": "التعبير", "92": "الفتن", "93": "الأحكام", "94": "التمني", "95": "أخبار الآحاد", "96": "الاعتصام بالكتاب والسنة", "97": "التوحيد"
+};
+
+const muslimBooks = {
+    "1": "الإيمان", "2": "الطهارة", "3": "الحيض", "4": "الصلاة", "5": "المساجد ومواضع الصلاة", "6": "صلاة المسافرين وقصرها", "7": "الفضائل", "8": "الجمعة", "9": "صلاة العيدين", "10": "الاستسقاء",
+    "11": "الكسوف", "12": "الجنائز", "13": "الزكاة", "14": "الصيام", "15": "الاعتكاف", "16": "الحج", "17": "النكاح", "18": "الرضاع", "19": "الطلاق", "20": "اللعان",
+    "21": "العتق", "22": "البيوع", "23": "الفرائض", "24": "الهبات", "25": "الوصية", "26": "النذر", "27": "الأيمان", "28": "القسامة والمحاربين والديات", "29": "الحدود", "30": "الأقضية",
+    "31": "اللقطة", "32": "الجهاد والسير", "33": "الإمارة", "34": "الصيد والذبائح", "35": "الأضاحي", "36": "الأشربة", "37": "اللباس والزينة", "38": "الآداب", "39": "السلام", "40": "الألفاظ من الأدب",
+    "41": "الشعر", "42": "الرؤيا", "43": "الفضائل", "44": "فضائل الصحابة", "45": "البر والصلة والآداب", "46": "القدر", "47": "العلم", "48": "الذكر والدعاء", "49": "الرقاق", "50": "التوبة",
+    "51": "صفة القيامة والجنة والنار", "52": "الجنة وصفة نعيمها وأهلها", "53": "الفتن وأشراط الساعة", "54": "الزهد والرقائق", "55": "التفسير", "56": "التفسير"
+};
+
+function getArabicBookNameByID(source, bookId) {
+    if (bookId === "0" && source === 'bukhari') return "القسم التمهيدي";
+    if (bookId === "0" && source === 'muslim') return "مقدمة الإمام مسلم";
+    if (source === 'bukhari' && bukhariBooks[bookId]) return "كِتَابُ " + bukhariBooks[bookId];
+    if (source === 'muslim' && muslimBooks[bookId]) return "كِتَابُ " + muslimBooks[bookId];
+    return `كِتَابُ رقم (${bookId})`;
+}
+
+// =========================================================
+// 7. نظام البحث الشامل + الانتقال الذكي لمكان الحديث
 // =========================================================
 const removeTashkeel = (text) => text.replace(/[\u0617-\u061A\u064B-\u0652]/g, "").replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ي/g, 'ى');
 
@@ -329,6 +362,7 @@ window.executeSearch = async function() {
                             let arBookName = getArabicBookNameByID(sourceKey, String(bookRef));
                             
                             results.push({
+                                sourceCode: sourceKey,
                                 source: sourceName,
                                 num: h.hadithnumber,
                                 text: cleanText,
@@ -345,13 +379,17 @@ window.executeSearch = async function() {
                     resultsBox.innerHTML = results.map((r, i) => {
                         let dorarQuery = getHadithMatnForSearch(r.text);
                         return `
-                        <div style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; margin-bottom: 10px; border-radius: 10px; text-align: right;">
-                            <div style="color: #10B981; font-weight: bold; margin-bottom: 15px; font-size: 14px;">${r.source} | رقم: ${r.num} | ${r.bookName}</div>
-                            <div style="font-family: 'Amiri', serif; font-size: 18px; margin-bottom: 15px; background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #E2E8F0;">
-                                ${formatHadithHtml(r.text.substring(0, 250) + '...', false)}
+                        <div style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; margin-bottom: 10px; border-radius: 10px; text-align: right; transition: 0.3s;">
+                            <div style="cursor: pointer;" onclick="jumpToHadithFromSearch('${r.sourceCode}', ${r.num})" title="اضغط لفتح الحديث في بابه">
+                                <div style="color: #10B981; font-weight: bold; margin-bottom: 15px; font-size: 14px;">${r.source} | رقم: ${r.num} | ${r.bookName}</div>
+                                <div style="font-family: 'Amiri', serif; font-size: 18px; margin-bottom: 15px; background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #E2E8F0; transition: 0.3s;" onmouseover="this.style.borderColor='#10B981'" onmouseout="this.style.borderColor='#E2E8F0'">
+                                    ${formatHadithHtml(r.text.substring(0, 250) + '...', false)}
+                                    <div style="text-align: left; margin-top: 10px; color: #10B981; font-size: 13px; font-weight: bold;">👈 اضغط لفتح الحديث كاملاً داخل بابه</div>
+                                </div>
                             </div>
+
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                <button onclick="window.open('https://dorar.net/hadith/search?q=' + encodeURIComponent(\`${dorarQuery}\`), '_blank')" style="background:#3B82F6; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">📖 الشرح (الدرر السنية)</button>
+                                <button onclick="window.open('https://dorar.net/hadith/search?q=' + encodeURIComponent(\`${dorarQuery}\`), '_blank')" style="background:#3B82F6; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">📖 التخريج (الدرر السنية)</button>
                                 <button onclick="copyHadith(this, \`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}')" style="background:#E2E8F0; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px; color:#334155;">📋 نسخ</button>
                                 <button onclick="exportHadithImage(\`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}')" style="background:#10B981; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">📤 صورة</button>
                             </div>
@@ -369,39 +407,6 @@ window.executeSearch = async function() {
 };
 
 // =========================================================
-// 7. القاموس الذكي لكتب الأحاديث والترجمة الدقيقة 
-// =========================================================
-const bukhariBooks = {
-    "1": "بدء الوحي", "2": "الإيمان", "3": "العلم", "4": "الوضوء", "5": "الغسل", "6": "الحيض", "7": "التيمم", "8": "الصلاة", "9": "مواقيت الصلاة", "10": "الأذان",
-    "11": "الجمعة", "12": "صلاة الخوف", "13": "العيدين", "14": "الوتر", "15": "الاستسقاء", "16": "الكسوف", "17": "سجود القرآن", "18": "تقصير الصلاة", "19": "التهجد", "20": "فضل الصلاة بمكة والمدينة",
-    "21": "العمل في الصلاة", "22": "السهو", "23": "الجنائز", "24": "الزكاة", "25": "الحج", "26": "العمرة", "27": "المحصر", "28": "جزاء الصيد", "29": "فضائل المدينة", "30": "الصوم",
-    "31": "صلاة التراويح", "32": "فضل ليلة القدر", "33": "الاعتكاف", "34": "البيوع", "35": "السلم", "36": "الشفعة", "37": "الإجارة", "38": "الحوالات", "39": "الكفالة", "40": "الوكالة",
-    "41": "المزارعة", "42": "المساقاة", "43": "الاستقراض", "44": "الخصومات", "45": "اللقطة", "46": "المظالم", "47": "الشركة", "48": "الرهن", "49": "العتق", "50": "المكاتب",
-    "51": "الهبة", "52": "الشهادات", "53": "الصلح", "54": "الشروط", "55": "الوصايا", "56": "الجهاد والسير", "57": "فرض الخمس", "58": "الجزية والموادعة", "59": "بدء الخلق", "60": "أحاديث الأنبياء",
-    "61": "المناقب", "62": "فضائل أصحاب النبي", "63": "مناقب الأنصار", "64": "المغازي", "65": "التفسير", "66": "فضائل القرآن", "67": "النكاح", "68": "الطلاق", "69": "النفقات", "70": "الأطعمة",
-    "71": "العقيقة", "72": "الذبائح والصيد", "73": "الأضاحي", "74": "الأشربة", "75": "المرضى", "76": "الطب", "77": "اللباس", "78": "الأدب", "79": "الاستئذان", "80": "الدعوات",
-    "81": "الرقاق", "82": "القدر", "83": "الأيمان والنذور", "84": "كفارات الأيمان", "85": "الفرائض", "86": "الحدود", "87": "الديات", "88": "استتابة المرتدين", "89": "الإكراه", "90": "الحيل",
-    "91": "التعبير", "92": "الفتن", "93": "الأحكام", "94": "التمني", "95": "أخبار الآحاد", "96": "الاعتصام بالكتاب والسنة", "97": "التوحيد"
-};
-
-const muslimBooks = {
-    "1": "الإيمان", "2": "الطهارة", "3": "الحيض", "4": "الصلاة", "5": "المساجد ومواضع الصلاة", "6": "صلاة المسافرين وقصرها", "7": "الفضائل", "8": "الجمعة", "9": "صلاة العيدين", "10": "الاستسقاء",
-    "11": "الكسوف", "12": "الجنائز", "13": "الزكاة", "14": "الصيام", "15": "الاعتكاف", "16": "الحج", "17": "النكاح", "18": "الرضاع", "19": "الطلاق", "20": "اللعان",
-    "21": "العتق", "22": "البيوع", "23": "الفرائض", "24": "الهبات", "25": "الوصية", "26": "النذر", "27": "الأيمان", "28": "القسامة والمحاربين والديات", "29": "الحدود", "30": "الأقضية",
-    "31": "اللقطة", "32": "الجهاد والسير", "33": "الإمارة", "34": "الصيد والذبائح", "35": "الأضاحي", "36": "الأشربة", "37": "اللباس والزينة", "38": "الآداب", "39": "السلام", "40": "الألفاظ من الأدب",
-    "41": "الشعر", "42": "الرؤيا", "43": "الفضائل", "44": "فضائل الصحابة", "45": "البر والصلة والآداب", "46": "القدر", "47": "العلم", "48": "الذكر والدعاء", "49": "الرقاق", "50": "التوبة",
-    "51": "صفة القيامة والجنة والنار", "52": "الجنة وصفة نعيمها وأهلها", "53": "الفتن وأشراط الساعة", "54": "الزهد والرقائق", "55": "التفسير", "56": "التفسير"
-};
-
-function getArabicBookNameByID(source, bookId) {
-    if (bookId === "0" && source === 'bukhari') return "القسم التمهيدي";
-    if (bookId === "0" && source === 'muslim') return "مقدمة الإمام مسلم";
-    if (source === 'bukhari' && bukhariBooks[bookId]) return "كِتَابُ " + bukhariBooks[bookId];
-    if (source === 'muslim' && muslimBooks[bookId]) return "كِتَابُ " + muslimBooks[bookId];
-    return `كِتَابُ رقم (${bookId})`;
-}
-
-// =========================================================
 // 8. نظام الأحاديث النبوية الشامل (واجهات العرض)
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
@@ -415,7 +420,6 @@ window.addEventListener('DOMContentLoaded', () => {
         .hadith-book-card:hover { transform: translateY(-5px); border-color: #10B981; box-shadow: 0 10px 20px rgba(16, 185, 129, 0.1); }
         .hadith-book-card h3 { color: #0F172A; margin: 0; font-size: 24px; font-family: 'Aref Ruqaa', serif; line-height: 1.5; }
         .hadith-item-card { background: #F8FAFC; border-radius: 20px; padding: 35px 25px; margin-bottom: 20px; text-align: right; border: 2px solid #10B981; box-shadow: 0 10px 30px rgba(16,185,129,0.1); max-width: 900px; margin: 0 auto; }
-        .hadith-item-text { font-family: 'Amiri', serif; font-size: clamp(22px, 5vw, 32px); color: #0F172A; margin-bottom: 30px; line-height: 2.1; text-align: justify; text-align-last: center; }
         .hadith-item-info { color: #10B981; font-weight: 700; font-size: 16px; margin-bottom: 20px; display: inline-block; background: #ECFDF5; padding: 8px 20px; border-radius: 50px; border: 1px solid #A7F3D0; }
         .hadith-actions-row { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; border-top: 2px dashed #CBD5E1; padding-top: 25px; }
         .h-btn { padding: 12px 20px; border-radius: 10px; border: none; font-family: inherit; font-weight: 700; cursor: pointer; transition: 0.3s; display: flex; align-items: center; gap: 8px; font-size: 15px; }
@@ -584,7 +588,9 @@ function renderCurrentSingleHadith() {
     card.className = 'hadith-item-card';
     card.innerHTML = `
         <div style="text-align: center;"><div class="hadith-item-info">📖 ${sourceName} | حديث رقم: ${hadith.hadithnumber}</div></div>
-        <div class="hadith-item-text">${formatHadithHtml(cleanText, false)}</div>
+        <div style="font-family: 'Amiri', serif; font-size: 26px; color: #0F172A; margin-bottom: 30px;">
+            ${formatHadithHtml(cleanText, false)}
+        </div>
         <div class="hadith-actions-row"></div>
     `;
 
@@ -623,6 +629,45 @@ function renderCurrentSingleHadith() {
 function nextHadith() { if (currentHadithIndex < currentChapterHadiths.length - 1) { currentHadithIndex++; renderCurrentSingleHadith(); } }
 function prevHadith() { if (currentHadithIndex > 0) { currentHadithIndex--; renderCurrentSingleHadith(); } }
 
+// دالة القفز الذكي من البحث لداخل الباب الخاص بالحديث
+window.jumpToHadithFromSearch = async function(source, hadithNumber) {
+    if(typeof closeModals === 'function') closeModals();
+    switchTab('hadith-view');
+    
+    if (currentHadithSource !== source || !currentHadithData) {
+        document.getElementById('hadith-books-grid').innerHTML = '<div style="grid-column: 1/-1; text-align: center; font-size: 20px; color: #10B981; font-weight: bold; padding: 40px;">جاري تجهيز الحديث... ⏳</div>';
+        showHadithBooks();
+        await loadHadithSource(source);
+    }
+    
+    const targetHadith = currentHadithData.hadiths.find(h => h.hadithnumber == hadithNumber);
+    if (!targetHadith) return showToast("عذراً، لم يتم العثور على الحديث.");
+    
+    const bookId = targetHadith.reference ? String(targetHadith.reference.book) : "1";
+    const arBookName = getArabicBookNameByID(source, bookId);
+    
+    currentBookName = arBookName;
+    document.getElementById('current-book-title').innerText = arBookName;
+    
+    const bookHadiths = currentHadithData.hadiths.filter(h => h.reference && h.reference.book == bookId);
+    const chunkSize = 15;
+    currentChapters = [];
+    for (let i = 0; i < bookHadiths.length; i += chunkSize) {
+        currentChapters.push(bookHadiths.slice(i, i + chunkSize));
+    }
+    
+    let globalIndex = bookHadiths.findIndex(h => h.hadithnumber == hadithNumber);
+    if (globalIndex === -1) globalIndex = 0;
+    
+    currentChapterIndex = Math.floor(globalIndex / chunkSize);
+    currentHadithIndex = globalIndex % chunkSize;
+    currentChapterHadiths = currentChapters[currentChapterIndex];
+    
+    document.getElementById('current-chapter-title').innerText = `${currentBookName} ❖ الباب (${currentChapterIndex + 1})`;
+    showSingleHadithViewer();
+    renderCurrentSingleHadith();
+};
+
 function copyHadith(btn, text, source, num, book) {
     let finalBook = book ? book : "";
     const fullText = `${text}\n[${source} ${finalBook ? "- " + finalBook : ""} - رقم ${num}]`;
@@ -643,11 +688,8 @@ function exportHadithImage(text, source, num, bookName) {
 
     exportDiv = document.createElement('div');
     exportDiv.id = 'export-hadith-canvas';
-    
-    // إضافة min-height لضمان أن التصميم يبدأ كمربع ويتمدد للأسفل لو الحديث طويل
     exportDiv.style.cssText = 'position: fixed; left: -3000px; top: 0; width: 1080px; min-height: 1080px; background: linear-gradient(135deg, #022c22 0%, #064e3b 100%); display: flex; flex-direction: column; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -9999; color: #FFFFFF;';
 
-    // خوارزمية تكبير الخطوط بشكل ديناميكي لتملأ المربع بشياكة
     let dynamicFontSize = 65, dynamicLineHeight = 1.8;
     if (text.length > 700) { dynamicFontSize = 36; dynamicLineHeight = 1.6; } 
     else if (text.length > 500) { dynamicFontSize = 42; dynamicLineHeight = 1.6; } 
