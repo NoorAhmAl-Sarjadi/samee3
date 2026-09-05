@@ -12,7 +12,7 @@ if ('serviceWorker' in navigator) {
 // =========================================================
 window.addEventListener('load', () => {
     setTimeout(silentlyCacheAllQuranText, 4000);
-    setTimeout(silentlyCacheHadithData, 6000); // تحميل الأحاديث بعد القرآن
+    setTimeout(silentlyCacheHadithData, 6000); 
 });
 
 async function silentlyCacheAllQuranText() {
@@ -49,54 +49,7 @@ async function silentlyCacheHadithData() {
 }
 
 // =========================================================
-// 3. دالة تنسيق الحديث الذكية (تم إصلاحها لمنع تشوه الصورة)
-// =========================================================
-function formatHadithHtml(text, isExport) {
-    const sanadColor = isExport ? '#FCD34D' : '#D97706'; 
-    const matnColor = isExport ? '#FFFFFF' : '#0F172A'; 
-    
-    const separators = [
-        'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ :', 'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ:', 'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ',
-        'صلى الله عليه وسلم :', 'صلى الله عليه وسلم:', 'صلى الله عليه وسلم',
-        'ﷺ :', 'ﷺ:', 'ﷺ',
-        'يَقُولُ :', 'يَقُولُ:', 'يقول :', 'يقول:',
-        'قَالَ :', 'قَالَ:', 'قال :', 'قال:'
-    ];
-
-    let splitIdx = -1;
-    let sepLen = 0;
-
-    for (let sep of separators) {
-        let idx = text.indexOf(sep);
-        if (idx !== -1) {
-            splitIdx = idx;
-            sepLen = sep.length;
-            break;
-        }
-    }
-
-    if (splitIdx !== -1) {
-        let cutoff = splitIdx + sepLen;
-        let sanad = text.substring(0, cutoff).trim();
-        let matn = text.substring(cutoff).trim();
-        
-        if(matn.length > 0) {
-            // استخدام div لحل مشكلة تقلص النص في html2canvas
-            return `
-                <div style="color: ${sanadColor}; font-size: ${isExport ? '0.75em' : '0.85em'}; line-height: 1.8; margin-bottom: 15px; border-bottom: 1px dashed ${isExport ? 'rgba(252, 211, 77, 0.3)' : 'rgba(217, 119, 6, 0.2)'}; padding-bottom: 15px; text-align: justify; text-align-last: center;">
-                    ${sanad}
-                </div>
-                <div style="color: ${matnColor}; font-weight: ${isExport ? 'normal' : 'bold'}; line-height: 2.2; text-align: justify; text-align-last: center;">
-                    « ${matn} »
-                </div>`;
-        }
-    }
-    
-    return `<div style="color: ${matnColor}; line-height: 2.2; text-align: justify; text-align-last: center;">« ${text} »</div>`;
-}
-
-// =========================================================
-// 4. حقن الأزرار والتحكم في الواجهات وإخفاء المشغل
+// 3. حقن الأزرار والتحكم في الواجهات وإخفاء المشغل
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
     const controlsContainer = document.querySelector('.player-controls');
@@ -183,7 +136,7 @@ if (typeof window.playSpecificAyahModal === 'function') {
 }
 
 // =========================================================
-// 5. دوال تحميل الصوتيات للعمل بدون نت 
+// 4. دوال تحميل الصوتيات للعمل بدون نت 
 // =========================================================
 async function cacheCurrentSurahForOffline() {
     if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
@@ -242,7 +195,7 @@ async function cacheFullMushafForOffline() {
 }
 
 // =========================================================
-// 6. نظام البحث الشامل المعدل (قرآن + قراء + أحاديث)
+// 5. نظام البحث الشامل المعدل (قرآن + قراء + أحاديث)
 // =========================================================
 const removeTashkeel = (text) => text.replace(/[\u0617-\u061A\u064B-\u0652]/g, "").replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ي/g, 'ى');
 
@@ -326,10 +279,7 @@ window.executeSearch = async function() {
                         <div style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; margin-bottom: 10px; border-radius: 10px; text-align: right;">
                             <div style="color: #10B981; font-weight: bold; margin-bottom: 15px; font-size: 14px;">${r.source} | رقم: ${r.num} | ${r.bookName}</div>
                             
-                            <!-- عرض النص بتنسيقه الجديد في البحث -->
-                            <div style="font-family: 'Amiri', serif; font-size: 18px; margin-bottom: 10px; background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #E2E8F0;">
-                                ${formatHadithHtml(r.text.substring(0, 250) + '...', false)}
-                            </div>
+                            <div style="font-family: 'Amiri', serif; font-size: 18px; color: #0F172A; margin-bottom: 10px; line-height: 1.8;">${r.text.substring(0, 250)}...</div>
                             
                             <div id="search-hadith-sharh-${i}" style="display: none; margin-bottom: 15px; padding: 15px; background: #fff; border: 1px solid #E2E8F0; border-radius: 8px; font-family: 'Amiri', serif; font-size: 16px; line-height: 1.8; border-right: 3px solid #10B981;">
                                 <strong style="color: #D97706;">📖 شرح الحديث:</strong><br>${simulatedSharh}<br><b style="color:#3B82F6;">المرجع:</b> <span style="color:#EF4444;">${referenceName}</span>
@@ -355,7 +305,7 @@ window.executeSearch = async function() {
 };
 
 // =========================================================
-// 7. القاموس الذكي لكتب الأحاديث والترجمة الدقيقة
+// 7. القاموس الذكي لكتب الأحاديث
 // =========================================================
 const bukhariBooks = {
     "1": "بدء الوحي", "2": "الإيمان", "3": "العلم", "4": "الوضوء", "5": "الغسل", "6": "الحيض", "7": "التيمم", "8": "الصلاة", "9": "مواقيت الصلاة", "10": "الأذان",
@@ -401,7 +351,7 @@ window.addEventListener('DOMContentLoaded', () => {
         .hadith-book-card:hover { transform: translateY(-5px); border-color: #10B981; box-shadow: 0 10px 20px rgba(16, 185, 129, 0.1); }
         .hadith-book-card h3 { color: #0F172A; margin: 0; font-size: 24px; font-family: 'Aref Ruqaa', serif; line-height: 1.5; }
         .hadith-item-card { background: #F8FAFC; border-radius: 20px; padding: 35px 25px; margin-bottom: 20px; text-align: right; border: 2px solid #10B981; box-shadow: 0 10px 30px rgba(16,185,129,0.1); max-width: 900px; margin: 0 auto; }
-        .hadith-item-text { font-family: 'Amiri', serif; font-size: clamp(22px, 5vw, 32px); color: #0F172A; margin-bottom: 30px; text-align: justify; text-align-last: center; }
+        .hadith-item-text { font-family: 'Amiri', serif; font-size: clamp(22px, 5vw, 32px); color: #0F172A; margin-bottom: 30px; line-height: 2.1; text-align: justify; text-align-last: center; }
         .hadith-item-info { color: #10B981; font-weight: 700; font-size: 16px; margin-bottom: 20px; display: inline-block; background: #ECFDF5; padding: 8px 20px; border-radius: 50px; border: 1px solid #A7F3D0; }
         .hadith-actions-row { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; border-top: 2px dashed #CBD5E1; padding-top: 25px; }
         .h-btn { padding: 12px 20px; border-radius: 10px; border: none; font-family: inherit; font-weight: 700; cursor: pointer; transition: 0.3s; display: flex; align-items: center; gap: 8px; font-size: 15px; }
@@ -576,7 +526,7 @@ function renderCurrentSingleHadith() {
     card.innerHTML = `
         <div style="text-align: center;"><div class="hadith-item-info">📖 ${sourceName} | حديث رقم: ${hadith.hadithnumber}</div></div>
         
-        <div class="hadith-item-text">${formatHadithHtml(cleanText, false)}</div>
+        <div class="hadith-item-text">${cleanText}</div>
         
         <div id="hadith-sharh-box" class="hadith-sharh-box"><div style="color: #D97706; font-size: 22px; font-weight: bold; margin-bottom: 10px;">📖 شرح الحديث:</div>${simulatedSharh}</div>
         <div class="hadith-actions-row"></div>
@@ -665,8 +615,8 @@ function exportHadithImage(text, source, num, bookName, withSharh, sharhText, re
         <div style="width: 100%; border: 4px solid #10B981; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: rgba(2, 44, 34, 0.8); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
             <div style="font-family: 'Aref Ruqaa', serif; font-size: 40px; color: #10B981; background: rgba(0, 0, 0, 0.4); padding: 10px 50px; border-radius: 50px; border: 1px solid #10B981; margin-bottom: 40px;">قَالَ رَسُولُ اللَّهِ ﷺ</div>
             
-            <div style="font-family: 'Amiri', serif; font-size: ${dynamicFontSize}px; width: 100%; margin: 0 0 30px 0;">
-                ${formatHadithHtml(text, true)}
+            <div style="font-family: 'Amiri', serif; font-size: ${dynamicFontSize}px; line-height: 2.1; color: #FFFFFF; text-align: justify; text-align-last: center; text-shadow: 0 10px 30px rgba(0,0,0,0.5); margin: 0 0 30px 0;">
+                « ${text} »
             </div>
             
             <div style="color: #67E8F9; font-size: 28px; font-weight: bold; margin-bottom: 10px; font-family: 'Tajawal', sans-serif;">${source} ${bookName ? "❖ " + bookName : ""} (رقم: ${num})</div>
