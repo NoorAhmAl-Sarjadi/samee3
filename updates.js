@@ -314,75 +314,79 @@ window.executeSearch = async function() {
 };
 
 // =========================================================
-// 6. قاموس الترجمة التلقائية لكتب الحديث (عربي - إنجليزي)
+// 6. قاموس الترجمة التلقائية الذكي لكتب الحديث (عربي - إنجليزي)
 // =========================================================
 const arabicBookNames = {
-    "Revelation": "بدء الوحي", "Belief": "الإيمان", "Faith": "الإيمان", "Knowledge": "العلم",
-    "Ablutions (Wudu')": "الوضوء", "The Book of Purification": "الطهارة", "Bathing (Ghusl)": "الغسل",
-    "Menstrual Periods": "الحيض", "The Book of Menstruation": "الحيض", "Rubbing hands and feet with dust (Tayammum)": "التيمم",
-    "Prayers (Salat)": "الصلاة", "The Book of Prayers": "الصلاة", "Times of the Prayers": "مواقيت الصلاة",
-    "The Book of Mosques and Places of Prayer": "المساجد ومواضع الصلاة", "Call to Prayers (Adhaan)": "الأذان",
-    "Characteristics of Prayer": "صفة الصلاة", "The Book of Prayer - Travellers": "صلاة المسافرين وقصرها",
-    "Friday Prayer": "الجمعة", "The Book of Prayer - Friday": "الجمعة", "Fear Prayer": "صلاة الخوف",
-    "The Two Festivals (Eids)": "صلاة العيدين", "The Book of Prayer - Two Eids": "صلاة العيدين", "Witr Prayer": "الوتر",
-    "Invoking Allah for Rain (Istisqaa)": "الاستسقاء", "The Book of Prayer - Rain": "الاستسقاء",
-    "Eclipses": "الكسوف", "The Book of Prayer - Eclipses": "الكسوف", "Prostration During Recital of Qur'an": "سجود التلاوة",
-    "Shortening the Prayers (At-Taqseer)": "قصر الصلاة", "Night Prayer (Tahajjud)": "التهجد",
-    "Virtues of Prayer at Masjid Makkah and Madinah": "فضل الصلاة في مكة والمدينة", "Actions while Praying": "العمل في الصلاة",
-    "Funerals (Al-Janaa'iz)": "الجنائز", "The Book of Prayer - Funerals": "الجنائز", "Obligatory Charity Tax (Zakat)": "الزكاة",
-    "The Book of Zakat": "الزكاة", "Hajj (Pilgrimage)": "الحج", "The Book of Pilgrimage": "الحج",
-    "Umrah (Minor pilgrimage)": "العمرة", "Pilgrims Prevented from Completing the Pilgrimage": "المحصر",
-    "Penalty of Hunting while on Pilgrimage": "جزاء الصيد", "Virtues of Madinah": "فضائل المدينة",
-    "Fasting": "الصيام", "The Book of Fasting": "الصيام", "Praying at Night in Ramadaan (Taraweeh)": "صلاة التراويح",
-    "Retiring to a Mosque for Remembrance of Allah (I'tikaf)": "الاعتكاف", "The Book of I'tikaf": "الاعتكاف",
-    "Sales and Trade": "البيوع", "The Book of Transactions": "البيوع", "Mudaraba (Profit Share)": "المضاربة",
-    "Agriculture": "المزارعة", "Distribution of Water": "المساقاة", "The Book of Musaqah": "المساقاة",
-    "Loans, Payment of Loans, Freezing of Property, Bankruptcy": "الاستقراض والديون", "Lost Things Picked up by Someone (Luqatah)": "اللقطة",
-    "The Book of Lost Property": "اللقطة", "Oppressions": "المظالم", "Partnership": "الشركة",
-    "Mortgaging": "الرهن", "Manumission of Slaves": "العتق", "The Book of Emancipating Slaves": "العتق",
-    "Gifts": "الهبات", "The Book of Gifts": "الهبات", "Witnesses": "الشهادات", "Peacemaking": "الصلح",
-    "Conditions": "الشروط", "Wills and Testaments (Wasaayaa)": "الوصايا", "The Book of Wills": "الوصية",
-    "Jihaad (Fighting for the Cause of Allah)": "الجهاد والسير", "The Book of Jihad and Expeditions": "الجهاد والسير",
-    "One-fifth of Booty to the Cause of Allah (Khumus)": "فرض الخمس", "Jizyah and Mawaada'ah": "الجزية والموادعة",
-    "Creation": "بدء الخلق", "Prophets": "أحاديث الأنبياء", "Virtues and Merits of the Prophet (pbuh) and his Companions": "المناقب",
-    "Companions of the Prophet": "فضائل الصحابة", "The Book of the Merits of the Companions": "فضائل الصحابة",
-    "Merits of the Helpers in Madinah (Ansaar)": "مناقب الأنصار", "Expeditions led by the Prophet (pbuh) (Al-Maghaazi)": "المغازي",
-    "Prophetic Commentary on the Qur'an (Tafseer of the Prophet (pbuh))": "التفسير", "The Book of Commentary on the Qur'an": "التفسير",
-    "Virtues of the Qur'an": "فضائل القرآن", "Wedlock, Marriage (Nikaah)": "النكاح", "The Book of Marriage": "النكاح",
-    "Divorce": "الطلاق", "The Book of Divorce": "الطلاق", "Supporting the Family": "النفقات",
-    "Food, Meals": "الأطعمة", "Sacrifice on Occasion of Birth (`Aqiqa)": "العقيقة",
-    "Hunting, Slaughtering": "الذبائح والصيد", "The Book of Hunting, Slaughter, and what may be Eaten": "الصيد والذبائح وما يؤكل",
-    "Al-Adha Festival Sacrifice (Adaahi)": "الأضاحي", "The Book of Sacrifices": "الأضاحي",
-    "Drinks": "الأشربة", "The Book of Drinks": "الأشربة", "Patients": "المرضى", "Medicine": "الطب",
-    "Dress": "اللباس", "The Book of Clothes and Adornment": "اللباس والزينة",
-    "Good Manners and Form (Al-Adab)": "الأدب", "The Book of Manners and Etiquette": "الآداب",
-    "Asking Permission": "الاستئذان", "Invocations": "الدعوات", "To make the Heart Tender (Ar-Riqaq)": "الرقاق",
-    "The Book of Heart-Melting Traditions": "الرقاق", "Divine Will (Al-Qadar)": "القدر", "The Book of Destiny": "القدر",
-    "Oaths and Vows": "الأيمان والنذور", "The Book of Oaths": "الأيمان",
-    "The Book of Oaths, Muharibin, Qasas (Retaliation), and Diyat (Blood Money)": "القسامة والمحاربين والديات",
-    "Expiation for Unfulfilled Oaths": "كفارات الأيمان", "Laws of Inheritance (Al-Faraa'id)": "الفرائض",
-    "The Book of the Rules of Inheritance": "الفرائض", "Limits and Punishments set by Allah (Hudood)": "الحدود",
-    "The Book of Legal Punishments": "الحدود", "Blood Money (Ad-Diyat)": "الديات", "Apostates": "استتابة المرتدين",
-    "Holding Fast to the Qur'an and Sunnah": "الاعتصام بالكتاب والسنة", "Judgments (Ahkaam)": "الأحكام",
-    "The Book of Judicial Decisions": "الأقضية", "Wishes": "التمني", "Accepting Information Given by a Truthful Person": "أخبار الآحاد",
-    "Dreams": "التعبير", "The Book of Dreams": "الرؤيا", "Afflictions and the End of the World": "الفتن",
-    "The Book of Tribulations and Portents of the Last Hour": "الفتن وأشراط الساعة",
-    "The Book of Suckling": "الرضاع", "The Book of Invoking Curses": "اللعان",
-    "The Book on Government": "الإمارة", "The Book of Greetings": "السلام",
-    "The Book Concerning the Use of Correct Words": "الألفاظ من الأدب", "The Book of Poetry": "الشعر",
-    "The Book of Virtues": "الفضائل", "The Book of Virtue, Enjoining Good Manners, and Joining of the Ties of Kinship": "البر والصلة",
-    "The Book Pertaining to the Remembrance of Allah, Supplication, Repentance and Seeking Forgiveness": "الذكر والدعاء والاستغفار",
-    "The Book of the Qualities of the Day of Resurrection, Paradise and Hell": "صفة القيامة والجنة والنار",
-    "The Book of Paradise, its Blessings and its Inhabitants": "الجنة وصفة نعيمها وأهلها",
-    "The Book of Zuhd and Softening of Hearts": "الزهد والرقائق"
+    "revelation": "بدء الوحي", "belief": "الإيمان", "faith": "الإيمان", "knowledge": "العلم",
+    "ablutions (wudu')": "الوضوء", "purification": "الطهارة", "bathing (ghusl)": "الغسل",
+    "menstrual periods": "الحيض", "menstruation": "الحيض", "rubbing hands and feet with dust (tayammum)": "التيمم",
+    "prayers (salat)": "الصلاة", "prayers": "الصلاة", "prayer": "الصلاة",
+    "mosques and places of prayer": "المساجد", "call to prayers (adhaan)": "الأذان",
+    "characteristics of prayer": "صفة الصلاة", "prayer - travellers": "صلاة المسافرين",
+    "friday prayer": "الجمعة", "prayer - friday": "الجمعة", "fear prayer": "صلاة الخوف",
+    "the two festivals (eids)": "العيدين", "prayer - two eids": "العيدين", "witr prayer": "الوتر",
+    "invoking allah for rain (istisqaa)": "الاستسقاء", "prayer - rain": "الاستسقاء",
+    "eclipses": "الكسوف", "prayer - eclipses": "الكسوف", "prostration during recital of qur'an": "سجود التلاوة",
+    "shortening the prayers (at-taqseer)": "قصر الصلاة", "night prayer (tahajjud)": "التهجد",
+    "virtues of prayer at masjid makkah and madinah": "فضل الصلاة بمكة والمدينة", "actions while praying": "العمل في الصلاة",
+    "funerals (al-janaa'iz)": "الجنائز", "prayer - funerals": "الجنائز", "funerals": "الجنائز",
+    "obligatory charity tax (zakat)": "الزكاة", "zakat": "الزكاة", "hajj (pilgrimage)": "الحج",
+    "pilgrimage": "الحج", "umrah (minor pilgrimage)": "العمرة", "pilgrims prevented from completing the pilgrimage": "المحصر",
+    "penalty of hunting while on pilgrimage": "جزاء الصيد", "virtues of madinah": "فضائل المدينة",
+    "fasting": "الصيام", "praying at night in ramadaan (taraweeh)": "التراويح",
+    "retiring to a mosque for remembrance of allah (i'tikaf)": "الاعتكاف", "i'tikaf": "الاعتكاف",
+    "sales and trade": "البيوع", "transactions": "البيوع", "mudaraba (profit share)": "المضاربة",
+    "agriculture": "المزارعة", "distribution of water": "المساقاة", "musaqah": "المساقاة",
+    "loans, payment of loans, freezing of property, bankruptcy": "الديون",
+    "lost things picked up by someone (luqatah)": "اللقطة", "lost property": "اللقطة",
+    "oppressions": "المظالم", "partnership": "الشركة", "mortgaging": "الرهن",
+    "manumission of slaves": "العتق", "emancipating slaves": "العتق", "gifts": "الهبات",
+    "witnesses": "الشهادات", "peacemaking": "الصلح", "conditions": "الشروط",
+    "wills and testaments (wasaayaa)": "الوصايا", "wills": "الوصية",
+    "jihaad (fighting for the cause of allah)": "الجهاد والسير", "jihad and expeditions": "الجهاد والسير",
+    "one-fifth of booty to the cause of allah (khumus)": "الخمس", "jizyah and mawaada'ah": "الجزية والموادعة",
+    "creation": "بدء الخلق", "prophets": "أحاديث الأنبياء", "virtues and merits of the prophet (pbuh) and his companions": "المناقب",
+    "companions of the prophet": "فضائل الصحابة", "merits of the companions": "فضائل الصحابة",
+    "merits of the helpers in madinah (ansaar)": "مناقب الأنصار", "expeditions led by the prophet (pbuh) (al-maghaazi)": "المغازي",
+    "prophetic commentary on the qur'an (tafseer of the prophet (pbuh))": "التفسير", "commentary on the qur'an": "التفسير",
+    "virtues of the qur'an": "فضائل القرآن", "wedlock, marriage (nikaah)": "النكاح", "marriage": "النكاح",
+    "divorce": "الطلاق", "supporting the family": "النفقات", "food, meals": "الأطعمة",
+    "sacrifice on occasion of birth (`aqiqa)": "العقيقة", "hunting, slaughtering": "الصيد والذبائح",
+    "hunting, slaughter, and what may be eaten": "الصيد والذبائح", "al-adha festival sacrifice (adaahi)": "الأضاحي",
+    "sacrifices": "الأضاحي", "drinks": "الأشربة", "patients": "المرضى", "medicine": "الطب",
+    "dress": "اللباس", "clothes and adornment": "اللباس والزينة", "good manners and form (al-adab)": "الأدب",
+    "manners and etiquette": "الآداب", "asking permission": "الاستئذان", "invocations": "الدعوات",
+    "to make the heart tender (ar-riqaq)": "الرقاق", "heart-melting traditions": "الرقاق",
+    "divine will (al-qadar)": "القدر", "destiny": "القدر", "oaths and vows": "الأيمان والنذور",
+    "oaths": "الأيمان", "vows": "النذور", "vow": "النذور",
+    "oaths, muharibin, qasas (retaliation), and diyat (blood money)": "القسامة والمحاربين والديات",
+    "expiation for unfulfilled oaths": "كفارات الأيمان", "laws of inheritance (al-faraa'id)": "الفرائض",
+    "rules of inheritance": "الفرائض", "limits and punishments set by allah (hudood)": "الحدود",
+    "legal punishments": "الحدود", "blood money (ad-diyat)": "الديات", "apostates": "استتابة المرتدين",
+    "holding fast to the qur'an and sunnah": "الاعتصام بالكتاب والسنة", "judgments (ahkaam)": "الأحكام",
+    "judicial decisions": "الأقضية", "wishes": "التمني", "accepting information given by a truthful person": "أخبار الآحاد",
+    "dreams": "الرؤيا", "afflictions and the end of the world": "الفتن", "tribulations and portents of the last hour": "الفتن وأشراط الساعة",
+    "suckling": "الرضاع", "invoking curses": "اللعان", "government": "الإمارة", "greetings": "السلام",
+    "concerning the use of correct words": "الألفاظ من الأدب", "poetry": "الشعر", "virtues": "الفضائل",
+    "virtue, enjoining good manners, and joining of the ties of kinship": "البر والصلة",
+    "pertaining to the remembrance of allah, supplication, repentance and seeking forgiveness": "الذكر والدعاء",
+    "qualities of the day of resurrection, paradise and hell": "صفة القيامة والجنة والنار",
+    "paradise, its blessings and its inhabitants": "الجنة وصفة نعيمها", "zuhd and softening of hearts": "الزهد والرقائق"
 };
 
 function getArabicBookName(englishName, bookId) {
-    if (!englishName || englishName.trim() === "") return `كتاب رقم (${bookId})`;
-    const cleanEng = englishName.trim();
+    if (!englishName || englishName.trim() === "") return `كِتَابُ رقم (${bookId})`;
+    
+    let cleanEng = englishName.toLowerCase().trim().replace(/^the book of /i, '').trim();
+    
     if (arabicBookNames[cleanEng]) return "كِتَابُ " + arabicBookNames[cleanEng];
-    if (/[a-zA-Z]/.test(cleanEng)) return `كتاب الباب (${bookId})`; 
-    return cleanEng; 
+    
+    for (let key in arabicBookNames) {
+        if (cleanEng.includes(key)) return "كِتَابُ " + arabicBookNames[key];
+    }
+    
+    if (/[a-z]/.test(cleanEng)) return `كِتَابُ ${englishName.trim()}`;
+    return englishName.trim();
 }
 
 // =========================================================
