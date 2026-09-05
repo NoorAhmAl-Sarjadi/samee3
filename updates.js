@@ -94,7 +94,7 @@ function formatHadithHtml(text, isExport) {
     return `<div style="color: ${textColor}; text-align: justify; text-align-last: center; text-shadow: ${isExport ? '0 10px 30px rgba(0,0,0,0.5)' : 'none'};">« ${text} »</div>`;
 }
 
-// استخراج أول 20 كلمة من المتن الفعلي فقط للبحث في الدرر السنية
+// استخراج أول 20 كلمة من المتن للبحث في الدرر السنية
 function getHadithMatnForSearch(text) {
     let splitIdx = -1;
     let sepLen = 0;
@@ -113,11 +113,9 @@ function getHadithMatnForSearch(text) {
         matn = text.substring(splitIdx + sepLen).trim();
     }
     
-    // إزالة كلمة قال/يقول وتجريد الأقواس
     matn = matn.replace(/^(?:يَقُولُ|يقول|قَالَ|قال)\s*[:،-]?\s*/i, '');
     matn = matn.replace(/^"|^«|»$|"$/g, '').replace(/^[،,:-]\s*/g, '').trim();
     
-    // أخذ أول 20 كلمة للبحث
     return matn.split(/\s+/).slice(0, 20).join(' ');
 }
 
@@ -417,6 +415,7 @@ window.addEventListener('DOMContentLoaded', () => {
         .hadith-book-card:hover { transform: translateY(-5px); border-color: #10B981; box-shadow: 0 10px 20px rgba(16, 185, 129, 0.1); }
         .hadith-book-card h3 { color: #0F172A; margin: 0; font-size: 24px; font-family: 'Aref Ruqaa', serif; line-height: 1.5; }
         .hadith-item-card { background: #F8FAFC; border-radius: 20px; padding: 35px 25px; margin-bottom: 20px; text-align: right; border: 2px solid #10B981; box-shadow: 0 10px 30px rgba(16,185,129,0.1); max-width: 900px; margin: 0 auto; }
+        .hadith-item-text { font-family: 'Amiri', serif; font-size: clamp(22px, 5vw, 32px); color: #0F172A; margin-bottom: 30px; line-height: 2.1; text-align: justify; text-align-last: center; }
         .hadith-item-info { color: #10B981; font-weight: 700; font-size: 16px; margin-bottom: 20px; display: inline-block; background: #ECFDF5; padding: 8px 20px; border-radius: 50px; border: 1px solid #A7F3D0; }
         .hadith-actions-row { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; border-top: 2px dashed #CBD5E1; padding-top: 25px; }
         .h-btn { padding: 12px 20px; border-radius: 10px; border: none; font-family: inherit; font-weight: 700; cursor: pointer; transition: 0.3s; display: flex; align-items: center; gap: 8px; font-size: 15px; }
@@ -585,9 +584,7 @@ function renderCurrentSingleHadith() {
     card.className = 'hadith-item-card';
     card.innerHTML = `
         <div style="text-align: center;"><div class="hadith-item-info">📖 ${sourceName} | حديث رقم: ${hadith.hadithnumber}</div></div>
-        <div style="font-family: 'Amiri', serif; font-size: 26px; color: #0F172A; margin-bottom: 30px;">
-            ${formatHadithHtml(cleanText, false)}
-        </div>
+        <div class="hadith-item-text">${formatHadithHtml(cleanText, false)}</div>
         <div class="hadith-actions-row"></div>
     `;
 
@@ -595,7 +592,7 @@ function renderCurrentSingleHadith() {
     
     const btnRead = document.createElement('button');
     btnRead.className = 'h-btn h-btn-read';
-    btnRead.innerHTML = '📖 الشرح والتخريج (الدرر السنية)';
+    btnRead.innerHTML = '📖 التخريج والشرح (الدرر السنية)';
     btnRead.onclick = function() {
         let dorarQuery = getHadithMatnForSearch(cleanText);
         window.open('https://dorar.net/hadith/search?q=' + encodeURIComponent(dorarQuery), '_blank');
@@ -646,28 +643,29 @@ function exportHadithImage(text, source, num, bookName) {
 
     exportDiv = document.createElement('div');
     exportDiv.id = 'export-hadith-canvas';
-    // الاحتفاظ بالهوية الخضراء للملصق
-    exportDiv.style.cssText = 'position: fixed; left: -3000px; top: 0; width: 1080px; background: linear-gradient(135deg, #022c22 0%, #064e3b 100%); display: flex; flex-direction: column; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -9999; color: #FFFFFF;';
+    
+    // إضافة min-height لضمان أن التصميم يبدأ كمربع ويتمدد للأسفل لو الحديث طويل
+    exportDiv.style.cssText = 'position: fixed; left: -3000px; top: 0; width: 1080px; min-height: 1080px; background: linear-gradient(135deg, #022c22 0%, #064e3b 100%); display: flex; flex-direction: column; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -9999; color: #FFFFFF;';
 
-    // خوارزمية المساحات المأخوذة من القرآن الكريم لملء الصورة بدقة
-    let dynamicFontSize = 55, dynamicLineHeight = 1.8;
-    if (text.length > 700) { dynamicFontSize = 32; dynamicLineHeight = 1.6; } 
-    else if (text.length > 500) { dynamicFontSize = 38; dynamicLineHeight = 1.6; } 
-    else if (text.length > 350) { dynamicFontSize = 42; dynamicLineHeight = 1.6; } 
-    else if (text.length > 200) { dynamicFontSize = 48; dynamicLineHeight = 1.7; } 
-    else if (text.length > 100) { dynamicFontSize = 52; dynamicLineHeight = 1.7; }
+    // خوارزمية تكبير الخطوط بشكل ديناميكي لتملأ المربع بشياكة
+    let dynamicFontSize = 65, dynamicLineHeight = 1.8;
+    if (text.length > 700) { dynamicFontSize = 36; dynamicLineHeight = 1.6; } 
+    else if (text.length > 500) { dynamicFontSize = 42; dynamicLineHeight = 1.6; } 
+    else if (text.length > 350) { dynamicFontSize = 48; dynamicLineHeight = 1.6; } 
+    else if (text.length > 200) { dynamicFontSize = 55; dynamicLineHeight = 1.7; } 
+    else if (text.length > 100) { dynamicFontSize = 60; dynamicLineHeight = 1.7; }
 
     exportDiv.innerHTML = `
-        <div style="width: 100%; border: 4px solid #10B981; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: rgba(2, 44, 34, 0.8); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
-            <div style="font-family: 'Aref Ruqaa', serif; font-size: 45px; color: #10B981; background: rgba(0, 0, 0, 0.4); padding: 10px 50px; border-radius: 50px; border: 1px solid #10B981; margin-bottom: 40px;">قَالَ رَسُولُ اللَّهِ ﷺ</div>
+        <div style="flex: 1; width: 100%; border: 4px solid #10B981; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: rgba(2, 44, 34, 0.8); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
+            <div style="font-family: 'Aref Ruqaa', serif; font-size: 50px; color: #10B981; background: rgba(0, 0, 0, 0.4); padding: 15px 60px; border-radius: 50px; border: 1px solid #10B981; margin-bottom: 50px;">قَالَ رَسُولُ اللَّهِ ﷺ</div>
             
-            <div style="font-family: 'Amiri', serif; font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight}; width: 100%; margin: 0 0 40px 0;">
+            <div style="font-family: 'Amiri', serif; font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight}; width: 100%; margin: 0 0 50px 0;">
                 ${formatHadithHtml(text, true)}
             </div>
             
-            <div style="color: #67E8F9; font-size: 30px; font-weight: bold; margin-bottom: 10px; font-family: 'Tajawal', sans-serif; background: rgba(0,0,0,0.3); padding: 10px 30px; border-radius: 20px; border: 1px solid rgba(103, 232, 249, 0.3);">${source} ${bookName ? "❖ " + bookName : ""} (رقم: ${num})</div>
+            <div style="color: #67E8F9; font-size: 32px; font-weight: bold; margin-bottom: 20px; font-family: 'Tajawal', sans-serif; background: rgba(0,0,0,0.3); padding: 15px 40px; border-radius: 20px; border: 1px solid rgba(103, 232, 249, 0.3);">${source} ${bookName ? "❖ " + bookName : ""} (رقم: ${num})</div>
             
-            <div style="font-family: 'Tajawal', sans-serif; font-size: 35px; font-weight: 800; color: #94A3B8; direction: rtl; display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 50px;">
+            <div style="font-family: 'Tajawal', sans-serif; font-size: 38px; font-weight: 800; color: #94A3B8; direction: rtl; display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: auto; padding-top: 40px;">
                 <bdi style="color:#FFFFFF;">مصحف سَمِيع</bdi><span style="color:#10B981; margin:0 15px;">❖</span><bdi style="color:#FFFFFF;">قسم الأحاديث النبوية</bdi>
             </div>
         </div>
