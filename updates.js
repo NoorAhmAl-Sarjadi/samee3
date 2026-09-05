@@ -60,7 +60,6 @@ const hadithSeparators = [
 ];
 
 function formatHadithHtml(text, isExport) {
-    // توحيد الألوان (أبيض في التصميم، كحلي في الموقع)
     const textColor = isExport ? '#FFFFFF' : '#0F172A'; 
     const borderColor = isExport ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)';
     
@@ -83,19 +82,19 @@ function formatHadithHtml(text, isExport) {
         
         if(matn.length > 0) {
             return `
-                <div style="color: ${textColor}; font-size: ${isExport ? '0.85em' : '0.9em'}; line-height: 1.8; margin-bottom: 15px; border-bottom: 1px dashed ${borderColor}; padding-bottom: 15px; text-align: justify; text-align-last: center;">
+                <div style="color: ${textColor}; font-size: ${isExport ? '0.75em' : '0.85em'}; opacity: ${isExport ? '0.85' : '1'}; margin-bottom: ${isExport ? '25px' : '15px'}; border-bottom: 1px dashed ${borderColor}; padding-bottom: ${isExport ? '20px' : '15px'}; text-align: justify; text-align-last: center;">
                     ${sanad}
                 </div>
-                <div style="color: ${textColor}; line-height: 2.2; text-align: justify; text-align-last: center;">
+                <div style="color: ${textColor}; font-weight: ${isExport ? 'normal' : 'bold'}; text-align: justify; text-align-last: center; text-shadow: ${isExport ? '0 10px 30px rgba(0,0,0,0.5)' : 'none'};">
                     « ${matn} »
                 </div>`;
         }
     }
     
-    return `<div style="color: ${textColor}; line-height: 2.2; text-align: justify; text-align-last: center;">« ${text} »</div>`;
+    return `<div style="color: ${textColor}; text-align: justify; text-align-last: center; text-shadow: ${isExport ? '0 10px 30px rgba(0,0,0,0.5)' : 'none'};">« ${text} »</div>`;
 }
 
-// استخراج المتن للبحث في الدرر السنية
+// استخراج أول 20 كلمة من المتن الفعلي فقط للبحث في الدرر السنية
 function getHadithMatnForSearch(text) {
     let splitIdx = -1;
     let sepLen = 0;
@@ -114,9 +113,12 @@ function getHadithMatnForSearch(text) {
         matn = text.substring(splitIdx + sepLen).trim();
     }
     
+    // إزالة كلمة قال/يقول وتجريد الأقواس
     matn = matn.replace(/^(?:يَقُولُ|يقول|قَالَ|قال)\s*[:،-]?\s*/i, '');
     matn = matn.replace(/^"|^«|»$|"$/g, '').replace(/^[،,:-]\s*/g, '').trim();
-    return matn.split(/\s+/).slice(0, 15).join(' ');
+    
+    // أخذ أول 20 كلمة للبحث
+    return matn.split(/\s+/).slice(0, 20).join(' ');
 }
 
 // =========================================================
@@ -207,17 +209,14 @@ if (typeof window.playSpecificAyahModal === 'function') {
 }
 
 // =========================================================
-// 5. دوال تحميل الصوتيات للعمل بدون نت (مؤمنة بالكامل)
+// 5. دوال تحميل الصوتيات للعمل بدون نت 
 // =========================================================
 async function cacheCurrentSurahForOffline() {
     if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
-    if(window.isDownloadingOp) return showToast("عملية جارية حالياً...");
+    if(typeof window.isDownloadingOp !== 'undefined' && window.isDownloadingOp) return showToast("عملية جارية حالياً...");
     window.isDownloadingOp = true;
     initSidePanel("تحميل السورة للعمل بدون نت");
-    
-    let cancelBtn = document.getElementById('side-panel-cancel-btn');
-    if(cancelBtn) cancelBtn.innerText = 'إلغاء العملية';
-    
+    els.sidePanelCancel.innerText = 'إلغاء العملية';
     try {
         updateSidePanel(30, "جاري الحفظ داخل المنصة...");
         const url = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
@@ -226,29 +225,22 @@ async function cacheCurrentSurahForOffline() {
         if(response.ok) {
             await cache.put(url, response);
             updateSidePanel(100, "تم التحميل! السورة تعمل الآن بدون نت.");
-            let dlBtn = document.getElementById('side-panel-download-btn');
-            if (dlBtn) dlBtn.classList.add('hidden'); 
+            if (els && els.sidePanelBtn) els.sidePanelBtn.classList.add('hidden'); 
             setTimeout(() => hideSidePanel(), 3500);
         } else { throw new Error("فشل"); }
     } catch(e) { 
-        let textPanel = document.getElementById('side-panel-text');
-        if (textPanel) textPanel.innerText = "فشل التحميل!"; 
+        if (els && els.sidePanelText) els.sidePanelText.innerText = "فشل التحميل!"; 
     } finally { window.isDownloadingOp = false; }
 }
 
 async function cacheFullMushafForOffline() {
     if(!currentAudioServer) return showToast("اختر قارئ أولاً.");
-    if(window.isDownloadingOp) return showToast("عملية جارية حالياً...");
-    
+    if(typeof window.isDownloadingOp !== 'undefined' && window.isDownloadingOp) return showToast("عملية جارية حالياً...");
     const surahsToDownload = (typeof currentAvailableSurahs !== 'undefined' && currentAvailableSurahs.length > 0) ? currentAvailableSurahs : Array.from({length: 114}, (_, i) => i + 1);
     if(!confirm("سيتم تحميل المصحف كاملاً داخل المنصة ليعمل بدون نت. هل ترغب بالمتابعة؟ (قد يستغرق بعض الوقت)")) return;
-    
     window.isDownloadingOp = true;
     initSidePanel("تحميل المصحف للعمل بدون نت");
-    
-    let cancelBtn = document.getElementById('side-panel-cancel-btn');
-    if (cancelBtn) cancelBtn.innerText = 'إيقاف / إلغاء';
-    
+    if (els && els.sidePanelCancel) els.sidePanelCancel.innerText = 'إيقاف / إلغاء';
     let downloadedCount = 0; let totalSurahs = surahsToDownload.length;
     try {
         const cache = await caches.open('samee3-cache-v6');
@@ -267,17 +259,11 @@ async function cacheFullMushafForOffline() {
             updateSidePanel(Math.floor((downloadedCount / totalSurahs) * 100), `تم التحميل ${downloadedCount} من ${totalSurahs} سورة`);
         }
         updateSidePanel(100, "اكتمل التحميل! المصحف متاح بدون نت.");
-        let dlBtn = document.getElementById('side-panel-download-btn');
-        if (dlBtn) dlBtn.classList.add('hidden');
+        if (els && els.sidePanelBtn) els.sidePanelBtn.classList.add('hidden');
         setTimeout(() => hideSidePanel(), 4000);
     } catch(e) { 
-        let textPanel = document.getElementById('side-panel-text');
-        if(e.message !== "تم الإلغاء") { 
-            if (textPanel) textPanel.innerText = "فشل التحميل.. المساحة ممتلئة أو انقطع الاتصال!"; 
-        } else { 
-            if (textPanel) textPanel.innerText = "تم إلغاء التحميل."; 
-            setTimeout(() => hideSidePanel(), 2000); 
-        }
+        if(e.message !== "تم الإلغاء") { if (els && els.sidePanelText) els.sidePanelText.innerText = "فشل التحميل.. المساحة ممتلئة أو انقطع الاتصال!"; } 
+        else { if (els && els.sidePanelText) els.sidePanelText.innerText = "تم إلغاء التحميل."; setTimeout(() => hideSidePanel(), 2000); }
     } finally { window.isDownloadingOp = false; }
 }
 
@@ -660,18 +646,26 @@ function exportHadithImage(text, source, num, bookName) {
 
     exportDiv = document.createElement('div');
     exportDiv.id = 'export-hadith-canvas';
-    // إضافة لون الخط الأبيض صراحة للمحتوى لضمان ظهوره على الخلفية الغامقة
+    // الاحتفاظ بالهوية الخضراء للملصق
     exportDiv.style.cssText = 'position: fixed; left: -3000px; top: 0; width: 1080px; background: linear-gradient(135deg, #022c22 0%, #064e3b 100%); display: flex; flex-direction: column; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -9999; color: #FFFFFF;';
+
+    // خوارزمية المساحات المأخوذة من القرآن الكريم لملء الصورة بدقة
+    let dynamicFontSize = 55, dynamicLineHeight = 1.8;
+    if (text.length > 700) { dynamicFontSize = 32; dynamicLineHeight = 1.6; } 
+    else if (text.length > 500) { dynamicFontSize = 38; dynamicLineHeight = 1.6; } 
+    else if (text.length > 350) { dynamicFontSize = 42; dynamicLineHeight = 1.6; } 
+    else if (text.length > 200) { dynamicFontSize = 48; dynamicLineHeight = 1.7; } 
+    else if (text.length > 100) { dynamicFontSize = 52; dynamicLineHeight = 1.7; }
 
     exportDiv.innerHTML = `
         <div style="width: 100%; border: 4px solid #10B981; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: rgba(2, 44, 34, 0.8); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
-            <div style="font-family: 'Aref Ruqaa', serif; font-size: 40px; color: #10B981; background: rgba(0, 0, 0, 0.4); padding: 10px 50px; border-radius: 50px; border: 1px solid #10B981; margin-bottom: 40px;">قَالَ رَسُولُ اللَّهِ ﷺ</div>
+            <div style="font-family: 'Aref Ruqaa', serif; font-size: 45px; color: #10B981; background: rgba(0, 0, 0, 0.4); padding: 10px 50px; border-radius: 50px; border: 1px solid #10B981; margin-bottom: 40px;">قَالَ رَسُولُ اللَّهِ ﷺ</div>
             
-            <div style="font-family: 'Amiri', serif; width: 100%; margin: 0 0 40px 0;">
+            <div style="font-family: 'Amiri', serif; font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight}; width: 100%; margin: 0 0 40px 0;">
                 ${formatHadithHtml(text, true)}
             </div>
             
-            <div style="color: #67E8F9; font-size: 28px; font-weight: bold; margin-bottom: 10px; font-family: 'Tajawal', sans-serif;">${source} ${bookName ? "❖ " + bookName : ""} (رقم: ${num})</div>
+            <div style="color: #67E8F9; font-size: 30px; font-weight: bold; margin-bottom: 10px; font-family: 'Tajawal', sans-serif; background: rgba(0,0,0,0.3); padding: 10px 30px; border-radius: 20px; border: 1px solid rgba(103, 232, 249, 0.3);">${source} ${bookName ? "❖ " + bookName : ""} (رقم: ${num})</div>
             
             <div style="font-family: 'Tajawal', sans-serif; font-size: 35px; font-weight: 800; color: #94A3B8; direction: rtl; display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 50px;">
                 <bdi style="color:#FFFFFF;">مصحف سَمِيع</bdi><span style="color:#10B981; margin:0 15px;">❖</span><bdi style="color:#FFFFFF;">قسم الأحاديث النبوية</bdi>
