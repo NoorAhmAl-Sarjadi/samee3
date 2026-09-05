@@ -49,24 +49,21 @@ async function silentlyCacheHadithData() {
 }
 
 // =========================================================
-// 3. دالة تنسيق الحديث الذكية (فصل السند عن المتن)
+// 3. دالة تنسيق الحديث وفصل المتن عن السند
 // =========================================================
-function formatHadithHtml(text, isExport) {
-    const sanadColor = isExport ? '#FCD34D' : '#D97706'; 
-    const matnColor = isExport ? '#FFFFFF' : '#0F172A'; 
-    
-    const separators = [
-        'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ :', 'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ:', 'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ',
-        'صلى الله عليه وسلم :', 'صلى الله عليه وسلم:', 'صلى الله عليه وسلم',
-        'ﷺ :', 'ﷺ:', 'ﷺ',
-        'يَقُولُ :', 'يَقُولُ:', 'يقول :', 'يقول:',
-        'قَالَ :', 'قَالَ:', 'قال :', 'قال:'
-    ];
+const hadithSeparators = [
+    'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ :', 'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ:', 'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ',
+    'صلى الله عليه وسلم :', 'صلى الله عليه وسلم:', 'صلى الله عليه وسلم',
+    'ﷺ :', 'ﷺ:', 'ﷺ',
+    'يَقُولُ :', 'يَقُولُ:', 'يقول :', 'يقول:',
+    'قَالَ :', 'قَالَ:', 'قال :', 'قال:'
+];
 
+function formatHadithHtml(text, isExport) {
     let splitIdx = -1;
     let sepLen = 0;
 
-    for (let sep of separators) {
+    for (let sep of hadithSeparators) {
         let idx = text.indexOf(sep);
         if (idx !== -1) {
             splitIdx = idx;
@@ -82,16 +79,40 @@ function formatHadithHtml(text, isExport) {
         
         if(matn.length > 0) {
             return `
-                <div style="color: ${sanadColor}; font-size: ${isExport ? '0.75em' : '0.85em'}; line-height: 1.8; margin-bottom: 15px; border-bottom: 1px dashed ${isExport ? 'rgba(252, 211, 77, 0.3)' : 'rgba(217, 119, 6, 0.2)'}; padding-bottom: 15px; text-align: justify; text-align-last: center;">
+                <div style="font-size: ${isExport ? '0.75em' : '0.85em'}; line-height: 1.8; margin-bottom: 15px; padding-bottom: 15px; text-align: justify; text-align-last: center;">
                     ${sanad}
                 </div>
-                <div style="color: ${matnColor}; font-weight: ${isExport ? 'normal' : 'bold'}; line-height: 2.2; text-align: justify; text-align-last: center;">
+                <div style="font-weight: ${isExport ? 'normal' : 'bold'}; line-height: 2.2; text-align: justify; text-align-last: center;">
                     « ${matn} »
                 </div>`;
         }
     }
     
-    return `<div style="color: ${matnColor}; line-height: 2.2; text-align: justify; text-align-last: center;">« ${text} »</div>`;
+    return `<div style="line-height: 2.2; text-align: justify; text-align-last: center;">« ${text} »</div>`;
+}
+
+// استخراج المتن فقط (لتوجيهه لمحرك بحث الدرر السنية بذكاء)
+function getHadithMatnForSearch(text) {
+    let splitIdx = -1;
+    let sepLen = 0;
+    
+    for (let sep of hadithSeparators) {
+        let idx = text.indexOf(sep);
+        if (idx !== -1) {
+            splitIdx = idx;
+            sepLen = sep.length;
+            break;
+        }
+    }
+
+    let matn = text;
+    if (splitIdx !== -1) {
+        matn = text.substring(splitIdx + sepLen).trim();
+    }
+    
+    // تنظيف الأقواس لو موجودة وناخد أول 8 كلمات بس لضمان دقة البحث
+    matn = matn.replace(/^"|^«|»$|"$/g, '').trim();
+    return matn.split(/\s+/).slice(0, 8).join(' ');
 }
 
 // =========================================================
@@ -160,6 +181,24 @@ if (typeof window.togglePlayState === 'function') {
             }
         }
         originalToggle(); 
+    };
+}
+
+if (typeof window.playSpecificAyahModal === 'function') {
+    const originalPlayAyah = window.playSpecificAyahModal;
+    window.playSpecificAyahModal = function() {
+        const audio = document.getElementById('main-audio');
+        if (audio) {
+            if (!navigator.onLine && (audio.error || audio.readyState === 0)) {
+                if(typeof closeModals === 'function') closeModals();
+                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
+            }
+            if (navigator.onLine && audio.error && typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
+                audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+                audio.load();
+            }
+        }
+        originalPlayAyah();
     };
 }
 
@@ -300,8 +339,8 @@ window.executeSearch = async function() {
                 
                 if(results.length > 0) {
                     resultsBox.innerHTML = results.map((r, i) => {
-                        // أخذ أول 300 حرف بحد أقصى للبحث في الدرر السنية لمنع خطأ URL Too Long
-                        let dorarQuery = r.text.length > 300 ? r.text.substring(0, 300) : r.text;
+                        // استخراج المتن فقط وتجهيزه للدرر السنية
+                        let dorarQuery = getHadithMatnForSearch(r.text);
                         
                         return `
                         <div style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; margin-bottom: 10px; border-radius: 10px; text-align: right;">
@@ -330,7 +369,7 @@ window.executeSearch = async function() {
 };
 
 // =========================================================
-// 7. القاموس الذكي لكتب الأحاديث والترجمة الدقيقة لرقم 0
+// 7. القاموس الذكي لكتب الأحاديث
 // =========================================================
 const bukhariBooks = {
     "1": "بدء الوحي", "2": "الإيمان", "3": "العلم", "4": "الوضوء", "5": "الغسل", "6": "الحيض", "7": "التيمم", "8": "الصلاة", "9": "مواقيت الصلاة", "10": "الأذان",
@@ -376,6 +415,7 @@ window.addEventListener('DOMContentLoaded', () => {
         .hadith-book-card:hover { transform: translateY(-5px); border-color: #10B981; box-shadow: 0 10px 20px rgba(16, 185, 129, 0.1); }
         .hadith-book-card h3 { color: #0F172A; margin: 0; font-size: 24px; font-family: 'Aref Ruqaa', serif; line-height: 1.5; }
         .hadith-item-card { background: #F8FAFC; border-radius: 20px; padding: 35px 25px; margin-bottom: 20px; text-align: right; border: 2px solid #10B981; box-shadow: 0 10px 30px rgba(16,185,129,0.1); max-width: 900px; margin: 0 auto; }
+        .hadith-item-text { font-family: 'Amiri', serif; font-size: clamp(22px, 5vw, 32px); color: #0F172A; margin-bottom: 30px; line-height: 2.1; text-align: justify; text-align-last: center; }
         .hadith-item-info { color: #10B981; font-weight: 700; font-size: 16px; margin-bottom: 20px; display: inline-block; background: #ECFDF5; padding: 8px 20px; border-radius: 50px; border: 1px solid #A7F3D0; }
         .hadith-actions-row { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; border-top: 2px dashed #CBD5E1; padding-top: 25px; }
         .h-btn { padding: 12px 20px; border-radius: 10px; border: none; font-family: inherit; font-weight: 700; cursor: pointer; transition: 0.3s; display: flex; align-items: center; gap: 8px; font-size: 15px; }
@@ -544,20 +584,17 @@ function renderCurrentSingleHadith() {
     card.className = 'hadith-item-card';
     card.innerHTML = `
         <div style="text-align: center;"><div class="hadith-item-info">📖 ${sourceName} | حديث رقم: ${hadith.hadithnumber}</div></div>
-        <div style="font-family: 'Amiri', serif; font-size: 26px; color: #0F172A; margin-bottom: 30px;">
-            ${formatHadithHtml(cleanText, false)}
-        </div>
+        <div class="hadith-item-text">${formatHadithHtml(cleanText, false)}</div>
         <div class="hadith-actions-row"></div>
     `;
 
     const actionsRow = card.querySelector('.hadith-actions-row');
     
-    // زر البحث في الدرر السنية الذكي
     const btnRead = document.createElement('button');
     btnRead.className = 'h-btn h-btn-read';
-    btnRead.innerHTML = '📖 الشرح والتخريج (الدرر السنية)';
+    btnRead.innerHTML = '📖 التخريج والشرح (الدرر السنية)';
     btnRead.onclick = function() {
-        let dorarQuery = cleanText.length > 300 ? cleanText.substring(0, 300) : cleanText;
+        let dorarQuery = getHadithMatnForSearch(cleanText);
         window.open('https://dorar.net/hadith/search?q=' + encodeURIComponent(dorarQuery), '_blank');
     };
 
