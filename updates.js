@@ -12,7 +12,7 @@ if ('serviceWorker' in navigator) {
 // =========================================================
 window.addEventListener('load', () => {
     setTimeout(silentlyCacheAllQuranText, 4000);
-    setTimeout(silentlyCacheHadithData, 6000); // تحميل الأحاديث بعد القرآن
+    setTimeout(silentlyCacheHadithData, 6000);
 });
 
 async function silentlyCacheAllQuranText() {
@@ -30,7 +30,7 @@ async function silentlyCacheAllQuranText() {
 }
 
 async function silentlyCacheHadithData() {
-    if (localStorage.getItem('samee3_hadith_cached_v1') === 'true') return;
+    if (localStorage.getItem('samee3_hadith_cached_v2') === 'true') return;
     try {
         const cache = await caches.open('samee3-hadith-cache-v1');
         const urls = [
@@ -44,7 +44,7 @@ async function silentlyCacheHadithData() {
                 if (response.ok) await cache.put(url, response.clone());
             }
         }
-        localStorage.setItem('samee3_hadith_cached_v1', 'true');
+        localStorage.setItem('samee3_hadith_cached_v2', 'true');
     } catch (e) {}
 }
 
@@ -52,7 +52,6 @@ async function silentlyCacheHadithData() {
 // 3. حقن الأزرار والتحكم في الواجهات وإخفاء المشغل
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
-    // أزرار التحميل للقرآن
     const controlsContainer = document.querySelector('.player-controls');
     if(controlsContainer) {
         const saveSurahBtn = document.createElement('button');
@@ -71,7 +70,6 @@ window.addEventListener('DOMContentLoaded', () => {
         controlsContainer.prepend(saveSurahBtn);
     }
     
-    // إضافة خيار (بحث عن حديث) في قائمة البحث
     const searchTypeSelect = document.getElementById('search-type');
     if(searchTypeSelect) {
         const hadithOption = document.createElement('option');
@@ -81,7 +79,6 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// تعديل switchTab لإخفاء المشغل السفلي داخل قسم الأحاديث
 if (typeof window.switchTab === 'function') {
     const originalSwitchTab = window.switchTab;
     window.switchTab = function(tabId) {
@@ -89,7 +86,6 @@ if (typeof window.switchTab === 'function') {
         const hv = document.getElementById('hadith-view');
         if (hv) hv.style.display = (tabId === 'hadith-view') ? 'block' : 'none';
         
-        // إخفاء الشريط السفلي في الأحاديث والإدارة وتسجيل الدخول
         const stickyPlayer = document.querySelector('.sticky-player');
         if (stickyPlayer) {
             if (tabId === 'hadith-view' || tabId === 'unified-login-view' || tabId === 'admin-view') {
@@ -112,11 +108,9 @@ if (typeof window.togglePlayState === 'function') {
                 if (playBtn) playBtn.innerHTML = "⏵";
                 return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً."); 
             }
-            if (navigator.onLine && audio.error) {
-                if(typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
-                    audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                    audio.load();
-                }
+            if (navigator.onLine && audio.error && typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
+                audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+                audio.load();
             }
         }
         originalToggle(); 
@@ -132,11 +126,9 @@ if (typeof window.playSpecificAyahModal === 'function') {
                 if(typeof closeModals === 'function') closeModals();
                 return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
             }
-            if (navigator.onLine && audio.error) {
-                if(typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
-                    audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                    audio.load();
-                }
+            if (navigator.onLine && audio.error && typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
+                audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
+                audio.load();
             }
         }
         originalPlayAyah();
@@ -203,7 +195,7 @@ async function cacheFullMushafForOffline() {
 }
 
 // =========================================================
-// 5. نظام البحث الشامل المعدل (قرآن + قراء + أحاديث)
+// 5. نظام البحث الشامل (قرآن + قراء + أحاديث)
 // =========================================================
 const removeTashkeel = (text) => text.replace(/[\u0617-\u061A\u064B-\u0652]/g, "").replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ي/g, 'ى');
 
@@ -255,16 +247,15 @@ window.executeSearch = async function() {
                 const normalizedQuery = removeTashkeel(query);
                 let results = [];
                 
-                const searchInBook = (sourceData, sourceName) => {
+                const searchInBook = (sourceData, sourceName, sourceKey) => {
                     for(let h of sourceData.hadiths) {
-                        if(results.length >= 20) break; // أقصى حد 20 نتيجة
+                        if(results.length >= 20) break;
                         const cleanText = h.text.replace(/حدثنا/g, 'حَدَّثَنَا').replace(/رضي الله عنه/g, 'رَضِيَ اللَّهُ عَنْهُ');
                         const normText = removeTashkeel(cleanText);
                         
                         if(normText.includes(normalizedQuery)) {
                             let bookRef = h.reference ? h.reference.book : "1";
-                            let engBookName = sourceData.metadata.sections[bookRef];
-                            let arBookName = getArabicBookName(engBookName, bookRef);
+                            let arBookName = getArabicBookNameByID(sourceKey, String(bookRef));
                             
                             results.push({
                                 source: sourceName,
@@ -276,8 +267,8 @@ window.executeSearch = async function() {
                     }
                 };
                 
-                searchInBook(bData, 'صحيح البخاري');
-                if(results.length < 20) searchInBook(mData, 'صحيح مسلم');
+                searchInBook(bData, 'صحيح البخاري', 'bukhari');
+                if(results.length < 20) searchInBook(mData, 'صحيح مسلم', 'muslim');
                 
                 if(results.length > 0) {
                     resultsBox.innerHTML = results.map((r, i) => {
@@ -289,7 +280,6 @@ window.executeSearch = async function() {
                             <div style="color: #10B981; font-weight: bold; margin-bottom: 5px; font-size: 14px;">${r.source} | رقم: ${r.num} | ${r.bookName}</div>
                             <div style="font-family: 'Amiri', serif; font-size: 18px; color: #0F172A; margin-bottom: 10px; line-height: 1.8;">${r.text.substring(0, 150)}...</div>
                             
-                            <!-- صندوق الشرح داخل البحث -->
                             <div id="search-hadith-sharh-${i}" style="display: none; margin-bottom: 15px; padding: 15px; background: #fff; border: 1px solid #E2E8F0; border-radius: 8px; font-family: 'Amiri', serif; font-size: 16px; line-height: 1.8; border-right: 3px solid #10B981;">
                                 <strong style="color: #D97706;">📖 شرح الحديث:</strong><br>${simulatedSharh}
                             </div>
@@ -314,79 +304,34 @@ window.executeSearch = async function() {
 };
 
 // =========================================================
-// 6. قاموس الترجمة التلقائية الذكي لكتب الحديث (عربي - إنجليزي)
+// 6. القاموس الذكي لكتب الأحاديث (مطابقة بالأرقام لضمان الدقة 100%)
 // =========================================================
-const arabicBookNames = {
-    "revelation": "بدء الوحي", "belief": "الإيمان", "faith": "الإيمان", "knowledge": "العلم",
-    "ablutions (wudu')": "الوضوء", "purification": "الطهارة", "bathing (ghusl)": "الغسل",
-    "menstrual periods": "الحيض", "menstruation": "الحيض", "rubbing hands and feet with dust (tayammum)": "التيمم",
-    "prayers (salat)": "الصلاة", "prayers": "الصلاة", "prayer": "الصلاة",
-    "mosques and places of prayer": "المساجد", "call to prayers (adhaan)": "الأذان",
-    "characteristics of prayer": "صفة الصلاة", "prayer - travellers": "صلاة المسافرين",
-    "friday prayer": "الجمعة", "prayer - friday": "الجمعة", "fear prayer": "صلاة الخوف",
-    "the two festivals (eids)": "العيدين", "prayer - two eids": "العيدين", "witr prayer": "الوتر",
-    "invoking allah for rain (istisqaa)": "الاستسقاء", "prayer - rain": "الاستسقاء",
-    "eclipses": "الكسوف", "prayer - eclipses": "الكسوف", "prostration during recital of qur'an": "سجود التلاوة",
-    "shortening the prayers (at-taqseer)": "قصر الصلاة", "night prayer (tahajjud)": "التهجد",
-    "virtues of prayer at masjid makkah and madinah": "فضل الصلاة بمكة والمدينة", "actions while praying": "العمل في الصلاة",
-    "funerals (al-janaa'iz)": "الجنائز", "prayer - funerals": "الجنائز", "funerals": "الجنائز",
-    "obligatory charity tax (zakat)": "الزكاة", "zakat": "الزكاة", "hajj (pilgrimage)": "الحج",
-    "pilgrimage": "الحج", "umrah (minor pilgrimage)": "العمرة", "pilgrims prevented from completing the pilgrimage": "المحصر",
-    "penalty of hunting while on pilgrimage": "جزاء الصيد", "virtues of madinah": "فضائل المدينة",
-    "fasting": "الصيام", "praying at night in ramadaan (taraweeh)": "التراويح",
-    "retiring to a mosque for remembrance of allah (i'tikaf)": "الاعتكاف", "i'tikaf": "الاعتكاف",
-    "sales and trade": "البيوع", "transactions": "البيوع", "mudaraba (profit share)": "المضاربة",
-    "agriculture": "المزارعة", "distribution of water": "المساقاة", "musaqah": "المساقاة",
-    "loans, payment of loans, freezing of property, bankruptcy": "الديون",
-    "lost things picked up by someone (luqatah)": "اللقطة", "lost property": "اللقطة",
-    "oppressions": "المظالم", "partnership": "الشركة", "mortgaging": "الرهن",
-    "manumission of slaves": "العتق", "emancipating slaves": "العتق", "gifts": "الهبات",
-    "witnesses": "الشهادات", "peacemaking": "الصلح", "conditions": "الشروط",
-    "wills and testaments (wasaayaa)": "الوصايا", "wills": "الوصية",
-    "jihaad (fighting for the cause of allah)": "الجهاد والسير", "jihad and expeditions": "الجهاد والسير",
-    "one-fifth of booty to the cause of allah (khumus)": "الخمس", "jizyah and mawaada'ah": "الجزية والموادعة",
-    "creation": "بدء الخلق", "prophets": "أحاديث الأنبياء", "virtues and merits of the prophet (pbuh) and his companions": "المناقب",
-    "companions of the prophet": "فضائل الصحابة", "merits of the companions": "فضائل الصحابة",
-    "merits of the helpers in madinah (ansaar)": "مناقب الأنصار", "expeditions led by the prophet (pbuh) (al-maghaazi)": "المغازي",
-    "prophetic commentary on the qur'an (tafseer of the prophet (pbuh))": "التفسير", "commentary on the qur'an": "التفسير",
-    "virtues of the qur'an": "فضائل القرآن", "wedlock, marriage (nikaah)": "النكاح", "marriage": "النكاح",
-    "divorce": "الطلاق", "supporting the family": "النفقات", "food, meals": "الأطعمة",
-    "sacrifice on occasion of birth (`aqiqa)": "العقيقة", "hunting, slaughtering": "الصيد والذبائح",
-    "hunting, slaughter, and what may be eaten": "الصيد والذبائح", "al-adha festival sacrifice (adaahi)": "الأضاحي",
-    "sacrifices": "الأضاحي", "drinks": "الأشربة", "patients": "المرضى", "medicine": "الطب",
-    "dress": "اللباس", "clothes and adornment": "اللباس والزينة", "good manners and form (al-adab)": "الأدب",
-    "manners and etiquette": "الآداب", "asking permission": "الاستئذان", "invocations": "الدعوات",
-    "to make the heart tender (ar-riqaq)": "الرقاق", "heart-melting traditions": "الرقاق",
-    "divine will (al-qadar)": "القدر", "destiny": "القدر", "oaths and vows": "الأيمان والنذور",
-    "oaths": "الأيمان", "vows": "النذور", "vow": "النذور",
-    "oaths, muharibin, qasas (retaliation), and diyat (blood money)": "القسامة والمحاربين والديات",
-    "expiation for unfulfilled oaths": "كفارات الأيمان", "laws of inheritance (al-faraa'id)": "الفرائض",
-    "rules of inheritance": "الفرائض", "limits and punishments set by allah (hudood)": "الحدود",
-    "legal punishments": "الحدود", "blood money (ad-diyat)": "الديات", "apostates": "استتابة المرتدين",
-    "holding fast to the qur'an and sunnah": "الاعتصام بالكتاب والسنة", "judgments (ahkaam)": "الأحكام",
-    "judicial decisions": "الأقضية", "wishes": "التمني", "accepting information given by a truthful person": "أخبار الآحاد",
-    "dreams": "الرؤيا", "afflictions and the end of the world": "الفتن", "tribulations and portents of the last hour": "الفتن وأشراط الساعة",
-    "suckling": "الرضاع", "invoking curses": "اللعان", "government": "الإمارة", "greetings": "السلام",
-    "concerning the use of correct words": "الألفاظ من الأدب", "poetry": "الشعر", "virtues": "الفضائل",
-    "virtue, enjoining good manners, and joining of the ties of kinship": "البر والصلة",
-    "pertaining to the remembrance of allah, supplication, repentance and seeking forgiveness": "الذكر والدعاء",
-    "qualities of the day of resurrection, paradise and hell": "صفة القيامة والجنة والنار",
-    "paradise, its blessings and its inhabitants": "الجنة وصفة نعيمها", "zuhd and softening of hearts": "الزهد والرقائق"
+const bukhariBooks = {
+    "1": "بدء الوحي", "2": "الإيمان", "3": "العلم", "4": "الوضوء", "5": "الغسل", "6": "الحيض", "7": "التيمم", "8": "الصلاة", "9": "مواقيت الصلاة", "10": "الأذان",
+    "11": "الجمعة", "12": "صلاة الخوف", "13": "العيدين", "14": "الوتر", "15": "الاستسقاء", "16": "الكسوف", "17": "سجود القرآن", "18": "تقصير الصلاة", "19": "التهجد", "20": "فضل الصلاة بمكة والمدينة",
+    "21": "العمل في الصلاة", "22": "السهو", "23": "الجنائز", "24": "الزكاة", "25": "الحج", "26": "العمرة", "27": "المحصر", "28": "جزاء الصيد", "29": "فضائل المدينة", "30": "الصوم",
+    "31": "صلاة التراويح", "32": "فضل ليلة القدر", "33": "الاعتكاف", "34": "البيوع", "35": "السلم", "36": "الشفعة", "37": "الإجارة", "38": "الحوالات", "39": "الكفالة", "40": "الوكالة",
+    "41": "المزارعة", "42": "المساقاة", "43": "الاستقراض", "44": "الخصومات", "45": "اللقطة", "46": "المظالم", "47": "الشركة", "48": "الرهن", "49": "العتق", "50": "المكاتب",
+    "51": "الهبة", "52": "الشهادات", "53": "الصلح", "54": "الشروط", "55": "الوصايا", "56": "الجهاد والسير", "57": "فرض الخمس", "58": "الجزية والموادعة", "59": "بدء الخلق", "60": "أحاديث الأنبياء",
+    "61": "المناقب", "62": "فضائل أصحاب النبي", "63": "مناقب الأنصار", "64": "المغازي", "65": "التفسير", "66": "فضائل القرآن", "67": "النكاح", "68": "الطلاق", "69": "النفقات", "70": "الأطعمة",
+    "71": "العقيقة", "72": "الذبائح والصيد", "73": "الأضاحي", "74": "الأشربة", "75": "المرضى", "76": "الطب", "77": "اللباس", "78": "الأدب", "79": "الاستئذان", "80": "الدعوات",
+    "81": "الرقاق", "82": "القدر", "83": "الأيمان والنذور", "84": "كفارات الأيمان", "85": "الفرائض", "86": "الحدود", "87": "الديات", "88": "استتابة المرتدين", "89": "الإكراه", "90": "الحيل",
+    "91": "التعبير", "92": "الفتن", "93": "الأحكام", "94": "التمني", "95": "أخبار الآحاد", "96": "الاعتصام بالكتاب والسنة", "97": "التوحيد"
 };
 
-function getArabicBookName(englishName, bookId) {
-    if (!englishName || englishName.trim() === "") return `كِتَابُ رقم (${bookId})`;
-    
-    let cleanEng = englishName.toLowerCase().trim().replace(/^the book of /i, '').trim();
-    
-    if (arabicBookNames[cleanEng]) return "كِتَابُ " + arabicBookNames[cleanEng];
-    
-    for (let key in arabicBookNames) {
-        if (cleanEng.includes(key)) return "كِتَابُ " + arabicBookNames[key];
-    }
-    
-    if (/[a-z]/.test(cleanEng)) return `كِتَابُ ${englishName.trim()}`;
-    return englishName.trim();
+const muslimBooks = {
+    "1": "الإيمان", "2": "الطهارة", "3": "الحيض", "4": "الصلاة", "5": "المساجد ومواضع الصلاة", "6": "صلاة المسافرين وقصرها", "7": "الفضائل", "8": "الجمعة", "9": "صلاة العيدين", "10": "الاستسقاء",
+    "11": "الكسوف", "12": "الجنائز", "13": "الزكاة", "14": "الصيام", "15": "الاعتكاف", "16": "الحج", "17": "النكاح", "18": "الرضاع", "19": "الطلاق", "20": "اللعان",
+    "21": "العتق", "22": "البيوع", "23": "الفرائض", "24": "الهبات", "25": "الوصية", "26": "النذر", "27": "الأيمان", "28": "القسامة والمحاربين والديات", "29": "الحدود", "30": "الأقضية",
+    "31": "اللقطة", "32": "الجهاد والسير", "33": "الإمارة", "34": "الصيد والذبائح", "35": "الأضاحي", "36": "الأشربة", "37": "اللباس والزينة", "38": "الآداب", "39": "السلام", "40": "الألفاظ من الأدب",
+    "41": "الشعر", "42": "الرؤيا", "43": "الفضائل", "44": "فضائل الصحابة", "45": "البر والصلة والآداب", "46": "القدر", "47": "العلم", "48": "الذكر والدعاء", "49": "الرقاق", "50": "التوبة",
+    "51": "صفة القيامة والجنة والنار", "52": "الجنة وصفة نعيمها وأهلها", "53": "الفتن وأشراط الساعة", "54": "الزهد والرقائق", "55": "التفسير", "56": "التفسير"
+};
+
+function getArabicBookNameByID(source, bookId) {
+    if (source === 'bukhari' && bukhariBooks[bookId]) return "كِتَابُ " + bukhariBooks[bookId];
+    if (source === 'muslim' && muslimBooks[bookId]) return "كِتَابُ " + muslimBooks[bookId];
+    return `كِتَابُ رقم (${bookId})`;
 }
 
 // =========================================================
@@ -496,10 +441,15 @@ async function loadHadithSource(source) {
 function renderHadithBooks() {
     const grid = document.getElementById('hadith-books-grid');
     grid.innerHTML = '';
+    
+    // (الحل الجذري): فلترة الكتب لعرض فقط الكتب التي تمتلك أحاديث مسجلة بالفعل
+    const availableBookIds = new Set(currentHadithData.hadiths.map(h => h.reference ? String(h.reference.book) : null).filter(Boolean));
     const sections = currentHadithData.metadata.sections;
+    
     for (const [key, value] of Object.entries(sections)) {
-        if (!value || value.trim() === "") continue;
-        const arName = getArabicBookName(value, key);
+        if (!availableBookIds.has(String(key))) continue; // لن يظهر أي كتاب فارغ بعد الآن
+        
+        const arName = getArabicBookNameByID(currentHadithSource, key);
         const card = document.createElement('div');
         card.className = 'hadith-book-card';
         card.innerHTML = `<h3>${arName}</h3>`;
@@ -540,17 +490,15 @@ function openHadithBook(bookId, bookName) {
     }
     const chaptersGrid = document.getElementById('hadith-chapters-grid');
     chaptersGrid.innerHTML = '';
-    if (currentChapters.length === 0) {
-        chaptersGrid.innerHTML = '<p style="grid-column: 1/-1; text-align: center; padding: 20px;">لا توجد أحاديث في هذا الكتاب حالياً.</p>';
-    } else {
-        currentChapters.forEach((chapterData, index) => {
-            const card = document.createElement('div');
-            card.className = 'hadith-book-card';
-            card.innerHTML = `<h3 style="color:#D97706;">الباب (${index + 1})</h3><p style="color:#64748B; margin: 10px 0 0 0; font-size:15px; font-weight:bold;">يحتوي على ${chapterData.length} أحاديث</p>`;
-            card.onclick = () => openHadithChapter(index);
-            chaptersGrid.appendChild(card);
-        });
-    }
+    
+    currentChapters.forEach((chapterData, index) => {
+        const card = document.createElement('div');
+        card.className = 'hadith-book-card';
+        card.innerHTML = `<h3 style="color:#D97706;">الباب (${index + 1})</h3><p style="color:#64748B; margin: 10px 0 0 0; font-size:15px; font-weight:bold;">يحتوي على ${chapterData.length} أحاديث</p>`;
+        card.onclick = () => openHadithChapter(index);
+        chaptersGrid.appendChild(card);
+    });
+    
     showHadithChapters();
 }
 
