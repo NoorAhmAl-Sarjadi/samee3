@@ -163,24 +163,6 @@ if (typeof window.togglePlayState === 'function') {
     };
 }
 
-if (typeof window.playSpecificAyahModal === 'function') {
-    const originalPlayAyah = window.playSpecificAyahModal;
-    window.playSpecificAyahModal = function() {
-        const audio = document.getElementById('main-audio');
-        if (audio) {
-            if (!navigator.onLine && (audio.error || audio.readyState === 0)) {
-                if(typeof closeModals === 'function') closeModals();
-                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
-            }
-            if (navigator.onLine && audio.error && typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
-                audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                audio.load();
-            }
-        }
-        originalPlayAyah();
-    };
-}
-
 // =========================================================
 // 5. دوال تحميل الصوتيات للعمل بدون نت 
 // =========================================================
@@ -318,19 +300,21 @@ window.executeSearch = async function() {
                 
                 if(results.length > 0) {
                     resultsBox.innerHTML = results.map((r, i) => {
-                        let dorarQuery = r.text.split(' ').slice(0, 8).join(' ');
+                        // أخذ أول 300 حرف بحد أقصى للبحث في الدرر السنية لمنع خطأ URL Too Long
+                        let dorarQuery = r.text.length > 300 ? r.text.substring(0, 300) : r.text;
+                        
                         return `
                         <div style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; margin-bottom: 10px; border-radius: 10px; text-align: right;">
                             <div style="color: #10B981; font-weight: bold; margin-bottom: 15px; font-size: 14px;">${r.source} | رقم: ${r.num} | ${r.bookName}</div>
                             
-                            <div style="font-family: 'Amiri', serif; font-size: 18px; margin-bottom: 10px; background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #E2E8F0;">
+                            <div style="font-family: 'Amiri', serif; font-size: 18px; margin-bottom: 15px; background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #E2E8F0;">
                                 ${formatHadithHtml(r.text.substring(0, 250) + '...', false)}
                             </div>
 
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                <button onclick="window.open('https://dorar.net/hadith/search?q=' + encodeURIComponent('${dorarQuery}'), '_blank')" style="background:#3B82F6; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">📖 الشرح (الدرر السنية)</button>
-                                <button onclick="copyHadith(this, \`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}')" style="background:#E2E8F0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px; color:#334155;">📋 نسخ</button>
-                                <button onclick="exportHadithImage(\`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}')" style="background:#10B981; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">📤 صورة</button>
+                                <button onclick="window.open('https://dorar.net/hadith/search?q=' + encodeURIComponent(\`${dorarQuery}\`), '_blank')" style="background:#3B82F6; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">📖 الشرح (الدرر السنية)</button>
+                                <button onclick="copyHadith(this, \`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}')" style="background:#E2E8F0; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px; color:#334155;">📋 نسخ</button>
+                                <button onclick="exportHadithImage(\`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}')" style="background:#10B981; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">📤 صورة</button>
                             </div>
                         </div>
                         `;
@@ -568,12 +552,13 @@ function renderCurrentSingleHadith() {
 
     const actionsRow = card.querySelector('.hadith-actions-row');
     
+    // زر البحث في الدرر السنية الذكي
     const btnRead = document.createElement('button');
     btnRead.className = 'h-btn h-btn-read';
-    btnRead.innerHTML = '📖 التخريج والشرح (الدرر السنية)';
+    btnRead.innerHTML = '📖 الشرح والتخريج (الدرر السنية)';
     btnRead.onclick = function() {
-        let query = cleanText.split(' ').slice(0, 8).join(' ');
-        window.open('https://dorar.net/hadith/search?q=' + encodeURIComponent(query), '_blank');
+        let dorarQuery = cleanText.length > 300 ? cleanText.substring(0, 300) : cleanText;
+        window.open('https://dorar.net/hadith/search?q=' + encodeURIComponent(dorarQuery), '_blank');
     };
 
     const btnCopy = document.createElement('button');
