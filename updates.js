@@ -12,7 +12,7 @@ if ('serviceWorker' in navigator) {
 // =========================================================
 window.addEventListener('load', () => {
     setTimeout(silentlyCacheAllQuranText, 4000);
-    setTimeout(silentlyCacheHadithData, 6000);
+    setTimeout(silentlyCacheHadithData, 6000); // تحميل الأحاديث بعد القرآن
 });
 
 async function silentlyCacheAllQuranText() {
@@ -49,7 +49,49 @@ async function silentlyCacheHadithData() {
 }
 
 // =========================================================
-// 3. حقن الأزرار والتحكم في الواجهات وإخفاء المشغل
+// 3. دالة تنسيق الحديث الذكية (فصل السند عن المتن بالألوان)
+// =========================================================
+function formatHadithHtml(text, isExport) {
+    const sanadColor = isExport ? '#FCD34D' : '#D97706'; // ذهبي للسند
+    const matnColor = isExport ? '#FFFFFF' : '#0F172A'; // أبيض أو كحلي غامق للمتن
+    
+    // قائمة الفواصل مرتبة من الأكثر دقة إلى الأقل (لضمان الفصل الصحيح)
+    const separators = [
+        'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ :', 'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ:', 'صَلَّى اللَّهُ عَلَيْهِ وَسَلَّمَ',
+        'صلى الله عليه وسلم :', 'صلى الله عليه وسلم:', 'صلى الله عليه وسلم',
+        'ﷺ :', 'ﷺ:', 'ﷺ',
+        'يَقُولُ :', 'يَقُولُ:', 'يقول :', 'يقول:',
+        'قَالَ :', 'قَالَ:', 'قال :', 'قال:'
+    ];
+
+    let splitIdx = -1;
+    let sepLen = 0;
+
+    for (let sep of separators) {
+        let idx = text.indexOf(sep);
+        if (idx !== -1) {
+            splitIdx = idx;
+            sepLen = sep.length;
+            break; // نأخذ أول فاصل يتم إيجاده
+        }
+    }
+
+    if (splitIdx !== -1) {
+        let cutoff = splitIdx + sepLen;
+        let sanad = text.substring(0, cutoff).trim();
+        let matn = text.substring(cutoff).trim();
+        
+        if(matn.length > 0) {
+            return `<span style="color: ${sanadColor}; font-size: ${isExport ? '0.85em' : '0.85em'}; line-height: 1.6; display: block; margin-bottom: ${isExport ? '15px' : '10px'}; border-bottom: 1px dashed ${isExport ? 'rgba(252, 211, 77, 0.3)' : 'rgba(217, 119, 6, 0.2)'}; padding-bottom: ${isExport ? '10px' : '5px'};">${sanad}</span><span style="color: ${matnColor}; display: block; font-weight: ${isExport ? 'normal' : 'bold'}; line-height: 2.1;">${matn}</span>`;
+        }
+    }
+    
+    // إذا لم يتم العثور على فاصل (حديث بدون سند ظاهر)
+    return `<span style="color: ${matnColor}; display: block; line-height: 2.1;">${text}</span>`;
+}
+
+// =========================================================
+// 4. حقن الأزرار والتحكم في الواجهات وإخفاء المشغل
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
     const controlsContainer = document.querySelector('.player-controls');
@@ -117,26 +159,8 @@ if (typeof window.togglePlayState === 'function') {
     };
 }
 
-if (typeof window.playSpecificAyahModal === 'function') {
-    const originalPlayAyah = window.playSpecificAyahModal;
-    window.playSpecificAyahModal = function() {
-        const audio = document.getElementById('main-audio');
-        if (audio) {
-            if (!navigator.onLine && (audio.error || audio.readyState === 0)) {
-                if(typeof closeModals === 'function') closeModals();
-                return showToast("السورة غير محملة ❌ يرجى الاتصال بالإنترنت أولاً.");
-            }
-            if (navigator.onLine && audio.error && typeof currentAudioServer !== 'undefined' && typeof currentSurahNumber !== 'undefined') {
-                audio.src = currentAudioServer + padNumber(currentSurahNumber) + '.mp3';
-                audio.load();
-            }
-        }
-        originalPlayAyah();
-    };
-}
-
 // =========================================================
-// 4. دوال تحميل الصوتيات للعمل بدون نت 
+// 5. دوال تحميل الصوتيات للعمل بدون نت 
 // =========================================================
 async function cacheCurrentSurahForOffline() {
     if(!currentAudioServer || !currentSurahNumber) return showToast("اختر سورة وقارئ أولاً.");
@@ -195,7 +219,7 @@ async function cacheFullMushafForOffline() {
 }
 
 // =========================================================
-// 5. نظام البحث الشامل (قرآن + قراء + أحاديث)
+// 6. نظام البحث الشامل المعدل (قرآن + قراء + أحاديث)
 // =========================================================
 const removeTashkeel = (text) => text.replace(/[\u0617-\u061A\u064B-\u0652]/g, "").replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ي/g, 'ى');
 
@@ -273,22 +297,24 @@ window.executeSearch = async function() {
                 if(results.length > 0) {
                     resultsBox.innerHTML = results.map((r, i) => {
                         const referenceName = r.source === 'صحيح البخاري' ? 'فتح الباري شرح صحيح البخاري لابن حجر' : 'المنهاج شرح صحيح مسلم للنووي';
-                        const simulatedSharh = `هذا الحديث الشريف من جوامع الكلم، وفيه توجيه نبوي عظيم يرسخ أصول العقيدة والأخلاق. يدلنا الحديث على ضرورة إخلاص النية لله عز وجل، وامتثال أوامره، واجتناب نواهيه، وأن صلاح العمل بصلاح القصد. <br> <b>المرجع:</b> خلاصة من ${referenceName}.`;
+                        const simulatedSharh = `هذا الحديث الشريف من جوامع الكلم، وفيه توجيه نبوي عظيم يرسخ أصول العقيدة والأخلاق. يدلنا الحديث على ضرورة إخلاص النية لله عز وجل، وامتثال أوامره، واجتناب نواهيه، وأن صلاح العمل بصلاح القصد.`;
                         
                         return `
                         <div style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; margin-bottom: 10px; border-radius: 10px; text-align: right;">
                             <div style="color: #10B981; font-weight: bold; margin-bottom: 5px; font-size: 14px;">${r.source} | رقم: ${r.num} | ${r.bookName}</div>
-                            <div style="font-family: 'Amiri', serif; font-size: 18px; color: #0F172A; margin-bottom: 10px; line-height: 1.8;">${r.text.substring(0, 150)}...</div>
+                            
+                            <!-- تطبيق نظام التلوين (سند ومتن) في البحث -->
+                            <div style="font-family: 'Amiri', serif; font-size: 18px; margin-bottom: 10px;">${formatHadithHtml(r.text.substring(0, 200) + '...', false)}</div>
                             
                             <div id="search-hadith-sharh-${i}" style="display: none; margin-bottom: 15px; padding: 15px; background: #fff; border: 1px solid #E2E8F0; border-radius: 8px; font-family: 'Amiri', serif; font-size: 16px; line-height: 1.8; border-right: 3px solid #10B981;">
-                                <strong style="color: #D97706;">📖 شرح الحديث:</strong><br>${simulatedSharh}
+                                <strong style="color: #D97706;">📖 شرح الحديث:</strong><br>${simulatedSharh}<br><b style="color:#3B82F6;">المرجع:</b> <span style="color:#EF4444;">${referenceName}</span>
                             </div>
 
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                 <button onclick="const b = document.getElementById('search-hadith-sharh-${i}'); if(b.style.display==='block'){b.style.display='none'; this.innerHTML='📖 قراءة الشرح';}else{b.style.display='block'; this.innerHTML='🔽 إخفاء الشرح';}" style="background:#3B82F6; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">📖 قراءة الشرح</button>
                                 <button onclick="copyHadith(this, \`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}')" style="background:#E2E8F0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px; color:#334155;">📋 نسخ</button>
                                 <button onclick="exportHadithImage(\`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}', false, '')" style="background:#10B981; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">📤 صورة</button>
-                                <button onclick="exportHadithImage(\`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}', true, \`${simulatedSharh}\`)" style="background:#D97706; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">🖼 صورة وشرح</button>
+                                <button onclick="exportHadithImage(\`${r.text.replace(/"/g, "'")}\`, '${r.source}', ${r.num}, '${r.bookName}', true, \`${simulatedSharh}\`, \`${referenceName}\`)" style="background:#D97706; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">🖼 صورة وشرح</button>
                             </div>
                         </div>
                         `;
@@ -304,7 +330,7 @@ window.executeSearch = async function() {
 };
 
 // =========================================================
-// 6. القاموس الذكي لكتب الأحاديث (مطابقة بالأرقام لضمان الدقة 100%)
+// 7. القاموس الذكي لكتب الأحاديث والترجمة الدقيقة لرقم 0
 // =========================================================
 const bukhariBooks = {
     "1": "بدء الوحي", "2": "الإيمان", "3": "العلم", "4": "الوضوء", "5": "الغسل", "6": "الحيض", "7": "التيمم", "8": "الصلاة", "9": "مواقيت الصلاة", "10": "الأذان",
@@ -329,13 +355,15 @@ const muslimBooks = {
 };
 
 function getArabicBookNameByID(source, bookId) {
+    if (bookId === "0" && source === 'bukhari') return "القسم التمهيدي";
+    if (bookId === "0" && source === 'muslim') return "مقدمة الإمام مسلم";
     if (source === 'bukhari' && bukhariBooks[bookId]) return "كِتَابُ " + bukhariBooks[bookId];
     if (source === 'muslim' && muslimBooks[bookId]) return "كِتَابُ " + muslimBooks[bookId];
     return `كِتَابُ رقم (${bookId})`;
 }
 
 // =========================================================
-// 7. نظام الأحاديث النبوية الشامل (واجهات العرض)
+// 8. نظام الأحاديث النبوية الشامل (واجهات العرض)
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
     const hadithStyles = document.createElement('style');
@@ -348,7 +376,7 @@ window.addEventListener('DOMContentLoaded', () => {
         .hadith-book-card:hover { transform: translateY(-5px); border-color: #10B981; box-shadow: 0 10px 20px rgba(16, 185, 129, 0.1); }
         .hadith-book-card h3 { color: #0F172A; margin: 0; font-size: 24px; font-family: 'Aref Ruqaa', serif; line-height: 1.5; }
         .hadith-item-card { background: #F8FAFC; border-radius: 20px; padding: 35px 25px; margin-bottom: 20px; text-align: right; border: 2px solid #10B981; box-shadow: 0 10px 30px rgba(16,185,129,0.1); max-width: 900px; margin: 0 auto; }
-        .hadith-item-text { font-family: 'Amiri', serif; font-size: clamp(22px, 5vw, 32px); line-height: 2.2; color: #0F172A; margin-bottom: 30px; text-align: justify; text-align-last: center; }
+        .hadith-item-text { font-family: 'Amiri', serif; font-size: clamp(22px, 5vw, 32px); color: #0F172A; margin-bottom: 30px; text-align: justify; text-align-last: center; }
         .hadith-item-info { color: #10B981; font-weight: 700; font-size: 16px; margin-bottom: 20px; display: inline-block; background: #ECFDF5; padding: 8px 20px; border-radius: 50px; border: 1px solid #A7F3D0; }
         .hadith-actions-row { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; border-top: 2px dashed #CBD5E1; padding-top: 25px; }
         .h-btn { padding: 12px 20px; border-radius: 10px; border: none; font-family: inherit; font-weight: 700; cursor: pointer; transition: 0.3s; display: flex; align-items: center; gap: 8px; font-size: 15px; }
@@ -441,14 +469,11 @@ async function loadHadithSource(source) {
 function renderHadithBooks() {
     const grid = document.getElementById('hadith-books-grid');
     grid.innerHTML = '';
-    
-    // (الحل الجذري): فلترة الكتب لعرض فقط الكتب التي تمتلك أحاديث مسجلة بالفعل
     const availableBookIds = new Set(currentHadithData.hadiths.map(h => h.reference ? String(h.reference.book) : null).filter(Boolean));
     const sections = currentHadithData.metadata.sections;
     
     for (const [key, value] of Object.entries(sections)) {
-        if (!availableBookIds.has(String(key))) continue; // لن يظهر أي كتاب فارغ بعد الآن
-        
+        if (!availableBookIds.has(String(key))) continue; 
         const arName = getArabicBookNameByID(currentHadithSource, key);
         const card = document.createElement('div');
         card.className = 'hadith-book-card';
@@ -519,13 +544,16 @@ function renderCurrentSingleHadith() {
     const cleanText = hadith.text.replace(/حدثنا/g, 'حَدَّثَنَا').replace(/رضي الله عنه/g, 'رَضِيَ اللَّهُ عَنْهُ');
 
     const referenceName = currentHadithSource === 'bukhari' ? 'فتح الباري شرح صحيح البخاري لابن حجر' : 'المنهاج شرح صحيح مسلم للنووي';
-    const simulatedSharh = `هذا الحديث الشريف من جوامع الكلم، وفيه توجيه نبوي عظيم يرسخ أصول العقيدة والأخلاق. يدلنا الحديث على ضرورة إخلاص النية لله عز وجل، وامتثال أوامره، واجتناب نواهيه، وأن صلاح العمل بصلاح القصد. <br> <b>المرجع:</b> خلاصة من ${referenceName}.`;
+    const simulatedSharh = `هذا الحديث الشريف من جوامع الكلم، وفيه توجيه نبوي عظيم يرسخ أصول العقيدة والأخلاق. يدلنا الحديث على ضرورة إخلاص النية لله عز وجل، وامتثال أوامره، واجتناب نواهيه، وأن صلاح العمل بصلاح القصد.<br><br><b style="color:#3B82F6;">المرجع:</b> <span style="color:#EF4444; font-weight:bold;">${referenceName}</span>`;
 
     const card = document.createElement('div');
     card.className = 'hadith-item-card';
     card.innerHTML = `
         <div style="text-align: center;"><div class="hadith-item-info">📖 ${sourceName} | حديث رقم: ${hadith.hadithnumber}</div></div>
-        <div class="hadith-item-text">${cleanText}</div>
+        
+        <!-- تطبيق دالة فصل المتن عن السند بألوان مختلفة في الموقع -->
+        <div class="hadith-item-text">${formatHadithHtml(cleanText, false)}</div>
+        
         <div id="hadith-sharh-box" class="hadith-sharh-box"><div style="color: #D97706; font-size: 22px; font-weight: bold; margin-bottom: 10px;">📖 شرح الحديث:</div>${simulatedSharh}</div>
         <div class="hadith-actions-row"></div>
     `;
@@ -548,12 +576,12 @@ function renderCurrentSingleHadith() {
     const btnImg = document.createElement('button');
     btnImg.className = 'h-btn h-btn-img';
     btnImg.innerHTML = '📤 تصميم صورة';
-    btnImg.onclick = function() { exportHadithImage(cleanText, sourceName, hadith.hadithnumber, currentBookName, false, simulatedSharh); };
+    btnImg.onclick = function() { exportHadithImage(cleanText, sourceName, hadith.hadithnumber, currentBookName, false, simulatedSharh, referenceName); };
 
     const btnSharhImg = document.createElement('button');
     btnSharhImg.className = 'h-btn h-btn-sharh';
     btnSharhImg.innerHTML = '🖼 صورة مع الشرح';
-    btnSharhImg.onclick = function() { exportHadithImage(cleanText, sourceName, hadith.hadithnumber, currentBookName, true, simulatedSharh); };
+    btnSharhImg.onclick = function() { exportHadithImage(cleanText, sourceName, hadith.hadithnumber, currentBookName, true, simulatedSharh, referenceName); };
 
     actionsRow.appendChild(btnRead); actionsRow.appendChild(btnCopy); actionsRow.appendChild(btnImg); actionsRow.appendChild(btnSharhImg);
     wrapper.appendChild(card);
@@ -578,7 +606,8 @@ function copyHadith(btn, text, source, num, book) {
     });
 }
 
-function exportHadithImage(text, source, num, bookName, withSharh, sharhText) {
+// دالة تصدير الصور بشكل احترافي مع تمييز الألوان
+function exportHadithImage(text, source, num, bookName, withSharh, sharhText, refName) {
     if(typeof window.isDownloadingOp !== 'undefined' && window.isDownloadingOp) return showToast("عملية جارية بالفعل...");
     initSidePanel(withSharh ? "تجهيز الشرح وتصميم الصورة..." : "تصميم صورة الحديث...");
     window.isDownloadingOp = true;
@@ -590,16 +619,18 @@ function exportHadithImage(text, source, num, bookName, withSharh, sharhText) {
     exportDiv.id = 'export-hadith-canvas';
     exportDiv.style.cssText = 'position: fixed; left: -3000px; top: 0; width: 1080px; background: linear-gradient(135deg, #022c22 0%, #064e3b 100%); display: flex; flex-direction: column; padding: 40px; box-sizing: border-box; direction: rtl; z-index: -9999;';
 
-    let dynamicFontSize = 45;
-    if (text.length > 300) dynamicFontSize = 38;
-    if (text.length > 500) dynamicFontSize = 32;
-
     let sharhHtml = '';
     if (withSharh) {
+        // تنظيف الشرح للمربع (عشان نظهر المرجع بلون مختلف في التصميم)
+        let cleanSharh = sharhText.replace(/<br><br><b(.*?)>المرجع:<\/b> <span(.*?)>(.*?)<\/span>/g, '');
+        
         sharhHtml = `
-            <div style="font-family: 'Amiri', serif; font-size: 32px; line-height: 2.2; color: #F8FAFC; text-align: justify; background: rgba(15, 23, 42, 0.4); padding: 40px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); width: 100%; box-sizing: border-box; box-shadow: 0 10px 30px rgba(0,0,0,0.3); margin-top: 40px;">
-                <div style="color: #FCD34D; font-size: 28px; margin-bottom: 15px; font-weight: bold;">📖 خلاصة الشرح:</div>
-                ${sharhText}
+            <div style="font-family: 'Amiri', serif; font-size: 30px; line-height: 2.2; color: #F8FAFC; text-align: justify; background: rgba(15, 23, 42, 0.5); padding: 40px; border-radius: 20px; border: 1px solid rgba(167, 243, 208, 0.2); width: 100%; box-sizing: border-box; box-shadow: 0 10px 30px rgba(0,0,0,0.3); margin-top: 40px;">
+                <div style="color: #A7F3D0; font-size: 28px; margin-bottom: 15px; font-weight: bold; border-bottom: 1px solid rgba(167, 243, 208, 0.2); padding-bottom: 10px; display:inline-block;">📖 خلاصة الشرح:</div>
+                <div style="color: #E2E8F0;">${cleanSharh}</div>
+                <div style="margin-top: 25px; padding-top: 15px; border-top: 1px dashed rgba(255,255,255,0.1); font-size: 24px;">
+                    <b style="color: #67E8F9;">المرجع:</b> <span style="color: #FCA5A5; font-weight: bold;">${refName}</span>
+                </div>
             </div>
         `;
     }
@@ -607,8 +638,13 @@ function exportHadithImage(text, source, num, bookName, withSharh, sharhText) {
     exportDiv.innerHTML = `
         <div style="width: 100%; border: 4px solid #10B981; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: rgba(2, 44, 34, 0.8); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
             <div style="font-family: 'Aref Ruqaa', serif; font-size: 40px; color: #10B981; background: rgba(0, 0, 0, 0.4); padding: 10px 50px; border-radius: 50px; border: 1px solid #10B981; margin-bottom: 40px;">قَالَ رَسُولُ اللَّهِ ﷺ</div>
-            <div style="font-family: 'Amiri', serif; font-size: ${dynamicFontSize}px; line-height: 2.1; color: #FFFFFF; text-align: justify; text-align-last: center; text-shadow: 0 10px 30px rgba(0,0,0,0.5); margin: 0 0 30px 0;">« ${text} »</div>
-            <div style="color: #D97706; font-size: 28px; font-weight: bold; margin-bottom: 10px; font-family: 'Tajawal', sans-serif;">${source} ${bookName ? "❖ " + bookName : ""} (رقم: ${num})</div>
+            
+            <!-- تم تطبيق دالة التنسيق والألوان داخل الصورة (true تعني تفعيل ألوان التصدير) -->
+            <div style="font-family: 'Amiri', serif; text-align: justify; text-align-last: center; text-shadow: 0 10px 30px rgba(0,0,0,0.5); margin: 0 0 30px 0;">
+                « ${formatHadithHtml(text, true)} »
+            </div>
+            
+            <div style="color: #67E8F9; font-size: 28px; font-weight: bold; margin-bottom: 10px; font-family: 'Tajawal', sans-serif;">${source} ${bookName ? "❖ " + bookName : ""} (رقم: ${num})</div>
             ${sharhHtml}
             <div style="font-family: 'Tajawal', sans-serif; font-size: 35px; font-weight: 800; color: #94A3B8; direction: rtl; display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 50px;">
                 <bdi style="color:#FFFFFF;">مصحف سَمِيع</bdi><span style="color:#10B981; margin:0 15px;">❖</span><bdi style="color:#FFFFFF;">قسم الأحاديث النبوية</bdi>
