@@ -710,7 +710,7 @@ function exportHadithImage(text, source, num, bookName) {
 
     exportDiv.innerHTML = `
         <div style="flex: 1; width: 100%; border: 4px solid #10B981; border-radius: 30px; padding: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: rgba(2, 44, 34, 0.8); box-shadow: inset 0 0 50px rgba(0,0,0,0.5); box-sizing: border-box;">
-            <div style="font-family: 'Aref Ruqaa', serif; font-size: 50px; color: #10B981; background: rgba(0, 0, 0, 0.4); padding: 15px 60px; border-radius: 50px; border: 1px solid #10B981; margin-bottom: 50px;">قَالَ رَسُولُ اللَّهِ ﷺ</div>
+            <div style="font-family: 'Aref Ruqaa', serif; font-size: 50px; color: #10B981; background: rgba(0, 0, 0, 0.4); padding: 15px 60px; border-radius: 50px; border: 1px solid #10B981; margin margin-bottom: 50px;">قَالَ رَسُولُ اللَّهِ ﷺ</div>
             
             <div style="font-family: 'Amiri', serif; font-size: ${dynamicFontSize}px; line-height: ${dynamicLineHeight}; width: 100%; margin: 0 0 50px 0;">
                 ${formatHadithHtml(text, true)}
@@ -760,3 +760,96 @@ function exportHadithImage(text, source, num, bookName) {
         }
     }, 1200); 
 }
+
+// =========================================================
+// 9. نظام الحفظ التلقائي لمكان القراءة والصوت (الاستئناف)
+// =========================================================
+window.addEventListener('DOMContentLoaded', () => {
+    // --- أ. استرجاع آخر موضع للصوت والقراءة عند فتح التطبيق ---
+    setTimeout(() => {
+        // 1. استرجاع الصوت
+        const savedAudio = localStorage.getItem('samee3_last_audio_state');
+        const audio = document.getElementById('main-audio');
+        
+        if (savedAudio && audio) {
+            try {
+                const state = JSON.parse(savedAudio);
+                if (state.surah) window.currentSurahNumber = state.surah;
+                if (state.server) window.currentAudioServer = state.server;
+                
+                audio.src = state.src;
+                
+                // تحديث واجهة السورة إذا كانت العناصر موجودة
+                const surahSelect = document.getElementById('surah-select');
+                if (surahSelect && state.surah) {
+                    surahSelect.value = state.surah;
+                    // استدعاء حدث التغيير لتحديث الواجهة إن كان مرتبطاً
+                    surahSelect.dispatchEvent(new Event('change'));
+                }
+                
+                // انتظار تحميل الصوت ثم القفز لنفس الثانية
+                audio.addEventListener('canplay', function resumeTime() {
+                    if (Math.abs(audio.currentTime - state.time) > 2) { 
+                        audio.currentTime = state.time;
+                    }
+                    audio.removeEventListener('canplay', resumeTime);
+                });
+                
+            } catch(e) { console.error('خطأ في استرجاع الصوت:', e); }
+        }
+
+        // 2. استرجاع مكان القراءة (السكرول أو آخر آية)
+        const savedScroll = localStorage.getItem('samee3_last_scroll_state');
+        if (savedScroll) {
+            try {
+                const scrollState = JSON.parse(savedScroll);
+                // البحث عن حاوية المصحف لعمل سكرول إليها
+                const quranContainer = document.getElementById('quran-text-container') || document.querySelector('.quran-text') || window;
+                
+                if (quranContainer && scrollState.top) {
+                    quranContainer.scrollTo({
+                        top: scrollState.top,
+                        behavior: 'smooth'
+                    });
+                }
+                
+                if (typeof showToast === 'function') {
+                    showToast("تم استرجاع آخر مكان توقفت عنده 📍");
+                }
+            } catch(e) {}
+        }
+    }, 1500); // تأخير بسيط لضمان تحميل عناصر الصفحة الأساسية
+
+    // --- ب. مراقبة وحفظ مكان الصوت باستمرار بشكل خفي ---
+    const audioEl = document.getElementById('main-audio');
+    if (audioEl) {
+        audioEl.addEventListener('timeupdate', () => {
+            // حفظ كل 3 ثواني لتخفيف الضغط على الذاكرة
+            if (Math.floor(audioEl.currentTime) % 3 === 0 && !audioEl.paused) {
+                if (typeof currentSurahNumber !== 'undefined' && typeof currentAudioServer !== 'undefined') {
+                    const state = {
+                        surah: currentSurahNumber,
+                        server: currentAudioServer,
+                        src: audioEl.src,
+                        time: audioEl.currentTime
+                    };
+                    localStorage.setItem('samee3_last_audio_state', JSON.stringify(state));
+                }
+            }
+        });
+    }
+
+    // --- ج. مراقبة وحفظ مكان السكرول (القراءة) ---
+    // سنحاول مراقبة حاوية المصحف، إن لم نجدها سنراقب نافذة المتصفح
+    const quranView = document.getElementById('quran-text-container') || document.querySelector('.quran-text') || window;
+    let scrollTimeout;
+    quranView.addEventListener('scroll', (e) => {
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+            const top = e.target.scrollTop || window.scrollY;
+            if (top > 0) {
+                localStorage.setItem('samee3_last_scroll_state', JSON.stringify({ top: top }));
+            }
+        }, 1000); // حفظ المكان بعد توقف المستخدم عن النزول بثانية
+    });
+});
