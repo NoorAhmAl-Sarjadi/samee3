@@ -45,7 +45,6 @@
 </head>
 <body>
 
-    <!-- شاشة التحميل السريعة -->
     <div id="splash-screen" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-main); z-index: 99999; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.4s ease;">
         <img src="https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png" alt="مصحف سميع" style="width: 140px; height: 140px; margin-bottom: 25px; border-radius: 25px; box-shadow: 0 10px 30px rgba(2, 132, 199, 0.2);">
         <h1 style="font-family: 'Aref Ruqaa', serif; font-size: 45px; color: var(--royal-blue); margin: 0 0 20px 0;">مصحف سَمِيع</h1>
@@ -55,7 +54,6 @@
 
     <div id="toast">رسالة تنبيهية</div>
 
-    <!-- اللوحة الجانبية للتحميلات -->
     <div id="side-progress-panel" class="side-panel">
         <h4 id="side-panel-title">جاري التجهيز...</h4>
         <div class="progress-bar-bg"><div id="side-panel-bar" class="progress-bar-fill"></div></div>
@@ -64,7 +62,6 @@
         <button id="side-panel-cancel-btn" class="dl-cancel-btn" onclick="hideSidePanel()">إغلاق / إلغاء</button>
     </div>
 
-    <!-- الشريط العلوي -->
     <nav class="navbar">
         <h1 id="site-main-title">مصحف سَمِيع</h1>
         <div class="nav-btns">
@@ -75,7 +72,6 @@
         </div>
     </nav>
 
-    <!-- منطقة الفلاتر -->
     <div class="controls-section" id="hero-filters">
         <div class="filters-container">
             <select class="filter-select" id="riwayah-select" onchange="filterRecitersByRiwayah()">
@@ -92,7 +88,6 @@
                 <option value="">جاري الاتصال بخوادم الصوت...</option>
             </select>
 
-            <!-- التفسير الميسر هو الافتراضي -->
             <select class="filter-select" id="tafsir-select" onchange="if(typeof syncTopTafsirToBottom === 'function') syncTopTafsirToBottom()">
                 <option value="ar.muyassar" selected>التفسير الميسر</option>
                 <option value="ar.ibnkathir">تفسير ابن كثير</option>
@@ -105,12 +100,10 @@
     </div>
 
     <div class="container">
-        <!-- شبكة السور -->
         <div id="home-view">
             <div class="surah-grid" id="surah-grid-container"></div>
         </div>
 
-        <!-- وضعية المصحف المدني المتجاوبة -->
         <div id="mushaf-view" class="mushaf-view">
             <div class="mushaf-toolbar">
                 <button class="btn-nav" onclick="closeMushafView()">العودة للقائمة الرئيسية</button>
@@ -142,7 +135,6 @@
             </div>
         </div>
 
-        <!-- شاشات الدخول -->
         <div id="unified-login-view" class="auth-container hidden-screen">
             <h2 id="auth-title" style="color: var(--royal-blue); margin-top: 0; font-weight: 800;">بوابة الدخول</h2>
             <div class="form-group" id="name-group" style="display: none;">
@@ -157,7 +149,6 @@
             </div>
         </div>
 
-        <!-- لوحة الإدارة -->
         <div id="admin-view" class="auth-container hidden-screen" style="max-width: 600px;">
             <h2 style="color: var(--royal-blue); margin-top: 0; font-weight: 800;">لوحة تحكم المنصة</h2>
             <div style="background: #F8FAFC; padding: 25px; border-radius: 12px; border: 1px solid #E2E8F0; text-align: right;">
@@ -177,7 +168,7 @@
         </div>
     </div>
 
-    <!-- شريط التشغيل السفلي المتجاوب -->
+    <!-- شريط التشغيل السفلي -->
     <div class="sticky-player">
         <div class="player-info" style="flex: 1; max-width: 450px; width: 100%;">
             <p class="p-surah" id="player-surah-txt" style="display: none;">اختر سورة للتشغيل</p>
@@ -202,7 +193,7 @@
         <audio id="main-audio"></audio>
     </div>
 
-    <!-- نوافذ الآيات وخيارات الجزء وغيرها -->
+    <!-- النوافذ المنبثقة للآيات وأجزاء القرآن -->
     <div id="action-modal" class="modal-overlay">
         <div class="modal-content">
             <button class="close-modal" onclick="closeModals()">✖</button>
@@ -220,7 +211,6 @@
         </div>
     </div>
 
-    <!-- نافذة خيارات الجزء الذكية -->
     <div id="juz-options-modal" class="modal-overlay">
         <div class="modal-content" style="max-width: 500px;">
             <button class="close-modal" onclick="closeModals()">✖</button>
@@ -292,9 +282,9 @@
         let surahTimingStats = [], currentPlayingAyahIndex = -1, isPlaying = false, startDelaySeconds = 0;
         let isRepeatingVerse = false, selectedAyahIndex = 0, isDownloadingOp = false, isSignUpMode = false;
         
-        // --- متغيرات التكرار والاسترجاع ---
         let isRepeatingSurah = false;
         let isRepeatingJuz = false;
+        let juzRepeatMode = null; 
         let selectedJuzForOptions = null;
         let activeJuzNumber = 1;
 
@@ -347,22 +337,7 @@
         let supabaseClient = null;
         try { if (window.supabase) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); } catch (e) { }
 
-        async function getDBUsers() {
-            try {
-                if (supabaseClient) {
-                    const { data, error } = await supabaseClient.from('store').select('value').eq('key', 'samee3_users').single();
-                    if (data && data.value) return data.value;
-                }
-            } catch (e) {}
-            return JSON.parse(localStorage.getItem('samee3_users') || '[]');
-        }
-
-        async function setDBUsers(usersArray) {
-            localStorage.setItem('samee3_users', JSON.stringify(usersArray));
-            try { if (supabaseClient) await supabaseClient.from('store').upsert({ key: 'samee3_users', value: usersArray }); } catch (e) {}
-        }
-
-        // --- نظام الحفظ والاسترجاع الشامل والذكي ---
+        // --- نظام الحفظ الذكي والشامل ---
         function saveAppFullState() {
             if (els.mushafView.style.display !== 'block') return;
             const state = {
@@ -427,31 +402,40 @@
             document.getElementById('juz-options-modal').style.display = 'flex';
         }
 
+        // --- دوال تكرار الجزء الذكية ---
         function jumpToJuzStart(juzNum) {
             const startData = JUZ_START_MAP[juzNum];
-            loadSurahForReadingAndPlaying(startData.surah, startData.ayah, true);
+            loadSurahForReadingAndPlaying(startData.surah, startData.ayah, true, false, true);
         }
 
         function playJuzWithCurrentReciter() {
-            isRepeatingJuz = true; activeJuzNumber = selectedJuzForOptions;
+            isRepeatingJuz = true; activeJuzNumber = selectedJuzForOptions; juzRepeatMode = 'current';
             closeModals(); jumpToJuzStart(activeJuzNumber);
         }
 
         function playJuzWithSpecificReciter() {
-            isRepeatingJuz = true; activeJuzNumber = selectedJuzForOptions;
+            isRepeatingJuz = true; activeJuzNumber = selectedJuzForOptions; juzRepeatMode = 'specific';
             let chosenReciter = document.getElementById('juz-specific-reciter').value;
             document.getElementById('reciter-select').value = chosenReciter;
             onReciterChange(); closeModals();
             setTimeout(() => jumpToJuzStart(activeJuzNumber), 500);
         }
 
-        function playJuzWithRandomReciter() {
-            isRepeatingJuz = true; activeJuzNumber = selectedJuzForOptions;
+        function applyRandomReciter() {
             let randomReciter = allMP3Reciters[Math.floor(Math.random() * allMP3Reciters.length)];
-            els.riwayahSelect.value = randomReciter.riwayah; filterRecitersByRiwayah();
-            els.reciterSelect.value = randomReciter.server; onReciterChange();
-            closeModals();
+            els.riwayahSelect.value = randomReciter.riwayah; 
+            filterRecitersByRiwayah(randomReciter.server);
+        }
+
+        function playJuzWithRandomReciter() {
+            isRepeatingJuz = true; activeJuzNumber = selectedJuzForOptions; juzRepeatMode = 'random';
+            applyRandomReciter(); closeModals();
             setTimeout(() => jumpToJuzStart(activeJuzNumber), 500);
+        }
+
+        function handleJuzRepeat() {
+            if (juzRepeatMode === 'random') { applyRandomReciter(); }
+            setTimeout(() => jumpToJuzStart(activeJuzNumber), 300);
         }
 
         function showToast(msg) {
@@ -459,6 +443,7 @@
             setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
         }
 
+        // --- محرك التهيئة المحدث لحفظ اختيارك بدقة ---
         async function initializeApp() {
             try {
                 const [resMeta, resMp3] = await Promise.all([
@@ -486,21 +471,20 @@
                     });
                 });
 
-                filterRecitersByRiwayah();
-                
                 const splash = document.getElementById('splash-screen');
                 if(splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 400); }
 
-                // --- الاسترجاع الذكي عند بداية التطبيق ---
+                // استرجاع القارئ والرواية المخصصة التي تركت التطبيق عليها
                 const savedStateStr = localStorage.getItem('samee3_super_state');
                 if(savedStateStr) {
                     try {
                         const state = JSON.parse(savedStateStr);
-                        if (state.riwayah) { els.riwayahSelect.value = state.riwayah; filterRecitersByRiwayah(); }
-                        if (state.reciter) { els.reciterSelect.value = state.reciter; onReciterChange(); }
-                        if (state.surah) { loadSurahForReadingAndPlaying(state.surah, null, false, true); }
-                    } catch(e){}
-                }
+                        if (state.riwayah) els.riwayahSelect.value = state.riwayah; 
+                        filterRecitersByRiwayah(state.reciter); 
+                        if (state.surah) { loadSurahForReadingAndPlaying(state.surah, null, false, true, true); }
+                    } catch(e) { filterRecitersByRiwayah(); }
+                } else { filterRecitersByRiwayah(); }
+                
                 syncBottomControls();
 
             } catch (err) { 
@@ -510,18 +494,21 @@
             }
         }
 
-        function filterRecitersByRiwayah() {
+        // تم تحديث الدالة لتقبل القارئ المسترجع وتختاره بدلاً من الافتراضي
+        function filterRecitersByRiwayah(targetServer = null) {
             audioPlayer.pause(); els.playBtnSticky.innerHTML = "⏵";
             const selectedRiwayah = els.riwayahSelect.value;
             els.reciterSelect.innerHTML = '';
             
-            let minshawiIndex = -1, count = 0;
+            let minshawiIndex = -1, count = 0, targetIndex = -1;
             allMP3Reciters.forEach(r => {
                 if(r.riwayah === selectedRiwayah) {
                     const option = new Option(r.name, r.server);
                     option.dataset.surahList = r.surahList.join(','); 
                     els.reciterSelect.add(option);
-                    if(r.name.includes("منشاوي") || r.name.includes("المنشاوي")) {
+                    
+                    if (targetServer && r.server === targetServer) targetIndex = count;
+                    else if(r.name.includes("منشاوي") || r.name.includes("المنشاوي")) {
                         if (r.name.includes("مجود") || r.name.includes("المجود")) minshawiIndex = count;
                         else if (minshawiIndex === -1) minshawiIndex = count; 
                     }
@@ -530,7 +517,8 @@
             });
 
             if(count > 0) {
-                if(minshawiIndex > -1) els.reciterSelect.selectedIndex = minshawiIndex;
+                if(targetIndex > -1) els.reciterSelect.selectedIndex = targetIndex;
+                else if(minshawiIndex > -1) els.reciterSelect.selectedIndex = minshawiIndex;
                 onReciterChange();
             } else { els.reciterSelect.add(new Option("عفواً، لا يوجد قراء لهذه الرواية", "")); }
         }
@@ -552,6 +540,8 @@
                 surahTimingStats = []; currentPlayingAyahIndex = -1;
                 if (wasPlaying) { audioPlayer.play(); isPlaying = true; els.playBtnSticky.innerHTML = "⏸"; }
             } else { document.getElementById('player-surah-txt').innerText = "اختر سورة للتشغيل"; }
+            
+            saveAppFullState();
         }
 
         function renderSurahGrid() {
@@ -604,7 +594,7 @@
                 currentPlayingAyahIndex = activeAyah.index;
                 let displayedPage = currentSurahPages[currentSurahPageIndex][0].page;
                 
-                // تحديث القوائم السفلية ديناميكياً أثناء القراءة
+                // تحديث القوائم السفلية ديناميكياً أثناء القراءة والمتابعة في الأجزاء
                 let activeAyahData = currentSurahData.ayahs[currentPlayingAyahIndex];
                 if(activeAyahData) {
                     let bSurah = document.getElementById('bottom-surah-select');
@@ -613,8 +603,7 @@
                     if(bJuz && bJuz.value != activeAyahData.juz) bJuz.value = activeAyahData.juz;
                     
                     if(isRepeatingJuz && activeAyahData.juz > activeJuzNumber) {
-                        jumpToJuzStart(activeJuzNumber);
-                        return;
+                        handleJuzRepeat(); return;
                     }
                 }
                 
@@ -628,24 +617,36 @@
             }
         };
 
+        // --- إدارة إنهاء السورة وتكرار الجزء ---
         audioPlayer.onended = () => { 
-            if(isRepeatingSurah) {
-                audioPlayer.currentTime = 0; audioPlayer.play();
-                return;
-            }
+            if(isRepeatingSurah) { audioPlayer.currentTime = 0; audioPlayer.play(); return; }
             
+            if(isRepeatingJuz) {
+                if (activeJuzNumber < 30) {
+                    let nextJuzStart = JUZ_START_MAP[activeJuzNumber + 1];
+                    if (nextJuzStart.surah === currentSurahNumber + 1 && nextJuzStart.ayah === 1) {
+                        handleJuzRepeat(); return;
+                    }
+                } else if (activeJuzNumber === 30 && currentSurahNumber === 114) {
+                    handleJuzRepeat(); return;
+                }
+            }
+
             let currentIndex = currentAvailableSurahs.indexOf(currentSurahNumber);
             if (currentIndex !== -1 && currentIndex < currentAvailableSurahs.length - 1) {
                 let nextSurah = currentAvailableSurahs[currentIndex + 1];
                 showToast("جاري الانتقال للسورة التالية...");
-                loadSurahForReadingAndPlaying(nextSurah);
+                loadSurahForReadingAndPlaying(nextSurah, null, true, false, true);
             } else { els.playBtnSticky.innerHTML = "⏵"; isPlaying = false; removeHighlight(); currentPlayingAyahIndex = -1; }
         };
 
-        async function loadSurahForReadingAndPlaying(surahNum, targetAyahNum = null, autoPlay = true, isResuming = false) {
+        // الدالة الأساسية لتحميل السور والقراءة
+        async function loadSurahForReadingAndPlaying(surahNum, targetAyahNum = null, autoPlay = true, isResuming = false, isAutoJump = false) {
             if(!currentAvailableSurahs.includes(Number(surahNum))) { showToast("عذراً، هذا القارئ لم يسجل هذه السورة."); return; }
             
-            if(!isResuming && !isRepeatingJuz) { isRepeatingVerse = false; isRepeatingSurah = false; }
+            if(!isResuming && !isAutoJump) { 
+                isRepeatingVerse = false; isRepeatingSurah = false; isRepeatingJuz = false; juzRepeatMode = null; 
+            }
             const btnRepeatA = document.getElementById('btn-repeat-ayah');
             const btnRepeatS = document.getElementById('btn-repeat-surah');
             if (btnRepeatA) { btnRepeatA.style.background = "#FEF3C7"; btnRepeatA.style.color = "var(--gold-premium)"; }
@@ -832,7 +833,7 @@
 
         function nextPage() { if(currentSurahPageIndex < currentSurahPages.length - 1) { currentSurahPageIndex++; renderCurrentPage(); document.querySelector('.mushaf-page-container').scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
         function prevPage() { if(currentSurahPageIndex > 0) { currentSurahPageIndex--; renderCurrentPage(); document.querySelector('.mushaf-page-container').scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
-        function closeMushafView() { els.mushafView.style.display = 'none'; els.homeView.style.display = 'block'; els.heroFilters.style.display = 'block'; audioPlayer.pause(); els.playBtnSticky.innerHTML = "⏵"; removeHighlight(); isRepeatingVerse = false; isRepeatingSurah = false; isRepeatingJuz = false; const btnRepeatA = document.getElementById('btn-repeat-ayah'); const btnRepeatS = document.getElementById('btn-repeat-surah'); if (btnRepeatA) { btnRepeatA.style.background = "#FEF3C7"; btnRepeatA.style.color = "var(--gold-premium)"; } if (btnRepeatS) { btnRepeatS.style.background = "#E0E7FF"; btnRepeatS.style.color = "#4338CA"; } }
+        function closeMushafView() { els.mushafView.style.display = 'none'; els.homeView.style.display = 'block'; els.heroFilters.style.display = 'block'; audioPlayer.pause(); els.playBtnSticky.innerHTML = "⏵"; removeHighlight(); isRepeatingVerse = false; isRepeatingSurah = false; isRepeatingJuz = false; juzRepeatMode = null; const btnRepeatA = document.getElementById('btn-repeat-ayah'); const btnRepeatS = document.getElementById('btn-repeat-surah'); if (btnRepeatA) { btnRepeatA.style.background = "#FEF3C7"; btnRepeatA.style.color = "var(--gold-premium)"; } if (btnRepeatS) { btnRepeatS.style.background = "#E0E7FF"; btnRepeatS.style.color = "#4338CA"; } }
         
         function initSidePanel(title) { els.sidePanelTitle.innerText = title; els.sidePanelBar.style.width = '0%'; els.sidePanelText.innerText = '0%'; els.sidePanelBtn.classList.add('hidden'); els.sidePanelCancel.innerText = 'إلغاء'; els.sidePanel.classList.add('show'); isDownloadingOp = true; }
         function updateSidePanel(percent, text) { els.sidePanelBar.style.width = percent + '%'; els.sidePanelText.innerText = text; }
