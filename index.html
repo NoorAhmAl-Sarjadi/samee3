@@ -7,7 +7,7 @@
     <link rel="manifest" href='data:application/manifest+json,{"name":"مصحف سميع","short_name":"مصحف سميع","description":"المنصة القرآنية الشاملة","display":"standalone","start_url":".","background_color":"#F4F9FE","theme_color":"#0284C7","icons":[{"src":"https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png","sizes":"192x192","type":"image/png"},{"src":"https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}'>
     <meta name="description" content="موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.">
     <title>مصحف سميع | المنصة القرآنية الشاملة</title>
-    <!-- تسريع تحميل الخطوط -->
+    
     <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <link href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700;800&family=Aref+Ruqaa:wght@400;700&display=swap" rel="stylesheet">
@@ -195,7 +195,6 @@
         </div>
         
         <div class="player-controls">
-            <!-- تمت إزالة الأزرار الزائدة، والإبقاء فقط على أزرار التحميل للجهاز -->
             <button class="action-btn-sm" onclick="downloadSingleSurahToDevice()">⬇️ تنزيل السورة للجهاز</button>
             <button class="action-btn-sm dl-all-btn" onclick="downloadFullMushafToDevice()">⬇️ تنزيل المصحف (ZIP)</button>
             <button class="play-pause-btn" id="play-btn-sticky" onclick="togglePlayState()">⏵</button>
@@ -203,7 +202,7 @@
         <audio id="main-audio"></audio>
     </div>
 
-    <!-- نوافذ الآيات والبحث وغيرها -->
+    <!-- نوافذ الآيات وخيارات الجزء وغيرها -->
     <div id="action-modal" class="modal-overlay">
         <div class="modal-content">
             <button class="close-modal" onclick="closeModals()">✖</button>
@@ -293,7 +292,7 @@
         let surahTimingStats = [], currentPlayingAyahIndex = -1, isPlaying = false, startDelaySeconds = 0;
         let isRepeatingVerse = false, selectedAyahIndex = 0, isDownloadingOp = false, isSignUpMode = false;
         
-        // --- متغيرات التكرار والاسترجاع الجديدة ---
+        // --- متغيرات التكرار والاسترجاع ---
         let isRepeatingSurah = false;
         let isRepeatingJuz = false;
         let selectedJuzForOptions = null;
@@ -384,7 +383,6 @@
             mainScrollTimer = setTimeout(saveAppFullState, 500);
         });
 
-        // مزامنة القوائم السفلية
         function syncBottomControls() {
             const topReciter = document.getElementById('reciter-select'), botReciter = document.getElementById('bottom-reciter-select');
             if (botReciter && topReciter) { botReciter.innerHTML = topReciter.innerHTML; botReciter.value = topReciter.value; }
@@ -418,7 +416,6 @@
             if(bs && bs.value) loadSurahForReadingAndPlaying(Number(bs.value)); 
         }
         
-        // فتح نافذة خيارات الجزء
         function onBottomJuzChange() {
             const juzNum = document.getElementById('bottom-juz-select').value;
             if(!juzNum) return;
@@ -430,7 +427,6 @@
             document.getElementById('juz-options-modal').style.display = 'flex';
         }
 
-        // دوال خيارات الجزء
         function jumpToJuzStart(juzNum) {
             const startData = JUZ_START_MAP[juzNum];
             loadSurahForReadingAndPlaying(startData.surah, startData.ayah, true);
@@ -616,7 +612,6 @@
                     if(bSurah && bSurah.value != currentSurahNumber) bSurah.value = currentSurahNumber;
                     if(bJuz && bJuz.value != activeAyahData.juz) bJuz.value = activeAyahData.juz;
                     
-                    // اكتشاف خروج الصوت عن الجزء المحدد في حال تفعيل تكرار الجزء
                     if(isRepeatingJuz && activeAyahData.juz > activeJuzNumber) {
                         jumpToJuzStart(activeJuzNumber);
                         return;
@@ -633,7 +628,6 @@
             }
         };
 
-        // إدارة الانتقال التلقائي أو التكرار عند انتهاء السورة
         audioPlayer.onended = () => { 
             if(isRepeatingSurah) {
                 audioPlayer.currentTime = 0; audioPlayer.play();
@@ -651,7 +645,6 @@
         async function loadSurahForReadingAndPlaying(surahNum, targetAyahNum = null, autoPlay = true, isResuming = false) {
             if(!currentAvailableSurahs.includes(Number(surahNum))) { showToast("عذراً، هذا القارئ لم يسجل هذه السورة."); return; }
             
-            // تصفير أزرار التكرار عند تحميل سورة جديدة بشكل يدوي
             if(!isResuming && !isRepeatingJuz) { isRepeatingVerse = false; isRepeatingSurah = false; }
             const btnRepeatA = document.getElementById('btn-repeat-ayah');
             const btnRepeatS = document.getElementById('btn-repeat-surah');
@@ -736,7 +729,6 @@
             document.getElementById('surah-name-header').innerText = `سورة ${exactSurahName}`;
             document.getElementById('juz-name-header').innerText = `الجزء ${JUZ_NAMES_AR[pageAyahs[0].juz]}`;
             
-            // تحديث الجزء في القائمة السفلية عند تقليب الصفحات
             let bJuz = document.getElementById('bottom-juz-select');
             if(bJuz && bJuz.value != pageAyahs[0].juz) bJuz.value = pageAyahs[0].juz;
 
@@ -1171,9 +1163,6 @@
         window.onload = initializeApp;
     </script>
     
-    <!-- ========================================== -->
-    <!-- نظام التحديثات الخارجية (لا تقم بحذفه) -->
-    <!-- ========================================== -->
     <link rel="stylesheet" href="updates.css">
     <script src="updates.js"></script>
 
