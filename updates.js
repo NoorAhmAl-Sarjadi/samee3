@@ -762,10 +762,10 @@ function exportHadithImage(text, source, num, bookName) {
 }
 
 // =========================================================
-// 9. نظام الحفظ التلقائي الشامل (الاستئناف الكامل)
+// 9. نظام الحفظ التلقائي الشامل (الاستئناف الكامل) - إصدار معدل
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
-    // --- أ. استرجاع الحالة كاملة (رواية، شيخ، سورة، آية، وصوت) ---
+    // --- أ. استرجاع الحالة كاملة (صوت + قوائم + سكرول) ---
     setTimeout(() => {
         const savedStateStr = localStorage.getItem('samee3_full_state_v1');
         const audio = document.getElementById('main-audio');
@@ -774,7 +774,7 @@ window.addEventListener('DOMContentLoaded', () => {
             try {
                 const state = JSON.parse(savedStateStr);
                 
-                // 1. استرجاع الرواية والشيخ والسورة وتحديث قوائم الاختيار في الواجهة
+                // 1. تحديث القوائم (الرواية، القارئ، السورة)
                 const riwayahSelect = document.getElementById('riwayah-select');
                 const reciterSelect = document.getElementById('reciter-select') || document.getElementById('reciters-select'); 
                 const surahSelect = document.getElementById('surah-select');
@@ -784,68 +784,64 @@ window.addEventListener('DOMContentLoaded', () => {
                     riwayahSelect.dispatchEvent(new Event('change'));
                 }
                 
-                // نعطي التطبيق وقت قصير لتحميل قائمة القراء بناءً على الرواية
                 setTimeout(() => {
                     if (reciterSelect && state.reciterValue) {
                         reciterSelect.value = state.reciterValue;
                         reciterSelect.dispatchEvent(new Event('change'));
                     }
-                    
-                    // استرجاع السورة التي كان يقرأها
                     if (surahSelect && state.surah) {
                         surahSelect.value = state.surah;
                         surahSelect.dispatchEvent(new Event('change'));
                         window.currentSurahNumber = state.surah;
                     }
-                    
                     if (state.server) window.currentAudioServer = state.server;
                     
-                    // 2. استرجاع مسار الصوت والقفز للثانية اللي وقف فيها القارئ
+                    // 2. استرجاع الصوت
                     audio.src = state.src;
-                    
                     audio.addEventListener('canplay', function resumePlay() {
                         if (Math.abs(audio.currentTime - state.time) > 2) { 
-                            audio.currentTime = state.time; // هذا السطر سيجعل "الظل" يقفز مباشرة للآية في تطبيقك
+                            audio.currentTime = state.time; 
                         }
-                        
-                        // محاولة التشغيل التلقائي للصوت
                         const playPromise = audio.play();
                         if (playPromise !== undefined) {
-                            playPromise.then(() => {
-                                if(typeof showToast === 'function') showToast("تم استئناف التلاوة تلقائياً من حيث توقفت 📍");
-                                const playBtn = document.getElementById('play-btn-sticky');
-                                if (playBtn) playBtn.innerHTML = "⏸";
-                                if(typeof window.isPlaying !== 'undefined') window.isPlaying = true;
-                            }).catch(error => {
-                                // بعض المتصفحات قد تمنع التشغيل التلقائي
-                                if(typeof showToast === 'function') showToast("يرجى الضغط على زر التشغيل (سياسة المتصفح تمنع التشغيل التلقائي).");
-                            });
+                            playPromise.catch(() => {}); // تجاهل خطأ المتصفحات اللي بتمنع التشغيل التلقائي
                         }
-                        
-                        // 3. استرجاع مكان السكرول (النزول في الصفحة)
-                        if (state.scrollTop) {
-                            const quranContainer = document.getElementById('quran-text-container') || document.querySelector('.quran-text') || window;
-                            quranContainer.scrollTo({ top: state.scrollTop, behavior: 'smooth' });
-                        }
-
                         audio.removeEventListener('canplay', resumePlay);
                     });
-                    
-                }, 300); // تأخير بسيط لضمان تحديث قوائم الواجهة أولاً
-            } catch(e) { console.error('خطأ في استرجاع الحالة:', e); }
+                }, 300);
+            } catch(e) {}
         }
-    }, 1500); // تأخير التحميل الأساسي لضمان استقرار واجهة المصحف
 
-    // --- ب. مراقبة وحفظ الحالة كاملة باستمرار أثناء التشغيل ---
+        // 3. استرجاع مكان القراءة (السكرول) بذكاء (ينتظر تحميل الآيات)
+        const savedScroll = localStorage.getItem('samee3_last_scroll_pos');
+        if (savedScroll) {
+            let attempts = 0;
+            // محاولة النزول كل نصف ثانية، لغاية ما الآيات تظهر وتملأ الشاشة
+            const scrollInterval = setInterval(() => {
+                const qContainer = document.getElementById('quran-text-container') || document.querySelector('.quran-text') || window;
+                const currentHeight = qContainer.scrollHeight || document.documentElement.scrollHeight;
+                const targetScroll = parseInt(savedScroll);
+                
+                // لو الشاشة بقت طويلة بما يكفي (معناها الآيات حملت)
+                if (currentHeight > targetScroll) {
+                    qContainer.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                    clearInterval(scrollInterval);
+                }
+                
+                attempts++;
+                if (attempts > 15) clearInterval(scrollInterval); // يوقف محاولات بعد 7.5 ثواني
+            }, 500);
+        }
+    }, 1500);
+
+    // --- ب. حفظ مكان الصوت أثناء التشغيل ---
     const audioEl = document.getElementById('main-audio');
     if (audioEl) {
         audioEl.addEventListener('timeupdate', () => {
-            // يتم الحفظ كل 3 ثواني فقط أثناء التشغيل لتخفيف الحمل على المتصفح
             if (Math.floor(audioEl.currentTime) % 3 === 0 && !audioEl.paused) {
                 const riwayahSelect = document.getElementById('riwayah-select');
                 const reciterSelect = document.getElementById('reciter-select') || document.getElementById('reciters-select');
                 const surahSelect = document.getElementById('surah-select');
-                const quranContainer = document.getElementById('quran-text-container') || document.querySelector('.quran-text') || window;
                 
                 if (typeof currentSurahNumber !== 'undefined' && typeof currentAudioServer !== 'undefined') {
                     const state = {
@@ -854,12 +850,24 @@ window.addEventListener('DOMContentLoaded', () => {
                         src: audioEl.src,
                         time: audioEl.currentTime,
                         riwayah: riwayahSelect ? riwayahSelect.value : null,
-                        reciterValue: reciterSelect ? reciterSelect.value : null,
-                        scrollTop: quranContainer.scrollTop || window.scrollY || 0
+                        reciterValue: reciterSelect ? reciterSelect.value : null
                     };
                     localStorage.setItem('samee3_full_state_v1', JSON.stringify(state));
                 }
             }
         });
     }
+
+    // --- ج. حفظ مكان الشاشة (السكرول) بشكل مستقل فوراً ---
+    const scrollTarget = document.getElementById('quran-text-container') || document.querySelector('.quran-text') || window;
+    let scrollTimeout;
+    scrollTarget.addEventListener('scroll', (e) => {
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+            const top = e.target.scrollTop || window.scrollY || document.documentElement.scrollTop;
+            if (top > 0) {
+                localStorage.setItem('samee3_last_scroll_pos', top);
+            }
+        }, 500); // يحفظ المكان بعد ما توقف سكرول بنصف ثانية
+    });
 });
