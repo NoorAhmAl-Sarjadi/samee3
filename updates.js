@@ -766,7 +766,6 @@ function exportHadithImage(text, source, num, bookName) {
 // =========================================================
 window.addEventListener('DOMContentLoaded', () => {
     
-    // دالة أخذ لقطة كاملة لحالة المصحف (سورة، شيخ، رواية، سكرول، وصوت)
     function saveAppFullState() {
         const riwayahSelect = document.getElementById('riwayah-select');
         const reciterSelect = document.getElementById('reciter-select') || document.getElementById('reciters-select');
@@ -776,7 +775,6 @@ window.addEventListener('DOMContentLoaded', () => {
         
         let currentScroll = qContainer.scrollTop || window.scrollY || document.documentElement.scrollTop;
         
-        // جلب رقم السورة الحالية سواء من المتغير العام أو من القائمة
         let sNum = (typeof window.currentSurahNumber !== 'undefined' && window.currentSurahNumber) 
                     ? window.currentSurahNumber 
                     : (surahSelect ? surahSelect.value : null);
@@ -795,15 +793,13 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 1. الحفظ عند النزول (Scroll) في الشاشة (حتى لو الصوت مش شغال)
     const scrollTarget = document.getElementById('quran-text-container') || document.querySelector('.quran-text') || window;
     let scrollTimer;
     scrollTarget.addEventListener('scroll', () => {
         clearTimeout(scrollTimer);
-        scrollTimer = setTimeout(saveAppFullState, 500); // يحفظ بعد ما توقف سكرول بنصف ثانية
+        scrollTimer = setTimeout(saveAppFullState, 500); 
     });
 
-    // 2. الحفظ أثناء تشغيل الصوت (كل 3 ثواني لتحديث مكان الآية)
     const audioEl = document.getElementById('main-audio');
     if (audioEl) {
         audioEl.addEventListener('timeupdate', () => {
@@ -813,15 +809,13 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // 3. الحفظ فوراً عند اختيار سورة جديدة
     const surahSelect = document.getElementById('surah-select');
     if (surahSelect) {
         surahSelect.addEventListener('change', () => {
-            setTimeout(saveAppFullState, 1500); // انتظار تحميل السورة الجديدة ثم حفظها
+            setTimeout(saveAppFullState, 1500); 
         });
     }
 
-    // --- أ. استرجاع الحالة وفتح الصفحة عند الدخول للمصحف ---
     setTimeout(() => {
         const savedStateStr = localStorage.getItem('samee3_super_state');
         if (savedStateStr) {
@@ -832,21 +826,17 @@ window.addEventListener('DOMContentLoaded', () => {
                 const reciterSelect = document.getElementById('reciter-select') || document.getElementById('reciters-select'); 
                 const surahSel = document.getElementById('surah-select');
                 
-                // أ- استرجاع الرواية 
                 if (riwayahSelect && state.riwayah) {
                     riwayahSelect.value = state.riwayah;
                     riwayahSelect.dispatchEvent(new Event('change'));
                 }
                 
-                // انتظار قصير لضمان بناء قائمة القراء
                 setTimeout(() => {
-                    // ب- استرجاع القارئ
                     if (reciterSelect && state.reciterValue) {
                         reciterSelect.value = state.reciterValue;
                         reciterSelect.dispatchEvent(new Event('change'));
                     }
                     
-                    // ج- استرجاع السورة (وهذا الأهم لفتح الصفحة الصحيحة)
                     if (surahSel && state.surah) {
                         surahSel.value = state.surah;
                         surahSel.dispatchEvent(new Event('change'));
@@ -855,7 +845,6 @@ window.addEventListener('DOMContentLoaded', () => {
                     
                     if (state.server) window.currentAudioServer = state.server;
                     
-                    // د- استرجاع الصوت للآية
                     if (audioEl && state.src && state.time) {
                         audioEl.src = state.src;
                         audioEl.addEventListener('canplay', function resumePlay() {
@@ -866,26 +855,85 @@ window.addEventListener('DOMContentLoaded', () => {
                         });
                     }
 
-                    // هـ- استرجاع مكان الشاشة بذكاء (الانتظار حتى ظهور الآيات)
                     if (state.scrollPos > 0) {
                         let attempts = 0;
                         const scrollInterval = setInterval(() => {
                             const qContainer = document.getElementById('quran-text-container') || document.querySelector('.quran-text') || window;
                             const currentHeight = qContainer.scrollHeight || document.documentElement.scrollHeight;
                             
-                            // لو ارتفاع الصفحة أصبح أكبر من رقم النزول (يعني الآيات ظهرت على الشاشة)
                             if (currentHeight > state.scrollPos) {
                                 qContainer.scrollTo({ top: state.scrollPos, behavior: 'auto' });
                                 clearInterval(scrollInterval);
                             }
                             
                             attempts++;
-                            if (attempts > 20) clearInterval(scrollInterval); // يوقف المحاولات بعد 10 ثواني عشان ميعلقش
+                            if (attempts > 20) clearInterval(scrollInterval); 
                         }, 500);
                     }
                     
-                }, 600); // تأخير لضمان تسلسل الأحداث
+                }, 600); 
             } catch(e) { console.log('خطأ في استرجاع الحالة:', e); }
         }
     }, 1000); 
+});
+
+// =========================================================
+// 10. دمج آيات القرآن مع شاشة القفل (Media Session API)
+// =========================================================
+window.addEventListener('DOMContentLoaded', () => {
+    const audioEl = document.getElementById('main-audio');
+
+    if ('mediaSession' in navigator && audioEl) {
+
+        function updateLockScreenMetadata() {
+            // 1. جلب اسم السورة من القائمة
+            const surahSelect = document.getElementById('surah-select');
+            let surahName = "مصحف سميع"; 
+            if (surahSelect && surahSelect.options.length > 0 && surahSelect.selectedIndex >= 0) {
+                surahName = surahSelect.options[surahSelect.selectedIndex].text;
+            }
+
+            // 2. جلب نص الآية الحالية التي يتم قراءتها
+            // ملاحظة: تأكد من أن كلاس '.active' أو '.active-ayah' يطابق الكلاس المستخدم لتظليل الآيات لديك
+            const activeAyahEl = document.querySelector('.active-ayah') ||
+                                 document.querySelector('.active') ||
+                                 document.querySelector('.playing-ayah') ||
+                                 document.querySelector('.quran-text span.active');
+
+            let currentAyahText = "جاري التلاوة...";
+            if (activeAyahEl) {
+                currentAyahText = activeAyahEl.innerText.replace(/[0-9٠-٩۝]/g, '').trim(); 
+            } else {
+                const reciterSelect = document.getElementById('reciter-select') || document.getElementById('reciters-select');
+                if(reciterSelect) currentAyahText = reciterSelect.options[reciterSelect.selectedIndex].text;
+            }
+
+            // 3. حقن البيانات في شاشة القفل
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: surahName,         
+                artist: currentAyahText,  
+                album: "مصحف سميع",
+                artwork: [
+                    // يرجى تغيير 'logo.png' إلى مسار اللوجو الفعلي الخاص بمنصة مصحف سميع
+                    { src: 'logo.png', sizes: '96x96', type: 'image/png' },
+                    { src: 'logo.png', sizes: '128x128', type: 'image/png' },
+                    { src: 'logo.png', sizes: '256x256', type: 'image/png' },
+                    { src: 'logo.png', sizes: '512x512', type: 'image/png' }
+                ]
+            });
+        }
+
+        audioEl.addEventListener('play', updateLockScreenMetadata);
+        
+        audioEl.addEventListener('timeupdate', () => {
+            if (Math.floor(audioEl.currentTime) % 1 === 0) {
+                updateLockScreenMetadata();
+            }
+        });
+
+        const surahSelect = document.getElementById('surah-select');
+        if (surahSelect) {
+            surahSelect.addEventListener('change', () => setTimeout(updateLockScreenMetadata, 1000));
+        }
+    }
 });
