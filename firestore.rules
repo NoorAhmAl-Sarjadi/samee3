@@ -1,20 +1,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn(){ return request.auth != null; }
-    function admin(){
-      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
+    function signedIn() { return request.auth != null; }
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
-    match /admins/{uid} { allow read: if signedIn() && request.auth.uid == uid || admin(); allow write: if false; }
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
     match /users/{uid} {
-      allow read,create,update: if signedIn() && request.auth.uid == uid || admin();
-      allow delete: if admin() && request.auth.uid != uid;
-      match /{sub=**} { allow read,write: if signedIn() && request.auth.uid == uid || admin(); }
+      allow read, write: if signedIn() && request.auth.uid == uid;
+      allow read, write: if isAdmin();
     }
-    match /content/{docId} { allow read: if true; allow write: if admin(); }
-    match /content/{docId}/{sub=**} { allow read: if true; allow write: if admin(); }
-    match /adminLogs/{id} { allow read,write: if admin(); }
-    match /{document=**} { allow read,write: if false; }
+    match /users/{uid}/{sub=**} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+      allow read, write: if isAdmin();
+    }
+    match /appSettings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /announcements/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /{document=**} { allow read, write: if isAdmin(); }
   }
 }

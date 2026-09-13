@@ -1,19 +1,12 @@
-# مصحف سميع
+# مصحف سميع — Production Static Foundation
 
-نسخة Static-first جديدة مناسبة للنشر على Vercel/GitHub Pages بدون Vite أو build step. تستعمل Firebase SDK من CDN، بيانات الروايات المحلية، وواجهات MP3Quran/QuranEnc وغيرها مباشرة.
+نسخة PWA ثابتة بدون build step، مصممة للموبايل والكمبيوتر مع صفحة مصحف أساسية، روايات محلية، MP3Quran، Firebase Auth/Firestore، Quranpedia/QuranEnc، حديث API، IndexedDB وService Worker.
 
 ## التشغيل
-
-لا توجد خطوة `npm install` مطلوبة. ارفع الملفات إلى Vercel أو GitHub Pages كما هي.
+ارفع محتويات هذا المجلد إلى GitHub ثم اربطه بـ Vercel. لا تحتاج npm لهذه النسخة.
 
 ## Firebase
+تم تضمين إعداد Firebase المرسل من مالك المشروع في `src/firebase.js`. قواعد Firestore في `firestore.rules`.
 
-تم تضمين إعدادات مشروع Firebase المرسلة من صاحب المشروع في `src/firebase.js`. قواعد Firestore يجب أن تبقى في Firebase Console وفق القواعد التي تم إعدادها للمشروع.
-
-## الروايات المحلية
-
-حفص، ورش، قالون، الدوري، السوسي، شعبة داخل `public/data/riwayat/`.
-
-## ملاحظة المصادر
-
-الصوت من MP3Quran، والتفسير الأساسي من QuranEnc، والأحاديث والأذكار من مصادر API/بيانات مفتوحة موثقة في الكود. راجع شروط الاستخدام والتراخيص قبل إعادة التوزيع التجاري.
+## مصادر
+راجع `SOURCES.md`.
