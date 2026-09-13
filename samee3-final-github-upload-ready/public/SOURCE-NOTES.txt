@@ -1,0 +1,3 @@
+Quran text data: KFGQPC-derived data supplied in the uploaded project.
+Audio/reciter metadata and audio: MP3Quran.net API.
+Review applicable licenses/terms before publishing a redistribution of source data or audio.
