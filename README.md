@@ -1,18 +1,12 @@
-# مصحف سميع — Ultimate Quran PWA
+# مصحف سميع — Production Static Foundation
 
-Static, mobile-first Quran application with:
-- Mushaf page viewer (single page mobile / facing pages desktop)
-- SVG page artwork + ayah hit layer for 5 riwayat, local text fallback for Soosi
-- 6 local riwayat datasets: Hafs, Warsh, Qaloon, Douri, Soosi, Shouba
-- MP3Quran reciters, riwayat filtering, audio timing, repeat, playlists, offline cache
-- Quranpedia tafsir, ayah services, topics, reciters and search
-- QuranEnc translations
-- Hadith collections through open Hadith API
-- Hisn Al-Muslim azkar
-- Prayer times using geolocation
-- Firebase Authentication + Firestore + offline cache
-- Notes, bookmarks, playlists, progress and khatma state
-- Admin panel using admins/{uid}
-- PWA service worker
+نسخة PWA ثابتة بدون build step، مصممة للموبايل والكمبيوتر مع صفحة مصحف أساسية، روايات محلية، MP3Quran، Firebase Auth/Firestore، Quranpedia/QuranEnc، حديث API، IndexedDB وService Worker.
 
-No build step is required. Upload the repository as static files to Vercel/GitHub Pages.
+## التشغيل
+ارفع محتويات هذا المجلد إلى GitHub ثم اربطه بـ Vercel. لا تحتاج npm لهذه النسخة.
+
+## Firebase
+تم تضمين إعداد Firebase المرسل من مالك المشروع في `src/firebase.js`. قواعد Firestore في `firestore.rules`.
+
+## مصادر
+راجع `SOURCES.md`.
