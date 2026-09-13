@@ -1,12 +1,13 @@
 {
-  "name":"مصحف سميع",
-  "short_name":"سميع",
-  "description":"مصحف سميع — قراءة وتلاوة وتفسير وحديث وأذكار",
-  "start_url":"./",
-  "display":"standalone",
-  "dir":"rtl",
-  "lang":"ar",
-  "theme_color":"#24170e",
-  "background_color":"#24170e",
-  "icons":[{"src":"./public/icons/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+  "name": "مصحف سميع",
+  "short_name": "مصحف سميع",
+  "start_url": "./",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#19160f",
+  "theme_color": "#b8943d",
+  "icons": [
+    {"src":"./icons/samee3-logo.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
 }

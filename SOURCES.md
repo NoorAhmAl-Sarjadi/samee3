@@ -1,19 +1,28 @@
-# مصادر البيانات
+# Sources and Usage Notes
 
-## القرآن والروايات
-بيانات النص المحلية مأخوذة من حزمة KFGQPC التي وفرها مالك المشروع، وموجودة داخل `public/data/riwayat/` بست روايات حالية: حفص، ورش، قالون، الدوري، السوسي، شعبة. يجب مراجعة الترخيص/النسبة النهائية قبل النشر التجاري.
+## Quran pages
+Quran SVG: https://github.com/quranpedia/quran-svg
+- KFQC editions currently listed by that project: Hafs, Warsh, Qalun, Al-Douri, Shubah; 604 pages each.
+- The project states its contribution is CC0 and documents publisher terms for the source artwork in NOTICE.md.
 
-## الصوت والتوقيت
-MP3Quran API: https://www.mp3quran.net/ — يتم جلب القراء والتلاوات وروابط الصوت مباشرة. راجع سياسة الخدمة وواجهة التوقيت قبل التوزيع واسع النطاق.
+## Quran data fallback
+Local JSON data was derived from the uploaded KFGQPC repository available in this workspace. Before public redistribution, retain provenance and verify the exact selected edition/usage terms against the King Fahd Complex source.
 
-## موسوعة القرآن
-Quranpedia API: https://api.quranpedia.net/v1 — مصدر مفتوح للآيات والتفاسير والترجمات والموضوعات والقراء وخدمات البحث، بدون مصادقة. استخدمناه للتفسير والموضوعات والبحث.
+## Audio
+MP3Quran API: https://www.mp3quran.net/eng/api
+- Reciters, rewayat and ayah timing endpoints are supported by the official API.
 
-## الترجمات
-QuranEnc API: https://quranenc.com/api/v1 — يوفر قائمة الترجمات وواجهات السورة والآية، وتعرض الوثائق شروط إعادة نشر المحتوى.
+## Tafsir, translations, topics, reciters
+Quranpedia API: https://quranpedia.net/api-docs
+QuranEnc API: https://quranenc.com/ar/home/api
 
-## الأحاديث
-Hadith API: https://github.com/fawazahmed0/hadith-api — إصدارات عربية مفتوحة عبر CDN، مع fallback في الكود. المصدر يذكر أن الترخيص Unlicense. لا يتم استخدام مصدره لادعاء تصحيح حديث خارج ما تعرضه البيانات.
+## Hadith
+Fawaz Ahmed Hadith API index: https://github.com/fawazahmed0/hadith-api
+Additional 9-books source reviewed: https://github.com/mghanii/The9Books
+Before redistributing full hadith datasets, verify exact source provenance, edition, and licence.
 
-## Firebase
-Firebase Authentication + Firestore. لا يتم استخدام Firebase Storage في هذه النسخة.
+## Prayer times
+AlAdhan API is used only for location-based timings in the web client.
+
+## Branding
+Samee3 logo was generated specifically for this project.

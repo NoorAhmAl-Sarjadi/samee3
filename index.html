@@ -1,182 +1,18 @@
 <!doctype html>
 <html lang="ar" dir="rtl">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#24170e" />
-  <meta name="description" content="مصحف سميع — قرآن، تلاوة، تفسير، حديث، أذكار وأدوات المسلم" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#efe2bf" />
+  <meta name="description" content="مصحف سميع — تجربة مصحف رقمية متكاملة للقراءة والتلاوة والتفسير والذكر." />
+  <link rel="icon" href="./icons/samee3-logo.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
   <title>مصحف سميع</title>
-  <link rel="stylesheet" href="./src/styles.css" />
+  <style>html,body,#app{margin:0;min-height:100%;background:#19160f}</style>
 </head>
 <body>
-<div id="app-shell" class="shell immersive">
-  <header class="topbar" id="topbar">
-    <div class="topbar-block start">
-      <button class="icon-btn" id="menuBtn" aria-label="القائمة">☰</button>
-      <button class="icon-btn" id="searchBtn" aria-label="بحث">⌕</button>
-    </div>
-    <div class="reader-title" id="readerTitle">
-      <strong id="surahTop">الفاتحة</strong>
-      <span id="readerMeta">الجزء ١ · الحزب ١</span>
-    </div>
-    <div class="topbar-block end">
-      <div class="prayer-pill" id="prayerPill">الصلاة القادمة — جاري الحساب</div>
-      <button class="icon-btn" id="settingsBtn" aria-label="الإعدادات">⚙</button>
-      <button class="icon-btn" id="immersiveBtn" aria-label="إظهار/إخفاء الأدوات">⌃</button>
-    </div>
-  </header>
-
-  <main class="reader" id="reader" aria-label="صفحة المصحف">
-    <div class="book-shell" id="bookShell">
-      <article class="mushaf-page page-before" id="pageBefore"></article>
-      <article class="mushaf-page page-current" id="pageCurrent"></article>
-      <article class="mushaf-page page-after" id="pageAfter"></article>
-    </div>
-    <div class="page-overlay left" data-dir="prev"></div>
-    <div class="page-overlay right" data-dir="next"></div>
-    <div class="reader-center-hint">اضغط منتصف الصفحة لإظهار الأدوات</div>
-  </main>
-
-  <section class="audio-dock" id="audioDock">
-    <button class="transport" id="playBtn">▶</button>
-    <div class="track-main">
-      <strong id="dockSurah">الفاتحة</strong>
-      <span id="dockReciter">اختر القارئ</span>
-      <div class="mini-progress"><div id="miniProgressFill"></div></div>
-    </div>
-    <button class="dock-chevron" id="audioExpand" aria-label="خيارات التلاوة">⌃</button>
-  </section>
-
-  <nav class="bottom-nav" id="bottomNav" aria-label="التنقل الرئيسي">
-    <button class="nav-item active" data-view="mushaf"><span>◈</span><small>المصحف</small></button>
-    <button class="nav-item" data-view="tools"><span>☀</span><small>أدوات المسلم</small></button>
-    <button class="nav-item" data-view="audio"><span>♫</span><small>المكتبة السمعية</small></button>
-    <button class="nav-item" data-view="library"><span>▤</span><small>المكتبة</small></button>
-  </nav>
-
-  <section class="view-layer" id="contentView" aria-live="polite"></section>
-
-  <aside class="side-panel" id="sidePanel" aria-hidden="true">
-    <div class="sheet-head"><strong>مصحف سميع</strong><button class="icon-btn close" data-close="#sidePanel">×</button></div>
-    <div class="tab-row">
-      <button class="tab active" data-side="surahs">الفهرس</button>
-      <button class="tab" data-side="juz">الأجزاء</button>
-      <button class="tab" data-side="notes">الملاحظات</button>
-      <button class="tab" data-side="bookmarks">المرجعيات</button>
-    </div>
-    <div class="panel-body" id="sideContent"></div>
-  </aside>
-
-  <section class="modal" id="searchModal" aria-hidden="true">
-    <div class="modal-card wide">
-      <div class="sheet-head"><strong>البحث الشامل</strong><button class="icon-btn close" data-close="#searchModal">×</button></div>
-      <div class="search-box"><input id="globalSearch" placeholder="ابحث في القرآن، السور، التفسير، الموضوعات، القراء، الملاحظات..." /><span>⌕</span></div>
-      <div class="search-filters" id="searchFilters">
-        <button class="filter active" data-search-type="all">الكل</button>
-        <button class="filter" data-search-type="quran">القرآن</button>
-        <button class="filter" data-search-type="tafsir">التفسير</button>
-        <button class="filter" data-search-type="topics">الموضوعات</button>
-        <button class="filter" data-search-type="reciters">القراء</button>
-        <button class="filter" data-search-type="notes">ملاحظاتي</button>
-      </div>
-      <div class="panel-body" id="searchResults"></div>
-    </div>
-  </section>
-
-  <section class="modal" id="settingsModal" aria-hidden="true">
-    <div class="modal-card wide">
-      <div class="sheet-head"><strong>الإعدادات</strong><button class="icon-btn close" data-close="#settingsModal">×</button></div>
-      <div class="settings-layout">
-        <div class="settings-group">
-          <h3>عام</h3>
-          <label>اللغة<select id="langSelect"><option value="ar">العربية</option><option value="en">English</option></select></label>
-          <label>التاريخ الهجري يدويًا<input type="number" id="hijriOffset" min="-3" max="3" value="0" /></label>
-        </div>
-        <div class="settings-group">
-          <h3>المظهر والقراءة</h3>
-          <label>ثيم المصحف<select id="themeSelect"><option value="gold">ذهبي</option><option value="ivory">عاجي</option><option value="sepia">بني هادئ</option><option value="night">ليلي</option></select></label>
-          <label>حجم الخط<input type="range" min="26" max="54" step="1" id="fontRange" /></label>
-          <label class="switch"><input type="checkbox" id="darkToggle" /><span>الوضع الداكن</span></label>
-          <label class="switch"><input type="checkbox" id="wakeToggle" /><span>إبقاء الشاشة مضاءة</span></label>
-          <label class="switch"><input type="checkbox" id="clockToggle" checked /><span>إظهار الساعة</span></label>
-          <label class="switch"><input type="checkbox" id="touchToggle" checked /><span>اللمس الجانبي للتقليب</span></label>
-          <label class="switch"><input type="checkbox" id="autoAdvanceToggle" checked /><span>الانتقال للصفحة التالية مع التلاوة</span></label>
-        </div>
-        <div class="settings-group">
-          <h3>الإشعارات</h3>
-          <label class="switch"><input type="checkbox" id="kahfToggle" checked /><span>تذكير سورة الكهف</span></label>
-          <label class="switch"><input type="checkbox" id="verseToggle" checked /><span>آية اليوم</span></label>
-          <label class="switch"><input type="checkbox" id="abandonToggle" /><span>تنبيه الانقطاع عن التلاوة</span></label>
-          <label class="switch"><input type="checkbox" id="prayerToggle" checked /><span>تنبيهات مواقيت الصلاة</span></label>
-          <label class="switch"><input type="checkbox" id="dailyToggle" checked /><span>تذكير الورد اليومي</span></label>
-        </div>
-        <div class="settings-group">
-          <h3>الحساب والتخزين والتواصل</h3>
-          <button class="outline-btn" id="accountBtn">الحساب وتسجيل الدخول</button>
-          <div class="storage-stat"><span>بيانات محلية</span><strong id="storageStat">—</strong></div>
-          <button class="outline-btn" id="clearCacheBtn">مسح الملفات المؤقتة</button>
-          <a class="outline-btn" href="https://wa.me/201005080532" target="_blank" rel="noopener">تواصل معنا عبر واتساب</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="modal" id="accountModal" aria-hidden="true">
-    <div class="modal-card wide">
-      <div class="sheet-head"><strong>الحساب والمزامنة</strong><button class="icon-btn close" data-close="#accountModal">×</button></div>
-      <div id="accountContent" class="panel-body"></div>
-    </div>
-  </section>
-
-  <section class="modal" id="readerModal" aria-hidden="true">
-    <div class="modal-card wide">
-      <div class="sheet-head"><strong>لوحة التلاوة</strong><button class="icon-btn close" data-close="#readerModal">×</button></div>
-      <div class="player-panel">
-        <div class="player-grid">
-          <label>الرواية<select id="riwayahSelect"></select></label>
-          <label>القارئ<select id="reciterSelect"><option>جارِ التحميل...</option></select></label>
-          <label>السورة<select id="audioSurahSelect"></select></label>
-          <label>النهاية<select id="finishMode"><option value="stop">إيقاف</option><option value="continue">إكمال التلاوة</option><option value="repeat">إعادة المقطع</option></select></label>
-        </div>
-        <div class="range-card">
-          <h3>تحديد المقطع</h3>
-          <div class="range-grid">
-            <label>من سورة / آية<input id="fromRange" placeholder="البقرة / 1" /></label>
-            <label>إلى سورة / آية<input id="toRange" placeholder="البقرة / 20" /></label>
-          </div>
-        </div>
-        <div class="playback-options">
-          <label class="switch"><input type="checkbox" id="highlightToggle" checked /><span>تظليل الآية والتتبع التلقائي</span></label>
-          <label class="switch"><input type="checkbox" id="repeatAyahToggle" /><span>تكرار الآية</span></label>
-          <label>عدد مرات التكرار<input id="repeatCount" type="number" min="1" value="3" /></label>
-        </div>
-        <div class="reciter-downloads" id="reciterDownloads"></div>
-        <div class="playlist-create"><input id="playlistName" placeholder="اسم قائمة تشغيل جديدة" /><button class="gold-btn" id="createPlaylistBtn">إضافة قائمة</button></div>
-        <div class="playlist-row" id="playlistRow"></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="bottom-sheet" id="ayahSheet" aria-hidden="true">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head"><strong id="ayahHeading">الآية</strong><button class="icon-btn close" data-close="#ayahSheet">×</button></div>
-    <blockquote id="ayahQuote"></blockquote>
-    <div class="ayah-actions">
-      <button data-ayah="copy">نسخ</button><button data-ayah="share">مشاركة</button><button data-ayah="tafsir">التفسير</button><button data-ayah="repeat">تكرار</button>
-      <button data-ayah="bookmark">مرجعية</button><button data-ayah="note">ملاحظة</button><button data-ayah="image">تصميم صورة</button><button data-ayah="image-tafsir">صورة + تفسير</button>
-    </div>
-    <div id="ayahDetails" class="ayah-details"></div>
-  </section>
-
-  <div class="toast" id="toast"></div>
-  <audio id="audio" preload="none" crossorigin="anonymous"></audio>
-</div>
-<script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}))}</script>
+<div id="app"></div>
+<noscript>يحتاج مصحف سميع إلى تفعيل JavaScript.</noscript>
 <script type="module" src="./src/app.js"></script>
 </body>
 </html>
