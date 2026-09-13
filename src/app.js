@@ -19,8 +19,15 @@ function immersiveToggle(force=null){state.immersive=force===null?!state.immersi
 async function bootstrap(){
   applySettings();
   $('#fontRange').value=state.fontSize; $('#themeSelect').value=state.theme; $('#riwayahSelect').innerHTML=Object.entries(RIWAYAT).map(([id,v])=>`<option value="${id}">${v.label}</option>`).join(''); $('#riwayahSelect').value=state.riwayah;
-  await loadQuran();
-  try{state.reciters=await loadReciters();renderReciters();}catch(e){toast('تعذر تحميل قائمة القراء الآن')}
+  try {
+    await loadQuran();
+  } catch (e) {
+    console.error('Quran bootstrap error:', e);
+    const current = $('#pageCurrent');
+    if (current) current.innerHTML = `<div class="load-error"><strong>تعذر تحميل بيانات المصحف</strong><p>${escapeHTML(e?.message || 'تحقق من أن مجلد data مرفوع إلى Vercel')}</p><button class="gold-btn" id="retryQuran">إعادة المحاولة</button></div>`;
+    $('#retryQuran')?.addEventListener('click',()=>loadQuran().catch(err=>toast(err.message)));
+  }
+  try{state.reciters=await loadReciters();renderReciters();}catch(e){console.warn(e);toast('تعذر تحميل قائمة القراء الآن')}
   setupAuth(); setupPrayer(); setupEvents(); restoreLists();
 }
 async function loadQuran(){state.book=await loadRiwayah(state.riwayah);state.page=Math.max(1,Math.min(604,state.page));save('riwayah',state.riwayah);renderPage(state.page);renderSurahSelects();}
@@ -33,7 +40,7 @@ function renderPage(p){
   $('#surahTop').textContent=surah;$('#readerMeta').textContent=`الجزء ${arabicDigits(juz)} · الحزب ${arabicDigits(Math.ceil(juz*4))}`;$('#dockSurah').textContent=surah;$('#pageCurrent').dataset.page=state.page;
 }
 function renderOne(el,p,isCurrent){
-  const rows=pageRows(p); el.innerHTML=''; el.className=`mushaf-page ${isCurrent?'page-current':'page-secondary'}`; if(p<1||p>604)return;
+  const rows=pageRows(p); el.innerHTML=''; el.className=`mushaf-page ${isCurrent?'page-current':'page-secondary'}`; el.style.setProperty('--mushaf-font', RIWAYAT[state.riwayah]?.font || 'Hafs'); if(p<1||p>604)return;
   const first=rows[0]; const head=first?stripPrefix(first.name):''; let html=`<div class="page-head"><span>${escapeHTML(head)}</span><span>الجزء ${first?arabicDigits(first.jozz):'—'}</span></div>`;
   let last=''; let inner=''; let currentLine=null;
   for(const a of rows){

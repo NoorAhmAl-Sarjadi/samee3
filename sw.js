@@ -1,4 +1,4 @@
-const CACHE='samee3-static-v1';
+const CACHE='samee3-static-v7';
 const ASSETS=['./','./index.html','./src/styles.css','./src/app.js','./src/quran.js','./src/mp3quran.js','./src/content.js','./src/prayer.js','./src/storage.js','./src/firebase.js','./manifest.webmanifest'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS))));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))));

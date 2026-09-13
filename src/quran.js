@@ -26,8 +26,22 @@ export function normalizeRow(raw){
 
 export async function loadRiwayah(id){
   const cfg=RIWAYAT[id];
-  const res=await fetch(`./public/data/riwayat/${cfg.file}`,{cache:'force-cache'});
-  if(!res.ok) throw new Error(`تعذر تحميل ${cfg.label}`);
+  const candidates = [
+    `./data/riwayat/${cfg.file}`,
+    `/data/riwayat/${cfg.file}`,
+    `./public/data/riwayat/${cfg.file}`,
+    `/public/data/riwayat/${cfg.file}`
+  ];
+  let res = null;
+  let lastError = null;
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url,{cache:'force-cache'});
+      if (r.ok) { res = r; break; }
+      lastError = new Error(`${url} -> HTTP ${r.status}`);
+    } catch (e) { lastError = e; }
+  }
+  if(!res) throw new Error(`تعذر تحميل ${cfg.label}${lastError ? ` — ${lastError.message}` : ''}`);
   const rows=(await res.json()).map(normalizeRow);
   const pages=new Map();
   const ayahById=new Map();
