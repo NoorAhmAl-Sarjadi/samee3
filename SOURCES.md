@@ -1,28 +1,29 @@
-# Sources and Usage Notes
+# مصادر مصحف سميع
 
-## Quran pages
-Quran SVG: https://github.com/quranpedia/quran-svg
-- KFQC editions currently listed by that project: Hafs, Warsh, Qalun, Al-Douri, Shubah; 604 pages each.
-- The project states its contribution is CC0 and documents publisher terms for the source artwork in NOTICE.md.
+## القرآن والصفحات
+- Quran SVG / quran-ws: صفحات مصحف المدينة بصيغة SVG مع طبقة ayahPolygon لروايات حفص وورش وقالون والدوري وشعبة. المصدر يذكر 604 صفحة لكل رواية وشروط استخدام منفصلة للعمل الفني. https://github.com/quranpedia/quran-svg
+- Quranpedia API: مصاحف ونصوص الروايات وخدمات الآيات. https://api.quranpedia.net/api-docs
+- ملفات الروايات المحلية داخل public/data/riwayat أصلها من ملفات KFGQPC التي وفرها المستخدم في المشروع.
 
-## Quran data fallback
-Local JSON data was derived from the uploaded KFGQPC repository available in this workspace. Before public redistribution, retain provenance and verify the exact selected edition/usage terms against the King Fahd Complex source.
+## الصوت والتوقيت
+- MP3Quran API: القراء، الروايات، السور، روابط الصوت، وتوقيت الآيات. https://www.mp3quran.net/eng/api
 
-## Audio
-MP3Quran API: https://www.mp3quran.net/eng/api
-- Reciters, rewayat and ayah timing endpoints are supported by the official API.
+## التفسير والموسوعة
+- Quranpedia API وEmbed: التفاسير، المعاني، الإعراب، أسباب النزول، الموضوعات، القراءات، وما يتاح من خدمات الآية. https://api.quranpedia.net/api-docs
 
-## Tafsir, translations, topics, reciters
-Quranpedia API: https://quranpedia.net/api-docs
-QuranEnc API: https://quranenc.com/ar/home/api
+## الترجمات
+- QuranEnc API: قائمة الترجمات وترجمة السورة/الآية مع شروط إعادة النشر. https://quranenc.com/ar/home/api
 
-## Hadith
-Fawaz Ahmed Hadith API index: https://github.com/fawazahmed0/hadith-api
-Additional 9-books source reviewed: https://github.com/mghanii/The9Books
-Before redistributing full hadith datasets, verify exact source provenance, edition, and licence.
+## الأحاديث
+- Hadith API by fawazahmed0: واجهة مفتوحة للكتب والإصدارات العربية، مع روابط fallback. https://github.com/fawazahmed0/hadith-api
+- التطبيق لا ينسب تصحيحًا حديثيًا من نفسه؛ واجهة الكتاب تعرض المصدر والكتاب كما يوفرهما المصدر.
 
-## Prayer times
-AlAdhan API is used only for location-based timings in the web client.
+## الأذكار
+- Hisn El Muslim data community project: https://github.com/asellam/HisnElMuslim
+- يجب مراجعة الإصدار/المصدر عند إعادة التوزيع العام للبيانات داخل المنتج.
 
-## Branding
-Samee3 logo was generated specifically for this project.
+## الصلاة
+- AlAdhan API: مواقيت الصلاة حسب الإحداثيات. https://aladhan.com/prayer-times-api
+
+## تنبيه حقوقي
+وجود مصدر API أو مستودع مفتوح لا يعني تلقائيًا أن كل ملف يمكن إعادة توزيعه على GitHub بنفس الشروط. التطبيق يعتمد live APIs قدر الإمكان، ولا يعيد نشر dumps ضخمة دون مراجعة الترخيص.

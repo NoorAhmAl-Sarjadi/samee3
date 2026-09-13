@@ -1,24 +1,43 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn(){ return request.auth != null; }
-    function isOwner(uid){ return isSignedIn() && request.auth.uid == uid; }
-    function isAdmin(){
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+    function signedIn(){ return request.auth != null; }
+    function self(uid){ return signedIn() && request.auth.uid == uid; }
+    function admin(){
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
+
     match /admins/{uid} {
-      allow read: if isOwner(uid) || isAdmin();
+      allow read: if self(uid) || admin();
       allow write: if false;
     }
+
     match /users/{uid} {
-      allow read, write: if isOwner(uid) || isAdmin();
-      match /{document=**} {
-        allow read, write: if isOwner(uid) || isAdmin();
+      allow read, create, update, delete: if self(uid) || admin();
+      match /state/{docId} {
+        allow read, create, update, delete: if self(uid) || admin();
+      }
+      match /bookmarks/{docId} {
+        allow read, create, update, delete: if self(uid) || admin();
+      }
+      match /notes/{docId} {
+        allow read, create, update, delete: if self(uid) || admin();
+      }
+      match /playlists/{docId} {
+        allow read, create, update, delete: if self(uid) || admin();
       }
     }
-    match /appSettings/{doc} { allow read: if true; allow write: if isAdmin(); }
-    match /publicContent/{doc} { allow read: if true; allow write: if isAdmin(); }
-    match /{document=**} { allow read, write: if isAdmin(); }
+
+    match /appSettings/{docId} {
+      allow read: if true;
+      allow write: if admin();
+    }
+    match /announcements/{docId} {
+      allow read: if true;
+      allow write: if admin();
+    }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }

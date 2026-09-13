@@ -1,13 +1,11 @@
 {
-  "name": "مصحف سميع",
-  "short_name": "مصحف سميع",
-  "start_url": "./",
-  "display": "standalone",
-  "dir": "rtl",
-  "lang": "ar",
-  "background_color": "#19160f",
-  "theme_color": "#b8943d",
-  "icons": [
-    {"src":"./icons/samee3-logo.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
-  ]
+  "name":"مصحف سميع",
+  "short_name":"مصحف سميع",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#19130b",
+  "theme_color":"#b79655",
+  "lang":"ar",
+  "dir":"rtl",
+  "icons":[{"src":"./icons/samee3-logo.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]
 }
