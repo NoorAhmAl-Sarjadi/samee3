@@ -1,34 +1,14 @@
-<!doctype html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><meta name="theme-color" content="#f3f4f4"/><title>مصحف سميع</title><link rel="stylesheet" href="/src/style.css"></head><body>
-<div class="app-shell">
-<header class="topbar"><button id="settings-btn" class="brand-btn" aria-label="الإعدادات">⚙</button><label class="searchbox"><span><input id="search" placeholder="بحث: الصفحة، السورة، القارئ..." /></span><b class="search-ico">⌕</b></label><button id="index-btn" class="brand-btn" aria-label="الفهرس">☰</button></header>
-
-<main id="view-mushaf" class="view active">
-  <div class="page-toolbar"><button class="toolbar-side" id="surah-picker"><span class="toolbar-icon">‹</span><span id="surah-display">البقرة</span></button><button class="toolbar-center" id="riwaya-btn">▦</button><button class="toolbar-side"><span id="juz-display">الجزء ٢</span><span class="toolbar-icon">⌑</span></button></div>
-  <div class="page-wrap"><section id="mushaf-paper" class="paper"></section></div>
-  <div class="page-controls"><button id="prev-page" class="page-chip">‹</button><span class="page-chip">صفحة <b id="page-display">٢٢</b></span><div class="dots" aria-hidden="true">${'<i></i>'.repeat(15)}</div><button id="next-page" class="page-chip">›</button></div>
-  <div class="reader-bar"><button id="play" class="play-main">▶</button><div class="reader-text"><b id="current-reader">اختر القارئ</b><small id="current-riwaya">حفص</small></div><button id="reader-btn" class="reader-action">♬</button></div>
-</main>
-
-<section id="view-audio" class="view section-page"><h1 class="section-title">المكتبة السمعية</h1><div class="card"><div class="summary"><div><b>كل القراء</b><div class="subtle">يتم جلب القراء والتلاوات من MP3Quran.net</div></div><div class="count" id="reciter-count">٠</div></div></div><div class="section-subtitle">اختر الرواية</div><div class="chips" id="riwaya-summary"></div><div class="section-subtitle">بحث في القراء</div><label class="searchbox"><span><input id="reciter-search" placeholder="اكتب اسم القارئ..." /></span><b class="search-ico">⌕</b></label><div class="section-subtitle">القراء</div><div id="reciters-list" class="reader-list"></div></section>
-
-<section id="view-tools" class="view section-page"><h1 class="section-title">أدوات المسلم</h1><div class="section-subtitle">أوقات الصلاة</div><div class="card"><div class="summary"><div><b>الفجر</b><div class="subtle">٤:٤٠ ص</div></div><div class="count">٠٢</div><div><b>العشاء</b><div class="subtle">٧:٢٦ م</div></div></div><hr><div class="row-card"><b>ورد اليوم</b><span class="subtle">٩ صفحات</span></div></div><div class="section-subtitle">الأذكار</div><div class="card"><div class="row-card"><b>أذكار الصباح</b><span>›</span></div><div class="row-card"><b>أذكار المساء</b><span>›</span></div><div class="row-card"><b>المزيد</b><span>›</span></div></div><div class="section-subtitle">القبلة</div><div class="card"><div class="tool-tile"><div class="big">🧭</div><span>اتجاه القبلة</span></div></div><div class="section-subtitle">إحصائيات</div><div class="card"><div class="summary"><b>معدل الصفحات اليومي</b><span class="count">٩</span></div></div></section>
-
-<section id="view-notify" class="view section-page"><h1 class="section-title">الإشعارات</h1><div class="card">
-<div class="row-card"><b>قراءة الكهف كل جمعة</b><span class="switch"></span></div><div class="row-card"><b>الاقتباسات اليومية</b><span class="switch on"></span></div><div class="row-card"><b>لك مدة من آخر مرة تلوت فيها القرآن</b><span class="switch on"></span></div><div class="row-card"><b>تنبيهات مواقيت الصلوات</b><span class="switch"></span></div><div class="row-card"><b>تذكير الورد اليومي</b><span class="switch on"></span></div></div>
-<div class="section-subtitle">إدارة التنزيلات</div><div class="card"><div class="row-card"><b>إدارة الملفات الصوتية</b><span>›</span></div><div class="row-card"><b>إدارة الكتب</b><span>›</span></div></div><div class="section-subtitle">مشاركة</div><div class="card"><div class="summary"><b>شارك مصحف سميع</b><span>◉　◎　◌</span></div></div></section>
-
-<section id="view-library" class="view section-page"><h1 class="section-title">المكتبة المقروءة</h1><div class="section-subtitle">نسخ المصاحف الخاصة بي</div><div class="card"><div class="summary"><div><b>مصحف التلاوة</b><div>رواية حفص عن عاصم</div><small class="subtle">مصحف المدينة</small></div><button class="chip active">الرئيسية</button></div></div><div class="section-subtitle">كتب</div><div class="card"><div class="row-card"><b>طبعات المصحف</b><span>٥ كتب</span></div><div class="row-card"><b>كتب التفسير</b><span>٥٥ كتاب</span></div><div class="row-card"><b>ترجمات</b><span>٧٦ كتاب</span></div><div class="row-card"><b>كتب الحديث</b><span>١٠ كتب</span></div></div></section>
-
-<nav class="bottom-nav"><button class="nav-item active" data-nav="mushaf"><span class="ico">☷</span><span>المصحف الذهبي</span></button><button class="nav-item" data-nav="tools"><span class="ico">▦</span><span>أدوات المسلم</span></button><button class="nav-item" data-nav="notify"><span class="ico">✉</span><span>التنبيهات</span></button><button class="nav-item" data-nav="audio"><span class="ico">♬</span><span>المكتبة السمعية</span></button><button class="nav-item" data-nav="library"><span class="ico">▤</span><span>المكتبة المقروءة</span></button></nav>
-
-<div class="player-line"><button id="home-btn">⌂</button><small id="theme-status">الوضع النهاري</small><div class="progress"><i></i></div><button id="back-mushaf">↑</button></div>
-</div>
-
-<div id="sheet" class="sheet">
-  <section class="sheet-panel hidden" data-sheet="riwayat"><div class="sheet-head"><h2>اختيار الرواية</h2><button id="close-sheet" class="close">إغلاق</button></div><div class="card"><label class="subtle">الرواية الحالية</label><select id="riwaya-select" class="select"></select></div><div class="card"><div class="summary"><b>بيانات الرواية</b><span id="riwaya-display" class="subtle"></span></div></div></section>
-  <section class="sheet-panel hidden" data-sheet="readers"><div class="sheet-head"><h2>اختر القارئ</h2><button id="close-sheet" class="close">إغلاق</button></div><label class="searchbox"><span><input id="reciter-search" placeholder="بحث باسم القارئ"/></span><b class="search-ico">⌕</b></label><div id="reciters-list" class="reader-list"></div></section>
-  <section class="sheet-panel hidden" data-sheet="settings"><div class="sheet-head"><h2>الإعدادات</h2><button id="close-sheet" class="close">إغلاق</button></div><div class="card"><div class="row-card"><b>حجم الخط</b><span><button id="font-sm" class="chip">A−</button> <button id="font-lg" class="chip active">A+</button></span></div><div class="row-card"><b>الوضع الليلي</b><button id="day-mode" class="switch"></button></div><div class="row-card"><b>الرواية</b><span class="subtle" id="riwaya-display">حفص عن عاصم</span></div></div></section>
-  <section class="sheet-panel hidden" data-sheet="index"><div class="sheet-head"><h2>فهرس السور</h2><button id="close-sheet" class="close">إغلاق</button></div><label class="searchbox"><span><input id="surah-search" placeholder="بحث في أسماء السور" oninput="renderIndex(this.value)"/></span><b class="search-ico">⌕</b></label><div id="surah-list" class="surah-list"></div></section>
-</div>
-<div id="toast" class="toast"></div>
-<script src="/src/main.js"></script></body></html>
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f7f3e9" />
+  <meta name="description" content="مصحف سميع — مصحف متكامل للقراءة والاستماع والتفسير والأحاديث والأذكار." />
+  <title>مصحف سميع</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

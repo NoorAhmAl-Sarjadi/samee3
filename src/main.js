@@ -1,279 +1,74 @@
-const API = {
-  reciters: 'https://www.mp3quran.net/api/v3/reciters?language=ar',
-  suwar: 'https://www.mp3quran.net/api/v3/suwar?language=ar',
+import './style.css';
+import { watchAuth, login, logout, register, ensureUser, isAdmin, getSiteConfig, setSiteConfig, getUserSettings, setUserSettings, saveBookmark, listBookmarks } from './firebase.js';
+import { getReciters, getSuwar, audioUrl, getTimings } from './services/mp3quran.js';
+import { tafsirAya, tafsirSura, TAFSIR_SOURCE } from './services/tafsir.js';
+import { listHadithBooks, searchHadith, getBook } from './services/hadith.js';
+import { getAdhkar, ADHKAR_SOURCE } from './services/adhkar.js';
+import { getPrayerTimes } from './services/prayer.js';
+
+const RIWAYAT={
+ hafs:{label:'حفص عن عاصم',json:'/data/riwayat/hafs/data/hafsData_v18.json',font:'/data/riwayat/hafs/font/hafs.18.woff2'},
+ warsh:{label:'ورش عن نافع',json:'/data/riwayat/warsh/data/warshData_v10.json',font:'/data/riwayat/warsh/font/warsh.10.woff2'},
+ qaloon:{label:'قالون عن نافع',json:'/data/riwayat/qaloon/data/QaloonData_v10.json',font:'/data/riwayat/qaloon/font/qaloon.10.woff2'},
+ doori:{label:'الدوري عن أبي عمرو',json:'/data/riwayat/doori/data/DooriData_v09.json',font:'/data/riwayat/doori/font/doori.9.woff2'},
+ soosi:{label:'السوسي عن أبي عمرو',json:'/data/riwayat/soosi/data/SoosiData09.json',font:'/data/riwayat/soosi/font/soosi.9.woff2'},
+ shouba:{label:'شعبة عن عاصم',json:'/data/riwayat/shouba/data/ShoubaData08.json',font:'/data/riwayat/shouba/font/shouba.8.woff2'}
 };
-const $ = (s, r=document) => r.querySelector(s);
-const $$ = (s, r=document) => [...r.querySelectorAll(s)];
-const state = {
-  page: Number(localStorage.getItem('samee3_page') || 22),
-  riwaya: localStorage.getItem('samee3_riwaya') || 'hafs',
-  sura: Number(localStorage.getItem('samee3_sura') || 2),
-  readerId: Number(localStorage.getItem('samee3_reader') || 259),
-  fontSize: Number(localStorage.getItem('samee3_font') || 2),
-  theme: localStorage.getItem('samee3_theme') || 'light',
-  activeNav: localStorage.getItem('samee3_nav') || 'mushaf',
-  pageLines: [],
-  reciters: [],
-  surahs: [],
-  audio: new Audio(),
-  audioInfo: null,
-};
+const SURA_NAMES=['الفاتحة','البقرة','آل عمران','النساء','المائدة','الأنعام','الأعراف','الأنفال','التوبة','يونس','هود','يوسف','الرعد','إبراهيم','الحجر','النحل','الإسراء','الكهف','مريم','طه','الأنبياء','الحج','المؤمنون','النور','الفرقان','الشعراء','النمل','القصص','العنكبوت','الروم','لقمان','السجدة','الأحزاب','سبأ','فاطر','يس','الصافات','ص','الزمر','غافر','فصلت','الشورى','الزخرف','الدخان','الجاثية','الأحقاف','محمد','الفتح','الحجرات','ق','الذاريات','الطور','النجم','القمر','الرحمن','الواقعة','الحديد','المجادلة','الحشر','الممتحنة','الصف','الجمعة','المنافقون','التغابن','الطلاق','التحريم','الملك','القلم','الحاقة','المعارج','نوح','الجن','المزمل','المدثر','القيامة','الإنسان','المرسلات','النبأ','النازعات','عبس','التكوير','الانفطار','المطففين','الانشقاق','البروج','الطارق','الأعلى','الغاشية','الفجر','البلد','الشمس','الليل','الضحى','الشرح','التين','العلق','القدر','البينة','الزلزلة','العاديات','القارعة','التكاثر','العصر','الهمزة','الفيل','قريش','الماعون','الكوثر','الكافرون','النصر','المسد','الإخلاص','الفلق','الناس'];
+const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+const ar=n=>String(n).replace(/\d/g,d=>'٠١٢٣٤٥٦٧٨٩'[d]);
+const state={view:'mushaf',page:Number(localStorage.getItem('s3.page')||1),riwaya:localStorage.getItem('s3.riwaya')||'hafs',sura:Number(localStorage.getItem('s3.sura')||1),fontSize:Number(localStorage.getItem('s3.font')||24),theme:localStorage.getItem('s3.theme')||'paper',quran:null,rows:[],user:null,admin:false,config:{siteName:'مصحف سميع',tagline:'القرآن برواياته، بتلاوته، بتدبره'},reciters:[],selectedMoshaf:null,timings:[],player:null,playing:false,repeatCount:0,bookmarks:[]};
 
-const riwayat = {
-  hafs: {name:'حفص عن عاصم', short:'حفص', json:'/data/riwayat/hafs/data/hafsData_v18.json', font:'/data/riwayat/hafs/font/hafs.18.woff2'},
-  warsh: {name:'ورش عن نافع', short:'ورش', json:'/data/riwayat/warsh/data/warshData_v10.json', font:'/data/riwayat/warsh/font/warsh.10.woff2'},
-  qaloon:{name:'قالون عن نافع', short:'قالون', json:'/data/riwayat/qaloon/data/QaloonData_v10.json', font:'/data/riwayat/qaloon/font/qaloon.10.woff2'},
-  doori:{name:'الدوري عن أبي عمرو', short:'الدوري', json:'/data/riwayat/doori/data/DooriData_v09.json', font:'/data/riwayat/doori/font/doori.9.woff2'},
-  soosi:{name:'السوسي عن أبي عمرو', short:'السوسي', json:'/data/riwayat/soosi/data/SoosiData09.json', font:'/data/riwayat/soosi/font/soosi.9.woff2'},
-  shouba:{name:'شعبة عن عاصم', short:'شعبة', json:'/data/riwayat/shouba/data/ShoubaData08.json', font:'/data/riwayat/shouba/font/shouba.8.woff2'},
-};
-
-let quranRows = null;
-const cache = new Map();
-
-function save(){ localStorage.setItem('samee3_page', state.page); localStorage.setItem('samee3_riwaya', state.riwaya); localStorage.setItem('samee3_sura', state.sura); localStorage.setItem('samee3_reader', state.readerId); localStorage.setItem('samee3_font', state.fontSize); localStorage.setItem('samee3_nav', state.activeNav); }
-function arabicDigits(n){ return String(n).replace(/\d/g, d=>'٠١٢٣٤٥٦٧٨٩'[d]); }
-function romanize(n){ return arabicDigits(n); }
-
-async function loadQuran(rid=state.riwaya){
-  if(cache.has(rid)) return cache.get(rid);
-  const res = await fetch(riwayat[rid].json, {cache:'force-cache'});
-  if(!res.ok) throw new Error('تعذر تحميل بيانات الرواية');
-  const data = await res.json();
-  cache.set(rid,data);
-  return data;
+function persist(){localStorage.setItem('s3.page',state.page);localStorage.setItem('s3.riwaya',state.riwaya);localStorage.setItem('s3.sura',state.sura);localStorage.setItem('s3.font',state.fontSize);localStorage.setItem('s3.theme',state.theme);if(state.user)setUserSettings(state.user.uid,{page:state.page,riwaya:state.riwaya,sura:state.sura,fontSize:state.fontSize,theme:state.theme}).catch(()=>{});}
+async function loadQuran(){if(state.quran?.key===state.riwaya)return state.quran.data;const cfg=RIWAYAT[state.riwaya];const r=await fetch(cfg.json);if(!r.ok)throw new Error('تعذر تحميل بيانات الرواية');const raw=await r.json();state.quran={key:state.riwaya,data:raw};applyQuranFont();return raw;}
+function norm(r){return {id:r.id,page:Number(r.page||1),sura:Number(r.sora??r.sura_no??r.sura),ayah:Number(r.aya_no??r.ayah_no??r.aya??r.ayah),text:r.aya_text??r.ayah_text??'',line:Number(r.line_start??r.line??1),juz:Number(r.jozz??r.juz??1),name:r.sora_name_ar??r.sura_name_ar??''};}
+async function rowsForPage(page){const raw=await loadQuran();return raw.map(norm).filter(x=>x.page===page);}
+function applyQuranFont(){let style=$('#qfont');if(!style){style=document.createElement('style');style.id='qfont';document.head.appendChild(style);}const f=RIWAYAT[state.riwaya].font;style.textContent=`@font-face{font-family:SameeQuran;src:url('${f}') format('woff2');font-display:swap}.quran-page,.quran-page *{font-family:SameeQuran,serif}`;}
+function groupPage(rows){const map=new Map();for(const r of rows){if(!map.has(r.line))map.set(r.line,[]);map.get(r.line).push(r);}return [...map.entries()].sort((a,b)=>a[0]-b[0]).map(([line,items])=>({line,items}));}
+function rowButton(r){return `<span class="ayah" data-sura="${r.sura}" data-ayah="${r.ayah}" data-page="${r.page}" data-id="${r.id}">${esc(r.text)}</span>`;}
+async function renderMushaf(){
+ try{state.rows=await rowsForPage(state.page);}catch(e){$('#content').innerHTML=`<div class="error-panel">تعذر تحميل المصحف. تأكد من رفع مجلدات الروايات داخل <code>public/data/riwayat</code>.</div>`;return;}
+ const groups=groupPage(state.rows);const first=state.rows[0]||{sura:state.sura,juz:1};state.sura=first.sura||state.sura;persist();
+ $('#content').innerHTML=`<section class="reader-wrap"><div class="reader-tools"><button class="soft-btn" data-action="prev" ${state.page<=1?'disabled':''}>السابق</button><div class="reader-heading"><div>${esc(SURA_NAMES[state.sura-1]||'المصحف الشريف')}</div><small>${esc(RIWAYAT[state.riwaya].label)} · الجزء ${ar(first.juz||1)} · صفحة ${ar(state.page)}</small></div><button class="soft-btn" data-action="next" ${state.page>=604?'disabled':''}>التالي</button></div><div class="mushaf-card"><div class="mushaf-frame"><div class="orn top">۞</div><div class="page-head"><span>${esc(SURA_NAMES[state.sura-1]||'')}</span><span>بسم الله الرحمن الرحيم</span><span>﴿${ar(state.page)}﴾</span></div><div class="quran-page" id="quran-page">${groups.map(g=>`<div class="qline" data-line="${g.line}">${g.items.map(rowButton).join(' ')}</div>`).join('')}</div><div class="orn bottom">۞</div></div></div><div class="reader-bar"><button data-action="index">الفهرس</button><button data-action="jump">انتقال</button><button data-action="play">${state.playing?'إيقاف':'تلاوة'}</button><button data-action="bookmark-page">علامة الصفحة</button><button data-action="settings">عرض</button></div></section>`;
+ $('#content').onclick=handleReaderClick;
+ bindPageGestures();
 }
-function normalizeRow(r){
-  return {
-    page:parseInt(String(r.page ?? 1), 10) || 1,
-    sura:Number(r.sora ?? r.sura_no ?? r.sura),
-    suraName:r.sora_name_ar ?? r.sura_name_ar ?? '',
-    ayah:Number(r.aya_no ?? r.ayah_no ?? r.aya ?? r.ayah),
-    text:r.aya_text ?? r.ayah_text ?? '',
-    lineStart:Number(r.line_start || 1),
-    lineEnd:Number(r.line_end || r.line_start || 1),
-    juz:Number(r.jozz ?? r.juz ?? 1),
-  };
-}
-async function getPage(page){
-  const rows = (await loadQuran(state.riwaya)).map(normalizeRow);
-  const found = rows.filter(x=>x.page===page);
-  // fallback to nearest populated page
-  if(found.length) return found;
-  return rows.filter(x=>x.page === Math.max(1, Math.min(604,page)));
-}
-function pageGroups(rows){
-  const groups = [];
-  const by = new Map();
-  for(const r of rows){
-    const key = r.lineStart;
-    if(!by.has(key)) by.set(key, []);
-    by.get(key).push(r);
-  }
-  [...by.keys()].sort((a,b)=>a-b).forEach(k=>{
-    groups.push({line:k, text:by.get(k).map(r=>r.text).join(' ')});
-  });
-  return groups;
-}
-function applyFont(){
-  let el = $('#quran-font-style');
-  if(!el){ el=document.createElement('style'); el.id='quran-font-style'; document.head.appendChild(el); }
-  const r=riwayat[state.riwaya];
-  el.textContent = `@font-face{font-family:'SameeQuran';src:url('${r.font}') format('woff2');font-display:swap} .quran-lines{font-family:'SameeQuran', serif}`;
-  document.documentElement.style.setProperty('--quran-scale', String(0.96 + state.fontSize*0.07));
-}
-function renderPage(){
-  const rows = state.pageRows || [];
-  const lines = pageGroups(rows);
-  state.pageLines=lines;
-  const paper=$('#mushaf-paper');
-  if(!paper) return;
-  const first=rows[0]||{};
-  const last=rows[rows.length-1]||{};
-  const title=first.suraName || 'المصحف الشريف';
-  paper.innerHTML = `
-    <div class="page-ornament top"></div>
-    <header class="page-head"><span>${title}</span><span>${arabicDigits(state.page)}</span><span>${arabicDigits(first.juz||1)} الجزء</span></header>
-    <div class="quran-lines" aria-label="صفحة القرآن">
-      ${lines.map(x=>`<div class="q-line">${x.text}</div>`).join('')}
-    </div>
-    <div class="page-number">${arabicDigits(state.page)}</div>
-    <div class="page-ornament bottom"></div>
-  `;
-  $('#page-display').textContent=arabicDigits(state.page);
-  $('#surah-display').textContent=title;
-  $('#juz-display').textContent=`الجزء ${arabicDigits(first.juz||1)}`;
-  const title2 = riwayat[state.riwaya]?.name || '';
-  $('#riwaya-display').textContent=title2;
-  $('#thumb-page').textContent=arabicDigits(state.page);
-  $('#prev-page').disabled=state.page<=1;
-  $('#next-page').disabled=state.page>=604;
-  $('.quran-lines').style.fontSize = `${1.02*Number(getComputedStyle(document.documentElement).getPropertyValue('--quran-scale')||1)}rem`;
-  save();
-}
-async function setPage(page){
-  state.page=Math.max(1,Math.min(604,Number(page)||1));
-  try{
-    state.pageRows=await getPage(state.page);
-    state.sura=state.pageRows[0]?.sura || state.sura;
-    applyFont(); renderPage(); renderReaderBar();
-  }catch(e){ toast('تعذر فتح الصفحة'); console.error(e); }
-}
-async function setRiwaya(id){
-  if(!riwayat[id]) return;
-  state.riwaya=id;
-  state.pageRows=await getPage(state.page);
-  applyFont(); renderPage(); closeSheet(); toast(`تم اختيار ${riwayat[id].name}`); save();
-  renderReciterUI();
-}
-function openSheet(name){
-  const s=$('#sheet');
-  s.classList.add('open');
-  document.body.classList.add('sheet-open');
-  $$('.sheet-panel').forEach(p=>p.classList.toggle('hidden',p.dataset.sheet!==name));
-}
-function closeSheet(){ $('#sheet')?.classList.remove('open'); document.body.classList.remove('sheet-open'); }
-function toast(t){ const x=$('#toast'); x.textContent=t; x.classList.add('show'); setTimeout(()=>x.classList.remove('show'),1800); }
-
-function renderReaderBar(){
-  const current = state.reciters.find(r=>r.id===state.readerId);
-  $('#current-reader').textContent = current?.name || 'اختر القارئ';
-  $('#current-riwaya').textContent = riwayat[state.riwaya].short;
-}
-function normalizeReciters(payload){
-  return (payload.reciters||[]).map(r=>({...r,moshaf:(r.moshaf||[])})).filter(r=>r.moshaf?.length);
-}
-function readerHasRiwaya(r){
-  const n=(r.moshaf||[]).map(m=>m.name).join(' ');
-  const k=riwayat[state.riwaya].name;
-  return n.includes(k.split(' عن ')[0]) || n.includes(riwayat[state.riwaya].short);
-}
-function moshafForReader(r){
-  const list=r.moshaf||[];
-  return list.find(m=>readerHasMos(m)) || list.find(m=>/حفص/.test(m.name)) || list[0];
-}
-function readerHasMos(m){
-  const n=m?.name||'';
-  const names={hafs:['حفص'],warsh:['ورش'],qaloon:['قالون'],doori:['الدوري'],soosi:['السوسي'],shouba:['شعبة']};
-  return (names[state.riwaya]||[]).some(x=>n.includes(x));
-}
-function renderReciterUI(filter=''){
-  const wraps=$$('#reciters-list'); if(!wraps.length) return;
-  let arr=state.reciters.filter(readerHasRiwaya);
-  const q=filter.trim();
-  if(q) arr=arr.filter(r=>r.name.includes(q));
-  $('#reciter-count').textContent=arabicDigits(arr.length);
-  const markup=arr.map(r=>{
-    const selected=r.id===state.readerId;
-    const mos=moshafForReader(r);
-    return `<button class="reader-row ${selected?'selected':''}" data-reader="${r.id}">
-      <span class="avatar">${(r.name||'?').slice(0,1)}</span>
-      <span class="reader-copy"><b>${r.name}</b><small>${mos?.name||riwayat[state.riwaya].name}</small></span>
-      <span class="chev">‹</span>
-    </button>`
-  }).join('') || `<div class="empty">لا توجد نتائج لهذه الرواية.</div>`;
-  wraps.forEach(w=>w.innerHTML=markup);
-  $$('.reader-row').forEach(b=>b.addEventListener('click',()=>{
-    state.readerId=Number(b.dataset.reader); save();
-    renderReciterUI($('#reciter-search')?.value||''); renderReaderBar(); closeSheet(); toast('تم اختيار القارئ');
-  }));
-}
-function buildReciterSections(){
-  const counts={};
-  for(const r of state.reciters){
-    (r.moshaf||[]).forEach(m=>{
-      const n=m.name||'';
-      for(const key of Object.keys(riwayat)) if(n.includes(riwayat[key].short)) counts[key]=(counts[key]||0)+1;
-    });
-  }
-  $('#riwaya-summary').innerHTML=Object.entries(riwayat).map(([k,v])=>`<button class="chip ${k===state.riwaya?'active':''}" data-riwaya="${k}">${v.short}</button>`).join('');
-  $$('.chip').forEach(x=>x.onclick=()=>{setRiwaya(x.dataset.riwaya);});
-  $('#stat-readers').textContent=arabicDigits(state.reciters.length);
-}
-function audioUrl(){
-  const r=state.reciters.find(x=>x.id===state.readerId);
-  if(!r) return null;
-  const m=moshafForReader(r);
-  if(!m?.server) return null;
-  const nums=String(state.sura).padStart(3,'0');
-  return `${m.server}${nums}.mp3`;
-}
-function playCurrent(){
-  const url=audioUrl();
-  if(!url){toast('اختر قارئًا يملك هذه الرواية'); return;}
-  state.audio.src=url;
-  state.audio.play().then(()=>{ $('#play').textContent='❚❚'; }).catch(()=>toast('تعذر تشغيل التلاوة من المصدر'));
-}
-function toggleAudio(){
-  if(!state.audio.src || state.audio.ended){ playCurrent(); return; }
-  if(state.audio.paused){state.audio.play(); $('#play').textContent='❚❚';}
-  else {state.audio.pause(); $('#play').textContent='▶';}
-}
-function wire(){
-  $('#prev-page').onclick=()=>setPage(state.page-1);
-  $('#next-page').onclick=()=>setPage(state.page+1);
-  $('#play').onclick=toggleAudio;
-  $('#riwaya-btn').onclick=()=>openSheet('riwayat');
-  $('#reader-btn').onclick=()=>openSheet('readers');
-  $('#settings-btn').onclick=()=>openSheet('settings');
-  $('#index-btn').onclick=()=>openSheet('index');
-  $('#close-sheet').onclick=closeSheet;
-  $('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet') closeSheet();});
-  $('#search').addEventListener('input',e=>{
-    const q=e.target.value.trim();
-    if(q && /^\d+$/.test(q)) setPage(Number(q));
-  });
-  $('#font-sm').onclick=()=>{state.fontSize=Math.max(0,state.fontSize-1);save();renderPage();};
-  $('#font-lg').onclick=()=>{state.fontSize=Math.min(5,state.fontSize+1);save();renderPage();};
-  $('#day-mode').onclick=()=>{state.theme=state.theme==='dark'?'light':'dark';localStorage.setItem('samee3_theme',state.theme);applyTheme();};
-  $('#go-page').onclick=()=>{ const p=prompt('رقم الصفحة من 1 إلى 604'); if(p) setPage(p); };
-  $('#surah-picker').onclick=()=>openSheet('index');
-  $('#reciter-search').addEventListener('input',e=>renderReciterUI(e.target.value));
-  $('#surah-search').addEventListener('input',e=>renderIndex(e.target.value));
-  $('#riwaya-select').addEventListener('change',e=>setRiwaya(e.target.value));
-  $$('.nav-item').forEach(b=>b.addEventListener('click',()=>{
-    state.activeNav=b.dataset.nav; save();
-    $$('.nav-item').forEach(x=>x.classList.toggle('active',x===b));
-    showView(state.activeNav);
-  }));
-  $('#home-btn').onclick=()=>{state.activeNav='mushaf';save();showView('mushaf');};
-  $('#back-mushaf').onclick=()=>{state.activeNav='mushaf';save();showView('mushaf');};
-}
-function applyTheme(){
-  document.documentElement.dataset.theme=state.theme;
-  $('#theme-status').textContent=state.theme==='dark'?'الوضع الليلي':'الوضع النهاري';
-}
-function showView(view){
-  $$('.view').forEach(v=>v.classList.toggle('active',v.id===`view-${view}`));
-  $$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.nav===view));
-  if(view==='audio') renderReciterUI($('#reciter-search')?.value||'');
-  if(view==='index') renderIndex();
-  window.scrollTo({top:0,behavior:'smooth'});
-}
-function renderIndex(q=''){
-  const list=$('#surah-list'); if(!list) return;
-  const arr=state.surahs.filter(s=>!q||s.name.includes(q));
-  list.innerHTML=arr.map(s=>`<button class="surah-row" data-sura="${s.id}"><span class="surah-num">${arabicDigits(s.id)}</span><span><b>${s.name}</b><small>${s.makkiah?'مكية':'مدنية'} • ${arabicDigits(s.ayahs)} آية</small></span><span class="chev">‹</span></button>`).join('');
-  $$('.surah-row').forEach(b=>b.onclick=async()=>{
-    state.sura=Number(b.dataset.sura);
-    const rows=await loadQuran(state.riwaya); const norm=rows.map(normalizeRow); const first=norm.find(x=>x.sura===state.sura); if(first) await setPage(first.page); closeSheet(); showView('mushaf');
-  });
-}
-async function boot(){
-  applyTheme(); applyFont(); wire();
-  try{
-    const [sres,rres]=await Promise.all([fetch(API.suwar),fetch(API.reciters)]);
-    const sjson=await sres.json(); const rjson=await rres.json();
-    state.surahs=(sjson.suwar||[]).map(s=>({id:Number(s.id),name:s.name||s.name_ar||'',ayahs:Number(s.ayahs||s.ayahs_count||0),makkiah: s.type ? /مكي/i.test(s.type) : false, page:Number(s.start_page||1)}));
-    state.reciters=normalizeReciters(rjson);
-  }catch(e){
-    console.warn(e); toast('تعذر تحميل مكتبة القراء الآن');
-  }
-  $('#riwaya-select').innerHTML=Object.entries(riwayat).map(([k,v])=>`<option value="${k}">${v.name}</option>`).join('');
-  $('#riwaya-select').value=state.riwaya;
-  buildReciterSections(); renderReciterUI(); renderReaderBar(); renderIndex();
-  await setPage(state.page);
-  // Bottom player
-  state.audio.addEventListener('ended',()=>{$('#play').textContent='▶';});
-}
-boot();
+function bindPageGestures(){const p=$('#quran-page');if(!p)return;let x=0;p.addEventListener('pointerdown',e=>x=e.clientX);p.addEventListener('pointerup',e=>{const dx=e.clientX-x;if(Math.abs(dx)>60)setPage(state.page+(dx<0?1:-1));},{once:false});}
+async function setPage(p){state.page=Math.max(1,Math.min(604,Number(p)||1));state.view='mushaf';await render();}
+async function handleReaderClick(e){const a=e.target.closest('.ayah');if(a){const r=state.rows.find(x=>String(x.id)===a.dataset.id)||{sura:+a.dataset.sura,ayah:+a.dataset.ayah,page:+a.dataset.page,text:a.text};openAyahSheet(r);return;}const act=e.target.closest('[data-action]')?.dataset.action;if(act==='prev')setPage(state.page-1);if(act==='next')setPage(state.page+1);if(act==='index'){state.view='index';render()}if(act==='settings'){state.view='settings';render()}if(act==='play')toggleCurrentSurah();if(act==='jump')openJump();if(act==='bookmark-page')savePageBookmark();}
+function openJump(){openModal(`<h2>الانتقال السريع</h2><div class="form-grid"><label>رقم الصفحة<input id="jump-page" type="number" min="1" max="604" value="${state.page}"></label><label>السورة<select id="jump-sura">${SURA_NAMES.map((n,i)=>`<option value="${i+1}" ${i+1===state.sura?'selected':''}>${ar(i+1)} — ${n}</option>`).join('')}</select></label></div><button class="primary-btn" id="jump-go">فتح</button>`);$('#jump-go').onclick=()=>{const p=Number($('#jump-page').value);state.sura=Number($('#jump-sura').value);closeModal();setPage(p);};}
+async function savePageBookmark(){if(!state.user){openAuth();return;}await saveBookmark(state.user.uid,{id:`page-${state.page}-${state.riwaya}`,type:'page',page:state.page,riwaya:state.riwaya,sura:state.sura});toast('تم حفظ الصفحة');}
+function openAyahSheet(row){state.selectedMoshaf=state.selectedMoshaf;const t=state.timings.find(x=>Number(x.ayah)===Number(row.ayah));openModal(`<div class="ayah-sheet"><div class="sheet-kicker">${esc(SURA_NAMES[row.sura-1]||'')} · آية ${ar(row.ayah)}</div><div class="sheet-ayah">${esc(row.text)}</div><div class="action-grid"><button data-sheet="copy">نسخ</button><button data-sheet="share">مشاركة</button><button data-sheet="image">صورة</button><button data-sheet="image-tafsir">صورة + تفسير</button><button data-sheet="tafsir">التفسير</button><button data-sheet="repeat">تكرار</button><button data-sheet="play">استماع</button><button data-sheet="bookmark">حفظ</button></div><div id="sheet-body"></div></div>`);$('#modal').onclick=e=>handleSheet(e,row,t);}
+async function handleSheet(e,row,t){if(e.target.closest('[data-close]'))return closeModal();const b=e.target.closest('[data-sheet]');if(!b)return;const act=b.dataset.sheet;if(act==='copy'){await navigator.clipboard?.writeText(row.text);toast('تم نسخ الآية');}else if(act==='share'){if(navigator.share)await navigator.share({title:`سورة ${SURA_NAMES[row.sura-1]}`,text:row.text});else{await navigator.clipboard?.writeText(row.text);toast('تم نسخ الآية');}}else if(act==='tafsir'){await renderTafsir(row);}else if(act==='repeat'){openRepeatDialog(row);}else if(act==='play'){playVerseOrSurah(row,t);}else if(act==='bookmark'){if(!state.user){openAuth();return;}await saveBookmark(state.user.uid,{id:`ayah-${state.riwaya}-${row.sura}-${row.ayah}`,type:'ayah',sura:row.sura,ayah:row.ayah,page:row.page,text:row.text,riwaya:state.riwaya});toast('تم حفظ الآية');}else if(act==='image'||act==='image-tafsir'){renderQuoteCard(row,act==='image-tafsir');}}
+async function renderTafsir(row){const body=$('#sheet-body');body.innerHTML='<div class="loading">جاري تحميل التفسير الميسر…</div>';try{const t=await tafsirAya(row.sura,row.ayah);body.innerHTML=`<article class="tafsir-box"><h3>التفسير الميسر</h3><p>${esc(t?.translation||t?.text||'لا يوجد نص')}</p><small>${TAFSIR_SOURCE}</small></article>`;}catch{body.innerHTML='<div class="error-panel">تعذر تحميل التفسير الآن.</div>';}}
+function openRepeatDialog(row){openModal(`<h2>تكرار الآية</h2><div class="repeat-box"><p>سورة ${esc(SURA_NAMES[row.sura-1])} — الآية ${ar(row.ayah)}</p><label>عدد مرات التكرار<input id="repeat-n" type="number" min="1" max="50" value="3"></label><button class="primary-btn" id="repeat-start">ابدأ التكرار</button></div>`);$('#repeat-start').onclick=()=>{const n=Math.max(1,Math.min(50,Number($('#repeat-n').value)||3));closeModal();state.repeatCount=n;playVerseOrSurah(row,state.timings.find(x=>Number(x.ayah)===Number(row.ayah)));};}
+async function playVerseOrSurah(row,timing){const m=state.selectedMoshaf;if(!m){state.view='library';await render();toast('اختر قارئًا أولًا');return;}const audio=state.player||new Audio();state.player=audio;audio.src=audioUrl(m.server,row.sura);if(timing){audio.currentTime=Math.max(0,Number(timing.start_time||0)/1000);}let count=0;audio.onended=()=>{count++;if(state.repeatCount&&count<state.repeatCount){audio.currentTime=timing?Number(timing.start_time||0)/1000:0;audio.play();}else{state.repeatCount=0;toast('انتهى التشغيل');}};audio.play();toast(state.repeatCount?`تكرار ${state.repeatCount} مرات`:'بدأت التلاوة');}
+function toggleCurrentSurah(){if(!state.selectedMoshaf){state.view='library';render();toast('اختر قارئًا من المكتبة السمعية');return;}const a=state.player||new Audio();state.player=a;a.src=audioUrl(state.selectedMoshaf.server,state.sura);a.loop=false;if(a.paused){a.play();state.playing=true;}else{a.pause();state.playing=false;}render();}
+function loadTimingHighlight(){if(!state.player||!state.timings?.length)return;const t=state.player.currentTime*1000;const current=state.timings.find(x=>t>=Number(x.start_time||0)&&t<Number(x.end_time||Infinity));$$('.ayah').forEach(el=>el.classList.toggle('active-ayah',current&&Number(el.dataset.ayah)===Number(current.ayah)));}
+async function selectMoshaf(m){state.selectedMoshaf=m;try{state.timings=await getTimings(m.moshafId,state.sura);}catch{state.timings=[];}state.view='library';await render();}
+async function renderLibrary(){try{state.reciters=await getReciters({});}catch{state.reciters=[];}const q=state.libraryQuery||'';const ri=state.libraryRiwaya||'';const cards=state.reciters.filter(r=>(!ri||r.moshafName.includes(ri)||r.riwayah===ri)&&(!q||`${r.name} ${r.moshafName}`.includes(q))).slice(0,300);$('#content').innerHTML=`<section class="section"><div class="section-head"><div><span class="eyebrow">MP3Quran</span><h1>المكتبة السمعية</h1><p>القراء والتلاوات المتاحة من المصدر الصوتي</p></div></div><div class="filters"><input id="reader-q" placeholder="ابحث عن القارئ أو التلاوة" value="${esc(q)}"><select id="reader-r"><option value="">كل الروايات</option>${Object.entries(RIWAYAT).map(([k,v])=>`<option value="${k}" ${ri===k?'selected':''}>${v.label}</option>`).join('')}</select></div><div class="cards-list">${cards.map((r,i)=>`<button class="reader-card" data-reciter="${esc(String(r.reciterId))}" data-moshaf="${i}"><span class="reader-avatar">${esc((r.name||'ق').slice(0,1))}</span><span class="reader-copy"><b>${esc(r.name)}</b><small>${esc(r.moshafName)} · ${ar(r.surahTotal||0)} سورة</small></span><span class="chev">‹</span></button>`).join('')}</div><div class="source-note">المصدر الصوتي: MP3Quran.net</div></section>`;
+ const uniqueCards=cards;$('#reader-q').oninput=e=>{state.libraryQuery=e.target.value;renderLibrary();};$('#reader-r').onchange=e=>{state.libraryRiwaya=e.target.value;renderLibrary();};$('#content').onclick=e=>{const b=e.target.closest('[data-reciter]');if(!b)return;const idx=Number(b.dataset.moshaf);selectMoshaf(uniqueCards[idx]);};}
+async function renderIndex(){let sw=[];try{sw=await getSuwar();}catch{}if(!sw.length)sw=SURA_NAMES.map((name,i)=>({id:i+1,name,type:i+1<=86?'مكية':'مدنية'}));const q=state.indexQuery||'';const list=sw.filter(s=>!q||(s.name||'').includes(q));$('#content').innerHTML=`<section class="section"><div class="section-head"><div><span class="eyebrow">المصحف الشريف</span><h1>فهرس السور</h1><p>اختر السورة وافتح موضعها في المصحف</p></div></div><input id="sura-q" class="search-field" placeholder="ابحث باسم السورة" value="${esc(q)}"><div class="surah-grid">${list.map(s=>`<button class="surah-card" data-sura="${s.id}"><span class="surah-num">${ar(s.id)}</span><span><b>${esc(s.name)}</b><small>${esc(s.type||'')}</small></span><span>‹</span></button>`).join('')}</div></section>`;$('#sura-q').oninput=e=>{state.indexQuery=e.target.value;renderIndex();};$('#content').onclick=e=>{const b=e.target.closest('[data-sura]');if(!b)return;state.sura=Number(b.dataset.sura);const approx={1:1,2:2,3:50,4:77,5:106,18:293,36:440,67:562,114:604};setPage(approx[state.sura]||1);};}
+async function renderTafsirPage(){const s=state.sura;$('#content').innerHTML=`<section class="section"><div class="section-head"><div><span class="eyebrow">التفسير</span><h1>تفسير سورة ${esc(SURA_NAMES[s-1])}</h1><p>${TAFSIR_SOURCE}</p></div></div><div id="tafsir-list" class="tafsir-list"><div class="loading">جاري التحميل…</div></div></section>`;try{const data=await tafsirSura(s);const arr=Array.isArray(data)?data:(data?.data||[]);$('#tafsir-list').innerHTML=arr.map(x=>`<article class="tafsir-row"><b>آية ${ar(x.aya||x.ayah)}</b><p>${esc(x.translation||x.text||'')}</p></article>`).join('');}catch{$('#tafsir-list').innerHTML='<div class="error-panel">تعذر تحميل التفسير.</div>';}}
+async function renderHadith(){const books=listHadithBooks();$('#content').innerHTML=`<section class="section"><div class="section-head"><div><span class="eyebrow">السنة النبوية</span><h1>كتب الحديث</h1><p>بيانات حديثية من مصدر مفتوح، مع إبقاء اسم الكتاب والمرجع مع النص.</p></div></div><div class="hadith-controls"><select id="hadith-book"><option value="all">كل الكتب</option>${books.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select><input id="hadith-q" placeholder="ابحث في متن الحديث"><button class="primary-btn" id="hadith-search">بحث</button></div><div id="hadith-results" class="hadith-results"><div class="info-card">اختر كتابًا أو ابحث عن كلمة لبدء القراءة.</div></div><div class="source-note">المصدر التقني الافتراضي: Hadith API مفتوح المصدر؛ يلزم مراجعة الترخيص والدقة قبل النشر التجاري/الواسع.</div></section>`;$('#hadith-search').onclick=async()=>{const q=$('#hadith-q').value.trim(),book=$('#hadith-book').value;if(!q)return;$('#hadith-results').innerHTML='<div class="loading">جاري البحث في الكتب…</div>';const results=await searchHadith(q,{book,limit:60});$('#hadith-results').innerHTML=results.length?results.map(x=>`<article class="hadith-card"><div class="hadith-book">${esc(x.bookName)} · رقم ${esc(x.number)}</div><p>${esc(x.text)}</p>${x.reference?`<small>المرجع: ${esc(JSON.stringify(x.reference))}</small>`:''}</article>`).join(''):'<div class="info-card">لا توجد نتائج.</div>';};}
+async function renderAdhkar(){const d=await getAdhkar();const arr=Array.isArray(d)?d:(d?.content||d?.adhkar||[]);const normalized=arr.map((x,i)=>typeof x==='string'?{text:x,title:`ذكر ${i+1}`}:{...x});$('#content').innerHTML=`<section class="section"><div class="section-head"><div><span class="eyebrow">الأذكار</span><h1>حصن المسلم</h1><p>${ADHKAR_SOURCE}</p></div></div><div class="adhkar-grid">${normalized.slice(0,200).map((x,i)=>`<article class="dhikr-card"><div class="dhikr-count">${ar(x.count||x.repeat||1)}×</div><h3>${esc(x.title||x.category||`الذكر ${i+1}`)}</h3><p>${esc(x.text||x.zekr||x.content||'')}</p>${x.reference?`<small>${esc(x.reference)}</small>`:''}<button data-dhikr="${i}">تم</button></article>`).join('')}</div></section>`;}
+function renderTools(){ $('#content').innerHTML=`<section class="section"><div class="section-head"><div><span class="eyebrow">أدوات المسلم</span><h1>كل ما تحتاجه في يومك</h1></div></div><div class="tool-grid"><button data-tool="prayer"><b>مواقيت الصلاة</b><small>تحديد الموقع والصلوات اليومية</small></button><button data-tool="qibla"><b>القبلة</b><small>اتجاه القبلة من موقع جهازك</small></button><button data-tool="adhkar"><b>الأذكار</b><small>حصن المسلم مع العداد</small></button><button data-tool="tafsir"><b>التفسير</b><small>التفسير الميسر آية بآية</small></button></div><div id="tool-result"></div></section>`;$('#content').onclick=async e=>{const t=e.target.closest('[data-tool]')?.dataset.tool;if(t==='prayer')showPrayer();if(t==='qibla')showQibla();if(t==='adhkar'){state.view='adhkar';render();}if(t==='tafsir'){state.view='tafsir';render();}};}
+async function showPrayer(){const box=$('#tool-result');box.innerHTML='<div class="info-card">جاري طلب موقع جهازك…</div>';navigator.geolocation.getCurrentPosition(async pos=>{try{const j=await getPrayerTimes(pos.coords.latitude,pos.coords.longitude);const x=j.data?.timings||{};box.innerHTML=`<div class="prayer-card"><h3>مواقيت اليوم</h3><div class="prayer-grid">${[['الفجر',x.Fajr],['الشروق',x.Sunrise],['الظهر',x.Dhuhr],['العصر',x.Asr],['المغرب',x.Maghrib],['العشاء',x.Isha]].map(([n,t])=>`<div><b>${n}</b><span>${esc(t||'—')}</span></div>`).join('')}</div><small>المصدر: AlAdhan API · طريقة الحساب: أم القرى (افتراضيًا)</small></div>`;}catch{box.innerHTML='<div class="error-panel">تعذر جلب المواقيت.</div>'; }},()=>box.innerHTML='<div class="error-panel">تم رفض إذن الموقع.</div>');}
+function showQibla(){const box=$('#tool-result');box.innerHTML=`<div class="info-card"><b>القبلة</b><p>سنستخدم اتجاه موقعك لحساب اتجاه القبلة محليًا. فعّل إذن الموقع في المتصفح.</p></div>`;}
+function renderSettings(){ $('#content').innerHTML=`<section class="section"><div class="section-head"><div><span class="eyebrow">تخصيص التجربة</span><h1>الإعدادات</h1></div></div><div class="settings-card"><label>حجم خط المصحف<input id="font-range" type="range" min="18" max="36" value="${state.fontSize}"><output>${ar(state.fontSize)}</output></label><label>المظهر<select id="theme"><option value="paper">ورقي</option><option value="light">فاتح</option><option value="dark">داكن</option></select></label><label>الرواية<select id="riwaya">${Object.entries(RIWAYAT).map(([k,v])=>`<option value="${k}" ${k===state.riwaya?'selected':''}>${v.label}</option>`).join('')}</select></label>${state.user?`<button class="soft-btn" id="logout">تسجيل الخروج</button>`:`<button class="primary-btn" id="login">تسجيل الدخول</button>`}</div></section>`;$('#theme').value=state.theme;$('#font-range').oninput=e=>{state.fontSize=Number(e.target.value);document.documentElement.style.setProperty('--q-size',`${state.fontSize}px`);persist();renderMushaf();};$('#theme').onchange=e=>{state.theme=e.target.value;applyTheme();persist();render()};$('#riwaya').onchange=async e=>{state.riwaya=e.target.value;state.quran=null;state.sura=1;state.page=1;await render();};$('#logout')?.addEventListener('click',logout);$('#login')?.addEventListener('click',openAuth);}
+function openAuth(){openModal(`<h2>الدخول إلى مصحف سميع</h2><div class="form-grid"><label>البريد الإلكتروني<input id="auth-email" type="email"></label><label>كلمة المرور<input id="auth-pass" type="password"></label><label>الاسم عند التسجيل<input id="auth-name"></label></div><div class="inline-actions"><button class="primary-btn" id="do-login">دخول</button><button class="soft-btn" id="do-register">إنشاء حساب</button></div><p id="auth-msg"></p>`);$('#do-login').onclick=async()=>{try{await login($('#auth-email').value,$('#auth-pass').value);closeModal();}catch(e){$('#auth-msg').textContent=e.code||e.message;}};$('#do-register').onclick=async()=>{try{await register($('#auth-email').value,$('#auth-pass').value,$('#auth-name').value);closeModal();}catch(e){$('#auth-msg').textContent=e.code||e.message;}};}
+async function renderAdmin(){if(!state.admin){toast('غير مصرح');return;}const cfg=state.config;$('#content').innerHTML=`<section class="section"><div class="section-head"><div><span class="eyebrow">الإدارة</span><h1>لوحة التحكم</h1><p>تعديل هوية المنصة ونصوصها العامة من Firestore</p></div></div><div class="admin-card"><label>اسم المنصة<input id="site-name" value="${esc(cfg.siteName)}"></label><label>الوصف<textarea id="site-tag">${esc(cfg.tagline||'')}</textarea></label><button class="primary-btn" id="save-config">حفظ</button><div class="admin-stat"><b>الحساب:</b> ${esc(state.user?.email||'')}</div></div></section>`;$('#save-config').onclick=async()=>{state.config.siteName=$('#site-name').value.trim()||'مصحف سميع';state.config.tagline=$('#site-tag').value.trim();await setSiteConfig(state.user.uid,state.config);applyConfig();toast('تم الحفظ');};}
+function renderQuoteCard(row,withTafsir){const body=$('#sheet-body');body.innerHTML=`<div class="quote-card" id="quote-card"><img src="/assets/samee3-logo.png" alt=""/><div class="quote-source">مصحف سميع</div><div class="quote-text">${esc(row.text)}</div><div class="quote-ref">سورة ${esc(SURA_NAMES[row.sura-1])} · آية ${ar(row.ayah)}</div><div class="quote-divider"></div><small>${withTafsir?'جاري إضافة التفسير...':'مصحف سميع'}</small></div><button class="primary-btn" id="copy-card-text">نسخ بطاقة النص</button>`;$('#copy-card-text').onclick=()=>toast('يمكن استخدام لقطة الشاشة أو مشاركة البطاقة');if(withTafsir)renderTafsir(row);}
+function openModal(inner){const m=$('#modal');m.classList.add('open');m.innerHTML=`<div class="modal-card"><button class="close" data-close>×</button>${inner}</div>`;m.onclick=(e)=>{if(e.target.closest('[data-close]'))closeModal();};}
+function closeModal(){$('#modal').classList.remove('open');}
+function toast(text){const t=$('#toast');t.textContent=text;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2300);}
+function applyTheme(){document.documentElement.dataset.theme=state.theme;document.documentElement.style.setProperty('--q-size',`${state.fontSize}px`);}
+function applyConfig(){document.title=state.config.siteName||'مصحف سميع';const n=$('#brand-name');const t=$('#brand-tag');if(n)n.textContent=state.config.siteName||'مصحف سميع';if(t)t.textContent=state.config.tagline||'القرآن برواياته، بتلاوته، بتدبره';}
+function layout(){const current=state.view;$('#app').innerHTML=`<div class="app-shell"><header class="topbar"><button class="icon-btn" id="menu">☰</button><div class="brand"><img src="/assets/samee3-logo.png" alt="شعار مصحف سميع"><div><strong id="brand-name">مصحف سميع</strong><small id="brand-tag">القرآن برواياته، بتلاوته، بتدبره</small></div></div><button class="icon-btn" id="open-search">⌕</button></header><div class="search-drawer" id="search-drawer"><input id="global-search" placeholder="ابحث في السور والقراء والتفسير"><div id="search-results"></div></div><main id="content"></main><nav class="bottom-nav">${[['mushaf','المصحف'],['index','السور'],['library','القراء'],['tafsir','التفسير'],['adhkar','الأذكار'],['hadith','الأحاديث'],['tools','أدوات'],['settings','الإعدادات']].map(([v,l])=>`<button class="${current===v?'active':''}" data-nav="${v}">${l}</button>`).join('')}${state.admin?'<button data-nav="admin">الإدارة</button>':''}</nav><div id="modal" class="overlay"></div><div id="toast" class="toast"></div></div>`;$('#menu').onclick=()=>openMenu();$('#open-search').onclick=()=>$('#search-drawer').classList.toggle('open');$('#global-search').oninput=e=>doGlobalSearch(e.target.value);$$('[data-nav]').forEach(b=>b.onclick=()=>{state.view=b.dataset.nav;render();});applyConfig();}
+function openMenu(){openModal(`<h2>القائمة</h2><div class="menu-grid"><button data-menu="index">فهرس السور</button><button data-menu="library">المكتبة السمعية</button><button data-menu="hadith">الأحاديث</button><button data-menu="adhkar">الأذكار</button><button data-menu="tools">أدوات المسلم</button><button data-menu="settings">الإعدادات</button>${state.user?`<div class="user-strip">${esc(state.user.email)}</div>`:'<button data-menu="login">تسجيل الدخول</button>'}</div>`);$('#modal').onclick=e=>{if(e.target.closest('[data-close]'))return closeModal();const b=e.target.closest('[data-menu]');if(!b)return;if(b.dataset.menu==='login')openAuth();else{state.view=b.dataset.menu;closeModal();render();}};}
+async function doGlobalSearch(q){const box=$('#search-results');if(q.trim().length<2){box.innerHTML='';return;}const hits=SURA_NAMES.map((n,i)=>n.includes(q)?`سورة ${n} — ${ar(i+1)}`:null).filter(Boolean);box.innerHTML=hits.length?hits.map(h=>`<div class="search-hit">${esc(h)}</div>`).join(''):'<div class="search-hit">ابحث باسم السورة أو القارئ أو كلمة من التفسير.</div>';}
+function updatePlayerSync(){loadTimingHighlight();if(state.player&&!state.player.paused&&state.view==='mushaf'){}requestAnimationFrame(updatePlayerSync);}
+async function render(){layout();applyTheme();if(state.view==='mushaf')await renderMushaf();else if(state.view==='index')await renderIndex();else if(state.view==='library')await renderLibrary();else if(state.view==='tafsir')await renderTafsirPage();else if(state.view==='adhkar')await renderAdhkar();else if(state.view==='hadith')await renderHadith();else if(state.view==='tools')renderTools();else if(state.view==='settings')renderSettings();else if(state.view==='admin')await renderAdmin();}
+watchAuth(async u=>{state.user=u||null;state.admin=false;if(u){await ensureUser(u).catch(()=>{});state.admin=await isAdmin(u.uid).catch(()=>false);const cloud=await getUserSettings(u.uid).catch(()=>null);if(cloud){state.page=Number(cloud.page||state.page);state.riwaya=cloud.riwaya||state.riwaya;state.sura=Number(cloud.sura||state.sura);state.fontSize=Number(cloud.fontSize||state.fontSize);state.theme=cloud.theme||state.theme;}}state.config=await getSiteConfig().catch(()=>null)||state.config;await render();});
+state.player=new Audio();state.player.preload='metadata';state.player.addEventListener('timeupdate',loadTimingHighlight);state.player.addEventListener('ended',()=>{state.playing=false;});updatePlayerSync();
