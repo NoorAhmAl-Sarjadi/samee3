@@ -1,3 +1,7 @@
+مصحف سميع — Professional Complete
+================================
+احفظ هذا الملف باسم index.html لتشغيله.
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -84,8 +88,377 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 }
 </style>
 
+
+<style id="samee3-royal-quran-redesign">
+:root{
+  --sq-bg:#f7f4ec;
+  --sq-surface:#fffdf8;
+  --sq-surface-2:#f0eadc;
+  --sq-ink:#17251f;
+  --sq-muted:#68756d;
+  --sq-green:#0b5b46;
+  --sq-green-2:#0f7a5c;
+  --sq-gold:#b18a45;
+  --sq-border:rgba(23,37,31,.12);
+  --sq-shadow:0 18px 55px rgba(35,45,35,.09);
+  --sq-radius:24px;
+}
+html,body{background:var(--sq-bg)!important;color:var(--sq-ink)!important}
+body{font-family:"Amiri","Noto Naskh Arabic","Tajawal",system-ui,sans-serif;letter-spacing:0}
+*{scrollbar-width:thin;scrollbar-color:var(--sq-gold) transparent}
+button,.btn,a[role=button]{border-radius:14px!important;transition:transform .2s ease,box-shadow .2s ease,background .2s ease,border-color .2s ease}
+button:hover,.btn:hover,a[role=button]:hover{transform:translateY(-2px)}
+header,.header,.navbar,.topbar,.app-header{
+  background:linear-gradient(110deg,#083e31 0%,#0b5b46 58%,#174f40 100%)!important;
+  color:#fff!important;border-bottom:1px solid rgba(177,138,69,.45)!important;
+  box-shadow:0 8px 28px rgba(7,46,35,.18)!important;
+}
+header *, .header *, .navbar *, .topbar *, .app-header *{color:inherit}
+main,.main-content,.page-content,.content{max-width:1440px!important;margin:auto!important}
+.card,.course-card,.surah-card,.feature-card,.panel,.modal-content,.sidebar,.dashboard-card{
+  background:linear-gradient(145deg,var(--sq-surface),#fbf8f0)!important;
+  border:1px solid var(--sq-border)!important;
+  border-radius:var(--sq-radius)!important;
+  box-shadow:var(--sq-shadow)!important;
+}
+.card:hover,.course-card:hover,.surah-card:hover,.feature-card:hover{
+  border-color:rgba(177,138,69,.65)!important;
+  box-shadow:0 22px 65px rgba(35,45,35,.14)!important;
+}
+h1,h2,h3,h4,.title,.heading{font-weight:800!important;letter-spacing:-.025em}
+h1{font-size:clamp(2rem,4vw,4rem)!important;line-height:1.15!important}
+h2{font-size:clamp(1.5rem,2.5vw,2.5rem)!important}
+input,select,textarea{
+  background:rgba(255,253,248,.9)!important;color:var(--sq-ink)!important;
+  border:1px solid rgba(11,91,70,.2)!important;border-radius:15px!important;
+  min-height:46px;padding:10px 14px!important;
+}
+input:focus,select:focus,textarea:focus{
+  outline:3px solid rgba(177,138,69,.25)!important;border-color:var(--sq-gold)!important;
+}
+button.primary,.btn-primary,.primary-btn,.cta{
+  background:linear-gradient(135deg,var(--sq-green),var(--sq-green-2))!important;
+  color:#fff!important;border:1px solid rgba(177,138,69,.5)!important;
+  box-shadow:0 8px 20px rgba(11,91,70,.2)!important;
+}
+button.secondary,.btn-secondary{
+  background:var(--sq-surface-2)!important;color:var(--sq-green)!important;
+  border:1px solid rgba(11,91,70,.18)!important;
+}
+nav a.active,.tab.active,.active-tab,.selected{
+  color:var(--sq-green)!important;
+  background:linear-gradient(135deg,rgba(177,138,69,.18),rgba(11,91,70,.08))!important;
+  border-bottom:2px solid var(--sq-gold)!important;
+}
+.quran-page,.mushaf-page,.ayah-container,.ayah-card,.verse{
+  background:#fffdf5!important;color:#26352d!important;
+  border:1px solid rgba(177,138,69,.28)!important;
+  border-radius:22px!important;
+  box-shadow:0 18px 50px rgba(69,54,25,.08)!important;
+}
+.ayah,.verse-text,.quran-text,.arabic-text{
+  font-family:"Amiri Quran","Amiri","Noto Naskh Arabic",serif!important;
+  line-height:2.25!important;font-size:clamp(1.35rem,2.4vw,2.1rem)!important;
+}
+.ayah.active,.verse.active,.current-ayah{
+  background:linear-gradient(90deg,rgba(177,138,69,.18),rgba(11,91,70,.07))!important;
+  box-shadow:inset 0 0 0 1px rgba(177,138,69,.35)!important;
+}
+.audio-player,.player,.bottom-player,.quran-player{
+  background:linear-gradient(110deg,#082f26,#0b5b46 70%,#174f40)!important;
+  color:#fff!important;border:1px solid rgba(177,138,69,.45)!important;
+  border-radius:24px!important;box-shadow:0 15px 40px rgba(7,46,35,.25)!important;
+}
+.audio-player *, .player *, .bottom-player *, .quran-player *{color:inherit}
+.progress,.progress-bar,.range-fill{accent-color:var(--sq-gold)!important}
+.badge,.tag,.pill{border-radius:999px!important;background:rgba(177,138,69,.15)!important;color:var(--sq-green)!important}
+.sidebar,.side-panel,.drawer{
+  background:linear-gradient(180deg,#fffdf8,#f1eadc)!important;
+  border-left:1px solid rgba(177,138,69,.35)!important;
+}
+footer{background:#082f26!important;color:#fff!important}
+@media(prefers-color-scheme:dark){
+  :root{--sq-bg:#0b1713;--sq-surface:#12231c;--sq-surface-2:#193126;--sq-ink:#eef5ef;--sq-muted:#aabbb0;--sq-border:rgba(220,235,224,.13)}
+  html,body{background:var(--sq-bg)!important;color:var(--sq-ink)!important}
+  .card,.course-card,.surah-card,.feature-card,.panel,.modal-content,.sidebar,.dashboard-card{background:linear-gradient(145deg,#12231c,#102019)!important}
+  input,select,textarea{background:#102019!important;color:#eef5ef!important}
+  .quran-page,.mushaf-page,.ayah-container,.ayah-card,.verse{background:#17251e!important;color:#f3f0e6!important}
+  .ayah,.verse-text,.quran-text,.arabic-text{color:#f3f0e6!important}
+}
+@media(max-width:768px){
+  main,.main-content,.page-content,.content{padding:12px!important}
+  .card,.course-card,.surah-card,.feature-card,.panel{border-radius:18px!important}
+  .quran-page,.mushaf-page{padding:14px!important;border-radius:16px!important}
+  .audio-player,.player,.bottom-player,.quran-player{border-radius:18px!important}
+  h1{font-size:2rem!important}
+  .ayah,.verse-text,.quran-text,.arabic-text{font-size:1.45rem!important;line-height:2.05!important}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+
+
+<style id="samee3-ultra-premium">
+/* ULTRA PREMIUM QURAN EXPERIENCE */
+:root{
+  --ultra-emerald:#063f32;
+  --ultra-emerald-2:#0b6a51;
+  --ultra-gold:#c7a15a;
+  --ultra-cream:#fbf7ed;
+  --ultra-paper:#fffdf7;
+  --ultra-ink:#172b23;
+  --ultra-muted:#718078;
+  --ultra-line:rgba(199,161,90,.28);
+}
+body{
+  background:
+    radial-gradient(circle at 8% 0%,rgba(199,161,90,.12),transparent 28rem),
+    radial-gradient(circle at 100% 15%,rgba(11,106,81,.10),transparent 32rem),
+    var(--sq-bg)!important;
+}
+body:before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;opacity:.23;
+  background-image:radial-gradient(rgba(6,63,50,.22) .6px,transparent .6px);
+  background-size:13px 13px;
+}
+.app-shell,.app-container,.dashboard,.home-container{position:relative}
+.hero,.hero-section,.welcome-section,.dashboard-hero{
+  position:relative;overflow:hidden;
+  background:
+    linear-gradient(120deg,rgba(4,48,38,.98),rgba(8,91,70,.94) 60%,rgba(21,76,59,.96)),
+    radial-gradient(circle at 90% 15%,rgba(199,161,90,.4),transparent 20rem)!important;
+  color:#fff!important;border:1px solid rgba(199,161,90,.45)!important;
+  border-radius:32px!important;box-shadow:0 24px 70px rgba(4,48,38,.25)!important;
+}
+.hero:after,.hero-section:after,.welcome-section:after,.dashboard-hero:after{
+  content:"۞";position:absolute;right:5%;bottom:-35%;font-size:20rem;line-height:1;
+  color:rgba(199,161,90,.08);font-family:serif;pointer-events:none;
+}
+.hero h1,.hero h2,.hero h3,.hero p,.hero span,
+.hero-section h1,.hero-section h2,.hero-section h3,.hero-section p,
+.welcome-section h1,.welcome-section h2,.welcome-section h3,.welcome-section p,
+.dashboard-hero h1,.dashboard-hero h2,.dashboard-hero h3,.dashboard-hero p{color:#fff!important}
+.section-title,.section-heading{
+  display:flex;align-items:center;gap:12px;
+}
+.section-title:before,.section-heading:before{
+  content:"";display:block;width:5px;height:28px;border-radius:99px;
+  background:linear-gradient(var(--ultra-gold),#8d6a32);
+}
+.stat-card,.metric-card,.progress-card{
+  position:relative;overflow:hidden;
+  background:linear-gradient(145deg,#fffdf7,#f1e8d5)!important;
+}
+.stat-card:before,.metric-card:before,.progress-card:before{
+  content:"";position:absolute;top:0;left:0;right:0;height:4px;
+  background:linear-gradient(90deg,var(--ultra-emerald),var(--ultra-gold),var(--ultra-emerald-2));
+}
+.surah-grid,.surahs-grid,.cards-grid,.features-grid{
+  gap:20px!important;
+}
+.surah-card,.surah-item{
+  position:relative;isolation:isolate;overflow:hidden;
+  min-height:150px;
+  background:linear-gradient(145deg,#fffdf8,#f3ead8)!important;
+}
+.surah-card:before,.surah-item:before{
+  content:"";position:absolute;inset:8px;border:1px solid rgba(199,161,90,.25);
+  border-radius:18px;pointer-events:none;
+}
+.surah-card:after,.surah-item:after{
+  content:"۝";position:absolute;right:14px;bottom:-16px;font-size:90px;
+  color:rgba(11,106,81,.07);font-family:serif;z-index:-1;
+}
+.surah-number,.surah-index,.chapter-number{
+  display:grid!important;place-items:center!important;
+  width:46px!important;height:46px!important;border-radius:50%!important;
+  background:var(--ultra-emerald)!important;color:#fff!important;
+  border:2px solid var(--ultra-gold)!important;
+  box-shadow:0 5px 15px rgba(6,63,50,.2)!important;
+}
+.mushaf-toolbar,.quran-toolbar,.reading-toolbar{
+  position:sticky!important;top:8px;z-index:20;
+  backdrop-filter:blur(18px);
+  background:rgba(255,253,247,.88)!important;
+  border:1px solid var(--ultra-line)!important;
+  box-shadow:0 10px 35px rgba(35,45,35,.09)!important;
+  border-radius:20px!important;
+}
+.mushaf-page,.quran-page,.reading-page{
+  position:relative!important;
+  padding:clamp(22px,4vw,58px)!important;
+  background:
+    linear-gradient(90deg,rgba(199,161,90,.08),transparent 12%,transparent 88%,rgba(199,161,90,.08)),
+    var(--ultra-paper)!important;
+  border:12px double rgba(199,161,90,.38)!important;
+  outline:1px solid rgba(6,63,50,.16);
+  box-shadow:0 25px 80px rgba(69,54,25,.13),inset 0 0 0 1px rgba(199,161,90,.25)!important;
+}
+.mushaf-page:before,.quran-page:before,.reading-page:before{
+  content:"";position:absolute;inset:9px;border:1px solid rgba(199,161,90,.24);
+  border-radius:4px;pointer-events:none;
+}
+.surah-header,.page-header,.quran-page-header{
+  text-align:center!important;padding:18px!important;margin-bottom:24px!important;
+  border-top:1px solid var(--ultra-line)!important;
+  border-bottom:1px solid var(--ultra-line)!important;
+}
+.audio-player,.player,.bottom-player,.quran-player{
+  position:sticky!important;bottom:12px;z-index:40;
+  padding:14px 18px!important;
+  backdrop-filter:blur(20px);
+  background:linear-gradient(115deg,rgba(3,42,33,.98),rgba(8,91,70,.98))!important;
+  border:1px solid rgba(199,161,90,.65)!important;
+}
+.audio-player button,.player button,.bottom-player button,.quran-player button{
+  min-width:42px;min-height:42px;
+  background:rgba(255,255,255,.09)!important;
+  border:1px solid rgba(255,255,255,.2)!important;color:#fff!important;
+}
+.audio-player button.primary,.player button.primary,
+.bottom-player button.primary,.quran-player button.primary{
+  background:var(--ultra-gold)!important;color:#173126!important;
+}
+.modal,.dialog,.overlay-panel{
+  backdrop-filter:blur(12px);
+}
+.modal-content,.dialog-content{
+  border:1px solid rgba(199,161,90,.5)!important;
+  box-shadow:0 30px 100px rgba(0,0,0,.25)!important;
+}
+.toast,.notification,.alert{
+  border-left:4px solid var(--ultra-gold)!important;
+}
+a{color:var(--ultra-emerald-2)}
+a:hover{color:var(--ultra-gold)}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:3px solid rgba(199,161,90,.75)!important;outline-offset:3px!important;
+}
+@media(max-width:768px){
+  .hero,.hero-section,.welcome-section,.dashboard-hero{border-radius:22px!important}
+  .mushaf-page,.quran-page,.reading-page{padding:16px!important;border-width:7px!important}
+  .mushaf-page:before,.quran-page:before,.reading-page:before{inset:5px}
+  .mushaf-toolbar,.quran-toolbar,.reading-toolbar{top:4px;border-radius:15px!important}
+  .audio-player,.player,.bottom-player,.quran-player{bottom:5px;border-radius:17px!important}
+}
+@media(prefers-color-scheme:dark){
+  body{background:var(--sq-bg)!important}
+  .stat-card,.metric-card,.progress-card,.surah-card,.surah-item{
+    background:linear-gradient(145deg,#142a21,#102019)!important;
+  }
+  .mushaf-toolbar,.quran-toolbar,.reading-toolbar{
+    background:rgba(18,35,28,.9)!important;
+  }
+  .mushaf-page,.quran-page,.reading-page{
+    background:linear-gradient(90deg,rgba(199,161,90,.05),transparent 12%,transparent 88%,rgba(199,161,90,.05)),#17251e!important;
+  }
+}
+</style>
+
 </head>
 <body>
+
+<style id="samee3-professional-app-shell">
+:root{
+ --pro-bg:#f6f4ee;--pro-card:#fffdf8;--pro-ink:#173128;--pro-muted:#718078;
+ --pro-green:#075640;--pro-green-2:#0d8062;--pro-gold:#c6a15a;--pro-line:rgba(7,86,64,.13);
+}
+body{background:var(--pro-bg)!important;color:var(--pro-ink)!important}
+#samee3-pro-shell{display:grid;grid-template-columns:265px minmax(0,1fr);min-height:100vh;background:var(--pro-bg)}
+#samee3-pro-sidebar{position:sticky;top:0;height:100vh;padding:24px 16px;background:linear-gradient(180deg,#063b2e,#075640 65%,#082f26);color:#fff;border-right:1px solid rgba(198,161,90,.4);display:flex;flex-direction:column;gap:22px;z-index:60}
+.pro-brand{display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid rgba(255,255,255,.14);padding-bottom:22px}
+.pro-brand-mark{width:48px;height:48px;display:grid;place-items:center;border:1px solid var(--pro-gold);border-radius:16px;background:rgba(198,161,90,.12);font-size:26px}
+.pro-brand strong{font-size:20px}.pro-brand small{display:block;opacity:.7;font-size:11px}
+.pro-nav{display:grid;gap:8px}.pro-nav button{display:flex;align-items:center;gap:12px;width:100%;padding:13px 14px;background:transparent!important;color:#e9f2ed!important;border:1px solid transparent!important;text-align:right;border-radius:14px!important;font-size:15px}
+.pro-nav button.active,.pro-nav button:hover{background:rgba(198,161,90,.15)!important;border-color:rgba(198,161,90,.4)!important;color:#fff!important}
+.pro-side-footer{margin-top:auto;font-size:12px;opacity:.7;line-height:1.8}
+#samee3-pro-main{min-width:0;padding:26px;overflow:hidden}
+.pro-topbar{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:25px;flex-wrap:wrap}
+.pro-eyebrow{color:var(--pro-green-2);font-size:12px;font-weight:800;letter-spacing:.12em}
+.pro-heading{font-size:clamp(26px,3vw,42px);font-weight:900;line-height:1.2;margin:4px 0}
+.pro-subtitle{color:var(--pro-muted);font-size:14px}
+.pro-actions{display:flex;gap:10px;flex-wrap:wrap}
+.pro-btn{border:1px solid var(--pro-line)!important;background:var(--pro-card)!important;color:var(--pro-green)!important;padding:11px 15px!important;border-radius:14px!important}
+.pro-btn.primary{background:linear-gradient(135deg,var(--pro-green),var(--pro-green-2))!important;color:#fff!important;border-color:var(--pro-gold)!important}
+.pro-screen{display:none;animation:proFade .35s ease}.pro-screen.active{display:block}
+@keyframes proFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.pro-hero{padding:30px;border-radius:28px;background:linear-gradient(120deg,#063b2e,#0b6b51 65%,#164d3c);color:#fff;position:relative;overflow:hidden;border:1px solid rgba(198,161,90,.5);box-shadow:0 22px 65px rgba(6,59,46,.2)}
+.pro-hero:after{content:"۞";position:absolute;right:5%;bottom:-50px;font-size:220px;color:rgba(198,161,90,.09)}
+.pro-hero *{position:relative;z-index:1}.pro-hero h2{font-size:clamp(25px,3vw,44px);font-weight:900;margin:8px 0}.pro-hero p{max-width:650px;color:rgba(255,255,255,.78)}
+.pro-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:18px;margin-top:20px}
+.pro-card{grid-column:span 4;background:var(--pro-card);border:1px solid var(--pro-line);border-radius:22px;padding:22px;box-shadow:0 12px 35px rgba(25,49,39,.06)}
+.pro-card.wide{grid-column:span 8}.pro-card.full{grid-column:1/-1}
+.pro-card h3{font-size:18px;font-weight:900;margin:0 0 8px}.pro-muted{color:var(--pro-muted);font-size:13px}
+.pro-number{font-size:34px;font-weight:900;color:var(--pro-green);margin:12px 0}
+.pro-progress{height:9px;background:#e8e3d7;border-radius:99px;overflow:hidden}.pro-progress span{display:block;height:100%;width:62%;background:linear-gradient(90deg,var(--pro-green),var(--pro-gold));border-radius:99px}
+.pro-list{display:grid;gap:10px;margin-top:15px}.pro-list-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px;border:1px solid var(--pro-line);border-radius:15px;background:#fffef9}
+.pro-icon{width:42px;height:42px;display:grid;place-items:center;border-radius:14px;background:#e9f0e9;color:var(--pro-green);font-size:21px}
+.pro-row{display:flex;align-items:center;gap:12px;min-width:0}.pro-row strong{display:block}.pro-row small{display:block;color:var(--pro-muted)}
+.pro-reader{background:var(--pro-card);border:1px solid var(--pro-line);border-radius:26px;padding:20px;box-shadow:0 15px 45px rgba(25,49,39,.07)}
+.pro-reader-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--pro-line);padding-bottom:15px}
+.pro-page{margin-top:18px;padding:clamp(22px,5vw,60px);border:10px double rgba(198,161,90,.35);background:#fffdf6;border-radius:8px;min-height:420px;text-align:center;box-shadow:inset 0 0 0 1px rgba(198,161,90,.2)}
+.pro-page .basmala{font-family:serif;font-size:clamp(26px,4vw,42px);color:#0a624b;margin-bottom:28px}
+.pro-page .sample-ayah{font-family:"Amiri","Noto Naskh Arabic",serif;font-size:clamp(25px,3.4vw,40px);line-height:2.2;color:#263c31}
+.pro-player{position:sticky;bottom:12px;margin-top:18px;padding:16px;border-radius:22px;background:linear-gradient(110deg,#063b2e,#0b6b51);color:#fff;display:flex;align-items:center;gap:15px;flex-wrap:wrap;border:1px solid rgba(198,161,90,.55);box-shadow:0 15px 40px rgba(6,59,46,.25)}
+.pro-player .track{flex:1;min-width:150px}.pro-player input{width:100%}
+.pro-admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.pro-field{display:grid;gap:7px}.pro-field label{font-size:13px;font-weight:800}.pro-field input,.pro-field textarea,.pro-field select{width:100%;box-sizing:border-box}
+.pro-table{width:100%;border-collapse:collapse}.pro-table th,.pro-table td{padding:13px;text-align:right;border-bottom:1px solid var(--pro-line);font-size:13px}.pro-table th{color:var(--pro-green);background:#f2eee3}
+#samee3-legacy-root{display:none!important}
+@media(max-width:1000px){#samee3-pro-shell{grid-template-columns:88px minmax(0,1fr)}#samee3-pro-sidebar{padding:18px 10px}.pro-brand div:not(.pro-brand-mark),.pro-nav button span,.pro-side-footer{display:none}.pro-nav button{justify-content:center;padding:14px}.pro-brand{justify-content:center}}
+@media(max-width:650px){#samee3-pro-shell{display:block}#samee3-pro-sidebar{position:sticky;top:0;height:auto;flex-direction:row;align-items:center;padding:10px;overflow:auto}#samee3-pro-sidebar .pro-brand{border:0;padding:0;min-width:max-content}#samee3-pro-sidebar .pro-nav{display:flex;gap:5px}#samee3-pro-sidebar .pro-nav button{min-width:46px}#samee3-pro-main{padding:13px}.pro-grid{gap:12px}.pro-card,.pro-card.wide{grid-column:1/-1;padding:17px}.pro-hero{padding:22px;border-radius:22px}.pro-admin-grid{grid-template-columns:1fr}.pro-page{padding:18px;border-width:6px}}
+</style>
+<div id="samee3-pro-shell">
+  <aside id="samee3-pro-sidebar">
+    <div class="pro-brand"><div class="pro-brand-mark">۞</div><div><strong>مصحف سميع</strong><small>القرآن بين يديك</small></div></div>
+    <nav class="pro-nav" aria-label="التنقل الرئيسي">
+      <button class="active" data-pro-screen="home"><span>⌂</span><span>الرئيسية</span></button>
+      <button data-pro-screen="mushaf"><span>﷽</span><span>المصحف</span></button>
+      <button data-pro-screen="player"><span>♫</span><span>التلاوة</span></button>
+      <button data-pro-screen="library"><span>▦</span><span>مكتبتي</span></button>
+      <button data-pro-screen="admin"><span>⚙</span><span>الإدارة</span></button>
+    </nav>
+    <div class="pro-side-footer">تجربة قراءة واستماع مصممة بعناية<br>نسخة احترافية قابلة للتخصيص</div>
+  </aside>
+  <main id="samee3-pro-main">
+    <div class="pro-topbar"><div><div class="pro-eyebrow">SAMEE3 / QURAN EXPERIENCE</div><div class="pro-heading" id="pro-page-title">السلام عليكم ورحمة الله</div><div class="pro-subtitle">اجعل وردك اليومي عادة جميلة.</div></div><div class="pro-actions"><button class="pro-btn" data-pro-screen="mushaf">فتح المصحف</button><button class="pro-btn primary" data-pro-screen="player">ابدأ التلاوة</button></div></div>
+    <section class="pro-screen active" id="pro-home">
+      <div class="pro-hero"><div class="pro-eyebrow" style="color:#d9bd7c">وردك اليومي</div><h2>وَرَتِّلِ الْقُرْآنَ تَرْتِيلًا</h2><p>مساحة هادئة للقراءة والتدبر والاستماع، مع وصول سريع إلى آخر موضع قرأتَه ووردك المفضل.</p><div class="pro-actions"><button class="pro-btn primary" data-pro-screen="mushaf">متابعة القراءة ←</button><button class="pro-btn" data-pro-screen="library">مكتبتي</button></div></div>
+      <div class="pro-grid"><div class="pro-card"><div class="pro-row"><div class="pro-icon">☀</div><div><h3>ورد اليوم</h3><div class="pro-muted">هدفك اليومي</div></div></div><div class="pro-number">٢ / ٤ صفحات</div><div class="pro-progress"><span></span></div><div class="pro-muted" style="margin-top:8px">أكمل وردك بهدوء واستمرارية.</div></div>
+      <div class="pro-card"><div class="pro-row"><div class="pro-icon">◷</div><div><h3>آخر قراءة</h3><div class="pro-muted">آخر موضع محفوظ</div></div></div><div class="pro-number">سورة البقرة</div><div class="pro-muted">الآية ٢٥٥ · آية الكرسي</div><button class="pro-btn primary" data-pro-screen="mushaf" style="margin-top:15px">متابعة</button></div>
+      <div class="pro-card"><div class="pro-row"><div class="pro-icon">♫</div><div><h3>القارئ المفضل</h3><div class="pro-muted">استماع مريح</div></div></div><div class="pro-number">مشاري العفاسي</div><div class="pro-muted">تلاوة مرتلة بجودة عالية</div><button class="pro-btn primary" data-pro-screen="player" style="margin-top:15px">استمع الآن</button></div></div>
+      <div class="pro-grid"><div class="pro-card wide"><h3>الوصول السريع</h3><div class="pro-list"><div class="pro-list-item"><div class="pro-row"><div class="pro-icon">١</div><div><strong>سورة الفاتحة</strong><small>٧ آيات · أم الكتاب</small></div></div><button class="pro-btn" data-pro-screen="mushaf">فتح</button></div><div class="pro-list-item"><div class="pro-row"><div class="pro-icon">٢</div><div><strong>سورة البقرة</strong><small>٢٨٦ آية · أطول سور القرآن</small></div></div><button class="pro-btn" data-pro-screen="mushaf">فتح</button></div></div></div><div class="pro-card"><h3>إحصائياتك</h3><div class="pro-muted">استمر على القليل الدائم</div><div class="pro-number">٧ أيام</div><div class="pro-muted">سلسلة القراءة الحالية</div></div></div>
+    </section>
+    <section class="pro-screen" id="pro-mushaf"><div class="pro-reader"><div class="pro-reader-head"><div><div class="pro-eyebrow">المصحف الشريف</div><h2 style="margin:4px 0;font-weight:900">سورة الفاتحة</h2><div class="pro-muted">الجزء الأول · الصفحة ١</div></div><div class="pro-actions"><button class="pro-btn">−</button><button class="pro-btn">حجم الخط</button><button class="pro-btn">+</button></div></div><div class="pro-page"><div class="basmala">بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ</div><div class="sample-ayah">الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ ۝ الرَّحْمَنِ الرَّحِيمِ ۝ مَالِكِ يَوْمِ الدِّينِ ۝ إِيَّاكَ نَعْبُدُ وَإِيَّاكَ نَسْتَعِينُ ۝</div></div><div class="pro-player"><button class="pro-btn primary" data-pro-screen="player">▶ تشغيل</button><div class="track"><strong>تلاوة سورة الفاتحة</strong><div class="pro-muted" style="color:#d8e7df">القارئ المفضل · جودة عالية</div><input type="range" min="0" max="100" value="0" aria-label="تقدم التلاوة"></div><button class="pro-btn">🔖 حفظ</button><button class="pro-btn">↗ مشاركة</button></div></div></section>
+    <section class="pro-screen" id="pro-player"><div class="pro-hero"><div class="pro-eyebrow" style="color:#d9bd7c">مشغل التلاوة</div><h2>استمع بقلب حاضر</h2><p>تحكم في التلاوة، القارئ، السرعة، والتكرار من مساحة واحدة.</p></div><div class="pro-grid"><div class="pro-card wide"><h3>التلاوة الحالية</h3><div class="pro-list-item"><div class="pro-row"><div class="pro-icon">♫</div><div><strong>سورة الفاتحة</strong><small>مشاري راشد العفاسي</small></div></div><button class="pro-btn primary" id="pro-play-toggle">▶ تشغيل</button></div><div style="margin-top:20px"><input type="range" min="0" max="100" value="0" style="width:100%" aria-label="تقدم التلاوة"></div></div><div class="pro-card"><h3>إعدادات الاستماع</h3><div class="pro-list"><div class="pro-list-item"><span>سرعة التشغيل</span><strong>1×</strong></div><div class="pro-list-item"><span>التكرار</span><strong>متوقف</strong></div><div class="pro-list-item"><span>جودة الصوت</span><strong>عالية</strong></div></div></div></div></section>
+    <section class="pro-screen" id="pro-library"><div class="pro-hero"><div class="pro-eyebrow" style="color:#d9bd7c">مكتبتي</div><h2>كل ما يهمك في مكان واحد</h2><p>علاماتك المرجعية، محفوظاتك، وآخر السور التي استمعت إليها.</p></div><div class="pro-grid"><div class="pro-card"><h3>العلامات المرجعية</h3><div class="pro-number">١٢</div><div class="pro-muted">موضع محفوظ للرجوع إليه.</div></div><div class="pro-card"><h3>السور المفضلة</h3><div class="pro-number">٨</div><div class="pro-muted">سور قريبة إلى قلبك.</div></div><div class="pro-card"><h3>سجل الاستماع</h3><div class="pro-number">٢٤</div><div class="pro-muted">جلسة استماع محفوظة.</div></div></div></section>
+    <section class="pro-screen" id="pro-admin"><div class="pro-hero"><div class="pro-eyebrow" style="color:#d9bd7c">لوحة الإدارة</div><h2>تحكم كامل في تجربة المنصة</h2><p>إعدادات الهوية، النصوص، الألوان، المحتوى، وإدارة الأقسام من لوحة موحدة.</p></div><div class="pro-card full" style="margin-top:20px"><div class="pro-admin-grid"><div class="pro-field"><label>اسم المنصة</label><input value="مصحف سميع"></div><div class="pro-field"><label>النص الترحيبي</label><input value="السلام عليكم ورحمة الله"></div><div class="pro-field"><label>اللون الرئيسي</label><input type="text" value="#075640"></div><div class="pro-field"><label>اللون الذهبي</label><input type="text" value="#c6a15a"></div><div class="pro-field" style="grid-column:1/-1"><label>وصف المنصة</label><textarea rows="4">مساحة هادئة للقراءة والتدبر والاستماع.</textarea></div></div><button class="pro-btn primary" style="margin-top:18px" id="pro-save-settings">حفظ الإعدادات</button><div class="pro-muted" id="pro-save-status" style="margin-top:10px"></div></div></section>
+  </main>
+</div>
+<script id="samee3-professional-app-shell-js">
+(function(){
+ const legacy=document.body;
+ const shell=document.getElementById('samee3-pro-shell');
+ if(!shell)return;
+ const screens=['home','mushaf','player','library','admin'];
+ function show(name){
+   screens.forEach(n=>{
+     const section=document.getElementById('pro-'+n);
+     if(section)section.classList.toggle('active',n===name);
+   });
+   document.querySelectorAll('[data-pro-screen]').forEach(el=>el.classList.toggle('active',el.dataset.proScreen===name));
+   const titles={home:'السلام عليكم ورحمة الله',mushaf:'المصحف الشريف',player:'مشغل التلاوة',library:'مكتبتي',admin:'لوحة الإدارة'};
+   const title=document.getElementById('pro-page-title');if(title)title.textContent=titles[name]||titles.home;
+ }
+ document.querySelectorAll('[data-pro-screen]').forEach(el=>el.addEventListener('click',()=>show(el.dataset.proScreen)));
+ const save=document.getElementById('pro-save-settings');
+ if(save)save.addEventListener('click',()=>{
+   const status=document.getElementById('pro-save-status');
+   if(status)status.textContent='تم حفظ إعدادات العرض محليًا في هذه الجلسة.';
+ });
+ const play=document.getElementById('pro-play-toggle');
+ if(play)play.addEventListener('click',()=>{play.textContent=play.textContent.includes('تشغيل')?'Ⅱ إيقاف مؤقت':'▶ تشغيل';});
+})();
+</script>
+
 
     <!-- شاشة التحميل السريعة -->
     <div id="splash-screen" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-main); z-index: 99999; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.4s ease;">
