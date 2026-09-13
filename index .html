@@ -3,13 +3,17 @@
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="application-name" content="مصحف سميع"><meta name="apple-mobile-web-app-title" content="مصحف سميع"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#0284C7">
-    <link rel="icon" href="https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png"><link rel="apple-touch-icon" href="https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png">
-    <link rel="manifest" href='data:application/manifest+json,{"name":"مصحف سميع","short_name":"مصحف سميع","description":"المنصة القرآنية الشاملة","display":"standalone","start_url":".","background_color":"#F4F9FE","theme_color":"#0284C7","icons":[{"src":"https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png","sizes":"192x192","type":"image/png"},{"src":"https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}'>
+    <link rel="icon" href="https://i.ibb.co/93YMTNwH/Chat-GPT-Image-13-2026-08-06-09.png"><link rel="apple-touch-icon" href="https://i.ibb.co/93YMTNwH/Chat-GPT-Image-13-2026-08-06-09.png">
+    <link rel="manifest" href='data:application/manifest+json,{"name":"مصحف سميع","short_name":"مصحف سميع","description":"المنصة القرآنية الشاملة","display":"standalone","start_url":".","background_color":"#F4F9FE","theme_color":"#0284C7","icons":[{"src":"https://i.ibb.co/93YMTNwH/Chat-GPT-Image-13-2026-08-06-09.png","sizes":"192x192","type":"image/png"},{"src":"https://i.ibb.co/93YMTNwH/Chat-GPT-Image-13-2026-08-06-09.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}'>
     <meta name="description" content="موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.">
     <title>مصحف سميع | المنصة القرآنية الشاملة</title>
     <!-- تسريع تحميل الخطوط -->
     <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    
+    <!-- مكتبات Firebase الأساسية وقاعدة بيانات Firestore -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    
     <link href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700;800&family=Aref+Ruqaa:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     
@@ -48,7 +52,7 @@
 
     <!-- شاشة التحميل السريعة -->
     <div id="splash-screen" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-main); z-index: 99999; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.4s ease;">
-        <img src="https://i.postimg.cc/W35f0BVS/EE8DDDF3-BE28-40C3-94BB-109F25DA270E.png" alt="مصحف سميع" style="width: 140px; height: 140px; margin-bottom: 25px; border-radius: 25px; box-shadow: 0 10px 30px rgba(2, 132, 199, 0.2);">
+        <img src="https://i.ibb.co/93YMTNwH/Chat-GPT-Image-13-2026-08-06-09.png" alt="مصحف سميع" style="width: 140px; height: 140px; margin-bottom: 25px; border-radius: 25px; box-shadow: 0 10px 30px rgba(2, 132, 199, 0.2);">
         <h1 style="font-family: 'Aref Ruqaa', serif; font-size: 45px; color: var(--royal-blue); margin: 0 0 20px 0;">مصحف سَمِيع</h1>
         <div class="spinner"></div>
         <p style="color: #64748B; font-weight: bold; font-size: 18px; margin-top: 20px;">جاري التحميل...</p>
@@ -288,26 +292,49 @@
             } catch (e) {}
         }
 
-        const SUPABASE_URL = 'https://wndzautzfpmycdesrbvs.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduZHphdXR6ZnBteWNkZXNyYnZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNzk2NzUsImV4cCI6MjEwMjg1NTY3NX0.EVUiKwmXjvAOYPqvWZx45c1cOcJHDvxufGtKEICJJms';
-        let supabaseClient = null;
-        try { if (window.supabase) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); } catch (e) { console.error("Supabase load error:", e); }
+        // إعدادات Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyBFFMauXqzuAlgodtODtVew3fokR8SlokA",
+            authDomain: "samee3-fb475.firebaseapp.com",
+            projectId: "samee3-fb475",
+            storageBucket: "samee3-fb475.firebasestorage.app",
+            messagingSenderId: "664276567806",
+            appId: "1:664276567806:web:f7a97eea7b64d58a23c7af",
+            measurementId: "G-JXP351V8QW"
+        };
+        
+        let db = null;
+        try {
+            if (window.firebase) {
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+            }
+        } catch (e) { 
+            console.error("Firebase load error:", e); 
+        }
 
         async function getDBUsers() {
             try {
-                if (supabaseClient) {
-                    const { data, error } = await supabaseClient.from('store').select('value').eq('key', 'samee3_users').single();
-                    if (data && data.value) return data.value;
+                if (db) {
+                    const docRef = db.collection('store').doc('samee3_users');
+                    const doc = await docRef.get();
+                    if (doc.exists && doc.data().value) {
+                        return doc.data().value;
+                    }
                 }
-            } catch (e) { console.error("Supabase Error on GET:", e); }
+            } catch (e) { console.error("Firebase Error on GET:", e); }
             return JSON.parse(localStorage.getItem('samee3_users') || '[]');
         }
 
         async function setDBUsers(usersArray) {
             localStorage.setItem('samee3_users', JSON.stringify(usersArray));
             try {
-                if (supabaseClient) await supabaseClient.from('store').upsert({ key: 'samee3_users', value: usersArray });
-            } catch (e) { console.error("Supabase Error on SET:", e); }
+                if (db) {
+                    await db.collection('store').doc('samee3_users').set({ 
+                        value: usersArray 
+                    }, { merge: true });
+                }
+            } catch (e) { console.error("Firebase Error on SET:", e); }
         }
 
         const SURAH_NAMES_AR = ["الفاتحة","البقرة","آل عمران","النساء","المائدة","الأنعام","الأعراف","الأنفال","التوبة","يونس","هود","يوسف","الرعد","إبراهيم","الحجر","النحل","الإسراء","الكهف","مريم","طه","الأنبياء","الحج","المؤمنون","النور","الفرقان","الشعراء","النمل","القصص","العنكبوت","الروم","لقمان","السجدة","الأحزاب","سبأ","فاطر","يس","الصافات","ص","الزمر","غافر","فصلت","الشورى","الزخرف","الدخان","الجاثية","الأحقاف","محمد","الفتح","الحجرات","ق","الذاريات","الطور","النجم","القمر","الرحمن","الواقعة","الحديد","المجادلة","الحشر","الممتحنة","الصف","الجمعة","المنافقون","التغابن","الطلاق","التحريم","الملك","القلم","الحاقة","المعارج","نوح","الجن","المزمل","المدثر","القيامة","الإنسان","المرسلات","النبأ","النازعات","عبس","التكوير","الانفطار","المطففين","الانشقاق","البروج","الطارق","الأعلى","الغاشية","الفجر","البلد","الشمس","الليل","الضحى","الشرح","التين","العلق","القدر","البينة","الزلزلة","العاديات","القارعة","التكاثر","العصر","الهمزة","الفيل","قريش","الماعون","الكوثر","الكافرون","النصر","المسد","الإخلاص","الفلق","الناس"];
