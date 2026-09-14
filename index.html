@@ -2178,5 +2178,116 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 </script>
 
+
+<script id="samee3-pro-player-enhancements">
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const STORE='samee3_pro_reading_v2';
+const getState=()=>{try{return JSON.parse(localStorage.getItem(STORE)||'{}')}catch(e){return {}}};
+const saveState=s=>{try{localStorage.setItem(STORE,JSON.stringify({...getState(),...s,updatedAt:Date.now()}))}catch(e){}};
+const textOf=id=>{const e=$(id);return e&&e.selectedIndex>=0?e.options[e.selectedIndex].text:''};
+const notify=t=>typeof window.showToast==='function'?window.showToast(t):console.log(t);
+
+function addStyle(){
+ if($('samee3-pro-style'))return;
+ const s=document.createElement('style');s.id='samee3-pro-style';
+ s.textContent=`
+ .samee3-pro-panel{position:fixed;z-index:10050;right:12px;left:12px;bottom:84px;max-width:560px;margin:auto;background:rgba(255,255,255,.98);border:1px solid #d9e2ec;border-radius:22px;box-shadow:0 14px 45px #0002;padding:16px;display:none;font-family:inherit}
+ .samee3-pro-panel.show{display:block}.samee3-pro-panel h3{margin:0 0 12px;color:#087fbd;font-size:18px}
+ .samee3-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.samee3-pro-panel label{font-size:12px;color:#52606d;display:block;margin-bottom:4px}
+ .samee3-pro-panel select,.samee3-pro-panel input{width:100%;box-sizing:border-box;border:1px solid #ccd6e0;border-radius:12px;padding:10px;background:#fff;font-size:15px}
+ .samee3-pro-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.samee3-pro-actions button{border:0;border-radius:12px;padding:10px 13px;background:#0789c9;color:#fff;font-weight:700}
+ .samee3-pro-actions .alt{background:#e78300}.samee3-pro-actions .gray{background:#64748b}
+ @media(max-width:480px){.samee3-pro-panel{bottom:70px}.samee3-pro-grid{gap:7px}}
+ `;
+ document.head.appendChild(s);
+}
+
+function planPanel(){
+ if($('samee3-pro-panel'))return;
+ const p=document.createElement('section');p.id='samee3-pro-panel';p.className='samee3-pro-panel';p.dir='rtl';
+ p.innerHTML=`
+ <h3>تشغيل من آية إلى آية</h3>
+ <div class="samee3-pro-grid">
+ <div><label>من السورة</label><select id="pro-from-surah"></select></div>
+ <div><label>من الآية</label><input id="pro-from-ayah" type="number" min="1" value="1"></div>
+ <div><label>إلى السورة</label><select id="pro-to-surah"></select></div>
+ <div><label>إلى الآية</label><input id="pro-to-ayah" type="number" min="1" value="7"></div>
+ <div><label>عدد التكرار</label><select id="pro-repeat"><option value="1">مرة واحدة</option><option value="2">مرتين</option><option value="3">3 مرات</option><option value="5">5 مرات</option><option value="10">10 مرات</option><option value="0">حتى الإيقاف</option></select></div>
+ <div><label>طريقة التكرار</label><select id="pro-mode"><option value="same">بنفس القارئ</option><option value="chosen">قارئ أختاره</option><option value="auto">قراء بالتتابع تلقائياً</option></select></div>
+ </div>
+ <div class="samee3-pro-actions"><button id="pro-start">▶ تشغيل المقطع</button><button class="alt" id="pro-save">حفظ الخطة</button><button class="gray" id="pro-close">إغلاق</button></div>`;
+ document.body.appendChild(p);
+ const names=window.SURAH_NAMES_AR||[];
+ ['pro-from-surah','pro-to-surah'].forEach(id=>{
+  const el=$(id);
+  names.forEach((name,i)=>{const o=document.createElement('option');o.value=i+1;o.textContent=(i+1)+'. '+name;el.appendChild(o)});
+ });
+ const old=getState().plan;
+ if(old)Object.keys(old).forEach(k=>{if($(k))$(k).value=old[k]});
+ $('pro-close').onclick=()=>p.classList.remove('show');
+ $('pro-save').onclick=()=>{saveState({plan:readPlan()});notify('تم حفظ خطة التشغيل');};
+ $('pro-start').onclick=()=>{
+  const x=readPlan();
+  if(x.fromSurah>x.toSurah||(x.fromSurah===x.toSurah&&x.fromAyah>x.toAyah))return notify('راجع نطاق الآيات');
+  saveState({plan:x,rangeActive:true});
+  p.classList.remove('show');
+  if(typeof window.loadSurahForReadingAndPlaying==='function')window.loadSurahForReadingAndPlaying(x.fromSurah,x.fromAyah,true);
+  notify('بدأ تشغيل المقطع المحدد');
+ };
+}
+function readPlan(){return {fromSurah:Number($('pro-from-surah').value),fromAyah:Number($('pro-from-ayah').value),toSurah:Number($('pro-to-surah').value),toAyah:Number($('pro-to-ayah').value),repeat:$('pro-repeat').value,mode:$('pro-mode').value}}
+
+function remember(){
+ const audio=$('main-audio');
+ const surah=window.currentSurahNumber||Number(($('bottom-surah-select')||$('surah-select'))?.value)||1;
+ const rec=$('bottom-reciter-select')||$('reciter-select');
+ saveState({surah,ayah:window.currentPlayingAyahIndex>=0?window.currentPlayingAyahIndex+1:(getState().ayah||1),page:window.currentSurahPageIndex||0,time:audio?audio.currentTime||0:0,reciter:rec?rec.value:'',reciterName:rec?textOf(rec.id):''});
+}
+function restoreSilently(){
+ const s=getState();if(!s.surah)return;
+ setTimeout(()=>{
+  try{
+   if(typeof window.loadSurahForReadingAndPlaying==='function')window.loadSurahForReadingAndPlaying(Number(s.surah),Number(s.ayah)||1,false,true);
+   const a=$('main-audio');
+   if(a&&s.time){const f=()=>{try{a.currentTime=s.time}catch(e){}a.removeEventListener('loadedmetadata',f)};a.addEventListener('loadedmetadata',f)}
+  }catch(e){}
+ },700);
+}
+function lockMetadata(){
+ if(!('mediaSession'in navigator))return;
+ const a=$('main-audio');if(!a)return;
+ try{navigator.mediaSession.metadata=new MediaMetadata({title:(textOf('bottom-surah-select')||textOf('surah-select')||'المصحف').replace(/^تحديد السورة/,'').trim(),artist:textOf('bottom-reciter-select')||textOf('reciter-select')||'القارئ',album:'مصحف سميع',artwork:[{src:'https://i.ibb.co/LDxp6s8S/8-F026-C85-439-E-4-C5-B-A8-AB-4-ED92-E0-DFB14.png',sizes:'512x512',type:'image/png'}]})}catch(e){}
+}
+function setup(){
+ addStyle();planPanel();
+ const old=$('samee3-last-place');if(old)old.remove();
+ const mush=$('quran-display')||$('mushaf-capture-area');
+ if(mush){
+  mush.addEventListener('dblclick',e=>{
+   if(e.target.closest('.verse'))e.preventDefault();
+   if(typeof window.toggleChrome==='function')window.toggleChrome();
+   else document.body.classList.toggle('samee3-hidden-chrome');
+  });
+  mush.addEventListener('click',e=>{
+   const v=e.target.closest('.verse');
+   if(v)remember();
+  },true);
+ }
+ const a=$('main-audio');
+ if(a)['timeupdate','pause','play','loadedmetadata','ended'].forEach(ev=>a.addEventListener(ev,()=>{remember();lockMetadata()}));
+ ['bottom-surah-select','surah-select','bottom-reciter-select','reciter-select'].forEach(id=>{const e=$(id);if(e)e.addEventListener('change',()=>{remember();lockMetadata()})});
+ if(!$('samee3-range-open')){
+  const b=document.createElement('button');b.id='samee3-range-open';b.textContent='🎛 تشغيل من آية لآية';
+  b.style.cssText='position:fixed;left:12px;bottom:12px;z-index:10040;border:0;border-radius:18px;padding:11px 13px;background:#0789c9;color:#fff;font-weight:700;box-shadow:0 5px 18px #0002';
+  b.onclick=()=>{$('samee3-pro-panel').classList.toggle('show')};
+  document.body.appendChild(b);
+ }
+ restoreSilently();
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup,{once:true});else setup();
+})();
+</script>
 </body>
 </html>
