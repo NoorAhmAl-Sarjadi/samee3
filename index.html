@@ -1115,42 +1115,43 @@
     <!-- ========================================== -->
     <!-- نظام التحديثات الخارجية (لا تقم بحذفه) -->
     <!-- ========================================== -->
+<style>
 
+/* ===== مصحف سميع — التنظيم الاحترافي ===== */
+:root{--samee-blue:#0788c9;--samee-green:#13b889;--samee-gold:#c49a35;--samee-ink:#17212b}
+body.samee-reader-mode{padding-bottom:112px!important}
+body.samee-reader-mode>header,
+body.samee-reader-mode>.top-nav,
+body.samee-reader-mode nav.main-nav,
+body.samee-reader-mode #main-nav,
+body.samee-reader-mode .main-nav{display:none!important}
+#samee-reader-dock{position:fixed;z-index:9998;right:12px;left:12px;bottom:12px;direction:rtl;background:rgba(255,255,255,.96);border:1px solid #d9e5ec;border-radius:24px;box-shadow:0 10px 40px rgba(0,70,100,.18);backdrop-filter:blur(18px);padding:10px 12px;display:flex;align-items:center;gap:10px}
+#samee-reader-dock .dock-play{width:50px;height:50px;border:0;border-radius:50%;background:var(--samee-blue);color:white;font-size:23px;flex:0 0 auto}
+#samee-reader-dock .dock-info{min-width:0;flex:1;text-align:right}
+#samee-reader-dock .dock-surah{font-weight:800;color:var(--samee-ink);font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#samee-reader-dock .dock-reader{font-size:13px;color:#71808c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
+#samee-reader-dock .dock-index{border:1px solid #b8dced;background:#eef9ff;color:#0876aa;border-radius:14px;padding:10px 12px;font-weight:800}
+#samee-index-panel{position:fixed;inset:0;z-index:10000;background:rgba(10,28,40,.38);backdrop-filter:blur(7px);display:none;align-items:flex-end;justify-content:center;direction:rtl}
+#samee-index-panel.open{display:flex}
+#samee-index-sheet{width:min(760px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:30px 30px 0 0;padding:18px;box-shadow:0 -10px 50px rgba(0,0,0,.2)}
+#samee-index-sheet .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #edf0f2;padding-bottom:14px}
+#samee-index-sheet h2{margin:0;color:var(--samee-blue);font-size:23px}
+#samee-index-sheet .close-sheet{border:0;background:#f2f6f8;border-radius:50%;width:42px;height:42px;font-size:22px}
+.samee-index-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}
+.samee-index-card{border:1px solid #e2ebef;border-radius:18px;background:#fbfdfe;padding:15px;text-align:right}
+.samee-index-card strong{display:block;color:#17465b;font-size:17px;margin-bottom:5px}
+.samee-index-card span{color:#7b8b95;font-size:13px}
+.samee-index-card button{margin-top:10px;width:100%;border:0;border-radius:12px;background:#eaf7fc;color:#0876aa;padding:10px;font-weight:800}
+.samee-section{margin-top:18px;border-top:1px solid #edf0f2;padding-top:14px}
+.samee-section h3{margin:0 0 10px;color:#9b7929}
+.samee-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.samee-fields label{font-size:13px;color:#667781}
+.samee-fields select,.samee-fields input{width:100%;margin-top:5px;border:1px solid #dce6eb;border-radius:12px;padding:11px;background:white}
+.samee-primary{width:100%;border:0;border-radius:16px;padding:14px;background:var(--samee-green);color:white;font-weight:900;font-size:16px;margin-top:12px}
+@media(max-width:480px){#samee-reader-dock{right:8px;left:8px;bottom:8px;padding:8px}#samee-reader-dock .dock-index{padding:9px;font-size:13px}.samee-index-grid,.samee-fields{grid-template-columns:1fr}}
 
-<style id="samee3-professional-ui">
-/* مصحف سميع — طبقة التنظيم الاحترافية */
-:root{--s3-blue:#0787c9;--s3-green:#12b981;--s3-gold:#d6ad45;--s3-ink:#102b3d}
-.s3-player{position:fixed;z-index:9998;right:12px;left:12px;bottom:12px;background:rgba(255,255,255,.97);border:1px solid #dce7ee;border-radius:24px;box-shadow:0 12px 40px rgba(10,55,80,.18);padding:12px 14px;direction:rtl;backdrop-filter:blur(16px)}
-.s3-player .s3-row{display:flex;align-items:center;gap:12px}
-.s3-player .s3-main{min-width:0;flex:1}
-.s3-player .s3-title{font-weight:900;color:var(--s3-ink);font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.s3-player .s3-sub{font-size:12px;color:#70808b;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.s3-player button,.s3-index button{border:0;cursor:pointer;font-family:inherit}
-.s3-play{width:46px;height:46px;border-radius:50%;background:var(--s3-blue);color:#fff;font-size:20px;flex:0 0 auto}
-.s3-index-btn{background:#edf8fd;color:var(--s3-blue);padding:10px 13px;border-radius:14px;font-weight:800}
-.s3-progress{height:4px;background:#e8eef2;border-radius:9px;margin-top:10px;overflow:hidden}
-.s3-progress span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--s3-blue),var(--s3-green));transition:width .2s}
-.s3-overlay{position:fixed;inset:0;z-index:10000;background:rgba(7,27,39,.35);display:none;align-items:flex-end;justify-content:center}
-.s3-overlay.open{display:flex}
-.s3-index{width:min(720px,100%);max-height:88vh;overflow:auto;background:#f7fafc;border-radius:28px 28px 0 0;padding:20px;direction:rtl}
-.s3-index h2{margin:0 0 15px;color:var(--s3-ink);font-size:22px}
-.s3-index .s3-close{float:left;background:#fff;border:1px solid #e4ebef;border-radius:50%;width:38px;height:38px}
-.s3-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.s3-field{background:#fff;border:1px solid #e5edf2;border-radius:16px;padding:10px}
-.s3-field label{display:block;font-size:12px;color:#70808b;margin-bottom:6px;font-weight:800}
-.s3-field select,.s3-field input{width:100%;box-sizing:border-box;border:1px solid #dce6ec;border-radius:11px;padding:10px;background:#fff;font:inherit}
-.s3-section{background:#fff;border-radius:20px;padding:14px;margin:12px 0;border:1px solid #e5edf2}
-.s3-section h3{margin:0 0 10px;color:var(--s3-blue);font-size:16px}
-.s3-actions{display:flex;gap:8px;flex-wrap:wrap}
-.s3-primary{background:var(--s3-blue);color:#fff;padding:12px 18px;border-radius:14px;font-weight:900}
-.s3-secondary{background:#eaf8f2;color:#087b52;padding:12px 18px;border-radius:14px;font-weight:900}
-.s3-note{font-size:12px;color:#778792;line-height:1.8}
-@media(max-width:520px){.s3-grid{grid-template-columns:1fr}.s3-player{bottom:8px}.s3-player .s3-index-btn{padding:9px}.s3-player .s3-title{font-size:13px}}
-body.s3-reading-mode .s3-player{opacity:.12;transition:opacity .2s}
-body.s3-reading-mode .s3-player:hover{opacity:1}
 </style>
-
-<script id="samee3-updates-inline">
+<script>
 // =========================================================
 // 1. تسجيل نظام الأوفلاين (Service Worker)
 // =========================================================
@@ -2092,105 +2093,127 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 </script>
+<style>
 
-<script id="samee3-professional-engine">
+/* ===== مصحف سميع — التنظيم الاحترافي ===== */
+:root{--samee-blue:#0788c9;--samee-green:#13b889;--samee-gold:#c49a35;--samee-ink:#17212b}
+body.samee-reader-mode{padding-bottom:112px!important}
+body.samee-reader-mode>header,
+body.samee-reader-mode>.top-nav,
+body.samee-reader-mode nav.main-nav,
+body.samee-reader-mode #main-nav,
+body.samee-reader-mode .main-nav{display:none!important}
+#samee-reader-dock{position:fixed;z-index:9998;right:12px;left:12px;bottom:12px;direction:rtl;background:rgba(255,255,255,.96);border:1px solid #d9e5ec;border-radius:24px;box-shadow:0 10px 40px rgba(0,70,100,.18);backdrop-filter:blur(18px);padding:10px 12px;display:flex;align-items:center;gap:10px}
+#samee-reader-dock .dock-play{width:50px;height:50px;border:0;border-radius:50%;background:var(--samee-blue);color:white;font-size:23px;flex:0 0 auto}
+#samee-reader-dock .dock-info{min-width:0;flex:1;text-align:right}
+#samee-reader-dock .dock-surah{font-weight:800;color:var(--samee-ink);font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#samee-reader-dock .dock-reader{font-size:13px;color:#71808c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
+#samee-reader-dock .dock-index{border:1px solid #b8dced;background:#eef9ff;color:#0876aa;border-radius:14px;padding:10px 12px;font-weight:800}
+#samee-index-panel{position:fixed;inset:0;z-index:10000;background:rgba(10,28,40,.38);backdrop-filter:blur(7px);display:none;align-items:flex-end;justify-content:center;direction:rtl}
+#samee-index-panel.open{display:flex}
+#samee-index-sheet{width:min(760px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:30px 30px 0 0;padding:18px;box-shadow:0 -10px 50px rgba(0,0,0,.2)}
+#samee-index-sheet .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #edf0f2;padding-bottom:14px}
+#samee-index-sheet h2{margin:0;color:var(--samee-blue);font-size:23px}
+#samee-index-sheet .close-sheet{border:0;background:#f2f6f8;border-radius:50%;width:42px;height:42px;font-size:22px}
+.samee-index-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}
+.samee-index-card{border:1px solid #e2ebef;border-radius:18px;background:#fbfdfe;padding:15px;text-align:right}
+.samee-index-card strong{display:block;color:#17465b;font-size:17px;margin-bottom:5px}
+.samee-index-card span{color:#7b8b95;font-size:13px}
+.samee-index-card button{margin-top:10px;width:100%;border:0;border-radius:12px;background:#eaf7fc;color:#0876aa;padding:10px;font-weight:800}
+.samee-section{margin-top:18px;border-top:1px solid #edf0f2;padding-top:14px}
+.samee-section h3{margin:0 0 10px;color:#9b7929}
+.samee-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.samee-fields label{font-size:13px;color:#667781}
+.samee-fields select,.samee-fields input{width:100%;margin-top:5px;border:1px solid #dce6eb;border-radius:12px;padding:11px;background:white}
+.samee-primary{width:100%;border:0;border-radius:16px;padding:14px;background:var(--samee-green);color:white;font-weight:900;font-size:16px;margin-top:12px}
+@media(max-width:480px){#samee-reader-dock{right:8px;left:8px;bottom:8px;padding:8px}#samee-reader-dock .dock-index{padding:9px;font-size:13px}.samee-index-grid,.samee-fields{grid-template-columns:1fr}}
+
+</style>
+<script>
+
+// ===== مصحف سميع: طبقة التنظيم الجديدة =====
 (function(){
-'use strict';
-const $=(s,r=document)=>r.querySelector(s);
-const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
-const storeKey='samee3_professional_reading_v1';
-const state=Object.assign({surah:'',ayah:'',page:'',juz:'',reciter:'',repeat:1,fromSurah:'',fromAyah:1,toSurah:'',toAyah:1},JSON.parse(localStorage.getItem(storeKey)||'{}'));
-function save(){localStorage.setItem(storeKey,JSON.stringify(state));}
-function selected(id){const e=document.getElementById(id);return e&&e.options[e.selectedIndex]?e.options[e.selectedIndex].text:''}
-function remember(){
- const s=$('#surah-select'),r=$('#reciter-select');
- if(s){state.surah=s.value;state.surahName=selected('surah-select')}
- if(r){state.reciter=r.value;state.reciterName=selected('reciter-select')}
- const active=$('.active-ayah,.playing-ayah,.ayah.active,[data-ayah].active');
- if(active){state.ayah=active.dataset.ayah||active.getAttribute('data-ayah')||active.textContent.match(/[0-9٠-٩]+/)?.[0]||state.ayah}
- state.page=state.page||'';
- save();renderPlayer();
-}
-function renderPlayer(){
- const p=$('.s3-player');if(!p)return;
- $('.s3-title',p).textContent=(state.surahName||'اختر السورة')+' — '+(state.reciterName||'اختر القارئ');
- $('.s3-sub',p).textContent='آخر موضع: '+(state.ayah?'الآية '+state.ayah+' — ':'')+(state.page?'الصفحة '+state.page:'يمكنك المتابعة من آخر قراءة');
-}
-function makePlayer(){
- if($('.s3-player'))return;
- const p=document.createElement('div');p.className='s3-player';
- p.innerHTML='<div class="s3-row"><button class="s3-play" id="s3-play" aria-label="تشغيل">▶</button><div class="s3-main"><div class="s3-title">اختر السورة — اختر القارئ</div><div class="s3-sub">آخر موضع قراءة محفوظ تلقائيًا</div></div><button class="s3-index-btn" id="s3-open-index">الفهرس ☰</button></div><div class="s3-progress"><span id="s3-progress"></span></div>';
- document.body.appendChild(p);
- $('#s3-open-index').onclick=openIndex;
- $('#s3-play').onclick=()=>{const a=$('#main-audio');if(!a)return;if(a.paused)a.play().catch(()=>{});else a.pause()};
- const a=$('#main-audio');if(a){
-  a.addEventListener('play',()=>$('#s3-play').textContent='Ⅱ');
-  a.addEventListener('pause',()=>$('#s3-play').textContent='▶');
-  a.addEventListener('timeupdate',()=>{$('#s3-progress').style.width=a.duration?((a.currentTime/a.duration)*100)+'%':'0%'});
- }
- renderPlayer();
-}
-function options(){
- const surah=$('#surah-select'),rec=$('#reciter-select');
- const surahOpts=surah?surah.innerHTML:'';
- const recOpts=rec?rec.innerHTML:'';
- return `<div class="s3-section"><h3>📖 تحديد المقطع</h3><div class="s3-grid">
- <div class="s3-field"><label>من السورة</label><select id="s3-from-surah">${surahOpts}</select></div>
- <div class="s3-field"><label>من الآية</label><input id="s3-from-ayah" type="number" min="1" value="${state.fromAyah||1}"></div>
- <div class="s3-field"><label>إلى السورة</label><select id="s3-to-surah">${surahOpts}</select></div>
- <div class="s3-field"><label>إلى الآية</label><input id="s3-to-ayah" type="number" min="1" value="${state.toAyah||1}"></div>
- </div></div>
- <div class="s3-section"><h3>🎙️ القارئ والرواية</h3><div class="s3-field"><label>اختر القارئ</label><select id="s3-reciter">${recOpts}</select></div><p class="s3-note">يتم ترتيب القارئ الحالي أولًا في واجهة التشغيل، وتُحفظ اختياراتك تلقائيًا.</p></div>
- <div class="s3-section"><h3>🔁 التكرار</h3><div class="s3-grid">
- <div class="s3-field"><label>عدد مرات التكرار</label><input id="s3-repeat" type="number" min="1" max="100" value="${state.repeat||1}"></div>
- <div class="s3-field"><label>طريقة التكرار</label><select id="s3-repeat-mode"><option value="same">نفس القارئ</option><option value="chosen">قارئ آخر من اختياري</option><option value="auto">تلقائي بين القراء</option></select></div>
- </div></div>
- <div class="s3-section"><h3>💾 آخر قراءة</h3><p class="s3-note">آخر سورة وقارئ وآية يتم حفظهم تلقائيًا حتى بعد إغلاق الموقع أو تسجيل الخروج والدخول مرة أخرى.</p><div class="s3-actions"><button class="s3-secondary" id="s3-resume">الرجوع لآخر موضع</button><button class="s3-secondary" id="s3-save-mark">حفظ الموضع الحالي</button></div></div>
- <div class="s3-actions"><button class="s3-primary" id="s3-run">▶ تشغيل المقطع المحدد</button><button class="s3-secondary" id="s3-download">☁ تحميل السورة للجهاز</button></div>`;
-}
-function openIndex(){
- let o=$('.s3-overlay');if(!o){o=document.createElement('div');o.className='s3-overlay';o.innerHTML='<div class="s3-index"><button class="s3-close" id="s3-close">×</button><h2>فهرس مصحف سميع</h2><div id="s3-index-content"></div></div>';document.body.appendChild(o);$('#s3-close').onclick=()=>o.classList.remove('open');o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open')})}
- $('#s3-index-content',o).innerHTML=options();o.classList.add('open');
- const s=$('#surah-select'),r=$('#reciter-select');
- if(s)$('#s3-from-surah').value=s.value;
- if(s)$('#s3-to-surah').value=s.value;
- if(r)$('#s3-reciter').value=r.value;
- $('#s3-run').onclick=()=>{
-  state.fromSurah=$('#s3-from-surah').value;state.fromAyah=$('#s3-from-ayah').value;
-  state.toSurah=$('#s3-to-surah').value;state.toAyah=$('#s3-to-ayah').value;
-  state.repeat=$('#s3-repeat').value;state.reciter=$('#s3-reciter').value;save();
-  if(s){s.value=state.fromSurah;s.dispatchEvent(new Event('change',{bubbles:true}))}
-  if(r){r.value=state.reciter;r.dispatchEvent(new Event('change',{bubbles:true}))}
-  const a=$('#main-audio');if(a)a.play().catch(()=>{});
-  o.classList.remove('open');renderPlayer();
- };
- $('#s3-resume').onclick=()=>{
-  if(s&&state.surah){s.value=state.surah;s.dispatchEvent(new Event('change',{bubbles:true}))}
-  if(r&&state.reciter){r.value=state.reciter;r.dispatchEvent(new Event('change',{bubbles:true}))}
-  o.classList.remove('open');renderPlayer();
- };
- $('#s3-save-mark').onclick=()=>{remember();alert('تم حفظ آخر موضع قراءة');};
- $('#s3-download').onclick=()=>{
-  const btn=$('[id*="download"]')||$('[onclick*="download"]');
-  if(btn)btn.click();else alert('زر التحميل غير متاح في هذه النسخة');
- };
-}
-function bind(){
- makePlayer();
- ['change','input'].forEach(ev=>document.addEventListener(ev,e=>{if(e.target.matches('#surah-select,#reciter-select,[data-ayah],.ayah'))remember()}));
- document.addEventListener('click',e=>{
-  const ay=e.target.closest('[data-ayah],.ayah,.ayah-item');if(ay){state.ayah=ay.dataset.ayah||ay.getAttribute('data-ayah')||state.ayah;save();renderPlayer()}
- });
- // منع تعارض الضغط المزدوج على الآية: إظهار/إخفاء الواجهات يكون من مساحة المصحف غير الآية.
- let last=0;
- document.addEventListener('dblclick',e=>{
-  if(e.target.closest('[data-ayah],.ayah,.ayah-item,button,select,input,textarea'))return;
-  document.body.classList.toggle('s3-reading-mode');
- });
- remember();
-}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind);else bind();
+  'use strict';
+  const $=(s,r=document)=>r.querySelector(s);
+  const text=(el)=>el?el.textContent.trim():'';
+  function currentSurah(){
+    return text($('#surah-select option:checked'))||text($('#surah-name'))||text($('.surah-title'))||'السورة الحالية';
+  }
+  function currentReader(){
+    return text($('#reader-select option:checked'))||text($('#reciter-select option:checked'))||text($('.reader-name'))||'القارئ الحالي';
+  }
+  function savePosition(){
+    const data={surah:currentSurah(),reader:currentReader(),time:Date.now(),url:location.href};
+    try{localStorage.setItem('samee3_last_position',JSON.stringify(data));}catch(e){}
+  }
+  function buildDock(){
+    if($('#samee-reader-dock'))return;
+    document.body.classList.add('samee-reader-mode');
+    const dock=document.createElement('div');
+    dock.id='samee-reader-dock';
+    dock.innerHTML='<button class="dock-play" id="samee-dock-play" aria-label="تشغيل وإيقاف">▶</button><div class="dock-info"><div class="dock-surah" id="samee-dock-surah"></div><div class="dock-reader" id="samee-dock-reader"></div></div><button class="dock-index" id="samee-open-index">☰ الفهرس</button>';
+    document.body.appendChild(dock);
+    $('#samee-dock-play').addEventListener('click',()=>{
+      const b=$('#play-btn')||$('#playButton')||$('.play-button')||$('button[aria-label*="تشغيل"]');
+      if(b)b.click();
+    });
+    $('#samee-open-index').addEventListener('click',openIndex);
+    refreshDock();
+  }
+  function refreshDock(){
+    const a=$('#samee-dock-surah'),b=$('#samee-dock-reader');
+    if(a)a.textContent=currentSurah();
+    if(b)b.textContent=currentReader();
+  }
+  function openIndex(){
+    let panel=$('#samee-index-panel');
+    if(!panel){
+      panel=document.createElement('div');panel.id='samee-index-panel';
+      panel.innerHTML='<section id="samee-index-sheet" role="dialog" aria-modal="true"><div class="sheet-head"><h2>الفهرس</h2><button class="close-sheet" id="samee-close-index">×</button></div><div class="samee-index-grid"><div class="samee-index-card"><strong>📖 السور</strong><span>الفاتحة إلى الناس</span><button data-go="surahs">فتح السور</button></div><div class="samee-index-card"><strong>🧩 الأجزاء</strong><span>اختيار بداية الجزء</span><button data-go="juz">فتح الأجزاء</button></div><div class="samee-index-card"><strong>🕌 الأحزاب</strong><span>بداية كل حزب بدقة</span><button data-go="hizb">فتح الأحزاب</button></div><div class="samee-index-card"><strong>📚 الأحاديث</strong><span>البخاري ومسلم وغيرها</span><button data-go="hadith">فتح الأحاديث</button></div></div><div class="samee-section"><h3>تشغيل من آية إلى آية</h3><div class="samee-fields"><label>من السورة<select id="samee-from-surah"></select></label><label>من الآية<input id="samee-from-ayah" type="number" min="1" value="1"></label><label>إلى السورة<select id="samee-to-surah"></select></label><label>إلى الآية<input id="samee-to-ayah" type="number" min="1" value="7"></label><label>عدد التكرار<input id="samee-repeat" type="number" min="1" value="1"></label><label>طريقة القارئ<select id="samee-reader-mode-select"><option value="same">نفس القارئ</option><option value="chosen">قارئ محدد</option><option value="auto">تلقائي كل 10 آيات</option></select></label></div><button class="samee-primary" id="samee-start-range">▶ تشغيل المقطع</button></div><div class="samee-section"><h3>الوصول السريع</h3><button class="samee-primary" id="samee-last-position">↩ الرجوع لآخر موضع قراءة</button><button class="samee-primary" id="samee-download">☁ تحميل السورة للجهاز</button></div></section>';
+      document.body.appendChild(panel);
+      $('#samee-close-index').addEventListener('click',()=>panel.classList.remove('open'));
+      panel.addEventListener('click',e=>{if(e.target===panel)panel.classList.remove('open')});
+      panel.querySelectorAll('[data-go]').forEach(btn=>btn.addEventListener('click',()=>{
+        const target=btn.dataset.go;
+        const map={surahs:'#surah-select',juz:'#juz-select',hizb:'#hizb-select',hadith:'#hadith-nav-btn'};
+        const el=$(map[target]);if(el)el.click();else alert('القسم متاح من القائمة الأساسية عند تفعيل بياناته.');
+      }));
+      $('#samee-last-position').addEventListener('click',()=>{
+        try{const p=JSON.parse(localStorage.getItem('samee3_last_position')||'null');if(p)alert('آخر موضع: '+p.surah+' — '+p.reader);else alert('لا يوجد موضع محفوظ بعد.');}catch(e){}
+      });
+      $('#samee-download').addEventListener('click',()=>{
+        const b=$('#download-surah-btn')||$('button[id*="download-surah"]')||$('button[id*="download"]');if(b)b.click();else alert('زر التحميل سيظهر عند توفر ملف السورة.');
+      });
+      $('#samee-start-range').addEventListener('click',()=>{
+        const detail={fromSurah:$('#samee-from-surah').value,fromAyah:+$('#samee-from-ayah').value,toSurah:$('#samee-to-surah').value,toAyah:+$('#samee-to-ayah').value,repeat:+$('#samee-repeat').value,readerMode:$('#samee-reader-mode-select').value};
+        window.samee3PlaybackRange=detail;savePosition();panel.classList.remove('open');
+        if(typeof window.startRangePlayback==='function')window.startRangePlayback(detail);
+        else alert('تم تجهيز المقطع. اربط دالة التشغيل startRangePlayback بمشغل الصوت الحالي.');
+      });
+      const opts=$$('#surah-select option');
+      const lists=[$('#samee-from-surah'),$('#samee-to-surah')];
+      lists.forEach(sel=>{if(sel&&opts.length)opts.forEach(o=>sel.appendChild(o.cloneNode(true)));});
+    }
+    panel.classList.add('open');
+  }
+  function $$(s,r=document){return Array.from(r.querySelectorAll(s));}
+  function init(){
+    buildDock();
+    savePosition();
+    setInterval(refreshDock,1500);
+    document.addEventListener('click',e=>{
+      if(e.target.closest('#samee-reader-dock')||e.target.closest('#samee-index-panel'))return;
+      if(e.target.closest('.ayah,.ayah-text,[data-ayah],.quran-ayah')){savePosition();return;}
+    },true);
+    let last=0;
+    document.addEventListener('dblclick',e=>{
+      if(e.target.closest('.ayah,.ayah-text,[data-ayah],.quran-ayah'))return;
+      const now=Date.now();if(now-last<450){document.body.classList.toggle('samee-reader-mode');const d=$('#samee-reader-dock');if(d)d.style.display=document.body.classList.contains('samee-reader-mode')?'flex':'none';}last=now;
+    },true);
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
+
 </script>
 
 </body>
