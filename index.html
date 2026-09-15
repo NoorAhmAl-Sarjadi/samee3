@@ -50,45 +50,38 @@
 
 <style id="samee3-premium-redesign">
 :root{
- --s3-ink:#173f45;--s3-teal:#176b70;--s3-gold:#b18a36;--s3-paper:#fbf7ed;
- --s3-line:rgba(23,63,69,.16);--s3-shadow:0 18px 55px rgba(23,63,69,.12);
+ --samee3-gold:#b99743;--samee3-gold-dark:#8e6c22;--samee3-cream:#fbf7ea;
+ --samee3-teal:#176d70;--samee3-ink:#203f42;
 }
-*{box-sizing:border-box}
-html,body{background:linear-gradient(180deg,#f8f5ed 0%,#eef4f1 100%)!important;color:var(--s3-ink)}
-body{padding-bottom:112px!important}
-.navbar{display:none!important}
-.container{width:min(100% - 24px,1100px)!important;margin-inline:auto!important}
-.mushaf-view,.quran-area,.mushaf-page-container{background:transparent!important}
-.mushaf-page-container{border:0!important;box-shadow:none!important;padding:10px!important}
-.mushaf-inner-frame{background:var(--s3-paper)!important;border:1px solid #c6a45c!important;border-radius:22px!important;box-shadow:var(--s3-shadow)!important;overflow:hidden}
-.mushaf-ornate-border{border:8px double #b18a36!important;border-radius:16px!important}
-.mushaf-top-header,.mushaf-toolbar{background:rgba(251,247,237,.96)!important;border-color:var(--s3-line)!important}
-.controls-section,.filters-container,.player-controls,.sticky-player,.hadith-item-info,.search-result-item,.auth-container,.modal-content,.install-card{
- background:rgba(255,255,255,.88)!important;border:1px solid var(--s3-line)!important;border-radius:24px!important;box-shadow:0 10px 35px rgba(23,63,69,.07)!important;backdrop-filter:blur(12px)
-}
-button,.btn-nav,.btn-login,.action-btn-sm,.filter-select,.play-pause-btn{
- border-radius:16px!important;font-family:inherit!important;transition:transform .18s ease,box-shadow .18s ease,background .18s ease!important
-}
-button:active{transform:scale(.97)}
-.btn-nav,.btn-login{background:#fff!important;color:var(--s3-ink)!important;border:1px solid var(--s3-line)!important}
-.btn-nav.active{background:var(--s3-teal)!important;color:#fff!important}
-.sticky-player{bottom:92px!important;z-index:900!important}
-#samee3-bottom-nav{position:fixed;z-index:2000;bottom:12px;left:12px;right:12px;margin:auto;width:min(760px,calc(100% - 24px));display:grid;grid-template-columns:repeat(4,1fr);gap:7px;padding:9px;background:rgba(251,247,237,.94);border:1px solid #c7aa69;border-radius:26px;box-shadow:0 16px 50px rgba(23,63,69,.2);backdrop-filter:blur(22px);direction:rtl}
-#samee3-bottom-nav button{min-height:62px;border:0;background:transparent;color:#6b7474;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;font-weight:800}
-#samee3-bottom-nav button .s3-icon{font-size:24px;line-height:1;color:var(--s3-teal)}
-#samee3-bottom-nav button.active{background:var(--s3-teal);color:#fff;box-shadow:0 8px 22px rgba(23,107,112,.25)}
-#samee3-bottom-nav button.active .s3-icon{color:#f6df9a}
-#samee3-bottom-nav button:focus-visible{outline:3px solid #d4af54;outline-offset:2px}
-.s3-brand{display:flex;align-items:center;justify-content:center;gap:10px;margin:16px auto 10px;color:var(--s3-teal);font-size:clamp(25px,5vw,42px);font-weight:900;letter-spacing:-1px}
-.s3-brand span{color:var(--s3-gold)}
-@media(max-width:560px){
- body{padding-bottom:105px!important}
- #samee3-bottom-nav{bottom:8px;padding:7px;border-radius:22px}
- #samee3-bottom-nav button{min-height:58px;font-size:11px}
- #samee3-bottom-nav button .s3-icon{font-size:22px}
- .mushaf-page-container{padding:4px!important}
-}
+html,body{background:var(--samee3-cream)!important;color:var(--samee3-ink)!important}
+body{font-family:"Amiri","Tajawal",serif!important;padding-bottom:104px!important}
+.navbar,.controls-section{display:none!important}
+.container{max-width:100%!important;width:100%!important;padding:0!important;margin:0!important}
+#home-view{display:none!important}
+#mushaf-view{display:block!important;padding:14px 10px 0!important}
+.mushaf-toolbar{margin:0 0 12px!important;justify-content:center!important}
+.mushaf-toolbar button{background:#fffaf0!important;color:var(--samee3-teal)!important;border:1px solid #d9c58d!important;border-radius:999px!important;font-size:16px!important;padding:9px 22px!important}
+.mushaf-page-container{max-width:900px!important;margin:auto!important;padding:8px!important;background:#eadfbe!important;border:1px solid #b99743!important;border-radius:18px!important;box-shadow:0 12px 35px #6d54201f!important}
+.mushaf-top-header{color:#b84e39!important;font-size:clamp(18px,4vw,28px)!important;padding:5px 14px 10px!important}
+.mushaf-ornate-border{background:#149bc2!important;border:4px solid #b99743!important;border-radius:16px!important;padding:10px!important;box-shadow:inset 0 0 0 2px #075d78,0 3px 0 #8e6c22!important}
+.mushaf-inner-frame{background:#fffaf0!important;border:2px solid #3e3b32!important;box-shadow:inset 0 0 0 3px #fffaf0,inset 0 0 0 5px #3e3b32!important;border-radius:2px!important;padding:clamp(12px,3vw,28px)!important}
+.surah-header-frame{margin-bottom:16px!important}
+.mushaf-title{color:#2d2922!important}
+.quran-area{font-size:clamp(24px,5.1vw,42px)!important;line-height:2.08!important;color:#171512!important}
+.verse-end{color:#b85c46!important}
+.active-verse{background:#c5e7ed!important}
+.page-number-badge{color:#1a88b3!important;border-color:#1a88b3!important;background:#fffaf0!important}
+.pagination-controls{background:#fffaf0!important;border-color:#d9c58d!important}
+.sticky-player{display:none!important}
+.samee3-bottom-nav{position:fixed;z-index:10000;bottom:10px;left:10px;right:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;background:rgba(255,250,240,.97);border:1px solid #c8ac64;border-radius:26px;box-shadow:0 10px 35px #4b39201f;backdrop-filter:blur(14px)}
+.samee3-bottom-nav button{min-height:66px;border:0;background:transparent;color:#286b6d;border-radius:18px;font-family:inherit;font-size:clamp(13px,3.5vw,18px);font-weight:800;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer}
+.samee3-bottom-nav button span{font-size:25px;line-height:1}
+.samee3-bottom-nav button.active{background:#176d70;color:#fff8e7}
+.samee3-bottom-nav button.play{background:#1597c2;color:white;border-radius:50%;width:58px;height:58px;min-height:58px;align-self:center;justify-self:center}
+#hadith-view{padding:20px 12px 100px!important}
+@media(max-width:480px){.samee3-bottom-nav{bottom:6px;left:6px;right:6px;border-radius:22px}.samee3-bottom-nav button{min-height:60px}.mushaf-page-container{padding:5px!important}.mushaf-ornate-border{padding:6px!important}}
 </style>
+
 </head>
 <body>
 
@@ -1155,9 +1148,41 @@ button:active{transform:scale(.97)}
     </script>
     
     <!-- ========================================== -->
-    <!-- التحديثات مدمجة داخل الملف للحفاظ على كل الإمكانيات -->
+    <!-- نظام التحديثات الخارجية (لا تقم بحذفه) -->
     <!-- ========================================== -->
-    <script>
+
+
+<style id="samee3-final-enhancements">
+/* تحسينات العرض والثبات للهاتف */
+html,body{max-width:100%;overflow-x:hidden}
+.mushaf-page-container{width:min(100%,760px);margin-inline:auto;box-sizing:border-box}
+#mushaf-capture-area{touch-action:pan-y}
+.quran-area{font-size:clamp(25px,6.2vw,43px);line-height:2.15;overflow-wrap:anywhere}
+@media(max-width:600px){
+  .container{padding-inline:8px!important;margin-top:10px!important}
+  .mushaf-page-container{padding:5px!important;border-radius:0!important}
+  .mushaf-inner-frame{padding:10px 7px!important}
+  .mushaf-top-header{font-size:12px!important}
+  .quran-area{font-size:clamp(24px,7vw,34px)!important;line-height:2.05!important}
+  .sticky-player{padding:8px!important}
+  .sticky-player .player-info{max-width:none!important}
+  .filters-container{gap:7px!important}
+  .filter-select{min-width:0!important;max-width:100%!important}
+}
+.samee3-hidden-chrome .navbar,
+.samee3-hidden-chrome #hero-filters,
+.samee3-hidden-chrome .hero-filters,
+.samee3-hidden-chrome .sticky-player,
+.samee3-hidden-chrome .mushaf-toolbar,
+.samee3-hidden-chrome .pagination-controls{display:none!important}
+.samee3-hidden-chrome .container{margin:0!important;padding:0!important}
+.samee3-hidden-chrome #mushaf-view{padding-top:0!important}
+.samee3-hidden-chrome .mushaf-page-container{width:100%!important;min-height:100vh!important}
+.samee3-last-place{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;background:#eff6ff;border:1px solid #93c5fd;border-radius:12px;padding:10px 12px;margin:8px 0;font-weight:700;color:#075985}
+.samee3-mini-btn{border:0;border-radius:9px;background:#0284c7;color:white;padding:7px 10px;font-family:inherit;font-weight:700;cursor:pointer}
+</style>
+
+<script>
 // =========================================================
 // 1. تسجيل نظام الأوفلاين (Service Worker)
 // =========================================================
@@ -2098,28 +2123,112 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-    </script>
+</script>
 
-
-<div id="samee3-bottom-nav" aria-label="التنقل الرئيسي">
-  <button type="button" data-tab="home-view" class="active"><span class="s3-icon">⌂</span><span>الرئيسية</span></button>
-  <button type="button" data-tab="hadith-view"><span class="s3-icon">▤</span><span>الأحاديث</span></button>
-  <button type="button" data-tab="index-view"><span class="s3-icon">☷</span><span>الفهرس</span></button>
-  <button type="button" data-tab="azkar-view"><span class="s3-icon">◉</span><span>الأذكار</span></button>
-</div>
-<script id="samee3-redesign-nav">
+<script id="samee3-final-enhancements">
 (function(){
- const nav=document.getElementById('samee3-bottom-nav');
- if(!nav) return;
- nav.querySelectorAll('button[data-tab]').forEach(btn=>{
-   btn.addEventListener('click',function(){
-     const tab=this.getAttribute('data-tab');
-     if(typeof window.switchTab==='function') window.switchTab(tab);
-     nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===this));
-     window.scrollTo({top:0,behavior:'smooth'});
-   });
- });
+'use strict';
+const KEY='samee3_last_reading_v5', FREQ='samee3_reciter_frequency_v1';
+const $=id=>document.getElementById(id);
+function getState(){try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){return null}}
+function saveState(extra){
+  const s=Object.assign(getState()||{},extra||{});
+  const surah=$('bottom-surah-select')||$('surah-select');
+  const rec=$('bottom-reciter-select')||$('reciter-select');
+  s.surah=window.currentSurahNumber||Number(surah&&surah.value)||1;
+  s.reciterValue=rec&&rec.value||window.currentAudioServer||'';
+  s.reciterName=rec&&rec.options[rec.selectedIndex]?rec.options[rec.selectedIndex].text:'';
+  s.time=$('main-audio')?$('main-audio').currentTime||0:0;
+  s.audioSrc=$('main-audio')?$('main-audio').src||'':'';
+  s.savedAt=Date.now();
+  try{localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}
+}
+function updateLock(){
+ const audio=$('main-audio'); if(!audio||!('mediaSession' in navigator))return;
+ const surah=$('bottom-surah-select')||$('surah-select');
+ const rec=$('bottom-reciter-select')||$('reciter-select');
+ const sn=surah&&surah.options[surah.selectedIndex]?surah.options[surah.selectedIndex].text:'المصحف';
+ const rn=rec&&rec.options[rec.selectedIndex]?rec.options[rec.selectedIndex].text:'';
+ try{navigator.mediaSession.metadata=new MediaMetadata({title:sn.replace(/^تحديد السورة.../,'').trim(),artist:rn||'مصحف سميع',album:'مصحف سميع',artwork:[{src:'https://i.ibb.co/LDxp6s8S/8-F026-C85-439-E-4-C5-B-A8-AB-4-ED92-E0-DFB14.png',sizes:'512x512',type:'image/png'}]})}catch(e){}
+}
+function countReciter(){
+ const rec=$('reciter-select'); if(!rec||!rec.value)return;
+ let x={};try{x=JSON.parse(localStorage.getItem(FREQ)||'{}')}catch(e){}
+ x[rec.value]=(x[rec.value]||0)+1;
+ try{localStorage.setItem(FREQ,JSON.stringify(x))}catch(e){}
+ [...rec.options].sort((a,b)=>(x[b.value]||0)-(x[a.value]||0)).forEach(o=>rec.appendChild(o));
+}
+function addLastPlace(){
+ const host=$('mushaf-view'); if(!host||$('samee3-last-place'))return;
+ const s=getState(); if(!s||!s.surah)return;
+ const bar=document.createElement('div');bar.id='samee3-last-place';bar.className='samee3-last-place';
+ bar.innerHTML='<span>📌 آخر موضع قراءة محفوظ تلقائياً</span><button class="samee3-mini-btn">الرجوع لآخر موضع</button>';
+ bar.querySelector('button').onclick=()=>restore(true);
+ const toolbar=host.querySelector('.mushaf-toolbar');(toolbar||host).after(bar);
+}
+function restore(force){
+ const s=getState();if(!s)return;
+ setTimeout(()=>{
+  try{
+   const sel=$('bottom-surah-select')||$('surah-select');
+   if(sel&&s.surah){sel.value=String(s.surah);sel.dispatchEvent(new Event('change',{bubbles:true}))}
+   if(typeof window.loadSurahForReadingAndPlaying==='function'&&s.surah){
+    window.loadSurahForReadingAndPlaying(Number(s.surah),Number(s.ayah)||1,false);
+   }
+   const audio=$('main-audio');
+   if(audio&&s.audioSrc){
+    if(!audio.src||audio.src!==s.audioSrc)audio.src=s.audioSrc;
+    const fn=()=>{try{audio.currentTime=Number(s.time)||0}catch(e){};audio.removeEventListener('loadedmetadata',fn)};
+    audio.addEventListener('loadedmetadata',fn);
+   }
+  }catch(e){}
+ },force?0:900);
+}
+function toggleChrome(){
+ document.body.classList.toggle('samee3-hidden-chrome');
+ try{localStorage.setItem('samee3_chrome_hidden',document.body.classList.contains('samee3-hidden-chrome')?'1':'0')}catch(e){}
+}
+function setup(){
+ const audio=$('main-audio'); if(audio){
+  ['timeupdate','pause','play','ended','loadedmetadata'].forEach(ev=>audio.addEventListener(ev,()=>{saveState();updateLock()}));
+ }
+ ['bottom-surah-select','surah-select','bottom-reciter-select','reciter-select'].forEach(id=>{const el=$(id);if(el)el.addEventListener('change',()=>{saveState();updateLock();countReciter()})});
+ const mushaf=$('quran-display')||$('mushaf-capture-area');
+ if(mushaf)mushaf.addEventListener('click',e=>{
+  if(e.target.closest('button,select,a,input'))return;
+  toggleChrome();
+ },{passive:true});
+ if(localStorage.getItem('samee3_chrome_hidden')==='1')document.body.classList.add('samee3-hidden-chrome');
+ addLastPlace(); restore(false);
+ // حفظ آخر آية/جزء/سورة عند النقر على أي آية أو اختيارها
+ document.addEventListener('click',e=>{
+  const ay=e.target.closest('[data-ayah],.ayah,.ayah-text,.quran-ayah,.ayah-container');
+  if(ay){
+   const n=Number(ay.dataset.ayah||ay.dataset.ayahNumber||ay.getAttribute('data-number'));
+   if(n)saveState({ayah:n});
+  }
+ },true);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup);else setup();
 })();
 </script>
+
+
+<nav class="samee3-bottom-nav" aria-label="التنقل الرئيسي">
+  <button id="samee3-nav-home" class="active" onclick="samee3GoHome()"><span>⌂</span><b>الرئيسية</b></button>
+  <button id="samee3-nav-hadith" onclick="samee3GoHadith()"><span>▤</span><b>الأحاديث</b></button>
+  <button id="samee3-nav-index" onclick="samee3GoIndex()"><span>☷</span><b>الفهرس</b></button>
+  <button class="play" aria-label="تشغيل أو إيقاف التلاوة" onclick="if(typeof togglePlayState==='function')togglePlayState()"><span>▶</span></button>
+</nav>
+<script>
+(function(){
+ function active(id){document.querySelectorAll('.samee3-bottom-nav button').forEach(b=>b.classList.remove('active'));var x=document.getElementById(id);if(x)x.classList.add('active')}
+ window.samee3GoHome=function(){active('samee3-nav-home');if(typeof switchTab==='function')switchTab('mushaf-view');else{document.getElementById('home-view').style.display='none';document.getElementById('mushaf-view').style.display='block'}};
+ window.samee3GoIndex=function(){active('samee3-nav-index');if(typeof switchTab==='function')switchTab('home-view');};
+ window.samee3GoHadith=function(){active('samee3-nav-hadith');if(typeof switchTab==='function')switchTab('hadith-view');if(typeof initHadithSystem==='function')initHadithSystem();};
+ setTimeout(function(){samee3GoHome()},900);
+})();
+</script>
+
 </body>
 </html>
