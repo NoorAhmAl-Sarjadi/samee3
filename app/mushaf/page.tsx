@@ -5,7 +5,7 @@ import { ChevronRight, ChevronLeft, Info } from 'lucide-react'
 async function getQuranPage(pageNumber: number) {
   try {
     const res = await fetch(`https://api.alquran.cloud/v1/page/${pageNumber}/quran-uthmani`, {
-      next: { revalidate: 86400 } // تخزين مؤقت لتسريع الأداء
+      next: { revalidate: 86400 } 
     })
     if (!res.ok) return null
     const data = await res.json()
@@ -16,13 +16,12 @@ async function getQuranPage(pageNumber: number) {
 }
 
 export default async function MushafPage() {
-  const pageNumber = 42 // نفس الصفحة في صورتك المرجعية
+  const pageNumber = 42 // صفحة آية الكرسي كما في صورتك المرجعية
   const pageData = await getQuranPage(pageNumber)
 
   return (
     <div className="min-h-screen bg-mushaf-paper flex flex-col pb-28 md:pb-8">
       
-      {/* الشريط العلوي للتنقل */}
       <div className="flex justify-between items-center p-4 bg-mushaf-paper shadow-sm z-10 relative">
         <Link href="/" className="text-mushaf-teal bg-white p-2 rounded-full shadow-sm hover:bg-mushaf-paper transition">
           <ChevronRight size={24} />
@@ -33,19 +32,16 @@ export default async function MushafPage() {
         </button>
       </div>
 
-      {/* حاوية المصحف الورقي */}
       <div className="flex-1 flex items-center justify-center p-3 sm:p-5">
         <div className="w-full max-w-2xl bg-mushaf-paper border-[6px] border-mushaf-border p-1.5 rounded-sm shadow-2xl relative">
           <div className="border-[2px] border-mushaf-gold p-4 sm:p-6 h-full flex flex-col relative bg-[#FEFCF8]">
             
-            {/* رأس الصفحة (الهيدر الورقي) */}
             <div className="flex justify-between items-center border-b-2 border-mushaf-gold pb-3 mb-6 text-mushaf-gold font-bold text-sm sm:text-base">
               <span>البقرة</span>
               <span className="font-uthmani text-2xl">سُورَةُ البَقَرَةِ</span>
               <span>الجزء ٣</span>
             </div>
 
-            {/* النص القرآني */}
             <div className="flex-1 flex flex-col justify-center">
               {pageData ? (
                 <p 
@@ -67,7 +63,6 @@ export default async function MushafPage() {
               )}
             </div>
 
-            {/* تذييل الصفحة (الفوتر الورقي) */}
             <div className="flex justify-between items-center border-t-2 border-mushaf-gold pt-3 mt-6 text-mushaf-gold font-bold text-sm">
               <span>الحزب ٥</span>
               <span className="text-lg">{pageNumber.toLocaleString('ar-EG')}</span>
@@ -78,7 +73,6 @@ export default async function MushafPage() {
         </div>
       </div>
 
-      {/* أزرار تقليب الصفحات */}
       <div className="fixed bottom-24 md:bottom-8 left-0 w-full flex justify-center gap-16 px-4 z-40">
         <button className="bg-white/90 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-mushaf-teal hover:bg-mushaf-teal hover:text-white transition transform hover:scale-105 border border-mushaf-teal/20">
           <ChevronLeft size={28} />
