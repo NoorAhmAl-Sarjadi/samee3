@@ -1,4 +1,3 @@
-
 'use client'
 
 import Link from 'next/link'
@@ -39,10 +38,11 @@ export default function BottomNav() {
           })}
         </div>
 
+        {/* زر التشغيل البارز تم تحويله لرابط يفتح صفحة الصوتيات */}
         <div className="pl-2 border-r-2 border-mushaf-border/30 pr-4 h-10 flex items-center">
-          <button className="bg-mushaf-teal text-white rounded-full p-1 shadow-lg hover:bg-mushaf-teal/90 transition-all">
+          <Link href="/audio" className={`rounded-full p-1 shadow-lg transition-all ${pathname === '/audio' ? 'bg-mushaf-gold text-white scale-110' : 'bg-mushaf-teal text-white hover:bg-mushaf-teal/90'}`}>
             <PlayCircle size={36} strokeWidth={1.5} />
-          </button>
+          </Link>
         </div>
 
       </div>
