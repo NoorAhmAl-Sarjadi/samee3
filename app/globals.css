@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  /* إخفاء شريط التمرير للحفاظ على جمالية التطبيق */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* خط المصحف العثماني الأساسي */
+@font-face {
+  font-family: 'KFGQPC Uthmanic Script HAFS';
+  src: local('KFGQPC Uthmanic Script HAFS');
+  font-display: swap;
+}
