@@ -9,7 +9,6 @@ export default function IndexPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
 
-  // جلب قائمة السور من المصدر الموثوق
   useEffect(() => {
     fetch('https://api.alquran.cloud/v1/surah')
       .then(res => res.json())
@@ -20,7 +19,6 @@ export default function IndexPage() {
       .catch(err => console.error("Error fetching surahs:", err))
   }, [])
 
-  // دالة البحث الفوري
   const filteredSurahs = surahs.filter(surah => 
     surah.name.includes(searchQuery) || surah.number.toString() === searchQuery
   )
@@ -28,7 +26,6 @@ export default function IndexPage() {
   return (
     <div className="min-h-screen bg-mushaf-paper flex flex-col pb-28 md:pb-8">
       
-      {/* الهيدر وشريط البحث */}
       <div className="bg-mushaf-teal text-white p-5 rounded-b-3xl shadow-md sticky top-0 z-20">
         <div className="flex items-center gap-3 mb-4">
           <Book size={28} className="text-mushaf-gold" />
@@ -47,7 +44,6 @@ export default function IndexPage() {
         </div>
       </div>
 
-      {/* قائمة السور */}
       <div className="p-4 flex-1">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-64 text-mushaf-teal gap-3">
@@ -59,12 +55,11 @@ export default function IndexPage() {
             {filteredSurahs.length > 0 ? (
               filteredSurahs.map((surah) => (
                 <Link 
-                  href="/mushaf" // حالياً يوجه لصفحة المصحف اللي عملناها
+                  href="/mushaf" 
                   key={surah.number}
                   className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/30 flex items-center justify-between hover:border-mushaf-teal transition group"
                 >
                   <div className="flex items-center gap-4">
-                    {/* رقم السورة في إطار زخرفي مبسط */}
                     <div className="w-12 h-12 flex items-center justify-center bg-mushaf-paper border-2 border-mushaf-gold rounded-full transform rotate-45 group-hover:bg-mushaf-teal transition">
                       <span className="transform -rotate-45 font-bold text-mushaf-dark group-hover:text-white">
                         {surah.number}
@@ -92,7 +87,6 @@ export default function IndexPage() {
           </div>
         )}
       </div>
-
     </div>
   )
 }
