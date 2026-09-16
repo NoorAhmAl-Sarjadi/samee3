@@ -485,300 +485,258 @@ function MushafContent() {
   // رابط الصوت من Al Quran Cloud
   // =========================================================
 
-  const getAudioUrl = (
-    ayahNumber: number
-  ) => {
-    return (
-      `https://cdn.islamic.network/quran/audio/128/` +
-      `${selectedReciter.identifier}/` +
-      `${ayahNumber}.mp3`
-    )
-  }
+  const getAudioUrl = useCallback(
+    (ayahNumber: number) => {
+      const bitrate =
+        selectedReciter.bitrate &&
+        [192, 128, 64, 48, 40, 32].includes(
+          Number(selectedReciter.bitrate)
+        )
+          ? Number(selectedReciter.bitrate)
+          : 128
+
+      return (
+        `https://cdn.islamic.network/quran/audio/` +
+        `${bitrate}/` +
+        `${selectedReciter.identifier}/` +
+        `${ayahNumber}.mp3`
+      )
+    },
+    [selectedReciter]
+  )
 
   // =========================================================
-  // إيقاف الصوت
+  // إيقاف الصوت بالكامل
   // =========================================================
 
-  const stopAudio =
-    useCallback(() => {
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current.currentTime = 0
-        audioRef.current.src = ''
-      }
+  const stopAudio = useCallback(() => {
+    const audio = audioRef.current
 
-      audioRef.current =
-        null
+    if (audio) {
+      audio.onended = null
+      audio.onerror = null
+      audio.oncanplay = null
+      audio.pause()
+      audio.currentTime = 0
+      audio.removeAttribute('src')
+      audio.load()
+    }
 
-      setIsPlaying(false)
-      setIsLooping(false)
-      setContinuousPlay(false)
-      setPlayingAyahNumber(null)
-    }, [])
+    audioRef.current = null
+
+    setIsPlaying(false)
+    setIsLooping(false)
+    setContinuousPlay(false)
+    setPlayingAyahNumber(null)
+  }, [])
 
   // =========================================================
   // تشغيل آية
   // =========================================================
 
-  const playSingleAyah =
-    useCallback(
-      async (
-        ayah: Ayah,
-        loop: boolean,
-        continuous: boolean
-      ) => {
-        try {
-          if (audioRef.current) {
-            audioRef.current.pause()
-            audioRef.current.src = ''
+  const playSingleAyah = useCallback(
+    async (
+      ayah: Ayah,
+      loop: boolean,
+      continuous: boolean
+    ) => {
+      try {
+        if (audioRef.current) {
+          const oldAudio = audioRef.current
+          oldAudio.onended = null
+          oldAudio.onerror = null
+          oldAudio.oncanplay = null
+          oldAudio.pause()
+          oldAudio.currentTime = 0
+          oldAudio.removeAttribute('src')
+          oldAudio.load()
+        }
+
+        const audio = new Audio()
+        audio.preload = 'auto'
+        audio.src = getAudioUrl(ayah.number)
+
+        audioRef.current = audio
+
+        setPlayingAyahNumber(ayah.number)
+        setIsPlaying(false)
+        setIsLooping(loop)
+        setContinuousPlay(continuous)
+
+        audio.oncanplay = async () => {
+          try {
+            await audio.play()
+            setIsPlaying(true)
+          } catch (error) {
+            console.error('Audio play blocked:', error)
+            setIsPlaying(false)
           }
+        }
 
-          const audio =
-            new Audio(
-              getAudioUrl(
-                ayah.number
-              )
-            )
+        audio.onerror = () => {
+          console.error('Audio file failed:', audio.src)
+          setIsPlaying(false)
+          setIsLooping(false)
+          setContinuousPlay(false)
+          setPlayingAyahNumber(null)
+        }
 
-          audioRef.current =
-            audio
-
-          setIsPlaying(true)
-          setIsLooping(loop)
-          setContinuousPlay(
-            continuous
-          )
-          setPlayingAyahNumber(
-            ayah.number
-          )
-
-          audio.onended =
-            async () => {
-              // ============================================
-              // تكرار الآية نفسها
-              // ============================================
-
-              if (loop) {
-                try {
-                  audio.currentTime = 0
-                  await audio.play()
-                } catch (error) {
-                  console.error(
-                    error
-                  )
-
-                  setIsPlaying(
-                    false
-                  )
-
-                  setPlayingAyahNumber(
-                    null
-                  )
-                }
-
-                return
-              }
-
-              // ============================================
-              // تشغيل الآيات بشكل متتابع
-              // ============================================
-
-              if (continuous) {
-                const currentIndex =
-                  pageData?.ayahs.findIndex(
-                    (item) =>
-                      item.number ===
-                      ayah.number
-                  ) ?? -1
-
-                const nextAyah =
-                  currentIndex >= 0
-                    ? pageData
-                        ?.ayahs[
-                        currentIndex +
-                          1
-                      ]
-                    : undefined
-
-                // آية تالية في نفس الصفحة
-                if (nextAyah) {
-                  setSelectedAyah(
-                    nextAyah
-                  )
-
-                  await playSingleAyah(
-                    nextAyah,
-                    false,
-                    true
-                  )
-
-                  return
-                }
-
-                // ==========================================
-                // انتهت الصفحة
-                // ننتقل للصفحة التالية
-                // ==========================================
-
-                if (
-                  currentPage <
-                  604
-                ) {
-                  setCurrentPage(
-                    (previous) =>
-                      previous + 1
-                  )
-
-                  return
-                }
-              }
-
+        audio.onended = async () => {
+          if (loop) {
+            try {
+              audio.currentTime = 0
+              await audio.play()
+              setIsPlaying(true)
+            } catch (error) {
+              console.error('Loop playback error:', error)
               setIsPlaying(false)
               setIsLooping(false)
-              setContinuousPlay(
-                false
-              )
-              setPlayingAyahNumber(
-                null
-              )
+              setPlayingAyahNumber(null)
             }
-
-          audio.onerror = () => {
-            console.error(
-              'Audio playback error'
-            )
-
-            setIsPlaying(false)
-            setIsLooping(false)
-            setContinuousPlay(
-              false
-            )
-            setPlayingAyahNumber(
-              null
-            )
+            return
           }
 
-          await audio.play()
-        } catch (error) {
-          console.error(
-            'Play error:',
-            error
-          )
+          if (continuous) {
+            const currentIndex =
+              pageData?.ayahs.findIndex(
+                (item) => item.number === ayah.number
+              ) ?? -1
+
+            const nextAyah =
+              currentIndex >= 0
+                ? pageData?.ayahs[currentIndex + 1]
+                : undefined
+
+            if (nextAyah) {
+              await playSingleAyah(nextAyah, false, true)
+              return
+            }
+
+            if (currentPage < 604) {
+              try {
+                const nextPageNumber = currentPage + 1
+                const response = await fetch(
+                  `https://api.alquran.cloud/v1/page/${nextPageNumber}/quran-uthmani`,
+                  { cache: 'no-store' }
+                )
+
+                if (!response.ok) {
+                  throw new Error('فشل تحميل الصفحة التالية')
+                }
+
+                const data = await response.json()
+                const nextPageData = data?.data as PageData
+
+                if (nextPageData?.ayahs?.length) {
+                  setCurrentPage(nextPageNumber)
+                  setPageData(nextPageData)
+                  const firstAyah = nextPageData.ayahs[0]
+                  await playSingleAyah(firstAyah, false, true)
+                  return
+                }
+              } catch (error) {
+                console.error('Next page audio error:', error)
+              }
+            }
+          }
 
           setIsPlaying(false)
           setIsLooping(false)
-          setContinuousPlay(
-            false
-          )
-          setPlayingAyahNumber(
-            null
-          )
+          setContinuousPlay(false)
+          setPlayingAyahNumber(null)
         }
-      },
-      [
-        pageData,
-        currentPage,
-        selectedReciter,
-      ]
-    )
+
+        try {
+          await audio.play()
+          setIsPlaying(true)
+        } catch {
+          // سيبدأ التشغيل تلقائيًا من oncanplay
+        }
+      } catch (error) {
+        console.error('Play ayah error:', error)
+        setIsPlaying(false)
+        setIsLooping(false)
+        setContinuousPlay(false)
+        setPlayingAyahNumber(null)
+      }
+    },
+    [currentPage, getAudioUrl, pageData]
+  )
 
   // =========================================================
   // تغيير القارئ
   // =========================================================
 
-  const handleReciterChange =
-    (
-      event: React.ChangeEvent<HTMLSelectElement>
-    ) => {
-      const newIdentifier =
-        event.target.value
+  const handleReciterChange = (
+    event: React.ChangeEvent<HTMLSelectElement>
+  ) => {
+    const newIdentifier = event.target.value
 
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current.currentTime = 0
-        audioRef.current.src = ''
-        audioRef.current = null
-      }
-
-      setIsPlaying(false)
-      setIsLooping(false)
-      setContinuousPlay(
-        false
-      )
-      setPlayingAyahNumber(
-        null
-      )
-
-      setSelectedReciterId(
-        newIdentifier
-      )
+    if (audioRef.current) {
+      const audio = audioRef.current
+      audio.onended = null
+      audio.onerror = null
+      audio.oncanplay = null
+      audio.pause()
+      audio.currentTime = 0
+      audio.removeAttribute('src')
+      audio.load()
+      audioRef.current = null
     }
+
+    setIsPlaying(false)
+    setIsLooping(false)
+    setContinuousPlay(false)
+    setPlayingAyahNumber(null)
+    setSelectedReciterId(newIdentifier)
+  }
 
   // =========================================================
   // استماع متتابع
   // =========================================================
 
-  const handleListen =
-    async () => {
-      if (!selectedAyah)
-        return
+  const handleListen = async () => {
+    if (!selectedAyah) return
 
-      await playSingleAyah(
-        selectedAyah,
-        false,
-        true
-      )
+    const ayahToPlay = selectedAyah
+    setSelectedAyah(null)
 
-      setSelectedAyah(null)
-    }
+    await playSingleAyah(ayahToPlay, false, true)
+  }
 
   // =========================================================
   // تكرار آية واحدة
   // =========================================================
 
-  const handleRepeat =
-    async () => {
-      if (!selectedAyah)
-        return
+  const handleRepeat = async () => {
+    if (!selectedAyah) return
 
-      await playSingleAyah(
-        selectedAyah,
-        true,
-        false
-      )
+    const ayahToPlay = selectedAyah
+    setSelectedAyah(null)
 
-      setSelectedAyah(null)
-    }
+    await playSingleAyah(ayahToPlay, true, false)
+  }
 
   // =========================================================
   // تشغيل / إيقاف المشغل
   // =========================================================
 
-  const toggleFloatingPlayer =
-    async () => {
-      if (
-        !audioRef.current
-      ) {
-        return
-      }
+  const toggleFloatingPlayer = async () => {
+    const audio = audioRef.current
+    if (!audio) return
 
-      if (
-        audioRef.current
-          .paused
-      ) {
-        try {
-          await audioRef.current.play()
-          setIsPlaying(true)
-        } catch (error) {
-          console.error(
-            error
-          )
-        }
+    try {
+      if (audio.paused) {
+        await audio.play()
+        setIsPlaying(true)
       } else {
-        audioRef.current.pause()
+        audio.pause()
         setIsPlaying(false)
       }
+    } catch (error) {
+      console.error('Floating player error:', error)
     }
+  }
 
   // =========================================================
   // نسخ الآية
@@ -1532,130 +1490,75 @@ function MushafContent() {
 
   return (
     <div
-      className="min-h-screen bg-mushaf-paper flex flex-col pb-40 relative"
+      className="min-h-screen bg-[#f6efdd] flex flex-col pb-44 relative overflow-x-hidden"
       dir="rtl"
     >
       {/* =====================================================
           HEADER
       ====================================================== */}
 
-      <header className="sticky top-0 z-30 bg-mushaf-paper/95 backdrop-blur-md border-b border-mushaf-border/30 shadow-sm">
-        <div className="flex items-center justify-between p-4">
-          <Link
-            href="/"
-            className="text-mushaf-teal bg-white p-2.5 rounded-full shadow-sm hover:bg-mushaf-paper transition"
-          >
-            <ChevronRight size={24} />
-          </Link>
+      <header className="sticky top-0 z-30 bg-[#f6efdd]/95 backdrop-blur-md border-b border-[#b78945]/40 shadow-[0_4px_18px_rgba(91,59,20,0.08)]">
+        <div className="relative mx-auto max-w-4xl px-3 pt-3 pb-2">
+          <div className="flex items-center justify-between gap-2">
+            <Link
+              href="/"
+              className="w-11 h-11 rounded-full border border-[#b78945]/50 bg-[#fffaf0] text-[#175e67] flex items-center justify-center shadow-sm"
+              aria-label="العودة للرئيسية"
+            >
+              <ChevronRight size={22} />
+            </Link>
 
-          <div className="text-center">
-            <h1 className="font-bold text-mushaf-dark text-lg">
-              المصحف الشريف
-            </h1>
-
-            <p className="text-[11px] text-mushaf-teal font-bold mt-1">
-              مصحف سَميع
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="text-mushaf-gold bg-white p-2.5 rounded-full shadow-sm"
-          >
-            <Info size={22} />
-          </button>
-        </div>
-
-        {/* ===================================================
-            اختيار القارئ
-        ==================================================== */}
-
-        <div className="px-4 pb-4">
-          <div className="w-full max-w-md mx-auto">
-            <div className="flex items-center gap-2 mb-2">
-              <Mic2
-                size={16}
-                className="text-mushaf-gold"
-              />
-
-              <span className="text-xs font-bold text-mushaf-teal">
-                القارئ
-              </span>
-
-              {!isLoadingReciters &&
-                reciters.length > 0 && (
-                  <span className="text-[10px] text-gray-400">
-                    ({reciters.length} تلاوة متاحة)
-                  </span>
-                )}
+            <div className="flex-1 text-center">
+              <h1 className="font-bold text-[#5a3b1b] text-xl font-uthmani">
+                المصحف الشريف
+              </h1>
+              <p className="text-[10px] font-bold text-[#175e67] mt-0.5 tracking-wide">
+                مصحف سَميع
+              </p>
             </div>
 
-            <div className="relative">
+            <button
+              type="button"
+              className="w-11 h-11 rounded-full border border-[#b78945]/50 bg-[#fffaf0] text-[#b78945] flex items-center justify-center shadow-sm"
+              aria-label="معلومات المصحف"
+            >
+              <Info size={21} />
+            </button>
+          </div>
+
+          <div className="mt-3">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <Mic2 size={15} className="text-[#b78945]" />
+              <span className="text-xs font-bold text-[#175e67]">القارئ</span>
+              {!isLoadingReciters && reciters.length > 0 && (
+                <span className="text-[10px] text-[#8a7456]">
+                  ({reciters.length} تلاوة)
+                </span>
+              )}
+            </div>
+
+            <div className="relative max-w-xl mx-auto">
               <select
-                value={
-                  selectedReciterId
-                }
-                onChange={
-                  handleReciterChange
-                }
-                disabled={
-                  isLoadingReciters
-                }
-                className="
-                  w-full
-                  appearance-none
-                  bg-white
-                  border
-                  border-mushaf-gold/40
-                  text-mushaf-teal
-                  font-bold
-                  text-sm
-                  rounded-2xl
-                  py-3
-                  pr-4
-                  pl-11
-                  shadow-sm
-                  outline-none
-                  focus:ring-2
-                  focus:ring-mushaf-teal/20
-                  cursor-pointer
-                  disabled:opacity-60
-                "
+                value={selectedReciterId}
+                onChange={handleReciterChange}
+                disabled={isLoadingReciters}
+                className="w-full appearance-none bg-[#fffaf0] border-2 border-[#b78945]/35 text-[#175e67] font-bold text-sm rounded-2xl py-3 pr-4 pl-11 shadow-sm outline-none focus:border-[#175e67] focus:ring-2 focus:ring-[#175e67]/10 cursor-pointer disabled:opacity-60"
               >
                 {isLoadingReciters ? (
-                  <option>
-                    جاري تحميل القراء...
-                  </option>
+                  <option>جاري تحميل القراء...</option>
                 ) : (
-                  reciters.map(
-                    (reciter) => (
-                      <option
-                        key={
-                          reciter.identifier
-                        }
-                        value={
-                          reciter.identifier
-                        }
-                      >
-                        {reciter.name ||
-                          reciter.englishName ||
-                          reciter.identifier}
-                      </option>
-                    )
-                  )
+                  reciters.map((reciter) => (
+                    <option key={reciter.identifier} value={reciter.identifier}>
+                      {reciter.name || reciter.englishName || reciter.identifier}
+                    </option>
+                  ))
                 )}
               </select>
-
-              <ChevronDown
-                size={18}
-                className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-mushaf-gold"
-              />
+              <ChevronDown size={18} className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-[#b78945]" />
             </div>
 
             {recitersError && (
-              <p className="text-[10px] text-red-500 mt-2 text-center">
-                {recitersError}
-              </p>
+              <p className="text-[10px] text-red-500 mt-2 text-center">{recitersError}</p>
             )}
           </div>
         </div>
@@ -1665,127 +1568,90 @@ function MushafContent() {
           المصحف
       ====================================================== */}
 
-      <main className="flex-1 flex items-center justify-center p-3 sm:p-5">
-        <div className="w-full max-w-3xl bg-mushaf-paper border-[6px] border-mushaf-border p-1.5 rounded-sm shadow-2xl">
-          <div className="border-[2px] border-mushaf-gold bg-[#FEFCF8] p-4 sm:p-7 min-h-[70vh] flex flex-col">
-            <div className="flex justify-between items-center border-b-2 border-mushaf-gold pb-3 mb-7 text-mushaf-gold font-bold text-xs sm:text-sm">
-              <span>
-                الجزء{' '}
-                {currentJuz
-                  ? Number(
-                      currentJuz
-                    ).toLocaleString(
-                      'ar-EG'
-                    )
-                  : '—'}
-              </span>
+      <main className="flex-1 flex items-center justify-center px-2 py-4 sm:px-4 sm:py-6">
+        <div className="w-full max-w-4xl">
+          <div className="relative rounded-[34px] border-[4px] border-[#a97834] bg-[#efe3c7] p-2 shadow-[0_18px_50px_rgba(83,50,20,0.20)]">
+            <div className="relative rounded-[28px] border-[2px] border-[#c59a53] bg-[#fffaf0] overflow-hidden">
+              <div className="pointer-events-none absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_20%_20%,rgba(183,137,69,.18),transparent_24%),radial-gradient(circle_at_80%_70%,rgba(23,94,103,.08),transparent_22%)]" />
 
-              <span className="font-uthmani text-lg sm:text-2xl text-center px-3">
-                {currentSurah}
-              </span>
+              <div className="relative px-3 py-4 sm:px-7 sm:py-6">
+                <div className="flex items-center gap-2 justify-between">
+                  <div className="min-w-[92px] text-center rounded-2xl border border-[#b78945]/50 bg-[#f9eed7] px-3 py-2 shadow-sm">
+                    <div className="text-[10px] font-bold text-[#8b6a3b]">الجزء</div>
+                    <div className="text-lg font-uthmani font-bold text-[#5a3b1b]">
+                      {currentJuz ? Number(currentJuz).toLocaleString('ar-EG') : '—'}
+                    </div>
+                  </div>
 
-              <span>
-                صفحة{' '}
-                {currentPage.toLocaleString(
-                  'ar-EG'
-                )}
-              </span>
-            </div>
+                  <div className="relative flex-1 text-center">
+                    <div className="absolute left-1/2 -top-5 -translate-x-1/2 text-[#0f7080] text-2xl">✦</div>
+                    <div className="inline-block rounded-[26px] border-2 border-[#b78945]/55 bg-[#f9eed7] px-6 py-2.5 shadow-inner">
+                      <div className="font-uthmani text-xl sm:text-3xl font-bold text-[#3f2a13] leading-none">
+                        {currentSurah}
+                      </div>
+                    </div>
+                  </div>
 
-            <div className="flex-1 flex items-center justify-center">
-              {isLoading ? (
-                <div className="flex flex-col items-center justify-center text-mushaf-teal gap-3 py-20">
-                  <Loader2
-                    className="animate-spin"
-                    size={40}
-                  />
-
-                  <p className="font-bold">
-                    جاري تحميل الصفحة...
-                  </p>
+                  <div className="min-w-[92px] text-center rounded-2xl border border-[#b78945]/50 bg-[#f9eed7] px-3 py-2 shadow-sm">
+                    <div className="text-[10px] font-bold text-[#8b6a3b]">صفحة</div>
+                    <div className="text-lg font-bold text-[#175e67]">
+                      {currentPage.toLocaleString('ar-EG')}
+                    </div>
+                  </div>
                 </div>
-              ) : pageData?.ayahs
-                  ?.length ? (
-                <p
-                  className="font-uthmani text-[24px] sm:text-[29px] leading-[2.5] sm:leading-[2.8] text-mushaf-dark text-justify w-full"
-                  style={{
-                    textAlignLast:
-                      'center',
-                  }}
-                >
-                  {pageData.ayahs.map(
-                    (ayah) => (
-                      <span
-                        key={
-                          ayah.number
-                        }
-                        onClick={() =>
-                          setSelectedAyah(
-                            ayah
-                          )
-                        }
-                        className={`
-                          cursor-pointer
-                          transition-all
-                          duration-300
-                          rounded-lg
-                          px-1
-                          inline
-                          ${
-                            selectedAyah?.number ===
-                              ayah.number ||
-                            playingAyahNumber ===
-                              ayah.number
-                              ? 'bg-mushaf-gold/20 shadow-sm'
-                              : 'hover:bg-mushaf-gold/10'
-                          }
-                        `}
-                      >
-                        {ayah.text}
 
+                <div className="my-4 h-px bg-gradient-to-r from-transparent via-[#b78945]/60 to-transparent" />
+
+                <div className="min-h-[62vh] sm:min-h-[70vh] flex items-center justify-center px-2 sm:px-7 py-3">
+                  {isLoading ? (
+                    <div className="flex flex-col items-center justify-center text-[#175e67] gap-3 py-24">
+                      <Loader2 className="animate-spin" size={42} />
+                      <p className="font-bold">جاري تحميل الصفحة...</p>
+                    </div>
+                  ) : pageData?.ayahs?.length ? (
+                    <p
+                      className="font-uthmani text-[25px] sm:text-[33px] leading-[2.45] sm:leading-[2.55] text-[#171717] text-justify w-full"
+                      style={{ textAlignLast: 'center' }}
+                    >
+                      {pageData.ayahs.map((ayah) => (
                         <span
-                          className={`
-                            text-mushaf-gold
-                            mx-1
-                            sm:mx-2
-                            text-xl
-                            sm:text-2xl
-                            inline-flex
-                            items-center
-                            justify-center
-                            align-middle
-                            transition-transform
-                            ${
-                              playingAyahNumber ===
-                              ayah.number
-                                ? 'scale-125'
-                                : ''
-                            }
-                          `}
+                          key={ayah.number}
+                          onClick={() => setSelectedAyah(ayah)}
+                          className={`cursor-pointer transition-all duration-200 rounded-lg px-1 inline ${
+                            selectedAyah?.number === ayah.number || playingAyahNumber === ayah.number
+                              ? 'bg-[#c59a53]/20 shadow-sm'
+                              : 'hover:bg-[#c59a53]/10'
+                          }`}
                         >
-                          ﴿
-                          {ayah.numberInSurah.toLocaleString(
-                            'ar-EG'
-                          )}
-                          ﴾
+                          {ayah.text}
+                          <span
+                            className={`text-[#b78945] mx-1 sm:mx-2 text-xl sm:text-2xl inline-flex items-center justify-center align-middle transition-transform ${
+                              playingAyahNumber === ayah.number ? 'scale-125' : ''
+                            }`}
+                          >
+                            ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
+                          </span>
                         </span>
-                      </span>
-                    )
+                      ))}
+                    </p>
+                  ) : (
+                    <div className="text-center text-red-500 font-bold">تعذر تحميل الصفحة</div>
                   )}
-                </p>
-              ) : (
-                <div className="text-center text-red-500 font-bold">
-                  تعذر تحميل الصفحة
                 </div>
-              )}
-            </div>
 
-            <div className="flex justify-center items-center border-t-2 border-mushaf-gold pt-3 mt-7 text-mushaf-gold font-bold text-sm">
-              <span className="text-lg">
-                {currentPage.toLocaleString(
-                  'ar-EG'
-                )}
-              </span>
+                <div className="my-4 h-px bg-gradient-to-r from-transparent via-[#b78945]/60 to-transparent" />
+
+                <div className="flex items-center justify-between text-[#b78945] text-sm font-bold">
+                  <span>مصحف سَميع</span>
+                  <span>{currentPage.toLocaleString('ar-EG')}</span>
+                  <span>{currentSurah}</span>
+                </div>
+              </div>
+
+              <div className="absolute top-2 left-2 text-3xl text-[#0f7080] opacity-80">❋</div>
+              <div className="absolute top-2 right-2 text-3xl text-[#0f7080] opacity-80">❋</div>
+              <div className="absolute bottom-2 left-2 text-3xl text-[#0f7080] opacity-80">❋</div>
+              <div className="absolute bottom-2 right-2 text-3xl text-[#0f7080] opacity-80">❋</div>
             </div>
           </div>
         </div>
@@ -1796,7 +1662,7 @@ function MushafContent() {
       ====================================================== */}
 
       <div
-        className="fixed bottom-28 md:bottom-8 left-0 w-full flex justify-center gap-10 sm:gap-16 px-4 z-30"
+        className="fixed bottom-6 left-0 w-full flex justify-center gap-10 sm:gap-16 px-4 z-30 pointer-events-none"
         dir="ltr"
       >
         <button
@@ -1805,7 +1671,7 @@ function MushafContent() {
           disabled={
             currentPage === 604
           }
-          className="bg-white/95 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-mushaf-teal hover:bg-mushaf-teal hover:text-white transition border border-mushaf-teal/20 disabled:opacity-40"
+          className="pointer-events-auto bg-[#fffaf0]/95 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-[#175e67] hover:bg-[#175e67] hover:text-white transition border border-[#b78945]/40 disabled:opacity-40"
         >
           <ChevronLeft size={28} />
         </button>
@@ -1816,7 +1682,7 @@ function MushafContent() {
           disabled={
             currentPage === 1
           }
-          className="bg-white/95 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-mushaf-teal hover:bg-mushaf-teal hover:text-white transition border border-mushaf-teal/20 disabled:opacity-40"
+          className="pointer-events-auto bg-[#fffaf0]/95 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-[#175e67] hover:bg-[#175e67] hover:text-white transition border border-[#b78945]/40 disabled:opacity-40"
         >
           <ChevronRight size={28} />
         </button>
@@ -2208,7 +2074,7 @@ function MushafContent() {
       ====================================================== */}
 
       {playingAyah && (
-        <div className="fixed bottom-[92px] sm:bottom-[96px] left-3 right-3 z-[45]">
+        <div className="fixed bottom-[92px] sm:bottom-[100px] left-3 right-3 z-[45]">
           <div className="bg-gradient-to-br from-[#175E67] to-[#0D383E] rounded-[24px] border border-mushaf-gold/30 shadow-[0_15px_50px_rgba(13,56,62,0.35)] px-4 py-3 text-white">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 shrink-0 rounded-full bg-white/10 border border-white/15 flex items-center justify-center">
