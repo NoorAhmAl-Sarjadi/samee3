@@ -1,101 +1,84 @@
 'use client'
 
 import { useState } from 'react'
-import { Heart, RotateCcw, Plus, Sun, Moon, Star } from 'lucide-react'
+import { Heart, Sun, Moon, Shield, ChevronLeft, Plus, RotateCcw } from 'lucide-react'
+import Link from 'next/link'
 
 export default function AdhkarPage() {
-  const [tasbeehCount, setTasbeehCount] = useState(0)
-
-  // دالة زيادة العداد
-  const handleTasbeeh = () => {
-    setTasbeehCount(prev => prev + 1)
-    // هنا ممكن نضيف اهتزاز خفيف للموبايل (Haptic Feedback) لو المتصفح يدعم
-    if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
-      window.navigator.vibrate(50)
-    }
-  }
-
-  // دالة تصفير العداد
-  const resetTasbeeh = () => {
-    setTasbeehCount(0)
-  }
-
+  const [count, setCount] = useState(0)
+  
   return (
     <div className="min-h-screen bg-mushaf-paper flex flex-col p-5 pb-28 md:pb-8">
       
       {/* الهيدر */}
-      <div className="flex items-center gap-3 mb-6 pt-2">
+      <div className="flex items-center gap-3 mb-8 pt-2">
         <Heart size={28} className="text-mushaf-teal" />
         <h1 className="text-2xl font-bold font-cairo text-mushaf-teal">الأذكار والتسبيح</h1>
       </div>
 
-      {/* المسبحة الإلكترونية (عداد التسبيح) */}
-      <section className="bg-gradient-to-br from-mushaf-teal to-[#11464D] rounded-3xl p-6 shadow-xl mb-8 relative overflow-hidden flex flex-col items-center justify-center border-4 border-mushaf-gold/20">
-        <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white to-transparent"></div>
-        
-        <h2 className="text-mushaf-gold font-bold text-lg mb-4 relative z-10">المسبحة الإلكترونية</h2>
-        
-        {/* شاشة العداد */}
-        <div className="bg-mushaf-paper w-40 h-20 rounded-2xl flex items-center justify-center shadow-inner mb-6 relative z-10 border-2 border-mushaf-border">
-          <span className="text-4xl font-bold text-mushaf-dark">{tasbeehCount}</span>
-        </div>
-
-        {/* أزرار التحكم */}
-        <div className="flex items-center gap-6 relative z-10">
-          <button 
-            onClick={resetTasbeeh}
-            className="bg-white/10 p-3 rounded-full text-white hover:bg-white/20 transition backdrop-blur-sm"
-            title="تصفير العداد"
-          >
-            <RotateCcw size={24} />
-          </button>
+      {/* السبحة الإلكترونية (تحديث شكلها) */}
+      <section className="mb-8">
+        <div className="bg-gradient-to-br from-[#175E67] to-[#0D383E] rounded-3xl p-8 shadow-xl text-center relative overflow-hidden border border-mushaf-gold/20 flex flex-col items-center justify-center">
+          <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl"></div>
           
-          <button 
-            onClick={handleTasbeeh}
-            className="bg-mushaf-gold w-24 h-24 rounded-full flex items-center justify-center text-white shadow-[0_0_20px_rgba(197,154,83,0.4)] hover:scale-105 active:scale-95 transition-all border-4 border-white/20"
-          >
-            <Plus size={40} strokeWidth={3} />
-          </button>
+          <h2 className="text-mushaf-gold font-bold mb-6 text-lg relative z-10">المسبحة الإلكترونية</h2>
+          
+          <div className="w-48 h-48 rounded-full border-4 border-mushaf-gold/30 flex items-center justify-center relative z-10 mb-8 bg-white/5 backdrop-blur-sm shadow-inner">
+            <span className="text-6xl font-mono text-white font-bold">{count}</span>
+          </div>
+
+          <div className="flex gap-4 w-full relative z-10">
+            <button 
+              onClick={() => setCount(prev => prev + 1)}
+              className="flex-1 bg-white text-mushaf-teal font-bold text-xl py-4 rounded-2xl shadow-lg hover:bg-mushaf-paper hover:scale-105 transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <Plus size={24} />
+              تسبيح
+            </button>
+            <button 
+              onClick={() => setCount(0)}
+              className="w-16 bg-white/10 text-white rounded-2xl flex items-center justify-center hover:bg-red-500 hover:text-white transition-all active:scale-95 border border-white/20"
+            >
+              <RotateCcw size={24} />
+            </button>
+          </div>
         </div>
       </section>
 
-      {/* تصنيفات الأذكار */}
+      {/* تصنيفات الأذكار المربوطة بالصفحة الجديدة */}
       <section>
-        <h3 className="text-lg font-bold text-mushaf-dark mb-4">أذكار المسلم</h3>
-        <div className="grid grid-cols-2 gap-4">
-          
-          {/* بطاقة أذكار الصباح */}
-          <button className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
-            <div className="bg-blue-50 p-3 rounded-full group-hover:bg-blue-100 transition">
-              <Sun size={28} className="text-blue-500" />
+        <h3 className="text-lg font-bold text-mushaf-dark mb-4">أقسام الأذكار</h3>
+        
+        <div className="flex flex-col gap-3">
+          <Link href="/adhkar/read?type=morning" className="bg-white p-5 rounded-2xl shadow-sm border border-mushaf-border/40 flex items-center justify-between hover:border-mushaf-teal transition group">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-orange-50 text-orange-500 rounded-xl flex items-center justify-center group-hover:bg-orange-500 group-hover:text-white transition">
+                <Sun size={24} />
+              </div>
+              <span className="font-bold text-mushaf-dark text-lg group-hover:text-mushaf-teal transition">أذكار الصباح</span>
             </div>
-            <span className="font-bold text-mushaf-dark text-sm">أذكار الصباح</span>
-          </button>
+            <ChevronLeft className="text-mushaf-gold opacity-50 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
+          </Link>
 
-          {/* بطاقة أذكار المساء */}
-          <button className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
-            <div className="bg-indigo-50 p-3 rounded-full group-hover:bg-indigo-100 transition">
-              <Moon size={28} className="text-indigo-600" />
+          <Link href="/adhkar/read?type=evening" className="bg-white p-5 rounded-2xl shadow-sm border border-mushaf-border/40 flex items-center justify-between hover:border-mushaf-teal transition group">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-xl flex items-center justify-center group-hover:bg-indigo-500 group-hover:text-white transition">
+                <Moon size={24} />
+              </div>
+              <span className="font-bold text-mushaf-dark text-lg group-hover:text-mushaf-teal transition">أذكار المساء</span>
             </div>
-            <span className="font-bold text-mushaf-dark text-sm">أذكار المساء</span>
-          </button>
+            <ChevronLeft className="text-mushaf-gold opacity-50 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
+          </Link>
 
-          {/* بطاقة أذكار النوم */}
-          <button className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
-            <div className="bg-purple-50 p-3 rounded-full group-hover:bg-purple-100 transition">
-              <Star size={28} className="text-purple-500" />
+          <Link href="/adhkar/read?type=sleep" className="bg-white p-5 rounded-2xl shadow-sm border border-mushaf-border/40 flex items-center justify-between hover:border-mushaf-teal transition group">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-mushaf-paper text-mushaf-teal rounded-xl flex items-center justify-center group-hover:bg-mushaf-teal group-hover:text-white transition">
+                <Shield size={24} />
+              </div>
+              <span className="font-bold text-mushaf-dark text-lg group-hover:text-mushaf-teal transition">أذكار النوم</span>
             </div>
-            <span className="font-bold text-mushaf-dark text-sm">أذكار النوم</span>
-          </button>
-
-          {/* بطاقة أذكار الصلاة */}
-          <button className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
-            <div className="bg-mushaf-paper p-3 rounded-full border border-mushaf-gold/30 group-hover:bg-mushaf-gold/10 transition">
-              <Heart size={28} className="text-mushaf-gold" />
-            </div>
-            <span className="font-bold text-mushaf-dark text-sm">بعد الصلاة</span>
-          </button>
-
+            <ChevronLeft className="text-mushaf-gold opacity-50 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
+          </Link>
         </div>
       </section>
 
