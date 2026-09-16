@@ -1,11 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import Link from 'next/link'
-import { Search, ChevronLeft, List, Hash } from 'lucide-react'
+import { Search, ChevronLeft, List, Hash, Loader2 } from 'lucide-react'
 
-// مصفوفة مبسطة للسور (ممكن نكملها للـ 114 سورة بنفس النمط)
-// رقم الصفحة هو بداية السورة في المصحف
 const surahsList = [
   { id: 1, name: 'الفاتحة', type: 'مكية', ayahs: 7, startPage: 1 },
   { id: 2, name: 'البقرة', type: 'مدنية', ayahs: 286, startPage: 2 },
@@ -28,10 +26,9 @@ const surahsList = [
   { id: 114, name: 'الناس', type: 'مكية', ayahs: 6, startPage: 604 },
 ]
 
-export default function IndexPage() {
+function IndexContent() {
   const [searchQuery, setSearchQuery] = useState('')
 
-  // فلترة السور بناءً على البحث
   const filteredSurahs = surahsList.filter(surah => 
     surah.name.includes(searchQuery)
   )
@@ -62,7 +59,6 @@ export default function IndexPage() {
         {filteredSurahs.map((surah) => (
           <Link 
             key={surah.id}
-            // السحر هنا: التوجيه لصفحة المصحف مع تمرير رقم بداية السورة
             href={`/mushaf?page=${surah.startPage}`} 
             className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex items-center justify-between hover:border-mushaf-teal transition group"
           >
@@ -100,5 +96,18 @@ export default function IndexPage() {
       </div>
 
     </div>
+  )
+}
+
+// السحر هنا: تغليف الصفحة بـ Suspense لحمايتها من أخطاء الـ Build
+export default function IndexPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-mushaf-paper">
+        <Loader2 className="animate-spin text-mushaf-teal" size={40}/>
+      </div>
+    }>
+      <IndexContent />
+    </Suspense>
   )
 }
