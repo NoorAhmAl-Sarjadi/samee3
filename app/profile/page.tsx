@@ -16,11 +16,14 @@ import {
   Play,
   Library,
   CheckCircle2,
+  CalendarDays,
+  Save,
+  RotateCcw,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { auth, db } from '@/lib/firebase'
 import { signOut } from 'firebase/auth'
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 interface BookmarkItem {
   number: number
@@ -28,6 +31,52 @@ interface BookmarkItem {
   numberInSurah: number
   surahName?: string
   page?: number
+}
+
+interface KhatmaPlan {
+  days: number
+  startDate: string
+}
+
+const TOTAL_PAGES = 604
+
+function formatArabicNumber(value: number) {
+  return value.toLocaleString('ar-EG')
+}
+
+function formatDateArabic(dateString: string) {
+  if (!dateString) return '—'
+
+  const date = new Date(`${dateString}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return dateString
+
+  return new Intl.DateTimeFormat('ar-EG', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date)
+}
+
+function addDays(dateString: string, days: number) {
+  const date = new Date(`${dateString}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`
+}
+
+function getTodayString() {
+  const today = new Date()
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+    today.getDate()
+  ).padStart(2, '0')}`
+}
+
+function diffDaysInclusive(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T00:00:00`)
+  const end = new Date(`${endDate}T00:00:00`)
+  const diff = Math.round((end.getTime() - start.getTime()) / 86400000)
+  return diff + 1
 }
 
 export default function ProfilePage() {
@@ -40,9 +89,17 @@ export default function ProfilePage() {
   const [deletingBookmark, setDeletingBookmark] = useState<number | null>(null)
 
   // =========================================================
-  // تحميل بيانات المستخدم والتقدم
+  // خطة الختمة
   // =========================================================
+  const [khatmaDays, setKhatmaDays] = useState(30)
+  const [khatmaStartDate, setKhatmaStartDate] = useState(getTodayString())
+  const [hasKhatmaPlan, setHasKhatmaPlan] = useState(false)
+  const [isSavingPlan, setIsSavingPlan] = useState(false)
+  const [planMessage, setPlanMessage] = useState('')
 
+  // =========================================================
+  // تحميل بيانات المستخدم والتقدم + خطة الختمة
+  // =========================================================
   useEffect(() => {
     if (!user) {
       setIsLoadingProfile(false)
@@ -58,12 +115,27 @@ export default function ProfilePage() {
 
         if (snapshot.exists()) {
           const data = snapshot.data()
+
           const savedPage = Number(data?.lastReadPage || 1)
 
           if (Number.isFinite(savedPage)) {
-            setLastPage(
-              Math.min(604, Math.max(1, savedPage))
-            )
+            setLastPage(Math.min(TOTAL_PAGES, Math.max(1, savedPage)))
+          }
+
+          const savedDays = Number(data?.khatmaDays || 0)
+          const savedStartDate =
+            typeof data?.khatmaStartDate === 'string'
+              ? data.khatmaStartDate
+              : ''
+
+          if (Number.isFinite(savedDays) && savedDays >= 1 && savedDays <= 365) {
+            setKhatmaDays(savedDays)
+
+            if (savedStartDate) {
+              setKhatmaStartDate(savedStartDate)
+            }
+
+            setHasKhatmaPlan(true)
           }
         }
       } catch (error) {
@@ -73,22 +145,19 @@ export default function ProfilePage() {
       }
     }
 
-    loadProfile()
+    void loadProfile()
   }, [user])
 
   // =========================================================
   // تحميل الآيات المحفوظة من localStorage
   // =========================================================
-
   useEffect(() => {
     try {
       const saved = JSON.parse(
         localStorage.getItem('samee3_bookmarks') || '[]'
       )
 
-      setBookmarks(
-        Array.isArray(saved) ? saved : []
-      )
+      setBookmarks(Array.isArray(saved) ? saved : [])
     } catch (error) {
       console.error('Bookmarks loading error:', error)
       setBookmarks([])
@@ -98,7 +167,6 @@ export default function ProfilePage() {
   // =========================================================
   // تسجيل الخروج
   // =========================================================
-
   const handleLogout = async () => {
     try {
       await signOut(auth)
@@ -111,7 +179,6 @@ export default function ProfilePage() {
   // =========================================================
   // حذف آية محفوظة
   // =========================================================
-
   const removeBookmark = (number: number) => {
     try {
       setDeletingBookmark(number)
@@ -136,27 +203,122 @@ export default function ProfilePage() {
   }
 
   // =========================================================
-  // نسبة الختمة
+  // نسبة الختمة الحالية
   // =========================================================
-
   const percentage = useMemo(() => {
-    const value = Math.round(
-      (lastPage / 604) * 100
-    )
-
+    const value = Math.round((lastPage / TOTAL_PAGES) * 100)
     return Math.min(100, Math.max(0, value))
   }, [lastPage])
-
-  // =========================================================
-  // صفحة البداية للمتابعة
-  // =========================================================
 
   const continueReadingUrl = `/mushaf?page=${lastPage}`
 
   // =========================================================
+  // حسابات خطة الختمة
+  // =========================================================
+  const safeKhatmaDays = Math.min(365, Math.max(1, Number(khatmaDays) || 1))
+
+  const pagesPerDay = useMemo(() => {
+    return Math.ceil(TOTAL_PAGES / safeKhatmaDays)
+  }, [safeKhatmaDays])
+
+  const khatmaEndDate = useMemo(() => {
+    if (!khatmaStartDate) return ''
+    return addDays(khatmaStartDate, safeKhatmaDays - 1)
+  }, [khatmaStartDate, safeKhatmaDays])
+
+  const planDaysPassed = useMemo(() => {
+    if (!hasKhatmaPlan || !khatmaStartDate) return 0
+
+    const today = getTodayString()
+    const rawDays = diffDaysInclusive(khatmaStartDate, today)
+
+    return Math.max(0, Math.min(safeKhatmaDays, rawDays))
+  }, [hasKhatmaPlan, khatmaStartDate, safeKhatmaDays])
+
+  const plannedPagesByToday = useMemo(() => {
+    if (!hasKhatmaPlan || planDaysPassed <= 0) return 0
+    return Math.min(
+      TOTAL_PAGES,
+      planDaysPassed * pagesPerDay
+    )
+  }, [hasKhatmaPlan, planDaysPassed, pagesPerDay])
+
+  const remainingToday = useMemo(() => {
+    if (!hasKhatmaPlan) return 0
+    return Math.max(0, plannedPagesByToday - lastPage)
+  }, [hasKhatmaPlan, plannedPagesByToday, lastPage])
+
+  const planProgress = useMemo(() => {
+    if (!hasKhatmaPlan) return 0
+    return Math.min(
+      100,
+      Math.max(0, Math.round((lastPage / TOTAL_PAGES) * 100))
+    )
+  }, [hasKhatmaPlan, lastPage])
+
+  const planStatus = useMemo(() => {
+    if (!hasKhatmaPlan) return 'لم يتم إنشاء خطة بعد'
+    if (lastPage >= TOTAL_PAGES) return 'تم إكمال الختمة'
+    if (planDaysPassed === 0) return 'الخطة لم تبدأ بعد'
+    if (planDaysPassed >= safeKhatmaDays) return 'انتهى موعد الخطة'
+    if (remainingToday === 0) return 'أنجزت المطلوب لهذا اليوم'
+    return `متبقي عليك ${formatArabicNumber(remainingToday)} صفحة اليوم`
+  }, [
+    hasKhatmaPlan,
+    lastPage,
+    planDaysPassed,
+    safeKhatmaDays,
+    remainingToday,
+  ])
+
+  const handleSavePlan = async () => {
+    if (!user) return
+
+    const numericDays = Math.min(
+      365,
+      Math.max(1, Number(khatmaDays) || 1)
+    )
+
+    if (!khatmaStartDate) {
+      setPlanMessage('اختار تاريخ بداية الختمة أولًا')
+      return
+    }
+
+    setIsSavingPlan(true)
+    setPlanMessage('')
+
+    try {
+      await setDoc(
+        doc(db, 'users', user.uid),
+        {
+          khatmaDays: numericDays,
+          khatmaStartDate,
+          khatmaPagesPerDay: Math.ceil(TOTAL_PAGES / numericDays),
+        },
+        { merge: true }
+      )
+
+      setKhatmaDays(numericDays)
+      setHasKhatmaPlan(true)
+      setPlanMessage('تم حفظ خطة الختمة بنجاح')
+    } catch (error) {
+      console.error('Khatma plan save error:', error)
+      setPlanMessage('تعذر حفظ خطة الختمة حاليًا')
+    } finally {
+      setIsSavingPlan(false)
+      setTimeout(() => setPlanMessage(''), 3000)
+    }
+  }
+
+  const resetPlanForm = () => {
+    setKhatmaDays(30)
+    setKhatmaStartDate(getTodayString())
+    setPlanMessage('')
+  }
+
+  // =========================================================
   // حالة تحميل المصادقة
   // =========================================================
-
   if (loading || isLoadingProfile) {
     return (
       <div
@@ -180,7 +342,6 @@ export default function ProfilePage() {
   // =========================================================
   // المستخدم غير مسجل
   // =========================================================
-
   if (!user) {
     router.push('/auth')
     return null
@@ -203,7 +364,6 @@ export default function ProfilePage() {
       {/* =====================================================
           الهيدر
       ====================================================== */}
-
       <header className="flex items-center justify-between mb-6 pt-2">
         <Link
           href="/"
@@ -270,7 +430,6 @@ export default function ProfilePage() {
       {/* =====================================================
           بطاقة المستخدم
       ====================================================== */}
-
       <section className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-mushaf-border/40 mb-6">
         <div className="flex items-center gap-4">
           <div
@@ -319,7 +478,6 @@ export default function ProfilePage() {
       {/* =====================================================
           بطاقة متابعة الختمة
       ====================================================== */}
-
       <section className="mb-7">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-mushaf-dark flex items-center gap-2">
@@ -353,12 +511,12 @@ export default function ProfilePage() {
               </p>
 
               <p className="text-2xl font-bold text-mushaf-teal mt-1">
-                الصفحة {lastPage.toLocaleString('ar-EG')}
+                الصفحة {formatArabicNumber(lastPage)}
               </p>
             </div>
 
             <p className="text-xs text-gray-400">
-              من 604
+              من {formatArabicNumber(TOTAL_PAGES)}
             </p>
           </div>
 
@@ -403,9 +561,245 @@ export default function ProfilePage() {
       </section>
 
       {/* =====================================================
+          مخطط الختمة
+      ====================================================== */}
+      <section className="mb-7">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-mushaf-dark flex items-center gap-2">
+            <CalendarDays
+              className="text-mushaf-teal"
+              size={23}
+            />
+            مخطط الختمة
+          </h3>
+
+          {hasKhatmaPlan && (
+            <span className="text-xs font-bold bg-mushaf-teal/10 text-mushaf-teal px-3 py-1 rounded-full">
+              خطة نشطة
+            </span>
+          )}
+        </div>
+
+        <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-mushaf-border/40">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="block">
+              <span className="block text-sm font-bold text-mushaf-dark mb-2">
+                عدد أيام الختمة
+              </span>
+
+              <select
+                value={khatmaDays}
+                onChange={(event) => setKhatmaDays(Number(event.target.value))}
+                className="
+                  w-full
+                  h-12
+                  rounded-2xl
+                  border
+                  border-mushaf-border/60
+                  bg-mushaf-paper
+                  px-4
+                  text-mushaf-dark
+                  font-bold
+                  outline-none
+                  focus:border-mushaf-teal
+                "
+              >
+                {[7, 10, 15, 20, 25, 30, 40, 50, 60, 90, 120, 180, 365].map(
+                  (days) => (
+                    <option key={days} value={days}>
+                      {formatArabicNumber(days)} يوم
+                    </option>
+                  )
+                )}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="block text-sm font-bold text-mushaf-dark mb-2">
+                تاريخ بداية الختمة
+              </span>
+
+              <input
+                type="date"
+                value={khatmaStartDate}
+                onChange={(event) => setKhatmaStartDate(event.target.value)}
+                className="
+                  w-full
+                  h-12
+                  rounded-2xl
+                  border
+                  border-mushaf-border/60
+                  bg-mushaf-paper
+                  px-4
+                  text-mushaf-dark
+                  font-bold
+                  outline-none
+                  focus:border-mushaf-teal
+                "
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mt-5">
+            <div className="rounded-2xl bg-mushaf-paper border border-mushaf-gold/20 p-4">
+              <p className="text-xs text-gray-400 font-bold mb-1">
+                الصفحات يوميًا
+              </p>
+              <p className="text-xl font-bold text-mushaf-teal">
+                {formatArabicNumber(pagesPerDay)}
+              </p>
+              <p className="text-[11px] text-gray-400 mt-1">
+                صفحة في اليوم
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-mushaf-paper border border-mushaf-gold/20 p-4">
+              <p className="text-xs text-gray-400 font-bold mb-1">
+                تاريخ الإتمام المتوقع
+              </p>
+              <p className="text-sm font-bold text-mushaf-teal leading-6">
+                {formatDateArabic(khatmaEndDate)}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSavePlan}
+            disabled={isSavingPlan}
+            className="
+              mt-5
+              w-full
+              bg-mushaf-teal
+              text-white
+              rounded-2xl
+              py-3.5
+              font-bold
+              flex
+              items-center
+              justify-center
+              gap-2
+              shadow-lg
+              hover:opacity-95
+              transition
+              disabled:opacity-60
+              disabled:cursor-not-allowed
+            "
+          >
+            <Save size={19} />
+            {isSavingPlan ? 'جاري حفظ الخطة...' : 'حفظ خطة الختمة'}
+          </button>
+
+          {planMessage && (
+            <p className="text-center text-xs font-bold text-mushaf-teal mt-3">
+              {planMessage}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={resetPlanForm}
+            className="
+              mt-3
+              w-full
+              rounded-2xl
+              py-2.5
+              text-xs
+              font-bold
+              text-gray-400
+              hover:text-mushaf-teal
+              transition
+              flex
+              items-center
+              justify-center
+              gap-2
+            "
+          >
+            <RotateCcw size={15} />
+            إعادة اختيار الخطة
+          </button>
+
+          <div className="mt-5 rounded-2xl border border-mushaf-teal/10 bg-mushaf-teal/5 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs text-gray-400 font-bold mb-1">
+                  حالة الخطة
+                </p>
+                <p className="text-sm font-bold text-mushaf-dark">
+                  {planStatus}
+                </p>
+              </div>
+
+              <div className="text-left">
+                <p className="text-xs text-gray-400 font-bold mb-1">
+                  إنجاز الخطة
+                </p>
+                <p className="text-lg font-bold text-mushaf-teal">
+                  {planProgress}%
+                </p>
+              </div>
+            </div>
+
+            {hasKhatmaPlan && (
+              <>
+                <div className="w-full h-2.5 bg-white rounded-full overflow-hidden mt-4">
+                  <div
+                    className="h-full bg-mushaf-teal rounded-full transition-all duration-700"
+                    style={{ width: `${planProgress}%` }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <div className="bg-white rounded-2xl p-4">
+                    <p className="text-[11px] text-gray-400 font-bold mb-1">
+                      أيام الخطة
+                    </p>
+                    <p className="font-bold text-mushaf-dark">
+                      {formatArabicNumber(safeKhatmaDays)} يوم
+                    </p>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-4">
+                    <p className="text-[11px] text-gray-400 font-bold mb-1">
+                      مرّ من الخطة
+                    </p>
+                    <p className="font-bold text-mushaf-dark">
+                      {formatArabicNumber(planDaysPassed)} يوم
+                    </p>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-4">
+                    <p className="text-[11px] text-gray-400 font-bold mb-1">
+                      المستهدف حتى اليوم
+                    </p>
+                    <p className="font-bold text-mushaf-dark">
+                      {formatArabicNumber(plannedPagesByToday)} صفحة
+                    </p>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-4">
+                    <p className="text-[11px] text-gray-400 font-bold mb-1">
+                      المتبقي اليوم
+                    </p>
+                    <p className="font-bold text-mushaf-teal">
+                      {formatArabicNumber(remainingToday)} صفحة
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-gray-400 leading-6 mt-4">
+                  تبدأ الخطة في {formatDateArabic(khatmaStartDate)}،
+                  وتنتهي في {formatDateArabic(khatmaEndDate)}.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* =====================================================
           إحصائيات سريعة
       ====================================================== */}
-
       <section className="grid grid-cols-2 gap-3 mb-7">
         <div className="bg-white rounded-2xl p-4 border border-mushaf-border/40 shadow-sm">
           <div className="flex items-center justify-between mb-3">
@@ -419,7 +813,7 @@ export default function ProfilePage() {
           </div>
 
           <p className="text-2xl font-bold text-mushaf-dark">
-            {bookmarks.length.toLocaleString('ar-EG')}
+            {formatArabicNumber(bookmarks.length)}
           </p>
 
           <p className="text-xs text-gray-400 mt-1">
@@ -439,7 +833,7 @@ export default function ProfilePage() {
           </div>
 
           <p className="text-2xl font-bold text-mushaf-dark">
-            {lastPage.toLocaleString('ar-EG')}
+            {formatArabicNumber(lastPage)}
           </p>
 
           <p className="text-xs text-gray-400 mt-1">
@@ -451,7 +845,6 @@ export default function ProfilePage() {
       {/* =====================================================
           الآيات المحفوظة
       ====================================================== */}
-
       <section className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-mushaf-dark flex items-center gap-2">
@@ -463,7 +856,7 @@ export default function ProfilePage() {
           </h3>
 
           <span className="text-xs text-gray-400 font-semibold">
-            {bookmarks.length.toLocaleString('ar-EG')} آية
+            {formatArabicNumber(bookmarks.length)} آية
           </span>
         </div>
 
@@ -527,28 +920,21 @@ export default function ProfilePage() {
 
                     <p className="text-xs text-gray-400 mt-1">
                       الآية{' '}
-                      {Number(
-                        bookmark.numberInSurah || 0
-                      ).toLocaleString('ar-EG')}
+                      {formatArabicNumber(
+                        Number(bookmark.numberInSurah || 0)
+                      )}
                       {bookmark.page
-                        ? ` • الصفحة ${Number(
-                            bookmark.page
-                          ).toLocaleString('ar-EG')}`
+                        ? ` • الصفحة ${formatArabicNumber(
+                            Number(bookmark.page)
+                          )}`
                         : ''}
                     </p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() =>
-                      removeBookmark(
-                        bookmark.number
-                      )
-                    }
-                    disabled={
-                      deletingBookmark ===
-                      bookmark.number
-                    }
+                    onClick={() => removeBookmark(bookmark.number)}
+                    disabled={deletingBookmark === bookmark.number}
                     className="
                       shrink-0
                       w-10
@@ -574,9 +960,9 @@ export default function ProfilePage() {
                   {bookmark.text}
                   <span className="text-mushaf-gold mx-2">
                     ﴿
-                    {Number(
-                      bookmark.numberInSurah || 0
-                    ).toLocaleString('ar-EG')}
+                    {formatArabicNumber(
+                      Number(bookmark.numberInSurah || 0)
+                    )}
                     ﴾
                   </span>
                 </p>
@@ -622,11 +1008,11 @@ export default function ProfilePage() {
       {/* =====================================================
           ملاحظة عن مزامنة التقدم
       ====================================================== */}
-
       <div className="mt-auto bg-mushaf-teal/5 border border-mushaf-teal/10 rounded-2xl p-4 text-center">
         <p className="text-xs text-mushaf-teal font-semibold leading-6">
           يتم حفظ آخر صفحة وصلت إليها في حسابك عبر Firebase،
-          بينما الآيات المحفوظة محفوظة محليًا على جهازك.
+          بينما الآيات المحفوظة محفوظة محليًا على جهازك،
+          وخطة الختمة محفوظة داخل حسابك.
         </p>
       </div>
     </div>
