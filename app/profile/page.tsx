@@ -13,7 +13,6 @@ export default function ProfilePage() {
   const router = useRouter()
   const [bookmarks, setBookmarks] = useState<any[]>([])
 
-  // جلب الآيات المحفوظة أول ما الصفحة تفتح
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('samee3_bookmarks') || '[]')
     setBookmarks(saved)
@@ -28,7 +27,7 @@ export default function ProfilePage() {
   const handleLogout = async () => {
     try {
       await signOut(auth)
-      router.push('/login') // هيحوله لصفحة تسجيل الدخول
+      router.push('/login')
     } catch (error) {
       console.error(error)
     }
@@ -37,7 +36,6 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-mushaf-paper flex flex-col pb-28 md:pb-8">
       
-      {/* الهيدر */}
       <div className="flex justify-between items-center p-4 bg-mushaf-paper shadow-sm z-10 sticky top-0">
         <Link href="/" className="text-mushaf-teal bg-white p-2 rounded-full shadow-sm hover:bg-mushaf-paper transition">
           <ChevronRight size={24} />
@@ -53,7 +51,6 @@ export default function ProfilePage() {
 
       <div className="p-5 flex flex-col gap-6">
         
-        {/* كارت بيانات المستخدم */}
         <div className="bg-gradient-to-br from-[#175E67] to-[#0D383E] rounded-3xl p-6 shadow-lg text-white flex items-center gap-4 relative overflow-hidden border border-mushaf-gold/20">
           <div className="w-16 h-16 bg-white/10 rounded-full border-2 border-mushaf-gold flex items-center justify-center">
             <User size={32} className="text-mushaf-gold" />
@@ -67,7 +64,6 @@ export default function ProfilePage() {
           <div className="absolute -top-10 -left-10 w-32 h-32 bg-white opacity-5 rounded-full blur-2xl"></div>
         </div>
 
-        {/* قسم المفضلة */}
         <div>
           <div className="flex items-center gap-2 mb-4">
             <Bookmark size={24} className="text-mushaf-teal" />
