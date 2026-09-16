@@ -24,7 +24,12 @@ const recitersList = [
   { id: 'ar.hudhaify', name: 'علي الحذيفي' },
   { id: 'ar.aymanswaid', name: 'أيمن سويد (تعليمي)' },
   { id: 'ar.abdullahbasfar', name: 'عبد الله بصفر' },
-  { id: 'ar.muhammadayyoub', name: 'محمد أيوب' }
+  { id: 'ar.muhammadayyoub', name: 'محمد أيوب' },
+  { id: 'ar.muhammadjibreel', name: 'محمد جبريل' },
+  { id: 'ar.abubakrashshaatree', name: 'أبو بكر الشاطري' },
+  { id: 'ar.haniarrifai', name: 'هاني الرفاعي' },
+  { id: 'ar.abdullahmatroud', name: 'عبد الله مطرود' },
+  { id: 'ar.khalifaaltunaiji', name: 'خليفة الطنيجي' }
 ]
 
 function MushafContent() {
