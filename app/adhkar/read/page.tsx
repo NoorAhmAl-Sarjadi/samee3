@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { ChevronRight, Check } from 'lucide-react'
+import { ChevronRight, Check, Loader2 } from 'lucide-react'
 
-// قاعدة بيانات مصغرة للأذكار (تقدر تزود فيها براحتك بعدين)
+// قاعدة بيانات مصغرة للأذكار
 const adhkarDB = {
   morning: {
     title: 'أذكار الصباح',
@@ -36,21 +36,20 @@ const adhkarDB = {
   }
 }
 
-export default function ReadAdhkarPage() {
+function ReadAdhkarContent() {
   const searchParams = useSearchParams()
   const type = (searchParams.get('type') || 'morning') as keyof typeof adhkarDB
   
   const currentAdhkar = adhkarDB[type]
   const [counts, setCounts] = useState<{ [key: number]: number }>({})
 
-  // تهيئة العدادات بناءً على العدد المطلوب لكل ذكر
   useEffect(() => {
     const initialCounts: { [key: number]: number } = {}
     currentAdhkar.items.forEach(item => {
       initialCounts[item.id] = item.count
     })
     setCounts(initialCounts)
-  }, [type])
+  }, [type, currentAdhkar.items])
 
   const handleTap = (id: number) => {
     if (counts[id] > 0) {
@@ -58,15 +57,12 @@ export default function ReadAdhkarPage() {
     }
   }
 
-  // حساب الإنجاز
   const totalItems = currentAdhkar.items.length
   const completedItems = Object.values(counts).filter(c => c === 0).length
   const progress = Math.round((completedItems / totalItems) * 100) || 0
 
   return (
     <div className="min-h-screen bg-mushaf-paper flex flex-col pb-28 md:pb-8">
-      
-      {/* الهيدر */}
       <div className="flex justify-between items-center p-4 bg-mushaf-paper shadow-sm z-10 sticky top-0">
         <Link href="/adhkar" className="text-mushaf-teal bg-white p-2 rounded-full shadow-sm hover:bg-mushaf-paper transition">
           <ChevronRight size={24} />
@@ -75,7 +71,6 @@ export default function ReadAdhkarPage() {
         <div className="w-10 text-center font-mono font-bold text-mushaf-gold">{progress}%</div>
       </div>
       
-      {/* شريط الإنجاز */}
       <div className="w-full h-1 bg-gray-200">
         <div className="h-full bg-mushaf-teal transition-all duration-500" style={{ width: `${progress}%` }}></div>
       </div>
@@ -121,7 +116,19 @@ export default function ReadAdhkarPage() {
           </div>
         )}
       </div>
-
     </div>
+  )
+}
+
+export default function ReadAdhkarPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-mushaf-paper">
+        <Loader2 className="animate-spin text-mushaf-teal" size={40}/>
+        <p className="text-mushaf-teal font-bold">جاري تحميل الأذكار...</p>
+      </div>
+    }>
+      <ReadAdhkarContent />
+    </Suspense>
   )
 }
