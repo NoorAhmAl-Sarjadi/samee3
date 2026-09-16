@@ -3,10 +3,29 @@
 import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { ChevronRight, ChevronLeft, Info, Loader2, Play, Pause, Copy, ImageIcon, FileText, Repeat, X, CheckCheck } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Loader2, Play, Pause, Copy, ImageIcon, FileText, Repeat, X, CheckCheck } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { db } from '@/lib/firebase'
 import { doc, setDoc } from 'firebase/firestore'
+
+// قائمة القراء المعتمدين لتقسيم الآيات بدقة (Ayah by Ayah)
+const recitersList = [
+  { id: 'ar.alafasy', name: 'مشاري العفاسي' },
+  { id: 'ar.husary', name: 'محمود خليل الحصري (مرتل)' },
+  { id: 'ar.husarymujawwad', name: 'محمود خليل الحصري (مجود)' },
+  { id: 'ar.abdulbasitmurattal', name: 'عبد الباسط عبد الصمد (مرتل)' },
+  { id: 'ar.abdulbasitmujawwad', name: 'عبد الباسط عبد الصمد (مجود)' },
+  { id: 'ar.minshawi', name: 'محمد صديق المنشاوي (مرتل)' },
+  { id: 'ar.minshawimujawwad', name: 'محمد صديق المنشاوي (مجود)' },
+  { id: 'ar.mahermuaiqly', name: 'ماهر المعيقلي' },
+  { id: 'ar.abdurrahmaansudais', name: 'عبد الرحمن السديس' },
+  { id: 'ar.saudshuraim', name: 'سعود الشريم' },
+  { id: 'ar.ahmedajamy', name: 'أحمد بن علي العجمي' },
+  { id: 'ar.hudhaify', name: 'علي الحذيفي' },
+  { id: 'ar.aymanswaid', name: 'أيمن سويد (تعليمي)' },
+  { id: 'ar.abdullahbasfar', name: 'عبد الله بصفر' },
+  { id: 'ar.muhammadayyoub', name: 'محمد أيوب' }
+]
 
 function MushafContent() {
   const searchParams = useSearchParams()
@@ -17,7 +36,8 @@ function MushafContent() {
   const [isLoading, setIsLoading] = useState(true)
   const { user } = useAuth()
 
-  // حالة تفاعل الآيات
+  // حالة تفاعل الآيات واختيار القارئ
+  const [selectedReciter, setSelectedReciter] = useState(recitersList[0].id) // العفاسي افتراضياً
   const [selectedAyah, setSelectedAyah] = useState<any>(null)
   const [audio, setAudio] = useState<HTMLAudioElement | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -30,11 +50,10 @@ function MushafContent() {
   const currentSurah = pageData?.ayahs[0]?.surah?.name || 'سُورَةُ...'
   const currentJuz = pageData?.ayahs[0]?.juz || ''
 
-  // جلب صفحة القرآن
   useEffect(() => {
     setIsLoading(true)
-    if(audio) { audio.pause(); setIsPlaying(false); } // إيقاف الصوت لو قلبنا الصفحة
-    setSelectedAyah(null) // إلغاء التحديد
+    if(audio) { audio.pause(); setIsPlaying(false); }
+    setSelectedAyah(null) 
 
     fetch(`https://api.alquran.cloud/v1/page/${currentPage}/quran-uthmani`)
       .then(res => res.json())
@@ -42,7 +61,6 @@ function MushafContent() {
       .catch(err => { console.error(err); setIsLoading(false) })
   }, [currentPage])
 
-  // حفظ التقدم في فايربيس
   useEffect(() => {
     if (user) {
       const saveProgress = async () => {
@@ -53,17 +71,23 @@ function MushafContent() {
     }
   }, [currentPage, user])
 
-  // تنظيف ملف الصوت لما نخرج من الصفحة
   useEffect(() => {
     return () => { if (audio) { audio.pause(); audio.src = ""; } }
   }, [audio])
 
-  // التقليب
+  // لما نغير القارئ، نوقف الصوت القديم عشان ميحصلش تداخل
+  const handleReciterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    if (audio) {
+      audio.pause();
+      setIsPlaying(false);
+    }
+    setSelectedReciter(e.target.value);
+  }
+
   const nextPage = () => { if (currentPage < 604) setCurrentPage(prev => prev + 1) }
   const prevPage = () => { if (currentPage > 1) setCurrentPage(prev => prev - 1) }
 
-  // ---------------- وظائف تفاعل الآية ----------------
-
+  // السحر هنا: استخدام القارئ المحدد مع الآية المحددة
   const toggleAudio = (loop = false) => {
     if (audio && isPlaying && isLooping === loop) {
       audio.pause();
@@ -72,8 +96,8 @@ function MushafContent() {
     }
     if (audio) audio.pause();
     
-    // تشغيل الآية بصوت العفاسي
-    const newAudio = new Audio(`https://cdn.islamic.network/quran/audio/128/ar.alafasy/${selectedAyah.number}.mp3`);
+    // سحب الصوت بناءً على اختيار القارئ
+    const newAudio = new Audio(`https://cdn.islamic.network/quran/audio/128/${selectedReciter}/${selectedAyah.number}.mp3`);
     newAudio.loop = loop;
     newAudio.play();
     setAudio(newAudio);
@@ -91,7 +115,7 @@ function MushafContent() {
   const openDesign = async (type: 'ayah' | 'tafsir') => {
     if (type === 'tafsir') {
       setIsFetchingTafsir(true);
-      setDesignMode('tafsir'); // نفتح الشاشة الأول عشان اليوزر يشوف التحميل
+      setDesignMode('tafsir'); 
       try {
         const res = await fetch(`https://api.alquran.cloud/v1/ayah/${selectedAyah.number}/ar.muyassar`);
         const data = await res.json();
@@ -105,18 +129,23 @@ function MushafContent() {
     }
   }
 
-  // --------------------------------------------------
-
   return (
     <div className="min-h-screen bg-mushaf-paper flex flex-col pb-28 md:pb-8 relative">
       
-      {/* الهيدر */}
+      {/* الهيدر مع قائمة اختيار القراء */}
       <div className="flex justify-between items-center p-4 bg-mushaf-paper shadow-sm z-10 relative">
         <Link href="/" className="text-mushaf-teal bg-white p-2 rounded-full shadow-sm hover:bg-mushaf-paper transition">
           <ChevronRight size={24} />
         </Link>
-        <h1 className="font-bold text-mushaf-dark text-lg">المصحف الشريف</h1>
-        <button className="text-mushaf-gold"><Info size={24} /></button>
+        
+        {/* قائمة القراء المنسدلة */}
+        <select 
+          value={selectedReciter} 
+          onChange={handleReciterChange}
+          className="bg-white border-2 border-mushaf-gold/30 text-mushaf-teal font-bold text-xs sm:text-sm rounded-xl py-2 px-3 focus:outline-none focus:border-mushaf-teal shadow-sm cursor-pointer max-w-[200px] truncate"
+        >
+          {recitersList.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
       </div>
 
       {/* إطار المصحف */}
@@ -218,7 +247,7 @@ function MushafContent() {
         </div>
       )}
 
-      {/* شاشة تصميم الصورة (Overlay) */}
+      {/* شاشة تصميم الصورة */}
       {designMode && selectedAyah && (
         <div className="fixed inset-0 bg-black/80 z-[100] flex flex-col items-center justify-center p-4 backdrop-blur-sm animate-[fadeIn_0.3s_ease-out]">
           
@@ -229,10 +258,8 @@ function MushafContent() {
             </button>
           </div>
 
-          {/* الكارت اللي هيتصور (Post Design) */}
           <div className="w-full max-w-sm bg-gradient-to-br from-[#175E67] to-[#0D383E] rounded-3xl p-8 shadow-2xl relative overflow-hidden border border-mushaf-gold/30 aspect-[4/5] flex flex-col justify-center text-center">
             
-            {/* زخرفة الخلفية */}
             <div className="absolute -top-20 -right-20 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl pointer-events-none"></div>
             <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-mushaf-gold opacity-10 rounded-full blur-3xl pointer-events-none"></div>
             
@@ -263,7 +290,6 @@ function MushafContent() {
               </div>
             </div>
           </div>
-
         </div>
       )}
 
