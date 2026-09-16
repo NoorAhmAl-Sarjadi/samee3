@@ -2,22 +2,20 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { BookOpen, List, Heart, Book, Compass, ChevronLeft, Bell } from 'lucide-react'
+import { BookOpen, List, Heart, Book, Compass, ChevronLeft, Bell, Headphones } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { db } from '@/lib/firebase'
 import { doc, getDoc } from 'firebase/firestore'
 
 export default function HomePage() {
   const { user, loading } = useAuth()
-  const [lastPage, setLastPage] = useState(1) // افتراضياً صفحة 1
+  const [lastPage, setLastPage] = useState(1)
 
-  // جلب آخر صفحة قرأها المستخدم من قاعدة البيانات
   useEffect(() => {
     if (user) {
       const fetchProgress = async () => {
         const docRef = doc(db, 'users', user.uid)
         const docSnap = await getDoc(docRef)
-        
         if (docSnap.exists() && docSnap.data().lastReadPage) {
           setLastPage(docSnap.data().lastReadPage)
         }
@@ -61,7 +59,6 @@ export default function HomePage() {
             </p>
           </div>
 
-          {/* الزرار هنا بقى مربوط برقم الصفحة اللي جاية من الداتا بيز */}
           <Link href={`/mushaf?page=${lastPage}`} className="w-full bg-white text-mushaf-teal font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:bg-mushaf-paper transition relative z-10 shadow-md">
             أكمل التلاوة
             <ChevronLeft size={20} />
@@ -72,9 +69,14 @@ export default function HomePage() {
       <section className="mb-8">
         <h3 className="text-lg font-bold text-mushaf-dark mb-4">الخدمات السريعة</h3>
         <div className="grid grid-cols-2 gap-4">
-          <Link href="/index" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
+          {/* هنا اتغير الرابط لـ quran-index */}
+          <Link href="/quran-index" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
             <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><List size={28} className="text-mushaf-gold" /></div>
             <span className="font-bold text-mushaf-dark text-sm">فهرس السور</span>
+          </Link>
+          <Link href="/audio" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
+            <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><Headphones size={28} className="text-mushaf-gold" /></div>
+            <span className="font-bold text-mushaf-dark text-sm">المكتبة الصوتية</span>
           </Link>
           <Link href="/prayer" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
             <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><Compass size={28} className="text-mushaf-gold" /></div>
@@ -84,7 +86,7 @@ export default function HomePage() {
             <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><Book size={28} className="text-mushaf-gold" /></div>
             <span className="font-bold text-mushaf-dark text-sm">الأحاديث النبوية</span>
           </Link>
-          <Link href="/adhkar" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
+          <Link href="/adhkar" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group col-span-2">
             <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><Heart size={28} className="text-mushaf-gold" /></div>
             <span className="font-bold text-mushaf-dark text-sm">الأذكار والتسبيح</span>
           </Link>
