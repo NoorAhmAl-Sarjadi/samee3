@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   LayoutDashboard,
@@ -21,6 +21,9 @@ import {
   X,
   BarChart3,
   MessageSquare,
+  Eye,
+  RefreshCw,
+  UserRound,
 } from 'lucide-react'
 import AdminGate from '@/components/AdminGate'
 import { db } from '@/lib/firebase'
@@ -57,16 +60,19 @@ function AdminDashboard() {
   const [users, setUsers] = useState<FirestoreUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(true)
   const [usersError, setUsersError] = useState('')
+  const [selectedUser, setSelectedUser] = useState<FirestoreUser | null>(null)
+  const [refreshingUsers, setRefreshingUsers] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadUsers() {
+  const loadUsers = useCallback(async (showRefreshState = false) => {
       try {
-        setLoadingUsers(true)
+        if (showRefreshState) {
+          setRefreshingUsers(true)
+        } else {
+          setLoadingUsers(true)
+        }
+
         setUsersError('')
         const snapshot = await getDocs(collection(db, 'users'))
-        if (cancelled) return
 
         const nextUsers: FirestoreUser[] = snapshot.docs.map((item) => {
           const data = item.data() as Record<string, unknown>
@@ -88,18 +94,16 @@ function AdminDashboard() {
         setUsers(nextUsers)
       } catch (error) {
         console.error(error)
-        if (!cancelled) {
-          setUsers([])
-          setUsersError('تعذر تحميل المستخدمين من Firestore. تأكد من صلاحيات القراءة في مجموعة users.')
-        }
+        setUsersError('تعذر تحميل المستخدمين من Firestore. تأكد من صلاحيات القراءة في مجموعة users.')
       } finally {
-        if (!cancelled) setLoadingUsers(false)
+        setLoadingUsers(false)
+        setRefreshingUsers(false)
       }
-    }
-
-    loadUsers()
-    return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    void loadUsers()
+  }, [loadUsers])
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -301,7 +305,18 @@ function AdminDashboard() {
           </p>
         </div>
 
-        <div className="relative w-full sm:w-72">
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => void loadUsers(true)}
+            disabled={refreshingUsers}
+            className="h-11 px-4 rounded-2xl bg-[#075640] text-white text-sm font-black flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            <RefreshCw size={16} className={refreshingUsers ? 'animate-spin' : ''} />
+            {refreshingUsers ? 'جاري التحديث...' : 'تحديث'}
+          </button>
+
+          <div className="relative w-full sm:w-72">
           <Search
             size={18}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
@@ -312,6 +327,7 @@ function AdminDashboard() {
             placeholder="ابحث بالاسم أو البريد..."
             className="w-full h-11 rounded-2xl border border-gray-200 bg-gray-50 pr-10 pl-4 text-sm outline-none focus:border-[#075640]"
           />
+          </div>
         </div>
       </div>
 
@@ -347,7 +363,7 @@ function AdminDashboard() {
           <tbody>
             {filteredUsers.map((user) => (
               <tr
-                key={user.email}
+                key={user.id}
                 className="border-b border-gray-50 last:border-0"
               >
                 <td className="py-4">
@@ -394,8 +410,10 @@ function AdminDashboard() {
                 <td className="py-4">
                   <button
                     type="button"
-                    className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 text-xs font-bold text-gray-600 hover:border-[#075640] hover:text-[#075640] transition"
+                    onClick={() => setSelectedUser(user)}
+                    className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 text-xs font-bold text-gray-600 hover:border-[#075640] hover:text-[#075640] transition flex items-center gap-2"
                   >
+                    <Eye size={14} />
                     عرض الحساب
                   </button>
                 </td>
@@ -789,6 +807,93 @@ function AdminDashboard() {
           {renderActiveTab()}
         </div>
       </main>
+
+      {selectedUser && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setSelectedUser(null)}
+        >
+          <div
+            className="w-full max-w-lg rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+            dir="rtl"
+          >
+            <div className="bg-[#075640] text-white p-6">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
+                    <UserRound size={24} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-white/60 font-bold">بيانات المستخدم</p>
+                    <h3 className="font-black text-xl truncate">{selectedUser.name}</h3>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedUser(null)}
+                  className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center"
+                  aria-label="إغلاق"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-gray-50 p-4">
+                  <p className="text-xs text-gray-400 font-bold mb-1">البريد الإلكتروني</p>
+                  <p className="text-sm font-bold text-gray-900 break-all" dir="ltr">
+                    {selectedUser.email}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-gray-50 p-4">
+                  <p className="text-xs text-gray-400 font-bold mb-1">الحالة</p>
+                  <p className="text-sm font-black text-[#075640]">{selectedUser.status}</p>
+                </div>
+
+                <div className="rounded-2xl bg-gray-50 p-4">
+                  <p className="text-xs text-gray-400 font-bold mb-1">تقدم المصحف</p>
+                  <p className="text-sm font-black text-gray-900">{selectedUser.progress}%</p>
+                </div>
+
+                <div className="rounded-2xl bg-gray-50 p-4">
+                  <p className="text-xs text-gray-400 font-bold mb-1">خطة الختمة</p>
+                  <p className="text-sm font-black text-gray-900">
+                    {selectedUser.khatmaDays ? `${selectedUser.khatmaDays} يوم` : 'لا توجد خطة'}
+                  </p>
+                </div>
+              </div>
+
+              {selectedUser.khatmaStartDate && (
+                <div className="rounded-2xl border border-gray-100 p-4">
+                  <p className="text-xs text-gray-400 font-bold mb-1">بداية الختمة</p>
+                  <p className="text-sm font-black text-gray-900" dir="ltr">
+                    {selectedUser.khatmaStartDate}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <span className="text-xs text-gray-400">
+                  UID: <span dir="ltr">{selectedUser.id}</span>
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedUser(null)}
+                  className="rounded-2xl bg-[#075640] text-white px-5 py-3 text-sm font-black"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
