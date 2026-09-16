@@ -1,156 +1,122 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Target, Bookmark, Heart, Award, BookOpen, Settings, LogOut } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useAuth } from '@/context/AuthContext'
+import { auth } from '@/lib/firebase'
+import { signOut } from 'firebase/auth'
+import { LogOut, User, Bookmark, Trash2, ChevronRight, BookOpen } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '@/context/AuthContext'
-import { auth, db } from '@/lib/firebase'
-import { signOut } from 'firebase/auth'
-import { doc, getDoc } from 'firebase/firestore'
 
 export default function ProfilePage() {
-  const { user, loading } = useAuth()
+  const { user } = useAuth()
   const router = useRouter()
-  const [lastPage, setLastPage] = useState(1)
+  const [bookmarks, setBookmarks] = useState<any[]>([])
 
-  // جلب آخر صفحة قرأها المستخدم لحساب الإنجاز
+  // جلب الآيات المحفوظة أول ما الصفحة تفتح
   useEffect(() => {
-    if (user) {
-      const fetchProgress = async () => {
-        try {
-          const docRef = doc(db, 'users', user.uid)
-          const docSnap = await getDoc(docRef)
-          
-          if (docSnap.exists() && docSnap.data().lastReadPage) {
-            setLastPage(docSnap.data().lastReadPage)
-          }
-        } catch (error) {
-          console.error("خطأ في جلب البيانات:", error)
-        }
-      }
-      fetchProgress()
-    }
-  }, [user])
+    const saved = JSON.parse(localStorage.getItem('samee3_bookmarks') || '[]')
+    setBookmarks(saved)
+  }, [])
+
+  const removeBookmark = (number: number) => {
+    const filtered = bookmarks.filter(b => b.number !== number)
+    setBookmarks(filtered)
+    localStorage.setItem('samee3_bookmarks', JSON.stringify(filtered))
+  }
 
   const handleLogout = async () => {
     try {
       await signOut(auth)
-      router.push('/auth')
+      router.push('/login') // هيحوله لصفحة تسجيل الدخول
     } catch (error) {
-      console.error('خطأ في تسجيل الخروج:', error)
+      console.error(error)
     }
   }
 
-  if (loading) {
-    return <div className="min-h-screen bg-mushaf-paper flex items-center justify-center text-mushaf-teal font-bold font-cairo">جاري التحميل...</div>
-  }
-
-  if (!user) {
-    router.push('/auth')
-    return null
-  }
-
-  // السحر هنا: حساب النسبة المئوية للختمة بناءً على 604 صفحة
-  const percentage = Math.round((lastPage / 604) * 100)
-
   return (
-    <div className="min-h-screen bg-mushaf-paper flex flex-col p-5 pb-28 md:pb-8">
+    <div className="min-h-screen bg-mushaf-paper flex flex-col pb-28 md:pb-8">
       
-      <div className="flex justify-between items-center mb-6 pt-2">
-        <h1 className="text-2xl font-bold font-cairo text-mushaf-teal">حسابي وإنجازي</h1>
-        <div className="flex gap-4">
-          <button className="text-mushaf-gold hover:text-mushaf-teal transition" title="الإعدادات">
-            <Settings size={24} />
-          </button>
-          <button onClick={handleLogout} className="text-red-400 hover:text-red-600 transition" title="تسجيل الخروج">
-            <LogOut size={24} />
-          </button>
-        </div>
+      {/* الهيدر */}
+      <div className="flex justify-between items-center p-4 bg-mushaf-paper shadow-sm z-10 sticky top-0">
+        <Link href="/" className="text-mushaf-teal bg-white p-2 rounded-full shadow-sm hover:bg-mushaf-paper transition">
+          <ChevronRight size={24} />
+        </Link>
+        <h1 className="font-bold text-mushaf-dark text-lg flex items-center gap-2">
+          <User size={20} className="text-mushaf-teal"/>
+          حسابي والمفضلة
+        </h1>
+        <button onClick={handleLogout} className="text-red-500 bg-white p-2 rounded-full shadow-sm hover:bg-red-50 transition">
+          <LogOut size={20} />
+        </button>
       </div>
 
-      <section className="bg-white rounded-3xl p-6 shadow-sm border border-mushaf-border/40 flex items-center gap-5 mb-8">
-        <div className="w-16 h-16 bg-mushaf-teal text-white rounded-full flex items-center justify-center text-2xl font-bold border-2 border-mushaf-gold shadow-md">
-          {user.email ? user.email.charAt(0).toUpperCase() : 'م'}
-        </div>
-        <div className="overflow-hidden">
-          <h2 className="text-lg font-bold text-mushaf-dark mb-1 truncate" dir="ltr">{user.email}</h2>
-          <p className="text-sm text-gray-500 flex items-center gap-1">
-            <Award size={16} className="text-mushaf-gold" />
-            عضو في مصحف سميع
-          </p>
-        </div>
-      </section>
-
-      <section className="mb-8">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-bold text-mushaf-dark flex items-center gap-2">
-            <Target className="text-mushaf-teal" size={24} />
-            خطة الختمة الحالية
-          </h3>
-          <span className="text-xs font-bold bg-mushaf-gold/20 text-mushaf-gold px-3 py-1 rounded-full">
-            مستمر
-          </span>
-        </div>
-
-        <div className="bg-gradient-to-br from-mushaf-teal to-[#11464D] rounded-3xl p-6 shadow-lg text-white relative overflow-hidden border border-mushaf-gold/20">
-          <div className="absolute -top-10 -left-10 w-32 h-32 bg-white opacity-5 rounded-full blur-2xl"></div>
-          
-          <div className="flex justify-between items-end mb-4 relative z-10">
-            <div>
-              <p className="text-mushaf-gold text-sm font-bold mb-1">توقفت عند</p>
-              <p className="text-2xl font-bold">صفحة {lastPage}</p>
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-bold mb-1">الإنجاز</p>
-              <p className="text-3xl font-mono text-mushaf-gold">{percentage}%</p>
-            </div>
-          </div>
-
-          {/* شريط التقدم الديناميكي */}
-          <div className="w-full h-2 bg-white/20 rounded-full mb-4 relative z-10 overflow-hidden">
-            <div 
-              className="h-full bg-mushaf-gold rounded-full shadow-[0_0_10px_rgba(197,154,83,0.8)] transition-all duration-1000 ease-out"
-              style={{ width: `${percentage}%` }}
-            ></div>
-          </div>
-
-          <Link href={`/mushaf?page=${lastPage}`} className="w-full bg-white text-mushaf-teal font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-mushaf-paper transition relative z-10 shadow-md">
-            <BookOpen size={20} />
-            متابعة الورد
-          </Link>
-        </div>
-      </section>
-
-      <section className="mb-8">
-        <h3 className="text-lg font-bold text-mushaf-dark mb-4 flex items-center gap-2">
-          <Bookmark className="text-mushaf-teal" size={24} />
-          المحفوظات والعلامات
-        </h3>
+      <div className="p-5 flex flex-col gap-6">
         
-        <div className="grid grid-cols-2 gap-4">
-          <button className="bg-white p-5 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
-            <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition">
-              <Bookmark size={28} className="text-mushaf-gold" />
-            </div>
-            <div className="text-center">
-              <span className="font-bold text-mushaf-dark block">الفواصل</span>
-              <span className="text-xs text-gray-500">يتم الحفظ تلقائياً</span>
-            </div>
-          </button>
-
-          <button className="bg-white p-5 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
-            <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition">
-              <Heart size={28} className="text-mushaf-gold" />
-            </div>
-            <div className="text-center">
-              <span className="font-bold text-mushaf-dark block">المفضلة</span>
-              <span className="text-xs text-gray-500">قريباً</span>
-            </div>
-          </button>
+        {/* كارت بيانات المستخدم */}
+        <div className="bg-gradient-to-br from-[#175E67] to-[#0D383E] rounded-3xl p-6 shadow-lg text-white flex items-center gap-4 relative overflow-hidden border border-mushaf-gold/20">
+          <div className="w-16 h-16 bg-white/10 rounded-full border-2 border-mushaf-gold flex items-center justify-center">
+            <User size={32} className="text-mushaf-gold" />
+          </div>
+          <div>
+            <p className="text-sm text-mushaf-gold font-bold mb-1">مرحباً بك،</p>
+            <h2 className="font-bold font-cairo text-xl truncate max-w-[200px]">
+              {user?.email ? user.email.split('@')[0] : 'ضيف سميع'}
+            </h2>
+          </div>
+          <div className="absolute -top-10 -left-10 w-32 h-32 bg-white opacity-5 rounded-full blur-2xl"></div>
         </div>
-      </section>
 
+        {/* قسم المفضلة */}
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <Bookmark size={24} className="text-mushaf-teal" />
+            <h3 className="text-lg font-bold text-mushaf-dark">الآيات المحفوظة ({bookmarks.length})</h3>
+          </div>
+
+          {bookmarks.length === 0 ? (
+            <div className="bg-white p-8 rounded-3xl border border-dashed border-gray-300 text-center text-gray-400">
+              <Bookmark size={48} className="mx-auto mb-3 opacity-20" />
+              <p className="font-bold">لا توجد آيات محفوظة بعد</p>
+              <p className="text-sm mt-1">اضغط على أي آية في المصحف لحفظها هنا</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {bookmarks.map((ayah, index) => (
+                <div key={index} className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 hover:border-mushaf-teal transition group relative">
+                  
+                  <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-2">
+                    <span className="text-mushaf-gold font-bold text-sm bg-mushaf-paper px-3 py-1 rounded-full">
+                      سُورَةُ {ayah.surahName}
+                    </span>
+                    <button 
+                      onClick={() => removeBookmark(ayah.number)}
+                      className="text-gray-300 hover:text-red-500 transition p-1"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+
+                  <p className="font-uthmani text-xl leading-loose text-mushaf-dark text-justify" dir="rtl">
+                    {ayah.text} <span className="text-mushaf-gold mx-1">﴿{ayah.numberInSurah}﴾</span>
+                  </p>
+
+                  <div className="mt-4 flex justify-end">
+                    <Link 
+                      href={`/mushaf?page=${ayah.page}`}
+                      className="flex items-center gap-1 text-sm font-bold text-mushaf-teal bg-mushaf-teal/10 px-4 py-2 rounded-xl hover:bg-mushaf-teal hover:text-white transition"
+                    >
+                      <BookOpen size={16} />
+                      الذهاب للصفحة
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </div>
     </div>
   )
 }
