@@ -1,92 +1,104 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
-import { Search, ChevronLeft, Book, Loader2 } from 'lucide-react'
+import { Search, ChevronLeft, List, Hash } from 'lucide-react'
+
+// مصفوفة مبسطة للسور (ممكن نكملها للـ 114 سورة بنفس النمط)
+// رقم الصفحة هو بداية السورة في المصحف
+const surahsList = [
+  { id: 1, name: 'الفاتحة', type: 'مكية', ayahs: 7, startPage: 1 },
+  { id: 2, name: 'البقرة', type: 'مدنية', ayahs: 286, startPage: 2 },
+  { id: 3, name: 'آل عمران', type: 'مدنية', ayahs: 200, startPage: 50 },
+  { id: 4, name: 'النساء', type: 'مدنية', ayahs: 176, startPage: 77 },
+  { id: 5, name: 'المائدة', type: 'مدنية', ayahs: 120, startPage: 106 },
+  { id: 6, name: 'الأنعام', type: 'مكية', ayahs: 165, startPage: 128 },
+  { id: 7, name: 'الأعراف', type: 'مكية', ayahs: 206, startPage: 151 },
+  { id: 8, name: 'الأنفال', type: 'مدنية', ayahs: 75, startPage: 177 },
+  { id: 9, name: 'التوبة', type: 'مدنية', ayahs: 129, startPage: 187 },
+  { id: 10, name: 'يونس', type: 'مكية', ayahs: 109, startPage: 208 },
+  { id: 11, name: 'هود', type: 'مكية', ayahs: 123, startPage: 221 },
+  { id: 12, name: 'يوسف', type: 'مكية', ayahs: 111, startPage: 235 },
+  { id: 18, name: 'الكهف', type: 'مكية', ayahs: 110, startPage: 293 },
+  { id: 36, name: 'يس', type: 'مكية', ayahs: 83, startPage: 440 },
+  { id: 55, name: 'الرحمن', type: 'مدنية', ayahs: 78, startPage: 531 },
+  { id: 67, name: 'الملك', type: 'مكية', ayahs: 30, startPage: 562 },
+  { id: 112, name: 'الإخلاص', type: 'مكية', ayahs: 4, startPage: 604 },
+  { id: 113, name: 'الفلق', type: 'مكية', ayahs: 5, startPage: 604 },
+  { id: 114, name: 'الناس', type: 'مكية', ayahs: 6, startPage: 604 },
+]
 
 export default function IndexPage() {
-  const [surahs, setSurahs] = useState<any[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [isLoading, setIsLoading] = useState(true)
 
-  useEffect(() => {
-    fetch('https://api.alquran.cloud/v1/surah')
-      .then(res => res.json())
-      .then(data => {
-        setSurahs(data.data)
-        setIsLoading(false)
-      })
-      .catch(err => console.error("Error fetching surahs:", err))
-  }, [])
-
-  const filteredSurahs = surahs.filter(surah => 
-    surah.name.includes(searchQuery) || surah.number.toString() === searchQuery
+  // فلترة السور بناءً على البحث
+  const filteredSurahs = surahsList.filter(surah => 
+    surah.name.includes(searchQuery)
   )
 
   return (
-    <div className="min-h-screen bg-mushaf-paper flex flex-col pb-28 md:pb-8">
+    <div className="min-h-screen bg-mushaf-paper flex flex-col p-5 pb-28 md:pb-8">
       
-      <div className="bg-mushaf-teal text-white p-5 rounded-b-3xl shadow-md sticky top-0 z-20">
-        <div className="flex items-center gap-3 mb-4">
-          <Book size={28} className="text-mushaf-gold" />
-          <h1 className="text-2xl font-bold font-cairo">فهرس السور</h1>
-        </div>
-        
-        <div className="relative">
-          <input 
-            type="text" 
-            placeholder="ابحث باسم السورة أو رقمها..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white/10 border border-white/20 text-white placeholder-white/60 rounded-xl py-3 pr-12 pl-4 focus:outline-none focus:ring-2 focus:ring-mushaf-gold transition"
-          />
-          <Search className="absolute right-4 top-3.5 text-mushaf-gold" size={20} />
-        </div>
+      {/* الهيدر */}
+      <div className="flex items-center gap-3 mb-6 pt-2">
+        <List size={28} className="text-mushaf-teal" />
+        <h1 className="text-2xl font-bold font-cairo text-mushaf-teal">فهرس السور</h1>
       </div>
 
-      <div className="p-4 flex-1">
-        {isLoading ? (
-          <div className="flex flex-col items-center justify-center h-64 text-mushaf-teal gap-3">
-            <Loader2 className="animate-spin" size={32} />
-            <p className="font-bold">جاري تحميل الفهرس...</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {filteredSurahs.length > 0 ? (
-              filteredSurahs.map((surah) => (
-                <Link 
-                  href="/mushaf" 
-                  key={surah.number}
-                  className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/30 flex items-center justify-between hover:border-mushaf-teal transition group"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 flex items-center justify-center bg-mushaf-paper border-2 border-mushaf-gold rounded-full transform rotate-45 group-hover:bg-mushaf-teal transition">
-                      <span className="transform -rotate-45 font-bold text-mushaf-dark group-hover:text-white">
-                        {surah.number}
-                      </span>
-                    </div>
-                    
-                    <div>
-                      <h2 className="font-uthmani text-2xl text-mushaf-teal mb-1">
-                        {surah.name}
-                      </h2>
-                      <p className="text-xs text-gray-500 font-semibold">
-                        {surah.revelationType === 'Meccan' ? 'مكية' : 'مدنية'} • {surah.numberOfAyahs} آية
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <ChevronLeft className="text-mushaf-gold opacity-50 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
-                </Link>
-              ))
-            ) : (
-              <div className="text-center text-gray-500 py-10">
-                لا توجد سورة بهذا الاسم
+      {/* شريط البحث */}
+      <div className="relative mb-6">
+        <input 
+          type="text" 
+          placeholder="ابحث عن سورة..." 
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full bg-white border border-mushaf-border/50 text-mushaf-dark placeholder-gray-400 rounded-xl py-3 pr-12 pl-4 focus:outline-none focus:ring-2 focus:ring-mushaf-teal transition shadow-sm"
+        />
+        <Search className="absolute right-4 top-3.5 text-mushaf-gold" size={20} />
+      </div>
+
+      {/* قائمة السور */}
+      <div className="flex flex-col gap-3">
+        {filteredSurahs.map((surah) => (
+          <Link 
+            key={surah.id}
+            // السحر هنا: التوجيه لصفحة المصحف مع تمرير رقم بداية السورة
+            href={`/mushaf?page=${surah.startPage}`} 
+            className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex items-center justify-between hover:border-mushaf-teal transition group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 flex items-center justify-center bg-mushaf-paper border border-mushaf-gold/50 rounded-xl group-hover:bg-mushaf-teal transition">
+                <span className="font-bold text-mushaf-gold group-hover:text-white">{surah.id}</span>
               </div>
-            )}
+              <div>
+                <h2 className="font-bold font-uthmani text-xl text-mushaf-dark mb-1 group-hover:text-mushaf-teal transition">
+                  سُورَةُ {surah.name}
+                </h2>
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                  <span className="flex items-center gap-1"><Hash size={12}/> {surah.type}</span>
+                  <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                  <span>{surah.ayahs} آية</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <div className="text-left hidden sm:block">
+                <span className="text-xs text-gray-400 block mb-1">الصفحة</span>
+                <span className="font-bold text-mushaf-teal">{surah.startPage}</span>
+              </div>
+              <ChevronLeft className="text-mushaf-gold opacity-50 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
+            </div>
+          </Link>
+        ))}
+
+        {filteredSurahs.length === 0 && (
+          <div className="text-center py-10 text-gray-400 font-bold">
+            لم يتم العثور على سورة بهذا الاسم
           </div>
         )}
       </div>
+
     </div>
   )
 }
