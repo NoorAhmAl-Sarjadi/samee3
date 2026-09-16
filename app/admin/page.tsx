@@ -1,115 +1,779 @@
 'use client'
 
-import { useState } from 'react'
-import { LayoutDashboard, Users, Database, Bell, Settings, LogOut, Activity, FileText, ShieldCheck } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
+import {
+  LayoutDashboard,
+  Users,
+  Database,
+  Bell,
+  Settings,
+  LogOut,
+  Activity,
+  FileText,
+  ShieldCheck,
+  BookOpen,
+  Headphones,
+  Moon,
+  ChevronLeft,
+  Search,
+  Menu,
+  X,
+  BarChart3,
+  MessageSquare,
+} from 'lucide-react'
+
+type Tab =
+  | 'dashboard'
+  | 'users'
+  | 'content'
+  | 'notifications'
+  | 'activity'
+  | 'settings'
+
+const recentActivity = [
+  {
+    user: 'مستخدم جديد',
+    action: 'إنشاء حساب في مصحف سَميع',
+    time: 'منذ 5 دقائق',
+  },
+  {
+    user: 'مستخدم',
+    action: 'حفظ آية في المفضلة',
+    time: 'منذ 18 دقيقة',
+  },
+  {
+    user: 'مستخدم',
+    action: 'بدأ خطة ختمة جديدة',
+    time: 'منذ 32 دقيقة',
+  },
+  {
+    user: 'مستخدم',
+    action: 'استمع إلى تلاوة',
+    time: 'منذ ساعة',
+  },
+]
+
+const users = [
+  {
+    name: 'أحمد محمد',
+    email: 'ahmed@example.com',
+    status: 'نشط',
+    progress: 42,
+  },
+  {
+    name: 'محمد علي',
+    email: 'mohamed@example.com',
+    status: 'نشط',
+    progress: 78,
+  },
+  {
+    name: 'عبدالله حسن',
+    email: 'abdullah@example.com',
+    status: 'غير نشط',
+    progress: 16,
+  },
+  {
+    name: 'يوسف أحمد',
+    email: 'yousef@example.com',
+    status: 'نشط',
+    progress: 91,
+  },
+]
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState('dashboard')
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const filteredUsers = useMemo(() => {
+    const query = search.trim().toLowerCase()
+
+    if (!query) return users
+
+    return users.filter(
+      (user) =>
+        user.name.toLowerCase().includes(query) ||
+        user.email.toLowerCase().includes(query)
+    )
+  }, [search])
+
+  const menuItems = [
+    {
+      id: 'dashboard' as const,
+      label: 'لوحة التحكم',
+      icon: LayoutDashboard,
+    },
+    {
+      id: 'users' as const,
+      label: 'المستخدمون',
+      icon: Users,
+    },
+    {
+      id: 'content' as const,
+      label: 'محتوى التطبيق',
+      icon: Database,
+    },
+    {
+      id: 'notifications' as const,
+      label: 'الإشعارات',
+      icon: Bell,
+    },
+    {
+      id: 'activity' as const,
+      label: 'النشاطات',
+      icon: Activity,
+    },
+    {
+      id: 'settings' as const,
+      label: 'الإعدادات',
+      icon: Settings,
+    },
+  ]
+
+  const stats = [
+    {
+      label: 'إجمالي المستخدمين',
+      value: '1,248',
+      icon: Users,
+      note: 'حساب مسجل',
+    },
+    {
+      label: 'خطط الختمة',
+      value: '386',
+      icon: BookOpen,
+      note: 'خطة نشطة',
+    },
+    {
+      label: 'جلسات الاستماع',
+      value: '2,941',
+      icon: Headphones,
+      note: 'جلسة',
+    },
+    {
+      label: 'النشاط اليوم',
+      value: '684',
+      icon: BarChart3,
+      note: 'عملية',
+    },
+  ]
+
+  const renderDashboard = () => (
+    <>
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        {stats.map((item) => {
+          const Icon = item.icon
+
+          return (
+            <div
+              key={item.label}
+              className="
+                bg-white
+                rounded-3xl
+                border border-gray-100
+                shadow-sm
+                p-5
+              "
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-11 h-11 rounded-2xl bg-[#075640]/10 flex items-center justify-center">
+                  <Icon size={22} className="text-[#075640]" />
+                </div>
+
+                <span className="text-[11px] font-bold text-gray-400">
+                  {item.note}
+                </span>
+              </div>
+
+              <p className="text-2xl font-black text-gray-900">
+                {item.value}
+              </p>
+
+              <p className="text-xs text-gray-500 mt-1">
+                {item.label}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <section className="xl:col-span-2 bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="font-black text-gray-900 text-lg">
+                آخر النشاطات
+              </h2>
+              <p className="text-xs text-gray-400 mt-1">
+                نظرة سريعة على آخر عمليات المنصة
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('activity')}
+              className="text-xs font-bold text-[#075640] hover:underline"
+            >
+              عرض الكل
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {recentActivity.map((item, index) => (
+              <div
+                key={`${item.user}-${index}`}
+                className="
+                  flex items-center justify-between gap-4
+                  p-4 rounded-2xl
+                  bg-gray-50
+                "
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 shrink-0 rounded-xl bg-white border border-gray-100 flex items-center justify-center">
+                    <Activity size={18} className="text-[#c6a15a]" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm text-gray-900 truncate">
+                      {item.user}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1 truncate">
+                      {item.action}
+                    </p>
+                  </div>
+                </div>
+
+                <span className="text-[11px] text-gray-400 shrink-0">
+                  {item.time}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-[#075640] rounded-3xl shadow-sm p-6 text-white relative overflow-hidden">
+          <div className="absolute -top-16 -left-16 w-40 h-40 rounded-full bg-white/5" />
+          <div className="absolute -bottom-20 -right-14 w-48 h-48 rounded-full bg-white/5" />
+
+          <div className="relative z-10">
+            <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-5">
+              <ShieldCheck size={24} />
+            </div>
+
+            <h2 className="text-xl font-black">
+              مساحة الإدارة
+            </h2>
+
+            <p className="text-sm text-white/75 leading-7 mt-2">
+              من هنا تتابع المستخدمين والمحتوى والنشاطات
+              والإشعارات وإعدادات المنصة.
+            </p>
+
+            <div className="mt-6 space-y-3">
+              <button
+                type="button"
+                onClick={() => setActiveTab('users')}
+                className="w-full rounded-2xl bg-white text-[#075640] py-3 font-black text-sm"
+              >
+                إدارة المستخدمين
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('notifications')}
+                className="w-full rounded-2xl border border-white/20 bg-white/10 py-3 font-black text-sm"
+              >
+                إرسال إشعار
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </>
+  )
+
+  const renderUsers = () => (
+    <section className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+        <div>
+          <h2 className="font-black text-gray-900 text-lg">
+            المستخدمون
+          </h2>
+          <p className="text-xs text-gray-400 mt-1">
+            عرض تجريبي لواجهة إدارة المستخدمين
+          </p>
+        </div>
+
+        <div className="relative w-full sm:w-72">
+          <Search
+            size={18}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="ابحث بالاسم أو البريد..."
+            className="w-full h-11 rounded-2xl border border-gray-200 bg-gray-50 pr-10 pl-4 text-sm outline-none focus:border-[#075640]"
+          />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[680px]">
+          <thead>
+            <tr className="text-right text-xs text-gray-400 border-b border-gray-100">
+              <th className="pb-3 font-bold">المستخدم</th>
+              <th className="pb-3 font-bold">الحالة</th>
+              <th className="pb-3 font-bold">التقدم</th>
+              <th className="pb-3 font-bold">الإجراء</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {filteredUsers.map((user) => (
+              <tr
+                key={user.email}
+                className="border-b border-gray-50 last:border-0"
+              >
+                <td className="py-4">
+                  <div>
+                    <p className="font-bold text-sm text-gray-900">
+                      {user.name}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1 dir-ltr text-right">
+                      {user.email}
+                    </p>
+                  </div>
+                </td>
+
+                <td className="py-4">
+                  <span
+                    className={`inline-flex rounded-full px-3 py-1 text-[11px] font-bold ${
+                      user.status === 'نشط'
+                        ? 'bg-emerald-50 text-emerald-600'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}
+                  >
+                    {user.status}
+                  </span>
+                </td>
+
+                <td className="py-4">
+                  <div className="w-36">
+                    <div className="flex items-center justify-between text-[11px] mb-1">
+                      <span className="text-gray-400">الختمة</span>
+                      <span className="font-bold text-[#075640]">
+                        {user.progress}%
+                      </span>
+                    </div>
+
+                    <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-[#075640]"
+                        style={{ width: `${user.progress}%` }}
+                      />
+                    </div>
+                  </div>
+                </td>
+
+                <td className="py-4">
+                  <button
+                    type="button"
+                    className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 text-xs font-bold text-gray-600 hover:border-[#075640] hover:text-[#075640] transition"
+                  >
+                    عرض الحساب
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {filteredUsers.length === 0 && (
+          <div className="py-12 text-center text-sm text-gray-400">
+            لا توجد نتائج مطابقة للبحث.
+          </div>
+        )}
+      </div>
+    </section>
+  )
+
+  const renderContent = () => (
+    <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {[
+        {
+          title: 'المصحف',
+          text: 'إدارة الأقسام المرتبطة بالقراءة والفهرس.',
+          icon: BookOpen,
+        },
+        {
+          title: 'التلاوات',
+          text: 'متابعة قسم الصوتيات والقراء.',
+          icon: Headphones,
+        },
+        {
+          title: 'الأحاديث',
+          text: 'إدارة واجهة مكتبة الأحاديث.',
+          icon: FileText,
+        },
+        {
+          title: 'الأذكار',
+          text: 'إدارة واجهات الأذكار والعدادات.',
+          icon: Moon,
+        },
+      ].map((item) => {
+        const Icon = item.icon
+
+        return (
+          <div
+            key={item.title}
+            className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-[#075640]/10 flex items-center justify-center mb-4">
+              <Icon size={23} className="text-[#075640]" />
+            </div>
+
+            <h3 className="font-black text-gray-900">
+              {item.title}
+            </h3>
+
+            <p className="text-sm text-gray-500 leading-7 mt-2">
+              {item.text}
+            </p>
+
+            <button
+              type="button"
+              className="mt-5 rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-bold text-gray-500"
+            >
+              إدارة القسم
+            </button>
+          </div>
+        )
+      })}
+    </section>
+  )
+
+  const renderNotifications = () => (
+    <section className="max-w-3xl bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-11 h-11 rounded-2xl bg-[#c6a15a]/15 flex items-center justify-center">
+          <Bell size={21} className="text-[#c6a15a]" />
+        </div>
+
+        <div>
+          <h2 className="font-black text-gray-900 text-lg">
+            الإشعارات
+          </h2>
+          <p className="text-xs text-gray-400 mt-1">
+            تجهيز واجهة إنشاء إشعار جديد
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <input
+          placeholder="عنوان الإشعار"
+          className="w-full h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#075640]"
+        />
+
+        <textarea
+          rows={5}
+          placeholder="اكتب نص الإشعار هنا..."
+          className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm outline-none resize-none focus:border-[#075640]"
+        />
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            type="button"
+            className="flex-1 rounded-2xl bg-[#075640] text-white py-3.5 font-black text-sm"
+          >
+            تجهيز الإشعار
+          </button>
+
+          <button
+            type="button"
+            className="rounded-2xl border border-gray-200 px-5 py-3.5 font-black text-sm text-gray-500"
+          >
+            حفظ كمسودة
+          </button>
+        </div>
+
+        <p className="text-xs text-gray-400 leading-6 bg-gray-50 rounded-2xl p-4">
+          الواجهة الحالية تجهيز إداري فقط؛ إرسال Push Notifications
+          فعليًا يحتاج ربط خدمة الإشعارات المناسبة بالمشروع.
+        </p>
+      </div>
+    </section>
+  )
+
+  const renderActivity = () => (
+    <section className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-11 h-11 rounded-2xl bg-[#075640]/10 flex items-center justify-center">
+          <Activity size={21} className="text-[#075640]" />
+        </div>
+
+        <div>
+          <h2 className="font-black text-gray-900 text-lg">
+            سجل النشاطات
+          </h2>
+          <p className="text-xs text-gray-400 mt-1">
+            آخر النشاطات المعروضة في لوحة الإدارة
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {recentActivity.map((item, index) => (
+          <div
+            key={index}
+            className="flex items-center justify-between gap-4 rounded-2xl bg-gray-50 p-4"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center shrink-0">
+                <MessageSquare size={17} className="text-[#c6a15a]" />
+              </div>
+
+              <div className="min-w-0">
+                <p className="font-bold text-sm text-gray-900 truncate">
+                  {item.user}
+                </p>
+                <p className="text-xs text-gray-500 mt-1 truncate">
+                  {item.action}
+                </p>
+              </div>
+            </div>
+
+            <span className="text-[11px] text-gray-400 shrink-0">
+              {item.time}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+
+  const renderSettings = () => (
+    <section className="max-w-3xl bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-11 h-11 rounded-2xl bg-[#075640]/10 flex items-center justify-center">
+          <Settings size={21} className="text-[#075640]" />
+        </div>
+
+        <div>
+          <h2 className="font-black text-gray-900 text-lg">
+            إعدادات المنصة
+          </h2>
+          <p className="text-xs text-gray-400 mt-1">
+            إعدادات أساسية لواجهة الإدارة
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <label className="block">
+          <span className="text-xs font-bold text-gray-500 mb-2 block">
+            اسم المنصة
+          </span>
+          <input
+            defaultValue="مصحف سَميع"
+            className="w-full h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold outline-none focus:border-[#075640]"
+          />
+        </label>
+
+        <label className="block">
+          <span className="text-xs font-bold text-gray-500 mb-2 block">
+            الرسالة الترحيبية
+          </span>
+          <input
+            defaultValue="السلام عليكم ورحمة الله"
+            className="w-full h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold outline-none focus:border-[#075640]"
+          />
+        </label>
+      </div>
+
+      <label className="block mt-4">
+        <span className="text-xs font-bold text-gray-500 mb-2 block">
+          وصف المنصة
+        </span>
+        <textarea
+          rows={4}
+          defaultValue="مساحة هادئة للقراءة والتدبر والاستماع."
+          className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm outline-none resize-none focus:border-[#075640]"
+        />
+      </label>
+
+      <button
+        type="button"
+        className="mt-5 rounded-2xl bg-[#075640] text-white px-6 py-3.5 font-black text-sm"
+      >
+        حفظ الإعدادات
+      </button>
+    </section>
+  )
+
+  const renderActiveTab = () => {
+    switch (activeTab) {
+      case 'users':
+        return renderUsers()
+      case 'content':
+        return renderContent()
+      case 'notifications':
+        return renderNotifications()
+      case 'activity':
+        return renderActivity()
+      case 'settings':
+        return renderSettings()
+      case 'dashboard':
+      default:
+        return renderDashboard()
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex relative z-[100]" dir="rtl">
-      
-      {/* القائمة الجانبية (Sidebar) */}
-      <aside className="w-20 md:w-64 bg-mushaf-dark text-white flex flex-col transition-all duration-300 shadow-2xl z-20">
-        <div className="p-4 md:p-6 border-b border-white/10 flex items-center justify-center md:justify-start gap-3">
-          <ShieldCheck className="text-mushaf-gold" size={32} />
-          <h1 className="font-bold text-xl hidden md:block">لوحة الإدارة</h1>
+    <div
+      className="min-h-screen bg-gray-50 text-gray-900"
+      dir="rtl"
+    >
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <button
+          type="button"
+          aria-label="إغلاق القائمة"
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={`
+          fixed top-0 right-0 bottom-0 z-50
+          w-[280px]
+          bg-[#073f30]
+          text-white
+          p-5
+          transition-transform duration-300
+          lg:translate-x-0
+          ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}
+        `}
+      >
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <p className="text-xs text-white/50 font-bold">
+              لوحة الإدارة
+            </p>
+            <h1 className="text-xl font-black mt-1">
+              مصحف سَميع
+            </h1>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="lg:hidden w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"
+            aria-label="إغلاق القائمة"
+          >
+            <X size={20} />
+          </button>
         </div>
-        
-        <nav className="flex-1 py-6 flex flex-col gap-2 px-3">
-          <SidebarItem icon={LayoutDashboard} label="الرئيسية" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-          <SidebarItem icon={Users} label="المستخدمين" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
-          <SidebarItem icon={Database} label="إدارة المحتوى" active={activeTab === 'content'} onClick={() => setActiveTab('content')} />
-          <SidebarItem icon={Bell} label="الإشعارات" active={activeTab === 'notifications'} onClick={() => setActiveTab('notifications')} />
-          <SidebarItem icon={Settings} label="الإعدادات" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+
+        <nav className="space-y-2">
+          {menuItems.map((item) => {
+            const Icon = item.icon
+            const active = activeTab === item.id
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(item.id)
+                  setSidebarOpen(false)
+                }}
+                className={`
+                  w-full
+                  flex
+                  items-center
+                  gap-3
+                  rounded-2xl
+                  px-4
+                  py-3.5
+                  text-sm
+                  font-bold
+                  transition
+                  ${
+                    active
+                      ? 'bg-white text-[#075640] shadow-sm'
+                      : 'text-white/75 hover:bg-white/10 hover:text-white'
+                  }
+                `}
+              >
+                <Icon size={19} />
+                {item.label}
+              </button>
+            )
+          })}
         </nav>
 
-        <div className="p-4 border-t border-white/10">
-          <button className="flex items-center justify-center md:justify-start gap-3 text-gray-400 hover:text-red-400 transition w-full p-2 rounded-xl hover:bg-white/5">
-            <LogOut size={20} />
-            <span className="hidden md:block">تسجيل الخروج</span>
+        <div className="absolute bottom-5 left-5 right-5 space-y-2">
+          <Link
+            href="/"
+            className="w-full flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 py-3 text-xs font-bold text-white/80 hover:bg-white/10"
+          >
+            العودة للتطبيق
+            <ChevronLeft size={15} />
+          </Link>
+
+          <button
+            type="button"
+            className="w-full flex items-center justify-center gap-2 rounded-2xl border border-white/10 py-3 text-xs font-bold text-white/60"
+          >
+            <LogOut size={16} />
+            تسجيل الخروج
           </button>
         </div>
       </aside>
 
-      {/* المحتوى الرئيسي */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto pb-28 md:pb-10">
-        <header className="flex justify-between items-center mb-10 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-800">مرحباً بك، مدير النظام</h2>
-            <p className="text-sm text-gray-500 mt-1">نظرة عامة على أداء تطبيق مصحف سميع</p>
+      {/* Main */}
+      <main className="lg:mr-[280px] min-h-screen">
+        <header className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur border-b border-gray-100">
+          <div className="px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="lg:hidden w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center text-[#075640]"
+                aria-label="فتح القائمة"
+              >
+                <Menu size={20} />
+              </button>
+
+              <div className="min-w-0">
+                <p className="text-xs text-gray-400 font-bold">
+                  الإدارة
+                </p>
+                <h2 className="font-black text-gray-900 text-lg truncate">
+                  {menuItems.find((item) => item.id === activeTab)?.label}
+                </h2>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2 bg-white border border-gray-100 rounded-2xl px-4 py-2.5">
+                <ShieldCheck size={16} className="text-[#075640]" />
+                <span className="text-xs font-bold text-gray-500">
+                  وضع الإدارة
+                </span>
+              </div>
+            </div>
           </div>
-          <Link href="/" className="bg-mushaf-teal text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:bg-mushaf-teal/90 transition flex items-center gap-2">
-            العودة للتطبيق
-          </Link>
         </header>
 
-        {/* بطاقات الإحصائيات */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-          <StatCard icon={Users} title="إجمالي المستخدمين" value="1,245" trend="+12% هذا الأسبوع" color="text-blue-500" bg="bg-blue-50" />
-          <StatCard icon={Activity} title="التلاوات المستمعة" value="8,430" trend="+5% هذا الأسبوع" color="text-mushaf-teal" bg="bg-teal-50" />
-          <StatCard icon={FileText} title="الختمات المكتملة" value="312" trend="+22% هذا الشهر" color="text-mushaf-gold" bg="bg-yellow-50" />
+        <div className="p-4 sm:p-6 lg:p-8">
+          {renderActiveTab()}
         </div>
-
-        {/* قسم النشاطات الأخيرة */}
-        <section className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
-          <h3 className="text-lg font-bold text-gray-800 mb-6 border-b pb-4">أحدث النشاطات</h3>
-          <div className="space-y-4">
-            <ActivityRow user="أحمد محمود" action="أكمل ختمة القرآن الكريم" time="منذ ساعتين" />
-            <ActivityRow user="سارة علي" action="أضافت 5 آيات للمفضلة" time="منذ 3 ساعات" />
-            <ActivityRow user="مدير النظام" action="تحديث قاعدة بيانات الأحاديث" time="منذ 5 ساعات" />
-            <ActivityRow user="عمر خالد" action="أنشأ حساباً جديداً" time="منذ يوم" />
-          </div>
-        </section>
       </main>
-    </div>
-  )
-}
-
-// مكونات فرعية للمساعدة في نظافة الكود
-function SidebarItem({ icon: Icon, label, active, onClick }: any) {
-  return (
-    <button 
-      onClick={onClick}
-      className={`flex items-center justify-center md:justify-start gap-3 w-full p-3 rounded-xl transition-all ${
-        active ? 'bg-mushaf-teal text-white shadow-md' : 'text-gray-400 hover:text-white hover:bg-white/5'
-      }`}
-    >
-      <Icon size={20} />
-      <span className="hidden md:block font-semibold text-sm">{label}</span>
-    </button>
-  )
-}
-
-function StatCard({ icon: Icon, title, value, trend, color, bg }: any) {
-  return (
-    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col hover:shadow-md transition">
-      <div className="flex items-center gap-4 mb-4">
-        <div className={`p-3 rounded-2xl ${bg}`}>
-          <Icon size={24} className={color} />
-        </div>
-        <h4 className="font-bold text-gray-600">{title}</h4>
-      </div>
-      <div className="text-3xl font-bold text-gray-800 mb-2">{value}</div>
-      <div className="text-xs text-green-500 font-semibold">{trend}</div>
-    </div>
-  )
-}
-
-function ActivityRow({ user, action, time }: any) {
-  return (
-    <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl transition border border-transparent hover:border-gray-100 cursor-default">
-      <div className="flex items-center gap-4">
-        <div className="w-10 h-10 bg-mushaf-paper border border-mushaf-gold/30 rounded-full flex items-center justify-center font-bold text-mushaf-teal">
-          {user.charAt(0)}
-        </div>
-        <div>
-          <p className="font-bold text-sm text-gray-800">{user}</p>
-          <p className="text-xs text-gray-500 mt-1">{action}</p>
-        </div>
-      </div>
-      <span className="text-xs text-gray-400 font-mono">{time}</span>
     </div>
   )
 }
