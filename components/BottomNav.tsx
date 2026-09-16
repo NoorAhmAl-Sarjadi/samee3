@@ -1,50 +1,51 @@
 'use client'
 
 import Link from 'next/link'
-import { Home, List, BookOpen, Heart, PlayCircle } from 'lucide-react'
 import { usePathname } from 'next/navigation'
+import { Home, BookOpen, Heart, User, List } from 'lucide-react'
 
 export default function BottomNav() {
   const pathname = usePathname()
 
   const navItems = [
-    { name: 'الرئيسية', href: '/', icon: Home },
-    { name: 'الفهرس', href: '/index', icon: List },
-    { name: 'الأحاديث', href: '/hadith', icon: BookOpen },
-    { name: 'الأذكار', href: '/adhkar', icon: Heart },
+    { label: 'الرئيسية', icon: Home, href: '/' },
+    { label: 'المصحف', icon: BookOpen, href: '/mushaf' },
+    // الرابط هنا بقى quran-index
+    { label: 'الفهرس', icon: List, href: '/quran-index' },
+    { label: 'الأذكار', icon: Heart, href: '/adhkar' },
+    { label: 'حسابي', icon: User, href: '/profile' },
   ]
 
   return (
-    <nav className="fixed bottom-0 left-0 w-full bg-mushaf-paper border-t-2 border-mushaf-border rounded-t-3xl shadow-[0_-4px_15px_rgba(0,0,0,0.05)] z-50">
-      <div className="flex justify-between items-center px-6 py-3 max-w-md mx-auto">
-        
-        <div className="flex w-full justify-between items-center pr-4">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href
-            const Icon = item.icon
-            
-            return (
-              <Link key={item.name} href={item.href} className="flex flex-col items-center gap-1">
-                <Icon 
-                  size={24} 
-                  strokeWidth={isActive ? 2.5 : 1.5}
-                  className={`${isActive ? 'text-mushaf-teal' : 'text-mushaf-gold'} transition-colors`} 
+    <nav className="fixed bottom-0 left-0 w-full bg-white border-t border-mushaf-border/50 pb-safe z-50 rounded-t-2xl shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+      <div className="flex justify-between items-center px-2 sm:px-6 h-20 relative">
+        {navItems.map((item, index) => {
+          const isActive = pathname === item.href
+          
+          return (
+            <Link 
+              key={index} 
+              href={item.href}
+              className="relative flex flex-col items-center justify-center w-full h-full group"
+            >
+              {isActive && (
+                <div className="absolute -top-4 w-12 h-1 bg-mushaf-teal rounded-b-lg shadow-[0_4px_10px_rgba(23,94,103,0.5)]"></div>
+              )}
+              
+              <div className={`transition-all duration-300 transform ${isActive ? '-translate-y-2' : 'group-hover:-translate-y-1'}`}>
+                <item.icon 
+                  size={26} 
+                  strokeWidth={isActive ? 2.5 : 2}
+                  className={`transition-colors duration-300 ${isActive ? 'text-mushaf-teal drop-shadow-md' : 'text-gray-400 group-hover:text-mushaf-gold'}`} 
                 />
-                <span className={`text-[10px] font-bold ${isActive ? 'text-mushaf-teal' : 'text-mushaf-gold'}`}>
-                  {item.name}
-                </span>
-              </Link>
-            )
-          })}
-        </div>
-
-        {/* زر التشغيل البارز تم تحويله لرابط يفتح صفحة الصوتيات */}
-        <div className="pl-2 border-r-2 border-mushaf-border/30 pr-4 h-10 flex items-center">
-          <Link href="/audio" className={`rounded-full p-1 shadow-lg transition-all ${pathname === '/audio' ? 'bg-mushaf-gold text-white scale-110' : 'bg-mushaf-teal text-white hover:bg-mushaf-teal/90'}`}>
-            <PlayCircle size={36} strokeWidth={1.5} />
-          </Link>
-        </div>
-
+              </div>
+              
+              <span className={`text-[11px] font-bold mt-1 transition-all duration-300 ${isActive ? 'text-mushaf-teal opacity-100' : 'text-gray-400 opacity-0 group-hover:opacity-100 group-hover:text-mushaf-gold absolute bottom-2'}`}>
+                {item.label}
+              </span>
+            </Link>
+          )
+        })}
       </div>
     </nav>
   )
