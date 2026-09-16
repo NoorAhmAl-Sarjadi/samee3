@@ -1,33 +1,63 @@
 'use client'
 
-import { User, Target, Bookmark, Heart, Award, ChevronLeft, BookOpen, Settings } from 'lucide-react'
+import { Target, Bookmark, Heart, Award, ChevronLeft, BookOpen, Settings, LogOut } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/context/AuthContext'
+import { auth } from '@/lib/firebase'
+import { signOut } from 'firebase/auth'
 
 export default function ProfilePage() {
+  const { user, loading } = useAuth()
+  const router = useRouter()
+
+  // دالة تسجيل الخروج
+  const handleLogout = async () => {
+    try {
+      await signOut(auth)
+      router.push('/auth')
+    } catch (error) {
+      console.error('خطأ في تسجيل الخروج:', error)
+    }
+  }
+
+  // شاشة تحميل بسيطة لحد ما فايربيس يتأكد من حالة المستخدم
+  if (loading) {
+    return <div className="min-h-screen bg-mushaf-paper flex items-center justify-center text-mushaf-teal font-bold font-cairo">جاري التحميل...</div>
+  }
+
+  // لو المستخدم مش مسجل دخول، هنرجعه لصفحة التسجيل
+  if (!user) {
+    router.push('/auth')
+    return null
+  }
+
   return (
     <div className="min-h-screen bg-mushaf-paper flex flex-col p-5 pb-28 md:pb-8">
       
       {/* الهيدر */}
       <div className="flex justify-between items-center mb-6 pt-2">
-        <div className="flex items-center gap-3">
-          <User size={28} className="text-mushaf-teal" />
-          <h1 className="text-2xl font-bold font-cairo text-mushaf-teal">حسابي وإنجازي</h1>
+        <h1 className="text-2xl font-bold font-cairo text-mushaf-teal">حسابي وإنجازي</h1>
+        <div className="flex gap-4">
+          <button className="text-mushaf-gold hover:text-mushaf-teal transition" title="الإعدادات">
+            <Settings size={24} />
+          </button>
+          <button onClick={handleLogout} className="text-red-400 hover:text-red-600 transition" title="تسجيل الخروج">
+            <LogOut size={24} />
+          </button>
         </div>
-        <button className="text-mushaf-gold hover:text-mushaf-teal transition">
-          <Settings size={24} />
-        </button>
       </div>
 
-      {/* بطاقة المستخدم */}
+      {/* بطاقة المستخدم (ببيانات فايربيس الحقيقية) */}
       <section className="bg-white rounded-3xl p-6 shadow-sm border border-mushaf-border/40 flex items-center gap-5 mb-8">
         <div className="w-16 h-16 bg-mushaf-teal text-white rounded-full flex items-center justify-center text-2xl font-bold border-2 border-mushaf-gold shadow-md">
-          م
+          {user.email ? user.email.charAt(0).toUpperCase() : 'م'}
         </div>
-        <div>
-          <h2 className="text-xl font-bold text-mushaf-dark mb-1">مسلم</h2>
+        <div className="overflow-hidden">
+          <h2 className="text-lg font-bold text-mushaf-dark mb-1 truncate" dir="ltr">{user.email}</h2>
           <p className="text-sm text-gray-500 flex items-center gap-1">
             <Award size={16} className="text-mushaf-gold" />
-            حافظ لـ 3 أجزاء
+            عضو في مصحف سميع
           </p>
         </div>
       </section>
@@ -59,7 +89,6 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* شريط التقدم */}
           <div className="w-full h-2 bg-white/20 rounded-full mb-4 relative z-10">
             <div className="h-full bg-mushaf-gold rounded-full w-[7%] shadow-[0_0_10px_rgba(197,154,83,0.8)]"></div>
           </div>
@@ -70,53 +99,6 @@ export default function ProfilePage() {
           </Link>
         </div>
       </section>
-
-      {/* الحفظ والمراجعة */}
-      <section className="mb-8">
-        <h3 className="text-lg font-bold text-mushaf-dark mb-4 flex items-center gap-2">
-          <Bookmark className="text-mushaf-teal" size={24} />
-          المحفوظات والعلامات
-        </h3>
-        
-        <div className="grid grid-cols-2 gap-4">
-          <button className="bg-white p-5 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
-            <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition">
-              <Bookmark size={28} className="text-mushaf-gold" />
-            </div>
-            <div className="text-center">
-              <span className="font-bold text-mushaf-dark block">الفواصل</span>
-              <span className="text-xs text-gray-500">4 علامات</span>
-            </div>
-          </button>
-
-          <button className="bg-white p-5 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
-            <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition">
-              <Heart size={28} className="text-mushaf-gold" />
-            </div>
-            <div className="text-center">
-              <span className="font-bold text-mushaf-dark block">المفضلة</span>
-              <span className="text-xs text-gray-500">12 آية</span>
-            </div>
-          </button>
-        </div>
-      </section>
-
-      {/* خطة الحفظ */}
-      <section>
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-mushaf-border/40 flex items-center justify-between group cursor-pointer hover:border-mushaf-teal transition">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-mushaf-paper rounded-full flex items-center justify-center border border-mushaf-gold/50">
-              <BookOpen className="text-mushaf-gold" size={24} />
-            </div>
-            <div>
-              <h4 className="font-bold text-mushaf-dark">اختبار الحفظ والمراجعة</h4>
-              <p className="text-xs text-gray-500">تسميع وإخفاء الآيات</p>
-            </div>
-          </div>
-          <ChevronLeft className="text-mushaf-gold opacity-50 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
-        </div>
-      </section>
-
     </div>
   )
 }
