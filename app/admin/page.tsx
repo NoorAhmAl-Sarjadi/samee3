@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   LayoutDashboard,
@@ -23,6 +23,8 @@ import {
   MessageSquare,
 } from 'lucide-react'
 import AdminGate from '@/components/AdminGate'
+import { db } from '@/lib/firebase'
+import { collection, getDocs } from 'firebase/firestore'
 
 type Tab =
   | 'dashboard'
@@ -32,60 +34,72 @@ type Tab =
   | 'activity'
   | 'settings'
 
-const recentActivity = [
-  {
-    user: 'مستخدم جديد',
-    action: 'إنشاء حساب في مصحف سَميع',
-    time: 'منذ 5 دقائق',
-  },
-  {
-    user: 'مستخدم',
-    action: 'حفظ آية في المفضلة',
-    time: 'منذ 18 دقيقة',
-  },
-  {
-    user: 'مستخدم',
-    action: 'بدأ خطة ختمة جديدة',
-    time: 'منذ 32 دقيقة',
-  },
-  {
-    user: 'مستخدم',
-    action: 'استمع إلى تلاوة',
-    time: 'منذ ساعة',
-  },
-]
+type FirestoreUser = {
+  id: string
+  name: string
+  email: string
+  status: string
+  progress: number
+  khatmaDays?: number
+  khatmaStartDate?: string
+  updatedAt?: unknown
+}
 
-const users = [
-  {
-    name: 'أحمد محمد',
-    email: 'ahmed@example.com',
-    status: 'نشط',
-    progress: 42,
-  },
-  {
-    name: 'محمد علي',
-    email: 'mohamed@example.com',
-    status: 'نشط',
-    progress: 78,
-  },
-  {
-    name: 'عبدالله حسن',
-    email: 'abdullah@example.com',
-    status: 'غير نشط',
-    progress: 16,
-  },
-  {
-    name: 'يوسف أحمد',
-    email: 'yousef@example.com',
-    status: 'نشط',
-    progress: 91,
-  },
+const demoRecentActivity = [
+  { user: 'مستخدم جديد', action: 'إنشاء حساب في مصحف سَميع', time: 'بيانات تجريبية' },
+  { user: 'مستخدم', action: 'حفظ آية في المفضلة', time: 'بيانات تجريبية' },
 ]
 
 function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [users, setUsers] = useState<FirestoreUser[]>([])
+  const [loadingUsers, setLoadingUsers] = useState(true)
+  const [usersError, setUsersError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadUsers() {
+      try {
+        setLoadingUsers(true)
+        setUsersError('')
+        const snapshot = await getDocs(collection(db, 'users'))
+        if (cancelled) return
+
+        const nextUsers: FirestoreUser[] = snapshot.docs.map((item) => {
+          const data = item.data() as Record<string, unknown>
+          const lastReadPage = typeof data.lastReadPage === 'number' ? data.lastReadPage : 0
+          const progress = Math.max(0, Math.min(100, Math.round((lastReadPage / 604) * 100)))
+          const rawName = typeof data.name === 'string' ? data.name : typeof data.displayName === 'string' ? data.displayName : ''
+          const rawEmail = typeof data.email === 'string' ? data.email : ''
+          return {
+            id: item.id,
+            name: rawName || rawEmail || `مستخدم ${item.id.slice(0, 6)}`,
+            email: rawEmail || 'البريد غير محفوظ',
+            status: data.disabled === true ? 'غير نشط' : 'نشط',
+            progress,
+            khatmaDays: typeof data.khatmaDays === 'number' ? data.khatmaDays : undefined,
+            khatmaStartDate: typeof data.khatmaStartDate === 'string' ? data.khatmaStartDate : undefined,
+            updatedAt: data.updatedAt ?? data.createdAt,
+          }
+        })
+        setUsers(nextUsers)
+      } catch (error) {
+        console.error(error)
+        if (!cancelled) {
+          setUsers([])
+          setUsersError('تعذر تحميل المستخدمين من Firestore. تأكد من صلاحيات القراءة في مجموعة users.')
+        }
+      } finally {
+        if (!cancelled) setLoadingUsers(false)
+      }
+    }
+
+    loadUsers()
+    return () => { cancelled = true }
+  }, [])
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -132,31 +146,13 @@ function AdminDashboard() {
     },
   ]
 
+  const khatmaUsersCount = users.filter((user) => user.khatmaDays && user.khatmaDays > 0).length
+
   const stats = [
-    {
-      label: 'إجمالي المستخدمين',
-      value: '1,248',
-      icon: Users,
-      note: 'حساب مسجل',
-    },
-    {
-      label: 'خطط الختمة',
-      value: '386',
-      icon: BookOpen,
-      note: 'خطة نشطة',
-    },
-    {
-      label: 'جلسات الاستماع',
-      value: '2,941',
-      icon: Headphones,
-      note: 'جلسة',
-    },
-    {
-      label: 'النشاط اليوم',
-      value: '684',
-      icon: BarChart3,
-      note: 'عملية',
-    },
+    { label: 'إجمالي المستخدمين', value: loadingUsers ? '…' : users.length.toLocaleString('ar-EG'), icon: Users, note: 'من Firestore' },
+    { label: 'خطط الختمة', value: loadingUsers ? '…' : khatmaUsersCount.toLocaleString('ar-EG'), icon: BookOpen, note: 'مستخدم لديه خطة' },
+    { label: 'جلسات الاستماع', value: '—', icon: Headphones, note: 'غير موصول بعد' },
+    { label: 'النشاط اليوم', value: '—', icon: BarChart3, note: 'غير موصول بعد' },
   ]
 
   const renderDashboard = () => (
@@ -220,7 +216,7 @@ function AdminDashboard() {
           </div>
 
           <div className="space-y-2">
-            {recentActivity.map((item, index) => (
+            {demoRecentActivity.map((item, index) => (
               <div
                 key={`${item.user}-${index}`}
                 className="
@@ -301,7 +297,7 @@ function AdminDashboard() {
             المستخدمون
           </h2>
           <p className="text-xs text-gray-400 mt-1">
-            عرض تجريبي لواجهة إدارة المستخدمين
+            المستخدمون المسجلون في مجموعة users داخل Firestore
           </p>
         </div>
 
@@ -318,6 +314,24 @@ function AdminDashboard() {
           />
         </div>
       </div>
+
+      {usersError && (
+        <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-600">
+          {usersError}
+        </div>
+      )}
+
+      {loadingUsers && (
+        <div className="mb-4 rounded-2xl bg-gray-50 px-4 py-3 text-sm font-bold text-gray-500">
+          جارٍ تحميل المستخدمين...
+        </div>
+      )}
+
+      {!loadingUsers && !usersError && users.length === 0 && (
+        <div className="mb-4 rounded-2xl bg-gray-50 px-4 py-6 text-center text-sm font-bold text-gray-500">
+          لا توجد مستندات مستخدمين في مجموعة users حتى الآن.
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px]">
@@ -525,7 +539,7 @@ function AdminDashboard() {
       </div>
 
       <div className="space-y-2">
-        {recentActivity.map((item, index) => (
+        {demoRecentActivity.map((item, index) => (
           <div
             key={index}
             className="flex items-center justify-between gap-4 rounded-2xl bg-gray-50 p-4"
