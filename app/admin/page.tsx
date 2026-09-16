@@ -22,6 +22,7 @@ import {
   BarChart3,
   MessageSquare,
 } from 'lucide-react'
+import AdminGate from '@/components/AdminGate'
 
 type Tab =
   | 'dashboard'
@@ -81,7 +82,7 @@ const users = [
   },
 ]
 
-export default function AdminDashboard() {
+function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -775,5 +776,13 @@ export default function AdminDashboard() {
         </div>
       </main>
     </div>
+  )
+}
+
+export default function AdminPage() {
+  return (
+    <AdminGate>
+      <AdminDashboard />
+    </AdminGate>
   )
 }
