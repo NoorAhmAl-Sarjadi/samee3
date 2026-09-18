@@ -1,13 +1,19 @@
 {
   "name": "مصحف سميع",
-  "short_name": "سميع",
-  "description": "تطبيق إسلامي متكامل للقرآن الكريم والأذكار ومواقيت الصلاة",
+  "short_name": "مصحف سميع",
+  "description": "المنصة القرآنية الشاملة",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FEFCF8",
+  "background_color": "#F4F9FE",
   "theme_color": "#175E67",
-  "orientation": "portrait-primary",
+  "lang": "ar",
+  "dir": "rtl",
   "icons": [
+    {
+      "src": "https://i.ibb.co/MyfNtDp9/8-F026-C85-439-E-4-C5-B-A8-AB-4-ED92-E0-DFB14.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
     {
       "src": "https://i.ibb.co/MyfNtDp9/8-F026-C85-439-E-4-C5-B-A8-AB-4-ED92-E0-DFB14.png",
       "sizes": "512x512",
