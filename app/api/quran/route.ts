@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Mushaf } from "@quran.ws/text";
+import { promises as fs } from "fs";
+import path from "path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const RIWAYA_KEYS = [
+const RIWAYAT = [
   "hafs",
   "warsh",
   "qalun",
@@ -14,19 +16,10 @@ const RIWAYA_KEYS = [
   "bazzi",
 ] as const;
 
-type RiwayaKey = (typeof RIWAYA_KEYS)[number];
+type Riwaya = (typeof RIWAYAT)[number];
 
-const RIWAYA_DATA_URLS: Record<Exclude<RiwayaKey, "hafs">, string> = {
-  warsh: "https://text.quran.ws/data/mushaf/warsh.json",
-  qalun: "https://text.quran.ws/data/mushaf/qalun.json",
-  douri: "https://text.quran.ws/data/mushaf/douri.json",
-  shubah: "https://text.quran.ws/data/mushaf/shubah.json",
-  sousi: "https://text.quran.ws/data/mushaf/sousi.json",
-  bazzi: "https://text.quran.ws/data/mushaf/bazzi.json",
-};
-
-function isRiwaya(value: string): value is RiwayaKey {
-  return RIWAYA_KEYS.includes(value as RiwayaKey);
+function isValidRiwaya(value: string): value is Riwaya {
+  return RIWAYAT.includes(value as Riwaya);
 }
 
 export async function GET(request: NextRequest) {
@@ -36,55 +29,82 @@ export async function GET(request: NextRequest) {
     const riwaya = (searchParams.get("riwaya") || "hafs").toLowerCase();
     const page = Number(searchParams.get("page") || "1");
 
-    if (!isRiwaya(riwaya)) {
+    if (!isValidRiwaya(riwaya)) {
       return NextResponse.json(
         {
           error: "الرواية غير مدعومة",
-          supported: RIWAYA_KEYS,
+          supported: RIWAYAT,
         },
         { status: 400 }
       );
     }
 
-    if (!Number.isInteger(page) || page < 1) {
+    if (!Number.isInteger(page) || page < 1 || page > 604) {
       return NextResponse.json(
-        { error: "رقم الصفحة غير صحيح" },
+        {
+          error: "رقم الصفحة غير صحيح",
+          page,
+        },
         { status: 400 }
       );
     }
 
     let mushaf: Mushaf;
 
-    // حفص موجود داخل الحزمة نفسها
+    /**
+     * حفص موجود بشكل مدمج داخل الحزمة
+     */
     if (riwaya === "hafs") {
       mushaf = await Mushaf.hafs();
     } else {
-      const url = RIWAYA_DATA_URLS[riwaya];
+      /**
+       * الروايات الأخرى موجودة داخل الحزمة نفسها:
+       * node_modules/@quran.ws/text/data/mushaf/*.json
+       */
+      const filePath = path.join(
+        process.cwd(),
+        "node_modules",
+        "@quran.ws",
+        "text",
+        "data",
+        "mushaf",
+        `${riwaya}.json`
+      );
 
-      const response = await fetch(url, {
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+      let fileContent: string;
 
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
+      try {
+        fileContent = await fs.readFile(filePath, "utf8");
+      } catch (fileError) {
+        console.error("RIWAYA FILE ERROR:", fileError);
+
         return NextResponse.json(
           {
-            error: "فشل تحميل بيانات الرواية",
+            error: "ملف الرواية غير موجود داخل الحزمة",
             riwaya,
-            status: response.status,
-            url,
-            details: body.slice(0, 500),
+            expectedFile: filePath,
           },
-          { status: 502 }
+          { status: 500 }
         );
       }
 
-      const json = await response.json();
+      let jsonData: unknown;
 
-      mushaf = Mushaf.fromJson(json);
+      try {
+        jsonData = JSON.parse(fileContent);
+      } catch (jsonError) {
+        console.error("RIWAYA JSON ERROR:", jsonError);
+
+        return NextResponse.json(
+          {
+            error: "ملف الرواية موجود لكن JSON غير صالح",
+            riwaya,
+          },
+          { status: 500 }
+        );
+      }
+
+      mushaf = Mushaf.fromJson(jsonData);
     }
 
     const pageData = mushaf.page(page);
@@ -100,15 +120,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const ayahs = pageData.ayahs.map((ayah: any) => ({
+      key: ayah.key,
+      surah: ayah.surah,
+      ayah: ayah.ayah,
+      globalAyah: ayah.key,
+      text: ayah.text,
+    }));
+
     return NextResponse.json({
+      success: true,
       riwaya,
       page,
-      ayahs: pageData.ayahs.map((ayah: any) => ({
-        surah: ayah.surah,
-        ayah: ayah.ayah,
-        globalAyah: ayah.key,
-        text: ayah.text,
-      })),
+      ayahs,
     });
   } catch (error) {
     console.error("QURAN API ERROR:", error);
@@ -117,7 +141,9 @@ export async function GET(request: NextRequest) {
       {
         error: "تعذر تحميل بيانات المصحف حاليًا",
         details:
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error
+            ? error.message
+            : String(error),
       },
       { status: 500 }
     );
