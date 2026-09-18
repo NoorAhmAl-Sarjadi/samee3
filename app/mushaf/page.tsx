@@ -457,7 +457,7 @@ function MushafContent() {
         setRiwayaError('')
 
         const mushaf = await loadRiwaya(riwayaId)
-        const ayahs = getRiwayaPage(
+        const ayahs = await getRiwayaPage(
           mushaf,
           page
         ) as Ayah[]
@@ -897,7 +897,7 @@ function MushafContent() {
                 )
 
                 const nextAyahs =
-                  getRiwayaPage(
+                  await getRiwayaPage(
                     mushaf,
                     nextPageNumber
                   ) as Ayah[]
