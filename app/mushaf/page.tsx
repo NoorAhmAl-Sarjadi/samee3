@@ -32,7 +32,7 @@ import {
 
 import { useAuth } from '@/context/AuthContext'
 import { db } from '@/lib/firebase'
-import { doc, setDoc } from 'firebase/firestore'
+import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 interface Ayah {
   number: number
@@ -140,6 +140,16 @@ function MushafContent() {
   const [isSaved, setIsSaved] = useState(false)
 
   // =========================================================
+  // حفظ واستعادة موضع القراءة المتقدم
+  // =========================================================
+
+  const hasExplicitPage = searchParams.has('page')
+  const [resumeReady, setResumeReady] = useState(false)
+  const [lastReadAyah, setLastReadAyah] = useState<Ayah | null>(null)
+  const pendingResumeAyahRef = useRef<number | null>(null)
+  const restoredReciterRef = useRef(false)
+
+  // =========================================================
   // القارئ المحدد
   // =========================================================
 
@@ -160,6 +170,9 @@ function MushafContent() {
   const currentSurah =
     pageData?.ayahs?.[0]?.surah?.name ||
     'المصحف الشريف'
+
+  const currentSurahNumber =
+    pageData?.ayahs?.[0]?.surah?.number || ''
 
   const currentJuz =
     pageData?.ayahs?.[0]?.juz || ''
@@ -251,23 +264,25 @@ function MushafContent() {
 
       setReciters(uniqueEditions)
 
-      // لو العفاسي موجود نختاره افتراضيًا
-      if (
-        uniqueEditions.some(
-          (edition) =>
-            edition.identifier ===
+      // لو فيه قارئ محفوظ للمستخدم، لا نستبدله بالافتراضي.
+      if (!restoredReciterRef.current) {
+        if (
+          uniqueEditions.some(
+            (edition) =>
+              edition.identifier ===
+              'ar.alafasy'
+          )
+        ) {
+          setSelectedReciterId(
             'ar.alafasy'
-        )
-      ) {
-        setSelectedReciterId(
-          'ar.alafasy'
-        )
-      } else if (
-        uniqueEditions.length > 0
-      ) {
-        setSelectedReciterId(
-          uniqueEditions[0].identifier
-        )
+          )
+        } else if (
+          uniqueEditions.length > 0
+        ) {
+          setSelectedReciterId(
+            uniqueEditions[0].identifier
+          )
+        }
       }
     } catch (error) {
       console.error(
@@ -294,6 +309,98 @@ function MushafContent() {
   useEffect(() => {
     loadReciters()
   }, [loadReciters])
+
+  // =========================================================
+  // استعادة آخر موضع قراءة من Firebase
+  // =========================================================
+
+  useEffect(() => {
+    let cancelled = false
+
+    const restoreReadingState = async () => {
+      if (!user) {
+        setResumeReady(true)
+        return
+      }
+
+      try {
+        const snapshot = await getDoc(
+          doc(
+            db,
+            'users',
+            user.uid
+          )
+        )
+
+        if (cancelled) return
+
+        if (snapshot.exists()) {
+          const data = snapshot.data()
+
+          const savedReciterId =
+            typeof data?.lastReadReciterId === 'string'
+              ? data.lastReadReciterId.trim()
+              : ''
+
+          if (savedReciterId) {
+            restoredReciterRef.current = true
+            setSelectedReciterId(
+              savedReciterId
+            )
+          }
+
+          // إذا كان الرابط يحتوي على page=... نحترم الصفحة المطلوبة.
+          if (!hasExplicitPage) {
+            const savedPage = Number(
+              data?.lastReadPage || 1
+            )
+
+            const safePage = Number.isFinite(savedPage)
+              ? Math.min(
+                  604,
+                  Math.max(
+                    1,
+                    savedPage
+                  )
+                )
+              : 1
+
+            setCurrentPage(safePage)
+
+            const savedAyahGlobal = Number(
+              data?.lastReadAyahGlobal || 0
+            )
+
+            if (
+              Number.isFinite(savedAyahGlobal) &&
+              savedAyahGlobal > 0
+            ) {
+              pendingResumeAyahRef.current =
+                savedAyahGlobal
+            }
+          }
+        }
+      } catch (error) {
+        console.error(
+          'Reading resume restore error:',
+          error
+        )
+      } finally {
+        if (!cancelled) {
+          setResumeReady(true)
+        }
+      }
+    }
+
+    void restoreReadingState()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    user,
+    hasExplicitPage,
+  ])
 
   // =========================================================
   // تحميل صفحة المصحف
@@ -338,14 +445,71 @@ function MushafContent() {
   useEffect(() => {
     fetchPage(currentPage)
     setSelectedAyah(null)
+    setLastReadAyah(null)
   }, [currentPage, fetchPage])
 
   // =========================================================
-  // حفظ آخر صفحة
+  // استعادة الآية الأخيرة داخل الصفحة
   // =========================================================
 
   useEffect(() => {
-    if (!user) return
+    if (
+      !resumeReady ||
+      hasExplicitPage ||
+      !pageData?.ayahs?.length
+    ) {
+      return
+    }
+
+    const targetAyahNumber =
+      pendingResumeAyahRef.current
+
+    if (!targetAyahNumber) return
+
+    const restoredAyah =
+      pageData.ayahs.find(
+        (ayah) =>
+          ayah.number ===
+          targetAyahNumber
+      )
+
+    if (restoredAyah) {
+      setLastReadAyah(
+        restoredAyah
+      )
+      pendingResumeAyahRef.current =
+        null
+    }
+  }, [
+    pageData,
+    resumeReady,
+    hasExplicitPage,
+  ])
+
+  // =========================================================
+  // حفظ آخر موضع قراءة
+  // =========================================================
+
+  useEffect(() => {
+    if (
+      !user ||
+      !resumeReady ||
+      !pageData?.ayahs?.length
+    ) {
+      return
+    }
+
+    const currentPlayingAyah =
+      pageData.ayahs.find(
+        (ayah) =>
+          ayah.number ===
+          playingAyahNumber
+      )
+
+    const ayahToSave =
+      lastReadAyah?.page === currentPage
+        ? lastReadAyah
+        : currentPlayingAyah || null
 
     const saveProgress = async () => {
       try {
@@ -358,6 +522,38 @@ function MushafContent() {
           {
             lastReadPage:
               currentPage,
+
+            lastReadSurahNumber:
+              currentSurahNumber || null,
+
+            lastReadSurahName:
+              currentSurah !==
+              'المصحف الشريف'
+                ? currentSurah
+                : null,
+
+            lastReadJuz:
+              currentJuz || null,
+
+            lastReadAyahGlobal:
+              ayahToSave?.number ||
+              null,
+
+            lastReadAyahNumber:
+              ayahToSave?.numberInSurah ||
+              null,
+
+            lastReadReciterId:
+              selectedReciter.identifier,
+
+            lastReadReciterName:
+              currentReciterName,
+
+            lastReadUpdatedAt:
+              new Date().toISOString(),
+
+            lastReadRoute:
+              `/mushaf?page=${currentPage}`,
           },
           {
             merge: true,
@@ -371,10 +567,19 @@ function MushafContent() {
       }
     }
 
-    saveProgress()
+    void saveProgress()
   }, [
     currentPage,
+    currentSurah,
+    currentSurahNumber,
+    currentJuz,
+    selectedReciter.identifier,
+    currentReciterName,
+    lastReadAyah,
+    playingAyahNumber,
+    pageData,
     user,
+    resumeReady,
   ])
 
   // =========================================================
@@ -558,6 +763,7 @@ function MushafContent() {
 
         audioRef.current = audio
 
+        setLastReadAyah(ayah)
         setPlayingAyahNumber(ayah.number)
         setIsPlaying(false)
         setIsLooping(loop)
@@ -1560,6 +1766,12 @@ function MushafContent() {
             {recitersError && (
               <p className="text-[10px] text-red-500 mt-2 text-center">{recitersError}</p>
             )}
+
+            {resumeReady && user && (
+              <p className="text-[10px] text-[#8a7456] mt-2 text-center">
+                يتم حفظ آخر موضع قراءة تلقائيًا
+              </p>
+            )}
           </div>
         </div>
       </header>
@@ -1616,9 +1828,14 @@ function MushafContent() {
                       {pageData.ayahs.map((ayah) => (
                         <span
                           key={ayah.number}
-                          onClick={() => setSelectedAyah(ayah)}
+                          onClick={() => {
+                            setSelectedAyah(ayah)
+                            setLastReadAyah(ayah)
+                          }}
                           className={`cursor-pointer transition-all duration-200 rounded-lg px-1 inline ${
-                            selectedAyah?.number === ayah.number || playingAyahNumber === ayah.number
+                            selectedAyah?.number === ayah.number ||
+                            playingAyahNumber === ayah.number ||
+                            lastReadAyah?.number === ayah.number
                               ? 'bg-[#c59a53]/20 shadow-sm'
                               : 'hover:bg-[#c59a53]/10'
                           }`}
