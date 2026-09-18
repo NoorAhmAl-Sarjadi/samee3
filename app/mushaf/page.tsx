@@ -33,13 +33,22 @@ import {
 import { useAuth } from '@/context/AuthContext'
 import { db } from '@/lib/firebase'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
+import {
+  getRiwayaPage,
+  isSupportedRiwayaId,
+  loadRiwaya,
+  RIWAYAT,
+  type RiwayaId,
+} from '@/lib/quran/Samee3DataAdapter'
 
 interface Ayah {
   number: number
+  key: string
   text: string
   numberInSurah: number
   juz: number
   page: number
+  audioNumber?: number
   surah?: {
     number: number
     name: string
@@ -79,6 +88,18 @@ function MushafContent() {
   const { user } = useAuth()
 
   const initialPage = Number(searchParams.get('page')) || 1
+  const requestedRiwaya = searchParams.get('riwaya')
+  const initialRiwaya: RiwayaId =
+    requestedRiwaya && isSupportedRiwayaId(requestedRiwaya)
+      ? requestedRiwaya
+      : 'hafs'
+
+  const [selectedRiwayaId, setSelectedRiwayaId] =
+    useState<RiwayaId>(initialRiwaya)
+  const [isLoadingRiwaya, setIsLoadingRiwaya] =
+    useState(true)
+  const [riwayaError, setRiwayaError] =
+    useState('')
 
   const [currentPage, setCurrentPage] = useState<number>(
     Math.min(604, Math.max(1, initialPage))
@@ -113,8 +134,8 @@ function MushafContent() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isLooping, setIsLooping] = useState(false)
   const [continuousPlay, setContinuousPlay] = useState(false)
-  const [playingAyahNumber, setPlayingAyahNumber] =
-    useState<number | null>(null)
+  const [playingAyahKey, setPlayingAyahKey] =
+    useState<string | null>(null)
 
   // =========================================================
   // النسخ
@@ -144,9 +165,10 @@ function MushafContent() {
   // =========================================================
 
   const hasExplicitPage = searchParams.has('page')
+  const hasExplicitRiwaya = searchParams.has('riwaya')
   const [resumeReady, setResumeReady] = useState(false)
   const [lastReadAyah, setLastReadAyah] = useState<Ayah | null>(null)
-  const pendingResumeAyahRef = useRef<number | null>(null)
+  const pendingResumeAyahKeyRef = useRef<string | null>(null)
   const restoredReciterRef = useRef(false)
 
   // =========================================================
@@ -325,11 +347,7 @@ function MushafContent() {
 
       try {
         const snapshot = await getDoc(
-          doc(
-            db,
-            'users',
-            user.uid
-          )
+          doc(db, 'users', user.uid)
         )
 
         if (cancelled) return
@@ -344,9 +362,20 @@ function MushafContent() {
 
           if (savedReciterId) {
             restoredReciterRef.current = true
-            setSelectedReciterId(
-              savedReciterId
-            )
+            setSelectedReciterId(savedReciterId)
+          }
+
+          const savedRiwayaId =
+            typeof data?.lastReadRiwayaId === 'string'
+              ? data.lastReadRiwayaId.trim()
+              : ''
+
+          if (
+            !hasExplicitRiwaya &&
+            savedRiwayaId &&
+            isSupportedRiwayaId(savedRiwayaId)
+          ) {
+            setSelectedRiwayaId(savedRiwayaId)
           }
 
           // إذا كان الرابط يحتوي على page=... نحترم الصفحة المطلوبة.
@@ -358,26 +387,39 @@ function MushafContent() {
             const safePage = Number.isFinite(savedPage)
               ? Math.min(
                   604,
-                  Math.max(
-                    1,
-                    savedPage
-                  )
+                  Math.max(1, savedPage)
                 )
               : 1
 
             setCurrentPage(safePage)
 
-            const savedAyahGlobal = Number(
-              data?.lastReadAyahGlobal || 0
+            const savedAyahKey =
+              typeof data?.lastReadAyahKey === 'string'
+                ? data.lastReadAyahKey.trim()
+                : ''
+
+            const savedSurahNumber = Number(
+              data?.lastReadSurahNumber || 0
             )
 
-            if (
-              Number.isFinite(savedAyahGlobal) &&
-              savedAyahGlobal > 0
-            ) {
-              pendingResumeAyahRef.current =
-                savedAyahGlobal
-            }
+            const savedAyahNumber = Number(
+              data?.lastReadAyahNumber || 0
+            )
+
+            const fallbackAyahKey =
+              savedSurahNumber > 0 && savedAyahNumber > 0
+                ? `${savedSurahNumber}:${savedAyahNumber}`
+                : ''
+
+            const savedStateBelongsToSelectedRiwaya =
+              !hasExplicitRiwaya ||
+              !savedRiwayaId ||
+              savedRiwayaId === initialRiwaya
+
+            pendingResumeAyahKeyRef.current =
+              savedStateBelongsToSelectedRiwaya
+                ? savedAyahKey || fallbackAyahKey || null
+                : null
           }
         }
       } catch (error) {
@@ -400,53 +442,65 @@ function MushafContent() {
   }, [
     user,
     hasExplicitPage,
+    hasExplicitRiwaya,
   ])
 
   // =========================================================
-  // تحميل صفحة المصحف
+  // تحميل صفحة المصحف حسب الرواية المختارة
   // =========================================================
 
   const fetchPage = useCallback(
-    async (page: number) => {
+    async (page: number, riwayaId: RiwayaId) => {
       try {
         setIsLoading(true)
+        setIsLoadingRiwaya(true)
+        setRiwayaError('')
 
-        const response = await fetch(
-          `https://api.alquran.cloud/v1/page/${page}/quran-uthmani`,
-          {
-            cache: 'no-store',
-          }
-        )
+        const mushaf = await loadRiwaya(riwayaId)
+        const ayahs = getRiwayaPage(
+          mushaf,
+          page
+        ) as Ayah[]
 
-        if (!response.ok) {
+        if (!ayahs.length) {
           throw new Error(
-            'فشل تحميل الصفحة'
+            `لا توجد آيات مسجلة للصفحة ${page} في الرواية المختارة.`
           )
         }
 
-        const data =
-          await response.json()
-
-        setPageData(data.data)
+        setPageData({
+          number: page,
+          ayahs,
+        })
       } catch (error) {
         console.error(
-          'Page loading error:',
+          'Riwaya page loading error:',
           error
         )
-
         setPageData(null)
+        setRiwayaError(
+          'تعذر تحميل نص هذه الرواية حاليًا. تأكد من اتصال الإنترنت ثم أعد المحاولة.'
+        )
       } finally {
         setIsLoading(false)
+        setIsLoadingRiwaya(false)
       }
     },
     []
   )
 
   useEffect(() => {
-    fetchPage(currentPage)
+    fetchPage(
+      currentPage,
+      selectedRiwayaId
+    )
     setSelectedAyah(null)
     setLastReadAyah(null)
-  }, [currentPage, fetchPage])
+  }, [
+    currentPage,
+    selectedRiwayaId,
+    fetchPage,
+  ])
 
   // =========================================================
   // استعادة الآية الأخيرة داخل الصفحة
@@ -461,24 +515,20 @@ function MushafContent() {
       return
     }
 
-    const targetAyahNumber =
-      pendingResumeAyahRef.current
+    const targetAyahKey =
+      pendingResumeAyahKeyRef.current
 
-    if (!targetAyahNumber) return
+    if (!targetAyahKey) return
 
     const restoredAyah =
       pageData.ayahs.find(
         (ayah) =>
-          ayah.number ===
-          targetAyahNumber
+          ayah.key === targetAyahKey
       )
 
     if (restoredAyah) {
-      setLastReadAyah(
-        restoredAyah
-      )
-      pendingResumeAyahRef.current =
-        null
+      setLastReadAyah(restoredAyah)
+      pendingResumeAyahKeyRef.current = null
     }
   }, [
     pageData,
@@ -486,7 +536,6 @@ function MushafContent() {
     hasExplicitPage,
   ])
 
-  // =========================================================
   // حفظ آخر موضع قراءة
   // =========================================================
 
@@ -502,14 +551,21 @@ function MushafContent() {
     const currentPlayingAyah =
       pageData.ayahs.find(
         (ayah) =>
-          ayah.number ===
-          playingAyahNumber
+          ayah.key ===
+          playingAyahKey
       )
 
     const ayahToSave =
       lastReadAyah?.page === currentPage
         ? lastReadAyah
         : currentPlayingAyah || null
+
+    const riwayaName =
+      RIWAYAT.find(
+        (item) =>
+          item.id ===
+          selectedRiwayaId
+      )?.label || selectedRiwayaId
 
     const saveProgress = async () => {
       try {
@@ -520,44 +576,25 @@ function MushafContent() {
             user.uid
           ),
           {
-            lastReadPage:
-              currentPage,
-
-            lastReadSurahNumber:
-              currentSurahNumber || null,
-
+            lastReadPage: currentPage,
+            lastReadRiwayaId: selectedRiwayaId,
+            lastReadRiwayaName: riwayaName,
+            lastReadSurahNumber: currentSurahNumber || null,
             lastReadSurahName:
-              currentSurah !==
-              'المصحف الشريف'
+              currentSurah !== 'المصحف الشريف'
                 ? currentSurah
                 : null,
-
-            lastReadJuz:
-              currentJuz || null,
-
-            lastReadAyahGlobal:
-              ayahToSave?.number ||
-              null,
-
-            lastReadAyahNumber:
-              ayahToSave?.numberInSurah ||
-              null,
-
-            lastReadReciterId:
-              selectedReciter.identifier,
-
-            lastReadReciterName:
-              currentReciterName,
-
-            lastReadUpdatedAt:
-              new Date().toISOString(),
-
+            lastReadJuz: currentJuz || null,
+            lastReadAyahKey: ayahToSave?.key || null,
+            lastReadAyahGlobal: ayahToSave?.audioNumber || null,
+            lastReadAyahNumber: ayahToSave?.numberInSurah || null,
+            lastReadReciterId: selectedReciter.identifier,
+            lastReadReciterName: currentReciterName,
+            lastReadUpdatedAt: new Date().toISOString(),
             lastReadRoute:
-              `/mushaf?page=${currentPage}`,
+              `/mushaf?page=${currentPage}&riwaya=${selectedRiwayaId}`,
           },
-          {
-            merge: true,
-          }
+          { merge: true }
         )
       } catch (error) {
         console.error(
@@ -573,16 +610,16 @@ function MushafContent() {
     currentSurah,
     currentSurahNumber,
     currentJuz,
+    selectedRiwayaId,
     selectedReciter.identifier,
     currentReciterName,
     lastReadAyah,
-    playingAyahNumber,
+    playingAyahKey,
     pageData,
     user,
     resumeReady,
   ])
 
-  // =========================================================
   // تنظيف الصوت عند مغادرة الصفحة
   // =========================================================
 
@@ -687,30 +724,64 @@ function MushafContent() {
   }
 
   // =========================================================
-  // رابط الصوت من Al Quran Cloud
+  // رابط الصوت من Al Quran Cloud — مستقل عن الرواية
   // =========================================================
 
   const getAudioUrl = useCallback(
-    (ayahNumber: number) => {
-      const bitrate =
-        selectedReciter.bitrate &&
-        [192, 128, 64, 48, 40, 32].includes(
-          Number(selectedReciter.bitrate)
-        )
-          ? Number(selectedReciter.bitrate)
-          : 128
+    async (ayah: Ayah) => {
+      try {
+        const surahNumber = ayah.surah?.number
 
-      return (
-        `https://cdn.islamic.network/quran/audio/` +
-        `${bitrate}/` +
-        `${selectedReciter.identifier}/` +
-        `${ayahNumber}.mp3`
+        if (!surahNumber) {
+          throw new Error('رقم السورة غير متوفر')
+        }
+
+        const response = await fetch(
+          `https://api.alquran.cloud/v1/ayah/${surahNumber}:${ayah.numberInSurah}/${selectedReciter.identifier}`,
+          { cache: 'no-store' }
+        )
+
+        if (response.ok) {
+          const data = await response.json()
+          const remoteUrl = data?.data?.audio
+
+          if (
+            typeof remoteUrl === 'string' &&
+            remoteUrl
+          ) {
+            return remoteUrl
+          }
+        }
+      } catch (error) {
+        console.error(
+          'Audio URL lookup error:',
+          error
+        )
+      }
+
+      if (ayah.audioNumber) {
+        const bitrate =
+          selectedReciter.bitrate &&
+          [192, 128, 64, 48, 40, 32].includes(
+            Number(selectedReciter.bitrate)
+          )
+            ? Number(selectedReciter.bitrate)
+            : 128
+
+        return (
+          `https://cdn.islamic.network/quran/audio/` +
+          `${bitrate}/${selectedReciter.identifier}/` +
+          `${ayah.audioNumber}.mp3`
+        )
+      }
+
+      throw new Error(
+        'تعذر العثور على ملف الصوت لهذه الآية.'
       )
     },
     [selectedReciter]
   )
 
-  // =========================================================
   // إيقاف الصوت بالكامل
   // =========================================================
 
@@ -732,7 +803,7 @@ function MushafContent() {
     setIsPlaying(false)
     setIsLooping(false)
     setContinuousPlay(false)
-    setPlayingAyahNumber(null)
+    setPlayingAyahKey(null)
   }, [])
 
   // =========================================================
@@ -759,12 +830,12 @@ function MushafContent() {
 
         const audio = new Audio()
         audio.preload = 'auto'
-        audio.src = getAudioUrl(ayah.number)
+        audio.src = await getAudioUrl(ayah)
 
         audioRef.current = audio
 
         setLastReadAyah(ayah)
-        setPlayingAyahNumber(ayah.number)
+        setPlayingAyahKey(ayah.key)
         setIsPlaying(false)
         setIsLooping(loop)
         setContinuousPlay(continuous)
@@ -784,7 +855,7 @@ function MushafContent() {
           setIsPlaying(false)
           setIsLooping(false)
           setContinuousPlay(false)
-          setPlayingAyahNumber(null)
+          setPlayingAyahKey(null)
         }
 
         audio.onended = async () => {
@@ -797,7 +868,7 @@ function MushafContent() {
               console.error('Loop playback error:', error)
               setIsPlaying(false)
               setIsLooping(false)
-              setPlayingAyahNumber(null)
+              setPlayingAyahKey(null)
             }
             return
           }
@@ -805,7 +876,7 @@ function MushafContent() {
           if (continuous) {
             const currentIndex =
               pageData?.ayahs.findIndex(
-                (item) => item.number === ayah.number
+                (item) => item.key === ayah.key
               ) ?? -1
 
             const nextAyah =
@@ -821,23 +892,31 @@ function MushafContent() {
             if (currentPage < 604) {
               try {
                 const nextPageNumber = currentPage + 1
-                const response = await fetch(
-                  `https://api.alquran.cloud/v1/page/${nextPageNumber}/quran-uthmani`,
-                  { cache: 'no-store' }
+                const mushaf = await loadRiwaya(
+                  selectedRiwayaId
                 )
 
-                if (!response.ok) {
-                  throw new Error('فشل تحميل الصفحة التالية')
-                }
+                const nextAyahs =
+                  getRiwayaPage(
+                    mushaf,
+                    nextPageNumber
+                  ) as Ayah[]
 
-                const data = await response.json()
-                const nextPageData = data?.data as PageData
+                if (nextAyahs.length) {
+                  const nextPageData: PageData = {
+                    number: nextPageNumber,
+                    ayahs: nextAyahs,
+                  }
 
-                if (nextPageData?.ayahs?.length) {
                   setCurrentPage(nextPageNumber)
                   setPageData(nextPageData)
-                  const firstAyah = nextPageData.ayahs[0]
-                  await playSingleAyah(firstAyah, false, true)
+                  const firstAyah =
+                    nextPageData.ayahs[0]
+                  await playSingleAyah(
+                    firstAyah,
+                    false,
+                    true
+                  )
                   return
                 }
               } catch (error) {
@@ -849,7 +928,7 @@ function MushafContent() {
           setIsPlaying(false)
           setIsLooping(false)
           setContinuousPlay(false)
-          setPlayingAyahNumber(null)
+          setPlayingAyahKey(null)
         }
 
         try {
@@ -863,13 +942,51 @@ function MushafContent() {
         setIsPlaying(false)
         setIsLooping(false)
         setContinuousPlay(false)
-        setPlayingAyahNumber(null)
+        setPlayingAyahKey(null)
       }
     },
-    [currentPage, getAudioUrl, pageData]
+    [
+      currentPage,
+      getAudioUrl,
+      pageData,
+      selectedRiwayaId,
+    ]
   )
 
   // =========================================================
+  // تغيير الرواية
+  // =========================================================
+
+  const handleRiwayaChange = (
+    event: React.ChangeEvent<HTMLSelectElement>
+  ) => {
+    const newRiwaya = event.target.value
+
+    if (!isSupportedRiwayaId(newRiwaya)) {
+      return
+    }
+
+    if (audioRef.current) {
+      const audio = audioRef.current
+      audio.onended = null
+      audio.onerror = null
+      audio.oncanplay = null
+      audio.pause()
+      audio.currentTime = 0
+      audio.removeAttribute('src')
+      audio.load()
+      audioRef.current = null
+    }
+
+    setIsPlaying(false)
+    setIsLooping(false)
+    setContinuousPlay(false)
+    setPlayingAyahKey(null)
+    setSelectedAyah(null)
+    setLastReadAyah(null)
+    setSelectedRiwayaId(newRiwaya)
+  }
+
   // تغيير القارئ
   // =========================================================
 
@@ -893,7 +1010,7 @@ function MushafContent() {
     setIsPlaying(false)
     setIsLooping(false)
     setContinuousPlay(false)
-    setPlayingAyahNumber(null)
+    setPlayingAyahKey(null)
     setSelectedReciterId(newIdentifier)
   }
 
@@ -1690,8 +1807,8 @@ function MushafContent() {
   const playingAyah =
     pageData?.ayahs.find(
       (ayah) =>
-        ayah.number ===
-        playingAyahNumber
+        ayah.key ===
+        playingAyahKey
     ) || selectedAyah
 
   return (
@@ -1734,6 +1851,31 @@ function MushafContent() {
 
           <div className="mt-3">
             <div className="flex items-center justify-center gap-2 mb-2">
+              <span className="text-sm font-black text-[#5a3b1b]">الرواية</span>
+              <span className="text-[10px] text-[#8a7456]">نص قرآني مستقل</span>
+            </div>
+
+            <div className="relative max-w-xl mx-auto mb-3">
+              <select
+                value={selectedRiwayaId}
+                onChange={handleRiwayaChange}
+                disabled={isLoadingRiwaya}
+                className="w-full appearance-none bg-[#fffaf0] border-2 border-[#b78945]/35 text-[#175e67] font-bold text-sm rounded-2xl py-3 pr-4 pl-11 shadow-sm outline-none focus:border-[#175e67] focus:ring-2 focus:ring-[#175e67]/10 cursor-pointer disabled:opacity-60"
+              >
+                {RIWAYAT.map((riwaya) => (
+                  <option
+                    key={riwaya.id}
+                    value={riwaya.id}
+                    disabled={!riwaya.available}
+                  >
+                    {riwaya.label}{!riwaya.available ? ' — غير متاحة بعد' : ''}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={18} className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-[#b78945]" />
+            </div>
+
+            <div className="flex items-center justify-center gap-2 mb-2">
               <Mic2 size={15} className="text-[#b78945]" />
               <span className="text-xs font-bold text-[#175e67]">القارئ</span>
               {!isLoadingReciters && reciters.length > 0 && (
@@ -1762,6 +1904,10 @@ function MushafContent() {
               </select>
               <ChevronDown size={18} className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-[#b78945]" />
             </div>
+
+            {riwayaError && (
+              <p className="text-[10px] text-red-600 mt-2 text-center">{riwayaError}</p>
+            )}
 
             {recitersError && (
               <p className="text-[10px] text-red-500 mt-2 text-center">{recitersError}</p>
@@ -1833,9 +1979,9 @@ function MushafContent() {
                             setLastReadAyah(ayah)
                           }}
                           className={`cursor-pointer transition-all duration-200 rounded-lg px-1 inline ${
-                            selectedAyah?.number === ayah.number ||
-                            playingAyahNumber === ayah.number ||
-                            lastReadAyah?.number === ayah.number
+                            selectedAyah?.key === ayah.key ||
+                            playingAyahKey === ayah.key ||
+                            lastReadAyah?.key === ayah.key
                               ? 'bg-[#c59a53]/20 shadow-sm'
                               : 'hover:bg-[#c59a53]/10'
                           }`}
@@ -1843,7 +1989,7 @@ function MushafContent() {
                           {ayah.text}
                           <span
                             className={`text-[#b78945] mx-1 sm:mx-2 text-xl sm:text-2xl inline-flex items-center justify-center align-middle transition-transform ${
-                              playingAyahNumber === ayah.number ? 'scale-125' : ''
+                              playingAyahKey === ayah.key ? 'scale-125' : ''
                             }`}
                           >
                             ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
