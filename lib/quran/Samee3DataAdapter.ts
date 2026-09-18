@@ -1,5 +1,3 @@
-import { Mushaf } from '@quran.ws/text'
-
 export type RiwayaId =
   | 'hafs'
   | 'warsh'
@@ -19,8 +17,8 @@ export interface RiwayaDefinition {
 }
 
 /**
- * مصدر نصي مستقل لكل رواية.
- * لا نقوم بتعديل نص حفص لمحاكاة رواية أخرى.
+ * بيانات الروايات مصدرها حزم منفصلة وموثقة.
+ * لا يتم تعديل نص حفص يدويًا لمحاكاة رواية أخرى.
  */
 export const RIWAYAT: RiwayaDefinition[] = [
   {
@@ -28,6 +26,8 @@ export const RIWAYAT: RiwayaDefinition[] = [
     label: 'حفص عن عاصم',
     source: 'quran.ws / quran-text',
     license: 'CC-BY-4.0',
+    dataUrl:
+      'https://cdn.jsdelivr.net/npm/@quran.ws/text@0.1.0/data/mushaf/hafs.json',
     available: true,
   },
   {
@@ -86,58 +86,21 @@ export const RIWAYAT: RiwayaDefinition[] = [
   },
 ]
 
-export function isSupportedRiwayaId(
-  value: string
-): value is RiwayaId {
+export function isSupportedRiwayaId(value: string): value is RiwayaId {
   return RIWAYAT.some((item) => item.id === value)
 }
 
-const mushafCache = new Map<RiwayaId, any>()
+type RemoteRiwaya = { riwayaId: RiwayaId }
 
-export async function loadRiwaya(
-  riwayaId: RiwayaId
-) {
-  const cached = mushafCache.get(riwayaId)
-  if (cached) return cached
-
-  const item = RIWAYAT.find(
-    (entry) => entry.id === riwayaId
-  )
-
+export async function loadRiwaya(riwayaId: RiwayaId): Promise<RemoteRiwaya> {
+  const item = RIWAYAT.find((entry) => entry.id === riwayaId)
   if (!item || !item.available) {
-    throw new Error(
-      `الرواية غير متاحة حاليًا: ${riwayaId}`
-    )
+    throw new Error(`الرواية غير متاحة حاليًا: ${riwayaId}`)
   }
-
-  let mushaf: any
-
-  if (riwayaId === 'hafs') {
-    mushaf = await Mushaf.hafs()
-  } else if (item.dataUrl) {
-    const response = await fetch(item.dataUrl, {
-      cache: 'force-cache',
-    })
-
-    if (!response.ok) {
-      throw new Error(
-        `تعذر تحميل حزمة الرواية: ${riwayaId}`
-      )
-    }
-
-    const json = await response.json()
-    mushaf = Mushaf.fromJson(json)
-  } else {
-    throw new Error(
-      `لا توجد حزمة بيانات للرواية: ${riwayaId}`
-    )
-  }
-
-  mushafCache.set(riwayaId, mushaf)
-  return mushaf
+  return { riwayaId }
 }
 
-const SURAH_NAMES_AR = [
+export const SURAH_NAMES_AR = [
   'الفاتحة', 'البقرة', 'آل عمران', 'النساء', 'المائدة', 'الأنعام',
   'الأعراف', 'الأنفال', 'التوبة', 'يونس', 'هود', 'يوسف', 'الرعد',
   'إبراهيم', 'الحجر', 'النحل', 'الإسراء', 'الكهف', 'مريم', 'طه',
@@ -156,101 +119,27 @@ const SURAH_NAMES_AR = [
   'الماعون', 'الكوثر', 'الكافرون', 'النصر', 'المسد', 'الإخلاص', 'الفلق', 'الناس',
 ]
 
-function getNumberFromKey(
-  key: string | undefined,
-  fallbackSurah: number,
-  fallbackAyah: number
-) {
-  if (!key) {
-    return {
-      surahNumber: fallbackSurah,
-      ayahNumber: fallbackAyah,
-    }
-  }
-
-  const [surah, ayah] = key.split(':').map(Number)
-
-  return {
-    surahNumber:
-      Number.isInteger(surah) && surah > 0
-        ? surah
-        : fallbackSurah,
-    ayahNumber:
-      Number.isInteger(ayah) && ayah > 0
-        ? ayah
-        : fallbackAyah,
-  }
-}
-
 /**
- * يحول كائن الصفحة من quran.ws إلى الشكل الذي تستخدمه شاشة المصحف الحالية.
+ * صفحة الرواية تُجلب من API Route على السيرفر، لأن حزمة quran.ws/text
+ * تحتوي على استيراد Node (`node:fs/promises`) لا ينبغي إدخاله إلى Client Bundle.
  */
-export function getRiwayaPage(
-  mushaf: any,
+export async function getRiwayaPage(
+  mushaf: RemoteRiwaya,
   pageNumber: number
 ) {
-  const page = mushaf.page(pageNumber)
-  const sourceAyahs = Array.isArray(page?.ayahs)
-    ? page.ayahs
-    : []
-
-  return sourceAyahs.map((sourceAyah: any, index: number) => {
-    const rawKey =
-      typeof sourceAyah?.key === 'string'
-        ? sourceAyah.key
-        : ''
-
-    const rawSurah = Number(
-      sourceAyah?.surah?.number ??
-        sourceAyah?.surahNumber ??
-        0
-    )
-
-    const rawAyah = Number(
-      sourceAyah?.numberInSurah ??
-        sourceAyah?.ayahNumber ??
-        0
-    )
-
-    const { surahNumber, ayahNumber } =
-      getNumberFromKey(
-        rawKey,
-        rawSurah || 1,
-        rawAyah || index + 1
-      )
-
-    const key =
-      rawKey || `${surahNumber}:${ayahNumber}`
-
-    const text =
-      typeof sourceAyah?.text === 'string'
-        ? sourceAyah.text
-        : typeof sourceAyah?.render === 'function'
-          ? String(
-              sourceAyah.render({
-                marks: true,
-                ayahMarks: false,
-              }) || ''
-            )
-          : ''
-
-    const stableNumber =
-      surahNumber * 1000 + ayahNumber
-
-    return {
-      number: stableNumber,
-      key,
-      text,
-      numberInSurah: ayahNumber,
-      juz: Number(sourceAyah?.juz ?? 0),
-      page: pageNumber,
-      surah: {
-        number: surahNumber,
-        name:
-          SURAH_NAMES_AR[surahNumber - 1] ||
-          `السورة ${surahNumber}`,
-        englishName: '',
-      },
-    }
+  const params = new URLSearchParams({
+    riwaya: mushaf.riwayaId,
+    page: String(pageNumber),
   })
+
+  const response = await fetch(`/api/quran?${params.toString()}`, {
+    cache: 'no-store',
+  })
+
+  if (!response.ok) {
+    throw new Error(`تعذر تحميل صفحة الرواية: ${mushaf.riwayaId}`)
+  }
+
+  const payload = await response.json()
+  return Array.isArray(payload?.ayahs) ? payload.ayahs : []
 }
