@@ -70,6 +70,13 @@ interface AudioEdition {
   bitrate?: number
 }
 
+interface TafsirBook {
+  id: number
+  name: string
+  short_name?: string
+  author?: string
+}
+
 type DesignMode = 'ayah' | 'tafsir' | null
 
 const DEFAULT_RECITER: AudioEdition = {
@@ -199,6 +206,26 @@ function MushafContent() {
   const [tafsirText, setTafsirText] = useState('')
   const [isFetchingTafsir, setIsFetchingTafsir] =
     useState(false)
+  const [isTafsirOpen, setIsTafsirOpen] =
+    useState(false)
+  const [tafsirError, setTafsirError] = useState('')
+  const [tafsirCopied, setTafsirCopied] = useState(false)
+
+  const [tafsirBooks, setTafsirBooks] = useState<TafsirBook[]>([])
+  const [selectedTafsirBookId, setSelectedTafsirBookId] =
+    useState<number | null>(null)
+  const [isLoadingTafsirBooks, setIsLoadingTafsirBooks] =
+    useState(false)
+  const [tafsirBooksError, setTafsirBooksError] =
+    useState('')
+
+  const tafsirCacheRef = useRef<
+    Map<string, { text: string; book: TafsirBook }>
+  >(new Map())
+
+  const tafsirBooksCacheRef = useRef<
+    Map<number, TafsirBook[]>
+  >(new Map())
 
   // =========================================================
   // الحفظ
@@ -1136,61 +1163,450 @@ function MushafContent() {
   }
 
   // =========================================================
-  // جلب التفسير
+  // كتب التفسير
   // =========================================================
 
-  const fetchTafsir =
-    async () => {
-      if (!selectedAyah)
-        return
+  // قائمة ثابتة ثانية على الواجهة حتى لا تظهر أي كتب خارج القائمة المسموح بها.
+  const APPROVED_SUNNI_TAFSIR_IDS = new Set<number>([
+    4,     // جامع البيان - الطبري
+    2,     // معالم التنزيل - البغوي
+    136,   // تفسير القرآن العظيم - ابن كثير
+    1469,  // الجامع لأحكام القرآن - القرطبي
+    3,     // تيسير الكريم الرحمن - السعدي
+    27796, // أضواء البيان في إيضاح القرآن بالقرآن - الشنقيطي
+    2012,  // التفسير الميسر
+    54,    // أيسر التفاسير
+  ])
 
-      setDesignMode(
-        'tafsir'
-      )
+  const normalizeTafsirBooks = (
+    input: unknown
+  ): TafsirBook[] => {
+    if (!Array.isArray(input)) return []
 
-      setIsFetchingTafsir(
-        true
-      )
+    return input
+      .map((item) => {
+        const row = item as Record<string, unknown>
 
-      setTafsirText('')
-
-      try {
-        const response =
-          await fetch(
-            `https://api.alquran.cloud/v1/ayah/${selectedAyah.number}/ar.muyassar`,
-            {
-              cache: 'no-store',
-            }
-          )
-
-        if (!response.ok) {
-          throw new Error(
-            'Failed to fetch tafsir'
-          )
+        return {
+          id: Number(row.id),
+          name:
+            typeof row.name === 'string'
+              ? row.name.trim()
+              : '',
+          short_name:
+            typeof row.short_name === 'string'
+              ? row.short_name.trim()
+              : '',
+          author:
+            typeof row.author === 'string'
+              ? row.author.trim()
+              : '',
         }
+      })
+      .filter(
+        (book) =>
+          Number.isFinite(book.id) &&
+          APPROVED_SUNNI_TAFSIR_IDS.has(book.id) &&
+          book.name
+      )
+  }
 
-        const data =
-          await response.json()
+  const loadTafsirBooks = async (
+    surahNumber: number
+  ): Promise<TafsirBook[]> => {
+    const cached =
+      tafsirBooksCacheRef.current.get(
+        surahNumber
+      )
 
-        setTafsirText(
-          data?.data?.text ||
-            'عذرًا، لم يتوفر التفسير لهذه الآية حاليًا.'
-        )
-      } catch (error) {
-        console.error(
-          'Tafsir error:',
-          error
+    if (cached?.length) {
+      setTafsirBooks(cached)
+      return cached
+    }
+
+    setIsLoadingTafsirBooks(true)
+    setTafsirBooksError('')
+
+    const controller =
+      new AbortController()
+
+    const timeoutId =
+      window.setTimeout(
+        () => controller.abort(),
+        10000
+      )
+
+    try {
+      const response =
+        await fetch(
+          `/api/tafsir?mode=books&surah=${surahNumber}`,
+          {
+            method: 'GET',
+            cache: 'no-store',
+            signal:
+              controller.signal,
+            headers: {
+              Accept:
+                'application/json',
+            },
+          }
         )
 
-        setTafsirText(
-          'عذرًا، لم نتمكن من جلب التفسير لهذه الآية حاليًا.'
+      const data =
+        await response.json().catch(
+          () => null
         )
-      } finally {
-        setIsFetchingTafsir(
-          false
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.error ===
+            'string'
+            ? data.error
+            : `HTTP ${response.status}`
         )
       }
+
+      const books =
+        normalizeTafsirBooks(
+          data?.books
+        )
+
+      if (!books.length) {
+        throw new Error(
+          'NO_TAFSIR_BOOKS'
+        )
+      }
+
+      tafsirBooksCacheRef.current.set(
+        surahNumber,
+        books
+      )
+
+      setTafsirBooks(books)
+
+      return books
+    } catch (error) {
+      console.error(
+        'Tafsir books error:',
+        error
+      )
+
+      setTafsirBooks([])
+      setTafsirBooksError(
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+          ? 'انتهى وقت تحميل كتب التفسير.'
+          : 'تعذر تحميل كتب التفسير حاليًا.'
+      )
+
+      throw error
+    } finally {
+      window.clearTimeout(
+        timeoutId
+      )
+      setIsLoadingTafsirBooks(
+        false
+      )
     }
+  }
+
+  const getDefaultTafsirBook = (
+    books: TafsirBook[]
+  ): TafsirBook | null => {
+    if (!books.length) return null
+
+    const preferred =
+      books.find((book) =>
+        /الميسر|الميسّر|المُيَسَّر/i.test(
+          book.name
+        )
+      ) ||
+      books.find((book) =>
+        /ابن كثير|القرآن العظيم/i.test(
+          book.name
+        )
+      ) ||
+      books.find((book) =>
+        /السعدي|الكريم الرحمن/i.test(
+          book.name
+        )
+      )
+
+    return preferred || books[0]
+  }
+
+  // =========================================================
+  // جلب تفسير كتاب محدد لآية محددة
+  // =========================================================
+
+  const fetchTafsir = async (
+    requestedBookId?: number,
+    forDesign = false
+  ) => {
+    if (!selectedAyah) return
+
+    const surahNumber =
+      selectedAyah.surah?.number ||
+      Number(
+        selectedAyah.key.split(':')[0]
+      )
+
+    const ayahNumber =
+      selectedAyah.numberInSurah
+
+    if (
+      !Number.isFinite(
+        surahNumber
+      ) ||
+      !Number.isFinite(
+        ayahNumber
+      )
+    ) {
+      return
+    }
+
+    if (forDesign) {
+      setDesignMode('tafsir')
+      setIsTafsirOpen(false)
+    } else {
+      setIsTafsirOpen(true)
+      setDesignMode(null)
+    }
+
+    setTafsirError('')
+    setTafsirCopied(false)
+    setTafsirBooksError('')
+
+    let books: TafsirBook[] = []
+
+    try {
+      books =
+        await loadTafsirBooks(
+          surahNumber
+        )
+    } catch {
+      setIsFetchingTafsir(false)
+      return
+    }
+
+    const requestedBook =
+      requestedBookId
+        ? books.find(
+            (book) =>
+              book.id ===
+              requestedBookId
+          )
+        : null
+
+    const currentBook =
+      selectedTafsirBookId
+        ? books.find(
+            (book) =>
+              book.id ===
+              selectedTafsirBookId
+          )
+        : null
+
+    const book =
+      requestedBook ||
+      currentBook ||
+      getDefaultTafsirBook(
+        books
+      )
+
+    if (!book) {
+      setTafsirError(
+        'لا توجد كتب تفسير متاحة لهذه السورة حاليًا.'
+      )
+      setIsFetchingTafsir(false)
+      return
+    }
+
+    setSelectedTafsirBookId(
+      book.id
+    )
+
+    const cacheKey =
+      `${book.id}:${surahNumber}:${ayahNumber}`
+
+    const cached =
+      tafsirCacheRef.current.get(
+        cacheKey
+      )
+
+    if (cached) {
+      setTafsirText(cached.text)
+      setIsFetchingTafsir(false)
+      return
+    }
+
+    setIsFetchingTafsir(true)
+    setTafsirText('')
+
+    const controller =
+      new AbortController()
+
+    const timeoutId =
+      window.setTimeout(
+        () => controller.abort(),
+        12000
+      )
+
+    try {
+      const params =
+        new URLSearchParams({
+          mode: 'ayah',
+          surah: String(
+            surahNumber
+          ),
+          ayah: String(
+            ayahNumber
+          ),
+          book: String(
+            book.id
+          ),
+        })
+
+      const response =
+        await fetch(
+          `/api/tafsir?${params.toString()}`,
+          {
+            method: 'GET',
+            cache: 'no-store',
+            signal:
+              controller.signal,
+            headers: {
+              Accept:
+                'application/json',
+            },
+          }
+        )
+
+      const data =
+        await response.json().catch(
+          () => null
+        )
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.error ===
+            'string'
+            ? data.error
+            : `HTTP ${response.status}`
+        )
+      }
+
+      const text =
+        typeof data?.text ===
+        'string'
+          ? data.text.trim()
+          : ''
+
+      if (!text) {
+        throw new Error(
+          'EMPTY_TAFSIR'
+        )
+      }
+
+      const result = {
+        text,
+        book,
+      }
+
+      tafsirCacheRef.current.set(
+        cacheKey,
+        result
+      )
+
+      setTafsirText(text)
+    } catch (error) {
+      console.error(
+        'Tafsir error:',
+        error
+      )
+
+      setTafsirError(
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+          ? 'انتهى وقت الاتصال. اضغط إعادة المحاولة.'
+          : 'تعذر جلب هذا التفسير حاليًا. تأكد من اتصال الإنترنت ثم أعد المحاولة.'
+      )
+    } finally {
+      window.clearTimeout(
+        timeoutId
+      )
+      setIsFetchingTafsir(
+        false
+      )
+    }
+  }
+
+  const handleTafsirBookChange = (
+    bookId: number
+  ) => {
+    setSelectedTafsirBookId(
+      bookId
+    )
+
+    void fetchTafsir(
+      bookId,
+      false
+    )
+  }
+
+  const getSelectedTafsirBookName =
+    () => {
+      if (
+        selectedTafsirBookId ===
+        null
+      ) {
+        return 'التفسير'
+      }
+
+      return (
+        tafsirBooks.find(
+          (book) =>
+            book.id ===
+            selectedTafsirBookId
+        )?.name ||
+        'التفسير'
+      )
+    }
+
+  const closeTafsir = () => {
+    setIsTafsirOpen(false)
+    setTafsirError('')
+    setTafsirCopied(false)
+  }
+
+  const copyTafsir = async () => {
+    if (!tafsirText) return
+
+    try {
+      await navigator.clipboard.writeText(
+        `سورة ${currentSurah} — الآية ${
+          selectedAyah?.numberInSurah.toLocaleString(
+            'ar-EG'
+          ) || ''
+        }\n\n${getSelectedTafsirBookName()}:\n${tafsirText}`
+      )
+      setTafsirCopied(
+        true
+      )
+      window.setTimeout(
+        () =>
+          setTafsirCopied(
+            false
+          ),
+        2000
+      )
+    } catch (error) {
+      console.error(
+        'Copy tafsir error:',
+        error
+      )
+    }
+  }
 
   // =========================================================
   // تصميم الآية
@@ -1203,7 +1619,10 @@ function MushafContent() {
 
   const openTafsirDesign =
     () => {
-      fetchTafsir()
+      void fetchTafsir(
+        undefined,
+        true
+      )
     }
 
   // =========================================================
@@ -1508,7 +1927,9 @@ function MushafContent() {
             font-size="22"
             font-weight="700"
             fill="#C59A53"
-          >المصدر: التفسير الميسر</text>
+          >المصدر: ${escapeXml(
+            getSelectedTafsirBookName()
+          )}</text>
         `
       }
 
@@ -2019,6 +2440,10 @@ function MushafContent() {
                           onClick={() => {
                             setSelectedAyah(ayah)
                             setLastReadAyah(ayah)
+                            setIsTafsirOpen(false)
+                            setTafsirError('')
+                            setTafsirText('')
+                            setTafsirCopied(false)
                           }}
                           className={`cursor-pointer transition-all duration-200 rounded-lg px-1 inline ${
                             selectedAyah?.key === ayah.key ||
@@ -2232,6 +2657,24 @@ function MushafContent() {
                 </span>
               </button>
 
+              {/* تفسير */}
+
+              <button
+                type="button"
+                onClick={() =>
+                  void fetchTafsir()
+                }
+                className="flex flex-col items-center gap-2 group"
+              >
+                <div className="w-12 h-12 bg-mushaf-paper text-emerald-700 rounded-full flex items-center justify-center group-hover:bg-emerald-50 transition-all">
+                  <FileText size={23} />
+                </div>
+
+                <span className="text-xs font-bold text-gray-600">
+                  التفسير
+                </span>
+              </button>
+
               {/* تفسير وصورة */}
 
               <button
@@ -2295,6 +2738,269 @@ function MushafContent() {
             </div>
           </div>
         )}
+
+      {/* =====================================================
+          نافذة التفسير المتعدد
+      ====================================================== */}
+
+      {isTafsirOpen && selectedAyah && (
+        <div
+          className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-5"
+          role="dialog"
+          aria-modal="true"
+          aria-label="تفاسير الآية"
+        >
+          <div className="w-full sm:max-w-3xl max-h-[92vh] overflow-hidden rounded-t-[30px] sm:rounded-[30px] bg-[#fffdf8] shadow-[0_25px_80px_rgba(0,0,0,0.28)] border border-[#b78945]/25">
+            <div className="px-5 py-4 border-b border-[#eadfce] bg-gradient-to-l from-[#f5ecdc] to-[#fffdf8]">
+              <div className="flex items-start justify-between gap-4">
+                <div className="text-right min-w-0 flex-1">
+                  <p className="text-[#175e67] font-extrabold text-lg">
+                    تفاسير الآية
+                  </p>
+
+                  <p className="text-[#8a7456] text-xs mt-1">
+                    سورة {currentSurah} · الآية{' '}
+                    {selectedAyah.numberInSurah.toLocaleString(
+                      'ar-EG'
+                    )}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeTafsir}
+                  className="w-10 h-10 shrink-0 rounded-full bg-white border border-[#eadfce] text-gray-500 hover:text-red-500 hover:border-red-200 transition flex items-center justify-center"
+                  aria-label="إغلاق التفاسير"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="mt-4">
+                <label
+                  htmlFor="samee3-tafsir-book"
+                  className="block text-right text-xs font-extrabold text-[#8a7456] mb-2"
+                >
+                  اختر كتاب التفسير
+                </label>
+
+                <div className="relative">
+                  <select
+                    id="samee3-tafsir-book"
+                    value={
+                      selectedTafsirBookId ??
+                      ''
+                    }
+                    onChange={(event) =>
+                      handleTafsirBookChange(
+                        Number(
+                          event.target.value
+                        )
+                      )
+                    }
+                    disabled={
+                      isLoadingTafsirBooks ||
+                      !tafsirBooks.length
+                    }
+                    className="w-full appearance-none rounded-2xl border border-[#d9ccb9] bg-white px-4 py-3.5 pl-11 text-right text-sm font-bold text-[#175e67] outline-none transition focus:border-[#175e67] focus:ring-4 focus:ring-[#175e67]/10 disabled:opacity-60"
+                    dir="rtl"
+                  >
+                    {isLoadingTafsirBooks ? (
+                      <option value="">
+                        جاري تحميل كتب التفسير...
+                      </option>
+                    ) : tafsirBooks.length ? (
+                      tafsirBooks.map(
+                        (book) => (
+                          <option
+                            key={
+                              book.id
+                            }
+                            value={
+                              book.id
+                            }
+                          >
+                            {book.name}
+                            {book.author
+                              ? ` — ${book.author}`
+                              : ''}
+                          </option>
+                        )
+                      )
+                    ) : (
+                      <option value="">
+                        لا توجد كتب متاحة
+                      </option>
+                    )}
+                  </select>
+
+                  <ChevronDown
+                    size={18}
+                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#8a7456]"
+                  />
+                </div>
+
+                {selectedTafsirBookId !==
+                  null &&
+                  !isLoadingTafsirBooks && (
+                    <p className="mt-2 text-[11px] font-bold text-[#8a7456] text-right">
+                      {getSelectedTafsirBookName()}
+                      {tafsirBooks.length > 1
+                        ? ` · متاح ${tafsirBooks.length.toLocaleString(
+                            'ar-EG'
+                          )} كتابًا لهذه السورة`
+                        : ''}
+                    </p>
+                  )}
+              </div>
+            </div>
+
+            <div className="overflow-y-auto max-h-[calc(92vh-220px)] px-5 py-5 sm:px-7 sm:py-7">
+              <div className="rounded-2xl border border-[#eadfce] bg-[#fcfbf8] p-4 sm:p-5">
+                <p className="text-[#8a7456] text-xs font-bold mb-3">
+                  نص الآية
+                </p>
+
+                <p
+                  className="font-uthmani text-[#171717] text-[22px] sm:text-[27px] leading-[2.05] text-right"
+                  dir="rtl"
+                >
+                  {selectedAyah.text}
+
+                  <span className="text-[#b78945] mx-1.5">
+                    ﴿
+                    {selectedAyah.numberInSurah.toLocaleString(
+                      'ar-EG'
+                    )}
+                    ﴾
+                  </span>
+                </p>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-[#dbe9e5] bg-white p-5 sm:p-6">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-9 h-9 shrink-0 rounded-full bg-[#eaf5f2] text-[#175e67] flex items-center justify-center">
+                      <FileText size={18} />
+                    </div>
+
+                    <div className="min-w-0">
+                      <h3 className="font-extrabold text-[#175e67] truncate">
+                        {getSelectedTafsirBookName()}
+                      </h3>
+
+                      <p className="text-[11px] text-[#8a7456] font-bold mt-0.5">
+                        تفسير الآية المختارة
+                      </p>
+                    </div>
+                  </div>
+
+                  {isFetchingTafsir && (
+                    <Loader2
+                      className="animate-spin text-[#175e67] shrink-0"
+                      size={22}
+                    />
+                  )}
+                </div>
+
+                {tafsirBooksError ? (
+                  <div className="rounded-2xl border border-red-100 bg-red-50 p-5 text-center">
+                    <p className="text-sm font-bold text-red-700">
+                      {tafsirBooksError}
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void fetchTafsir()
+                      }
+                      className="mt-4 px-5 py-2.5 rounded-xl bg-[#175e67] text-white text-sm font-bold hover:opacity-90 transition"
+                    >
+                      إعادة المحاولة
+                    </button>
+                  </div>
+                ) : isFetchingTafsir ? (
+                  <div className="py-12 flex flex-col items-center justify-center gap-3">
+                    <Loader2
+                      className="animate-spin text-[#175e67]"
+                      size={30}
+                    />
+
+                    <p className="text-sm text-gray-500 font-bold">
+                      جاري تحميل {getSelectedTafsirBookName()}...
+                    </p>
+                  </div>
+                ) : tafsirError ? (
+                  <div className="rounded-2xl border border-red-100 bg-red-50 p-5 text-center">
+                    <p className="text-sm font-bold text-red-700">
+                      {tafsirError}
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void fetchTafsir(
+                          selectedTafsirBookId ??
+                            undefined
+                        )
+                      }
+                      className="mt-4 px-5 py-2.5 rounded-xl bg-[#175e67] text-white text-sm font-bold hover:opacity-90 transition"
+                    >
+                      إعادة المحاولة
+                    </button>
+                  </div>
+                ) : (
+                  <p
+                    className="text-[#2f2f2f] text-[15px] sm:text-[17px] leading-[2.15] text-right whitespace-pre-wrap"
+                    dir="rtl"
+                  >
+                    {tafsirText ||
+                      'لم يتوفر نص لهذا الكتاب لهذه الآية حاليًا.'}
+                  </p>
+                )}
+              </div>
+
+              {!isFetchingTafsir &&
+                !tafsirBooksError &&
+                !tafsirError &&
+                tafsirText && (
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-[#8a7456]">
+                        المصدر
+                      </p>
+
+                      <p className="text-xs font-extrabold text-[#175e67] mt-1">
+                        Quranpedia ·{' '}
+                        {getSelectedTafsirBookName()}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={copyTafsir}
+                      className="inline-flex items-center gap-2 rounded-xl border border-[#eadfce] bg-white px-4 py-2.5 text-xs font-bold text-[#175e67] hover:bg-[#f7f1e7] transition"
+                    >
+                      {tafsirCopied ? (
+                        <CheckCheck
+                          size={16}
+                        />
+                      ) : (
+                        <Copy
+                          size={16}
+                        />
+                      )}
+
+                      {tafsirCopied
+                        ? 'تم نسخ التفسير'
+                        : 'نسخ التفسير'}
+                    </button>
+                  </div>
+                )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* =====================================================
           شاشة التصميم
@@ -2415,7 +3121,7 @@ function MushafContent() {
 
                         <div className="mt-6 pt-4 border-t border-white/10">
                           <p className="text-mushaf-gold text-xs font-bold text-right">
-                            المصدر: التفسير الميسر
+                            المصدر: {getSelectedTafsirBookName()}
                           </p>
                         </div>
                       </>
