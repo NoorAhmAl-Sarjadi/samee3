@@ -98,6 +98,7 @@ export default function IslamicBookReaderPage() {
     if (!book) return
 
     let cancelled = false
+    const currentBook = book
 
     async function load() {
       try {
@@ -105,7 +106,7 @@ export default function IslamicBookReaderPage() {
         setLoadError('')
 
         const response = await fetch(
-          `/api/islamic-library/book/${encodeURIComponent(book.id)}`,
+          `/api/islamic-library/book/${encodeURIComponent(currentBook.id)}`,
           { cache: 'no-store' }
         )
         const data = await response.json()
@@ -132,10 +133,10 @@ export default function IslamicBookReaderPage() {
       const bookmarks = JSON.parse(
         localStorage.getItem(BOOKMARKS_KEY) || '[]'
       )
-      setSaved(Array.isArray(bookmarks) && bookmarks.includes(book.id))
+      setSaved(Array.isArray(bookmarks) && bookmarks.includes(currentBook.id))
 
       const state = JSON.parse(
-        localStorage.getItem(`${READING_KEY_PREFIX}${book.id}`) || '{}'
+        localStorage.getItem(`${READING_KEY_PREFIX}${currentBook.id}`) || '{}'
       )
 
       if (typeof state.fontScale === 'number') {
