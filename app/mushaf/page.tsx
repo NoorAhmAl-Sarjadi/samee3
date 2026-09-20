@@ -34,9 +34,7 @@ import { useAuth } from '@/context/AuthContext'
 import { db } from '@/lib/firebase'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import {
-  getRiwayaPage,
   isSupportedRiwayaId,
-  loadRiwaya,
   RIWAYAT,
   type RiwayaId,
 } from '@/lib/quran/Samee3DataAdapter'
@@ -83,6 +81,54 @@ const DEFAULT_RECITER: AudioEdition = {
   type: 'versebyverse',
 }
 
+
+// =========================================================
+// اتصال المصحف الآمن: الصفحة تعتمد على Route الداخلي فقط.
+// يدعم أي صيغة استجابة حالية { ayahs } بدون ربط الصفحة
+// بشكل مباشر بتفاصيل Adapter، ويمنع التحميل اللانهائي.
+// =========================================================
+
+async function fetchQuranPageDirect(
+  page: number,
+  riwayaId: RiwayaId,
+  timeoutMs = 15000
+): Promise<Ayah[]> {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const params = new URLSearchParams({
+      riwaya: riwayaId,
+      page: String(page),
+    })
+
+    const response = await fetch(`/api/quran?${params.toString()}`, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    })
+
+    const payload = await response.json().catch(() => null)
+
+    if (!response.ok) {
+      const apiMessage =
+        typeof payload?.error === 'string'
+          ? payload.error
+          : `HTTP ${response.status}`
+      throw new Error(apiMessage)
+    }
+
+    const ayahs = Array.isArray(payload?.ayahs)
+      ? payload.ayahs
+      : []
+
+    return ayahs as Ayah[]
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
 function MushafContent() {
   const searchParams = useSearchParams()
   const { user } = useAuth()
@@ -100,10 +146,6 @@ function MushafContent() {
     useState(true)
   const [riwayaError, setRiwayaError] =
     useState('')
-
-  // الخط الخاص بالرواية المختارة
-  const [riwayaFontUrl, setRiwayaFontUrl] = useState<string | null>(null)
-  const [riwayaFontFamily, setRiwayaFontFamily] = useState<string | null>(null)
 
   const [currentPage, setCurrentPage] = useState<number>(
     Math.min(604, Math.max(1, initialPage))
@@ -460,15 +502,7 @@ function MushafContent() {
         setIsLoadingRiwaya(true)
         setRiwayaError('')
 
-        const mushaf = await loadRiwaya(riwayaId)
-        const result = await getRiwayaPage(
-          mushaf,
-          page
-        )
-
-        const ayahs = result.ayahs as Ayah[]
-
-        setRiwayaFontUrl(result.fontFile || null)
+        const ayahs = await fetchQuranPageDirect(page, riwayaId)
 
         if (!ayahs.length) {
           throw new Error(
@@ -486,8 +520,11 @@ function MushafContent() {
           error
         )
         setPageData(null)
+
         setRiwayaError(
-          'تعذر تحميل نص هذه الرواية حاليًا. تأكد من اتصال الإنترنت ثم أعد المحاولة.'
+          error instanceof DOMException && error.name === 'AbortError'
+            ? 'تأخر الاتصال بالخادم. اضغط إعادة المحاولة.'
+            : 'تعذر تحميل نص هذه الرواية حاليًا. تأكد من اتصال الإنترنت ثم أعد المحاولة.'
         )
       } finally {
         setIsLoading(false)
@@ -509,56 +546,6 @@ function MushafContent() {
     selectedRiwayaId,
     fetchPage,
   ])
-
-  // =========================================================
-  // تحميل خط الرواية المختار تلقائيًا
-  // =========================================================
-
-  useEffect(() => {
-    let cancelled = false
-
-    if (!riwayaFontUrl) {
-      setRiwayaFontFamily(null)
-      return
-    }
-
-    const loadRiwayaFont = async () => {
-      try {
-        const family = `Samee3Riwaya-${selectedRiwayaId}`
-
-        if (
-          typeof document !== 'undefined' &&
-          'fonts' in document
-        ) {
-          const font = new FontFace(
-            family,
-            `url("${riwayaFontUrl}")`
-          )
-
-          await font.load()
-
-          if (cancelled) return
-
-          document.fonts.add(font)
-          setRiwayaFontFamily(family)
-        }
-      } catch (error) {
-        console.error(
-          'Riwaya font loading error:',
-          error
-        )
-        if (!cancelled) {
-          setRiwayaFontFamily(null)
-        }
-      }
-    }
-
-    void loadRiwayaFont()
-
-    return () => {
-      cancelled = true
-    }
-  }, [riwayaFontUrl, selectedRiwayaId])
 
   // =========================================================
   // استعادة الآية الأخيرة داخل الصفحة
@@ -950,18 +937,12 @@ function MushafContent() {
             if (currentPage < 604) {
               try {
                 const nextPageNumber = currentPage + 1
-                const mushaf = await loadRiwaya(
-                  selectedRiwayaId
-                )
-
-                const nextResult =
-                  await getRiwayaPage(
-                    mushaf,
-                    nextPageNumber
-                  )
 
                 const nextAyahs =
-                  nextResult.ayahs as Ayah[]
+                  await fetchQuranPageDirect(
+                    nextPageNumber,
+                    selectedRiwayaId
+                  )
 
                 if (nextAyahs.length) {
                   const nextPageData: PageData = {
@@ -1045,8 +1026,6 @@ function MushafContent() {
     setPlayingAyahKey(null)
     setSelectedAyah(null)
     setLastReadAyah(null)
-    setRiwayaFontUrl(null)
-    setRiwayaFontFamily(null)
     setSelectedRiwayaId(newRiwaya)
   }
 
@@ -2032,12 +2011,7 @@ function MushafContent() {
                   ) : pageData?.ayahs?.length ? (
                     <p
                       className="font-uthmani text-[25px] sm:text-[33px] leading-[2.45] sm:leading-[2.55] text-[#171717] text-justify w-full"
-                      style={{
-                        textAlignLast: 'center',
-                        ...(riwayaFontFamily
-                          ? { fontFamily: riwayaFontFamily }
-                          : {}),
-                      }}
+                      style={{ textAlignLast: 'center' }}
                     >
                       {pageData.ayahs.map((ayah) => (
                         <span
@@ -2066,7 +2040,24 @@ function MushafContent() {
                       ))}
                     </p>
                   ) : (
-                    <div className="text-center text-red-500 font-bold">تعذر تحميل الصفحة</div>
+                    <div className="flex flex-col items-center justify-center text-center gap-4 py-20">
+                      <div className="w-14 h-14 rounded-full bg-red-50 border border-red-100 flex items-center justify-center text-red-500 text-xl">
+                        !
+                      </div>
+                      <div>
+                        <p className="font-extrabold text-[#7f1d1d]">تعذر تحميل الصفحة</p>
+                        <p className="text-xs text-[#8a7456] mt-1 max-w-md">
+                          {riwayaError || 'حدث خطأ مؤقت أثناء تحميل بيانات المصحف.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fetchPage(currentPage, selectedRiwayaId)}
+                        className="inline-flex items-center justify-center rounded-2xl bg-[#175e67] text-white px-5 py-2.5 text-sm font-bold shadow-sm hover:opacity-95 active:scale-[0.98] transition"
+                      >
+                        إعادة المحاولة
+                      </button>
+                    </div>
                   )}
                 </div>
 
