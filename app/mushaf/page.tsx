@@ -1,7 +1,3 @@
-# المرحلة 25 — ربط خط كل رواية تلقائيًا
-
-## 1) app/mushaf/page.tsx
-
 'use client'
 
 import {
