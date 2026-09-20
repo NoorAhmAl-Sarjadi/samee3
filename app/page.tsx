@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { BookOpen, List, Heart, Book, Compass, ChevronLeft, Bell, Headphones } from 'lucide-react'
+import { BookOpen, List, Heart, Book, Compass, ChevronLeft, Bell, Headphones, LibraryBig, GraduationCap } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { db } from '@/lib/firebase'
 import { doc, getDoc } from 'firebase/firestore'
@@ -14,10 +14,14 @@ export default function HomePage() {
   useEffect(() => {
     if (user) {
       const fetchProgress = async () => {
-        const docRef = doc(db, 'users', user.uid)
-        const docSnap = await getDoc(docRef)
-        if (docSnap.exists() && docSnap.data().lastReadPage) {
-          setLastPage(docSnap.data().lastReadPage)
+        try {
+          const docRef = doc(db, 'users', user.uid)
+          const docSnap = await getDoc(docRef)
+          if (docSnap.exists() && docSnap.data().lastReadPage) {
+            setLastPage(docSnap.data().lastReadPage)
+          }
+        } catch (error) {
+          console.error('Progress load error:', error)
         }
       }
       fetchProgress()
@@ -69,8 +73,7 @@ export default function HomePage() {
       <section className="mb-8">
         <h3 className="text-lg font-bold text-mushaf-dark mb-4">الخدمات السريعة</h3>
         <div className="grid grid-cols-2 gap-4">
-          {/* هنا اتغير الرابط لـ quran-index */}
-          <Link href="/quran-index" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
+          <Link href="/surahs" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
             <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><List size={28} className="text-mushaf-gold" /></div>
             <span className="font-bold text-mushaf-dark text-sm">فهرس السور</span>
           </Link>
@@ -86,9 +89,13 @@ export default function HomePage() {
             <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><Book size={28} className="text-mushaf-gold" /></div>
             <span className="font-bold text-mushaf-dark text-sm">الأحاديث النبوية</span>
           </Link>
-          <Link href="/adhkar" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group col-span-2">
+          <Link href="/adhkar" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
             <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><Heart size={28} className="text-mushaf-gold" /></div>
             <span className="font-bold text-mushaf-dark text-sm">الأذكار والتسبيح</span>
+          </Link>
+          <Link href="/islamic-library" className="bg-white p-4 rounded-2xl shadow-sm border border-mushaf-border/40 flex flex-col items-center gap-3 hover:border-mushaf-teal transition group">
+            <div className="bg-mushaf-paper p-3 rounded-full group-hover:bg-mushaf-gold/20 transition"><LibraryBig size={28} className="text-mushaf-gold" /></div>
+            <span className="font-bold text-mushaf-dark text-sm">المكتبة الشرعية</span>
           </Link>
         </div>
       </section>
