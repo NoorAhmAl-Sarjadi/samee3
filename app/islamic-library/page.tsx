@@ -4,13 +4,11 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowRight,
-  ArrowLeft,
   BookOpen,
   ExternalLink,
   GraduationCap,
   LibraryBig,
   Search,
-  Bookmark,
 } from 'lucide-react'
 
 import {
@@ -193,11 +191,6 @@ export default function IslamicLibraryPage() {
                 {book.description}
               </p>
 
-              <div className="mt-3 flex items-center gap-2 text-[11px] font-bold text-mushaf-teal">
-                <Bookmark size={14} />
-                غرفة قراءة داخل مصحف سميع + المصدر الأصلي للكتاب والشرح
-              </div>
-
               <div className="mt-5 rounded-2xl bg-mushaf-paper border border-mushaf-gold/15 p-4">
                 <div className="flex items-center gap-2 text-mushaf-teal text-xs font-black">
                   <GraduationCap size={16} />
@@ -212,10 +205,10 @@ export default function IslamicLibraryPage() {
               <div className="mt-5 flex flex-wrap gap-2">
                 <Link
                   href={`/islamic-library/book/${encodeURIComponent(book.id)}`}
-                  className="inline-flex items-center gap-2 rounded-xl bg-mushaf-gold text-white px-4 py-2.5 text-xs font-black hover:opacity-90 shadow-sm"
+                  className="inline-flex items-center gap-2 rounded-xl bg-mushaf-teal text-white px-4 py-2.5 text-xs font-black hover:opacity-90"
                 >
-                  فتح غرفة القراءة
-                  <ArrowLeft size={14} />
+                  فتح القارئ
+                  <BookOpen size={14} />
                 </Link>
 
                 {book.readingUrl && (
@@ -223,9 +216,9 @@ export default function IslamicLibraryPage() {
                     href={book.readingUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-2 rounded-xl bg-mushaf-teal text-white px-4 py-2.5 text-xs font-black hover:opacity-90"
+                    className="inline-flex items-center gap-2 rounded-xl bg-white text-mushaf-teal border border-mushaf-teal/20 px-4 py-2.5 text-xs font-black hover:bg-mushaf-teal/5"
                   >
-                    {book.readingLabel || 'فتح الكتاب'}
+                    المصدر الأصلي
                     <ExternalLink size={14} />
                   </a>
                 )}
