@@ -12,6 +12,7 @@ import {
   Bell,
   Headphones,
   LibraryBig,
+  type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { db } from '@/lib/firebase'
@@ -63,7 +64,7 @@ export default function HomePage() {
             typeof data.lastReadPage === 'number' &&
             data.lastReadPage >= 1
           ) {
-            setLastPage(data.lastReadPage)
+            setLastPage(Math.min(604, Math.max(1, data.lastReadPage)))
           }
         } else {
           setProgress(null)
@@ -78,7 +79,7 @@ export default function HomePage() {
       }
     }
 
-    fetchProgress()
+    void fetchProgress()
 
     return () => {
       cancelled = true
@@ -117,7 +118,10 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-[var(--bg-main)] px-4 pb-32 pt-4 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl">
-        {/* Header */}
+
+        {/* =====================================================
+            Header
+        ====================================================== */}
         <header className="mb-7 flex items-center justify-between gap-4 pt-1">
           <div className="min-w-0">
             <p className="mb-1 text-sm font-medium text-slate-500">
@@ -138,8 +142,10 @@ export default function HomePage() {
             aria-label="فتح الحساب والإشعارات"
             className="
               flex h-12 w-12 shrink-0 items-center justify-center
-              rounded-full border border-[rgba(2,132,199,0.16)]
-              bg-white shadow-sm
+              rounded-full
+              border border-[rgba(2,132,199,0.16)]
+              bg-white
+              shadow-sm
               transition-all duration-200
               hover:-translate-y-0.5
               hover:border-[rgba(2,132,199,0.35)]
@@ -155,34 +161,44 @@ export default function HomePage() {
           </Link>
         </header>
 
-        {/* Continue Reading */}
+        {/* =====================================================
+            Continue Reading
+        ====================================================== */}
         <section className="relative mb-8 overflow-hidden">
           <div
             className="
               relative overflow-hidden rounded-[30px]
               border border-[rgba(14,165,233,0.18)]
-              bg-gradient-to-br from-[var(--royal-blue)] to-[#0369A1]
-              p-5 text-white
+              bg-gradient-to-br
+              from-[var(--royal-blue)]
+              to-[#0369A1]
+              p-5
+              text-white
               shadow-[0_12px_35px_rgba(2,132,199,0.18)]
               sm:p-6
             "
           >
-            {/* Decorative shapes */}
             <div
               aria-hidden="true"
               className="
-                pointer-events-none absolute -right-16 -top-16
-                h-44 w-44 rounded-full
-                bg-white/10 blur-2xl
+                pointer-events-none
+                absolute -right-16 -top-16
+                h-44 w-44
+                rounded-full
+                bg-white/10
+                blur-2xl
               "
             />
 
             <div
               aria-hidden="true"
               className="
-                pointer-events-none absolute -bottom-20 -left-10
-                h-40 w-40 rounded-full
-                bg-cyan-200/10 blur-3xl
+                pointer-events-none
+                absolute -bottom-20 -left-10
+                h-40 w-40
+                rounded-full
+                bg-cyan-200/10
+                blur-3xl
               "
             />
 
@@ -190,8 +206,10 @@ export default function HomePage() {
               <div className="mb-5 flex items-center gap-2">
                 <span
                   className="
-                    flex h-9 w-9 items-center justify-center
-                    rounded-full bg-white/10
+                    flex h-9 w-9
+                    items-center justify-center
+                    rounded-full
+                    bg-white/10
                   "
                 >
                   <BookOpen size={18} />
@@ -242,10 +260,15 @@ export default function HomePage() {
               <Link
                 href={continueHref}
                 className="
-                  flex w-full items-center justify-center gap-2
-                  rounded-2xl bg-white
+                  flex w-full
+                  items-center
+                  justify-center
+                  gap-2
+                  rounded-2xl
+                  bg-white
                   py-3.5
-                  font-bold text-[var(--royal-blue)]
+                  font-bold
+                  text-[var(--royal-blue)]
                   shadow-lg
                   transition-all duration-200
                   hover:-translate-y-0.5
@@ -265,13 +288,16 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Quick Services */}
+        {/* =====================================================
+            Quick Services
+        ====================================================== */}
         <section className="mb-8">
           <div className="mb-4 flex items-end justify-between gap-4">
             <div>
               <h2 className="text-lg font-extrabold text-[var(--text-main)]">
                 الخدمات السريعة
               </h2>
+
               <p className="mt-1 text-xs font-medium text-slate-400">
                 كل ما تحتاجه في مكان واحد
               </p>
@@ -280,7 +306,8 @@ export default function HomePage() {
             <Link
               href="/surahs"
               className="
-                text-xs font-bold
+                text-xs
+                font-bold
                 text-[var(--royal-blue)]
                 transition-colors
                 hover:text-[#0369A1]
@@ -341,11 +368,7 @@ export default function HomePage() {
 
 interface QuickServiceCardProps {
   href: string
-  icon: React.ComponentType<{
-    size?: number
-    strokeWidth?: number
-    className?: string
-  }>
+  icon: LucideIcon
   title: string
   description: string
 }
@@ -360,7 +383,9 @@ function QuickServiceCard({
     <Link
       href={href}
       className="
-        group relative overflow-hidden
+        group
+        relative
+        overflow-hidden
         rounded-[22px]
         border border-[var(--border-light)]
         bg-white
@@ -376,12 +401,14 @@ function QuickServiceCard({
       <div className="flex flex-col items-center text-center">
         <span
           className="
-            mb-3 flex h-12 w-12 items-center justify-center
+            mb-3
+            flex h-12 w-12
+            items-center justify-center
             rounded-2xl
             bg-[rgba(2,132,199,0.08)]
             transition-all duration-200
-            group-hover:bg-[rgba(2,132,199,0.13)]
             group-hover:scale-105
+            group-hover:bg-[rgba(2,132,199,0.13)]
           "
         >
           <Icon
