@@ -605,6 +605,12 @@ function MushafContent() {
   )
 
   useEffect(() => {
+    void fetchPage(currentPage, selectedRiwayaId)
+    setSelectedAyah(null)
+    setLastReadAyah(null)
+  }, [currentPage, selectedRiwayaId, fetchPage])
+
+  useEffect(() => {
     let cancelled = false
 
     const loadPrintedMushaf = async () => {
@@ -822,7 +828,7 @@ function MushafContent() {
             lastReadReciterName: currentReciterName,
             lastReadUpdatedAt: new Date().toISOString(),
             lastReadRoute:
-              `/mushaf?page=${currentPage}&riwaya=${selectedRiwayaId}&reciter=${encodeURIComponent(selectedReciter.identifier)}`,
+              `/mushaf?page=${currentPage}&riwaya=${selectedRiwayaId}`,
           },
           { merge: true }
         )
@@ -1214,11 +1220,6 @@ function MushafContent() {
     setIsToolsOpen(false)
     setMushafSearch('')
     setSelectedRiwayaId(newRiwaya)
-    try {
-      localStorage.setItem('samee3_selected_riwaya_v2', newRiwaya)
-    } catch {
-      // تجاهل فشل التخزين المحلي
-    }
   }
 
   // تغيير القارئ
@@ -1247,11 +1248,6 @@ function MushafContent() {
     setPlayingAyahKey(null)
     setIsToolsOpen(false)
     setSelectedReciterId(newIdentifier)
-    try {
-      localStorage.setItem('samee3_selected_reciter_v2', newIdentifier)
-    } catch {
-      // تجاهل فشل التخزين المحلي
-    }
   }
 
   // =========================================================
@@ -2445,42 +2441,6 @@ function MushafContent() {
         playingAyahKey
     ) || selectedAyah
 
-  // =========================================================
-  // تقليب صفحات المصحف باللمس — تجربة أقرب للمصحف الحقيقي
-  // swipe left  -> next page
-  // swipe right -> previous page
-  // =========================================================
-
-  const touchStartXRef = useRef<number | null>(null)
-
-  const handleMushafTouchStart = (
-    event: React.TouchEvent<HTMLDivElement>
-  ) => {
-    touchStartXRef.current =
-      event.touches[0]?.clientX ?? null
-  }
-
-  const handleMushafTouchEnd = (
-    event: React.TouchEvent<HTMLDivElement>
-  ) => {
-    const startX = touchStartXRef.current
-    touchStartXRef.current = null
-
-    const endX = event.changedTouches[0]?.clientX
-
-    if (startX === null || endX === undefined) return
-
-    const deltaX = endX - startX
-
-    if (Math.abs(deltaX) < 55) return
-
-    if (deltaX < 0) {
-      nextPage()
-    } else {
-      prevPage()
-    }
-  }
-
   return (
     <div
       className="min-h-screen bg-[#f6efdd] flex flex-col pb-44 relative overflow-x-hidden"
@@ -2623,19 +2583,33 @@ function MushafContent() {
         </div>
       </div>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-0 pt-1 pb-24 sm:pt-2">
+      <main className="flex-1 flex flex-col items-center justify-center px-0 pt-4 pb-28 sm:pt-6">
         <div className="w-full flex flex-col items-center">
+          <div className="w-full max-w-[720px] px-3 sm:px-6 mb-2">
+            <div className="flex items-center justify-between gap-3 text-[10px] sm:text-xs font-black text-[#6f5533]">
+              <span className="truncate">
+                {currentSurah}
+              </span>
+
+              <span className="shrink-0 rounded-full border border-[#b78945]/35 bg-[#fffaf0]/85 px-3 py-1.5 text-[#175e67] shadow-sm">
+                الصفحة {currentPage.toLocaleString('ar-EG')}
+              </span>
+
+              <span className="truncate text-left">
+                {currentJuz ? `الجزء ${Number(currentJuz).toLocaleString('ar-EG')}` : ''}
+              </span>
+            </div>
+          </div>
+
           <div
-            className="relative w-full max-w-[820px] px-0 sm:px-2"
+            className="relative w-full max-w-[720px] px-2 sm:px-4"
             aria-label={`صفحة المصحف ${currentPage}`}
-            onTouchStart={handleMushafTouchStart}
-            onTouchEnd={handleMushafTouchEnd}
           >
-            <div className="relative overflow-hidden bg-[#fbfaf3] shadow-[0_20px_70px_rgba(68,45,18,0.24)] sm:rounded-[8px]">
-              <div className="pointer-events-none absolute inset-0 z-10 ring-1 ring-inset ring-[#9e824d]/45" />
+            <div className="relative overflow-hidden rounded-[18px] sm:rounded-[24px] border border-[#9e824d]/55 bg-[#fbfaf3] shadow-[0_18px_60px_rgba(68,45,18,0.20)]">
+              <div className="pointer-events-none absolute inset-0 z-10 rounded-[18px] sm:rounded-[24px] ring-1 ring-inset ring-[#b78945]/25" />
 
               {isLoading ? (
-                <div className="flex min-h-[82vh] items-center justify-center bg-[#fbfaf3] px-5">
+                <div className="flex min-h-[72vh] items-center justify-center bg-[#fbfaf3] px-5">
                   <div className="flex flex-col items-center gap-3 text-[#175e67]">
                     <Loader2 className="animate-spin" size={38} />
                     <p className="text-sm font-black">جاري فتح صفحة المصحف...</p>
@@ -2644,23 +2618,20 @@ function MushafContent() {
               ) : printedMushafSvg ? (
                 <div
                   id="samee3-printed-mushaf"
-                  className="w-full bg-[#fbfaf3] [&>svg]:block [&>svg]:h-auto [&>svg]:w-full select-none"
+                  className="w-full bg-[#fbfaf3] [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
                   dangerouslySetInnerHTML={{ __html: printedMushafSvg }}
-                  aria-label={`صفحة مصحف حقيقية رقم ${currentPage}`}
                 />
               ) : pageData?.ayahs?.length ? (
-                <div className="min-h-[82vh] bg-[#fbfaf3] px-4 py-8 sm:px-8 sm:py-12">
-                  <div className="mx-auto max-w-3xl rounded-[18px] border border-[#cdb77d]/75 bg-[#fffdf7] px-4 py-7 sm:px-8 sm:py-10 shadow-[inset_0_0_30px_rgba(160,130,70,0.06)]">
-                    <div className="mb-7 text-center">
-                      <div className="mx-auto inline-flex items-center rounded-full border border-[#b78945]/30 bg-[#f8f0de] px-4 py-1.5 text-[10px] font-black text-[#8a6a34]">
-                        {selectedRiwayaId === 'sousi'
-                          ? 'السوسي عن أبي عمرو'
-                          : 'البزي عن ابن كثير'}
-                      </div>
-                    </div>
+                <div className="min-h-[72vh] bg-[#fbfaf3] px-5 py-10 sm:px-10">
+                  <div className="mx-auto max-w-3xl text-center">
+                    <p className="mb-7 text-[10px] font-black tracking-wide text-[#b78945]">
+                      {selectedRiwayaId === 'sousi'
+                        ? 'السوسي عن أبي عمرو'
+                        : 'البزي عن ابن كثير'}
+                    </p>
 
                     <p
-                      className="font-uthmani text-[25px] sm:text-[32px] leading-[2.45] text-[#171717]"
+                      className="font-uthmani text-[24px] sm:text-[31px] leading-[2.4] text-[#171717]"
                       style={{ textAlignLast: 'center' }}
                     >
                       {pageData.ayahs.map((ayah) => (
@@ -2692,7 +2663,7 @@ function MushafContent() {
                   </div>
                 </div>
               ) : (
-                <div className="flex min-h-[82vh] flex-col items-center justify-center gap-4 bg-[#fbfaf3] px-5 text-center">
+                <div className="flex min-h-[72vh] flex-col items-center justify-center gap-4 bg-[#fbfaf3] px-5 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full border border-red-100 bg-red-50 text-xl text-red-500">
                     !
                   </div>
@@ -2706,9 +2677,7 @@ function MushafContent() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      void fetchPage(currentPage, selectedRiwayaId)
-                    }}
+                    onClick={() => fetchPage(currentPage, selectedRiwayaId)}
                     className="rounded-2xl bg-[#175e67] px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-95 active:scale-[0.98]"
                   >
                     إعادة المحاولة
@@ -2718,46 +2687,45 @@ function MushafContent() {
             </div>
           </div>
 
-          <div className="mt-2 flex w-full max-w-[820px] items-center justify-center px-3 text-[9px] font-bold text-[#8a7456] sm:text-[10px]">
-            <span>صفحة {currentPage.toLocaleString('ar-EG')} من ٦٠٤</span>
+          <div className="mt-2 flex w-full max-w-[720px] items-center justify-between px-5 text-[10px] font-bold text-[#8a7456]">
+            <span>مصحف سَميع</span>
+            <span>
+              {currentReciterName}
+            </span>
           </div>
         </div>
       </main>
 
       {/* =====================================================
-          شريط التنقل السفلي — نفس أسماء الأقسام المطلوبة
+          أزرار التقليب
       ====================================================== */}
 
-      <nav
-        className="fixed bottom-2 left-1/2 z-40 grid w-[96vw] max-w-lg -translate-x-1/2 grid-cols-4 rounded-[24px] border border-white/10 bg-[#123F44]/98 p-1.5 text-white shadow-[0_16px_45px_rgba(18,63,68,0.35)] backdrop-blur-xl"
-        aria-label="التنقل في مصحف سميع"
+      <div
+        className="fixed bottom-6 left-0 w-full flex justify-center gap-10 sm:gap-16 px-4 z-30 pointer-events-none"
+        dir="ltr"
       >
-        <Link
-          href="/"
-          className="flex items-center justify-center rounded-2xl py-3 text-[10px] font-black transition hover:bg-white/10 sm:text-[11px]"
+        <button
+          type="button"
+          onClick={nextPage}
+          disabled={
+            currentPage === 604
+          }
+          className="pointer-events-auto bg-[#fffaf0]/95 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-[#175e67] hover:bg-[#175e67] hover:text-white transition border border-[#b78945]/40 disabled:opacity-40"
         >
-          الرئيسية
-        </Link>
-        <Link
-          href="/hadith"
-          className="flex items-center justify-center rounded-2xl py-3 text-[10px] font-black transition hover:bg-white/10 sm:text-[11px]"
+          <ChevronLeft size={28} />
+        </button>
+
+        <button
+          type="button"
+          onClick={prevPage}
+          disabled={
+            currentPage === 1
+          }
+          className="pointer-events-auto bg-[#fffaf0]/95 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-[#175e67] hover:bg-[#175e67] hover:text-white transition border border-[#b78945]/40 disabled:opacity-40"
         >
-          الأحاديث
-        </Link>
-        <Link
-          href="/adhkar"
-          className="flex items-center justify-center gap-1 rounded-2xl py-3 text-[10px] font-black transition hover:bg-white/10 sm:text-[11px]"
-        >
-          <Play size={11} fill="currentColor" />
-          الأذكار
-        </Link>
-        <Link
-          href="/surahs"
-          className="flex items-center justify-center rounded-2xl bg-white/10 py-3 text-[10px] font-black text-[#e2c36f] sm:text-[11px]"
-        >
-          الفهرس
-        </Link>
-      </nav>
+          <ChevronRight size={28} />
+        </button>
+      </div>
 
       {/* =====================================================
           خيارات الآية
