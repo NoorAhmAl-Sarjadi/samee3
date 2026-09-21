@@ -14,6 +14,28 @@ export interface RiwayaDefinition {
   license: string
   mushafId: number
   available: boolean
+  /**
+   * اسم نسخة الـSVG المطبوعة من مستودع quran-svg.
+   * تكون موجودة فقط للروايات الخمس التي لها صفحة مصحف مرئية جاهزة.
+   */
+  printedEdition?: PrintedMushafEdition
+}
+
+export type PrintedMushafEdition =
+  | 'hafs-kfqc'
+  | 'warsh-kfqc'
+  | 'qalon-kfqc'
+  | 'douri-kfqc'
+  | 'shubah-kfqc'
+
+export const PRINTED_MUSHAF_EDITIONS: Partial<
+  Record<RiwayaId, PrintedMushafEdition>
+> = {
+  hafs: 'hafs-kfqc',
+  warsh: 'warsh-kfqc',
+  qalun: 'qalon-kfqc',
+  douri: 'douri-kfqc',
+  shubah: 'shubah-kfqc',
 }
 
 export const RIWAYAT: RiwayaDefinition[] = [
@@ -24,6 +46,7 @@ export const RIWAYAT: RiwayaDefinition[] = [
     license: 'Quranpedia API',
     mushafId: 1,
     available: true,
+    printedEdition: 'hafs-kfqc',
   },
   {
     id: 'warsh',
@@ -32,6 +55,7 @@ export const RIWAYAT: RiwayaDefinition[] = [
     license: 'Quranpedia API',
     mushafId: 4,
     available: true,
+    printedEdition: 'warsh-kfqc',
   },
   {
     id: 'qalun',
@@ -40,6 +64,7 @@ export const RIWAYAT: RiwayaDefinition[] = [
     license: 'Quranpedia API',
     mushafId: 7,
     available: true,
+    printedEdition: 'qalon-kfqc',
   },
   {
     id: 'douri',
@@ -48,6 +73,7 @@ export const RIWAYAT: RiwayaDefinition[] = [
     license: 'Quranpedia API',
     mushafId: 6,
     available: true,
+    printedEdition: 'douri-kfqc',
   },
   {
     id: 'sousi',
@@ -64,6 +90,7 @@ export const RIWAYAT: RiwayaDefinition[] = [
     license: 'Quranpedia API',
     mushafId: 9,
     available: true,
+    printedEdition: 'shubah-kfqc',
   },
   {
     id: 'bazzi',
@@ -78,7 +105,43 @@ export const RIWAYAT: RiwayaDefinition[] = [
 export function isSupportedRiwayaId(
   value: string
 ): value is RiwayaId {
-  return RIWAYAT.some((item) => item.id === value)
+  return RIWAYAT.some(
+    (item) => item.id === value
+  )
+}
+
+export function getRiwayaDefinition(
+  riwayaId: RiwayaId
+): RiwayaDefinition {
+  const item = RIWAYAT.find(
+    (entry) => entry.id === riwayaId
+  )
+
+  if (!item) {
+    throw new Error(
+      `الرواية غير معروفة: ${riwayaId}`
+    )
+  }
+
+  return item
+}
+
+export function isPrintedMushafRiwaya(
+  value: string
+): value is RiwayaId {
+  return (
+    isSupportedRiwayaId(value) &&
+    Boolean(PRINTED_MUSHAF_EDITIONS[value])
+  )
+}
+
+export function getPrintedMushafEdition(
+  riwayaId: RiwayaId
+): PrintedMushafEdition | null {
+  return (
+    PRINTED_MUSHAF_EDITIONS[riwayaId] ||
+    null
+  )
 }
 
 type RemoteRiwaya = {
