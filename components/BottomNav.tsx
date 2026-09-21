@@ -12,29 +12,6 @@ import {
   ChevronDown,
 } from 'lucide-react'
 
-const navItems = [
-  {
-    label: 'الرئيسية',
-    icon: Home,
-    href: '/',
-  },
-  {
-    label: 'الأحاديث',
-    icon: BookOpen,
-    href: '/hadith',
-  },
-  {
-    label: 'الأذكار',
-    icon: Heart,
-    href: '/adhkar',
-  },
-  {
-    label: 'الفهرس',
-    icon: List,
-    href: '/surahs',
-  },
-]
-
 export default function BottomNav() {
   const pathname = usePathname()
   const [mushafNavOpen, setMushafNavOpen] = useState(false)
@@ -45,6 +22,30 @@ export default function BottomNav() {
     setMushafNavOpen(!isMushafPage)
   }, [isMushafPage])
 
+  const navItems = [
+    {
+      label: 'الرئيسية',
+      icon: Home,
+      href: '/',
+    },
+    {
+      // داخل المصحف نعرض «المصحف» بدل «الأحاديث»
+      label: isMushafPage ? 'المصحف' : 'الأحاديث',
+      icon: BookOpen,
+      href: isMushafPage ? '/mushaf' : '/hadith',
+    },
+    {
+      label: 'الأذكار',
+      icon: Heart,
+      href: '/adhkar',
+    },
+    {
+      label: 'الفهرس',
+      icon: List,
+      href: '/surahs',
+    },
+  ]
+
   const isActiveRoute = (href: string) => {
     if (href === '/') {
       return pathname === '/'
@@ -53,6 +54,9 @@ export default function BottomNav() {
     return pathname === href || pathname.startsWith(`${href}/`)
   }
 
+  /* =========================================================
+     شاشة المصحف — شريط التنقل مطوي افتراضيًا
+  ========================================================== */
   if (isMushafPage && !mushafNavOpen) {
     return (
       <button
@@ -121,7 +125,6 @@ export default function BottomNav() {
             bg-white
             shadow-[0_-3px_12px_rgba(15,23,42,0.07)]
             transition-transform duration-200
-            hover:-translate-x-1/2 hover:-translate-y-0.5
             active:scale-95
           "
         >
@@ -133,20 +136,14 @@ export default function BottomNav() {
         </button>
       )}
 
-      <div
-        className="
-          flex h-[70px] items-stretch
-          px-1.5
-          sm:px-3
-        "
-      >
+      <div className="flex h-[70px] items-stretch px-1.5 sm:px-3">
         {navItems.map((item) => {
           const Icon = item.icon
           const isActive = isActiveRoute(item.href)
 
           return (
             <Link
-              key={item.href}
+              key={`${item.href}-${item.label}`}
               href={item.href}
               aria-current={isActive ? 'page' : undefined}
               onClick={() => {
