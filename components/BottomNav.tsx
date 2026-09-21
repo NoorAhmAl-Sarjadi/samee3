@@ -10,6 +10,7 @@ import {
   List,
   ChevronUp,
   ChevronDown,
+  User,
 } from 'lucide-react'
 
 export default function BottomNav() {
@@ -22,29 +23,56 @@ export default function BottomNav() {
     setMushafNavOpen(!isMushafPage)
   }, [isMushafPage])
 
-  const navItems = [
-    {
-      label: 'الرئيسية',
-      icon: Home,
-      href: '/',
-    },
-    {
-      // داخل المصحف نعرض «المصحف» بدل «الأحاديث»
-      label: isMushafPage ? 'المصحف' : 'الأحاديث',
-      icon: BookOpen,
-      href: isMushafPage ? '/mushaf' : '/hadith',
-    },
-    {
-      label: 'الأذكار',
-      icon: Heart,
-      href: '/adhkar',
-    },
-    {
-      label: 'الفهرس',
-      icon: List,
-      href: '/surahs',
-    },
-  ]
+  const navItems = isMushafPage
+    ? [
+        {
+          label: 'الرئيسية',
+          icon: Home,
+          href: '/',
+        },
+        {
+          label: 'المصحف',
+          icon: BookOpen,
+          href: '/mushaf',
+        },
+        {
+          label: 'الأذكار',
+          icon: Heart,
+          href: '/adhkar',
+        },
+        {
+          label: 'الفهرس',
+          icon: List,
+          href: '/surahs',
+        },
+      ]
+    : [
+        {
+          label: 'الرئيسية',
+          icon: Home,
+          href: '/',
+        },
+        {
+          label: 'المصحف',
+          icon: BookOpen,
+          href: '/mushaf',
+        },
+        {
+          label: 'الأذكار',
+          icon: Heart,
+          href: '/adhkar',
+        },
+        {
+          label: 'الحساب',
+          icon: User,
+          href: '/profile',
+        },
+        {
+          label: 'الفهرس',
+          icon: List,
+          href: '/surahs',
+        },
+      ]
 
   const isActiveRoute = (href: string) => {
     if (href === '/') {
