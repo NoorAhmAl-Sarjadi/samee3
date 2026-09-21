@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   BookOpen,
@@ -161,6 +161,43 @@ export default function QuranIndexPage() {
   const [riwaya, setRiwaya] = useState<(typeof RIWAYAT)[number]['id']>('hafs')
   const [reciter, setReciter] = useState<(typeof RECITERS)[number]['id']>('ar.alafasy')
 
+  useEffect(() => {
+    try {
+      const savedRiwaya = localStorage.getItem('samee3_selected_riwaya_v2')
+      const savedReciter = localStorage.getItem('samee3_selected_reciter_v2')
+
+      if (savedRiwaya && RIWAYAT.some((item) => item.id === savedRiwaya)) {
+        setRiwaya(savedRiwaya as (typeof RIWAYAT)[number]['id'])
+      }
+
+      if (savedReciter && RECITERS.some((item) => item.id === savedReciter)) {
+        setReciter(savedReciter as (typeof RECITERS)[number]['id'])
+      }
+    } catch {
+      // تجاهل أي خطأ من localStorage
+    }
+  }, [])
+
+  const handleRiwayaChange = (value: (typeof RIWAYAT)[number]['id']) => {
+    setRiwaya(value)
+    try {
+      localStorage.setItem('samee3_selected_riwaya_v2', value)
+    } catch {
+      // تجاهل فشل التخزين
+    }
+  }
+
+  const handleReciterChange = (value: (typeof RECITERS)[number]['id']) => {
+    setReciter(value)
+    try {
+      localStorage.setItem('samee3_selected_reciter_v2', value)
+    } catch {
+      // تجاهل فشل التخزين
+    }
+  }
+
+  const mushafHref = `/mushaf?riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(reciter)}`
+
   const filteredSurahs = useMemo(() => {
     const normalized = query.trim().replace(/^سورة\s*/i, '')
 
@@ -206,6 +243,9 @@ export default function QuranIndexPage() {
               <h1 className="mt-1 text-3xl font-black sm:text-4xl">
                 فهرس السور
               </h1>
+              <p className="mt-2 text-[11px] font-bold text-white/55">
+                اختر الرواية والقارئ قبل بدء القراءة
+              </p>
             </div>
 
             <div className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-white/10">
@@ -229,7 +269,7 @@ export default function QuranIndexPage() {
               <select
                 value={riwaya}
                 onChange={(event) =>
-                  setRiwaya(event.target.value as (typeof RIWAYAT)[number]['id'])
+                  handleRiwayaChange(event.target.value as (typeof RIWAYAT)[number]['id'])
                 }
                 className="w-full rounded-xl border border-white/15 bg-white/95 px-3 py-3 text-sm font-black text-[#175E67] outline-none"
               >
@@ -249,7 +289,7 @@ export default function QuranIndexPage() {
               <select
                 value={reciter}
                 onChange={(event) =>
-                  setReciter(event.target.value as (typeof RECITERS)[number]['id'])
+                  handleReciterChange(event.target.value as (typeof RECITERS)[number]['id'])
                 }
                 className="w-full rounded-xl border border-white/15 bg-white/95 px-3 py-3 text-sm font-black text-[#175E67] outline-none"
               >
@@ -260,6 +300,17 @@ export default function QuranIndexPage() {
                 ))}
               </select>
             </label>
+          </div>
+
+          <div className="mx-auto mt-4 flex justify-center">
+            <Link
+              href={mushafHref}
+              className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-gold px-5 py-3 text-sm font-black text-[#173C39] shadow-lg shadow-black/10 transition hover:-translate-y-0.5 hover:brightness-105"
+            >
+              <BookOpen size={17} />
+              فتح المصحف بهذه الاختيارات
+              <ChevronLeft size={16} />
+            </Link>
           </div>
         </div>
       </section>
