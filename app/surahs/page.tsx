@@ -11,6 +11,7 @@ import {
   Sun,
   Sparkles,
   X,
+  Mic2,
 } from 'lucide-react'
 
 const surahsList = [
@@ -130,6 +131,24 @@ const surahsList = [
   { id: 114, name: 'الناس', type: 'مكية', ayahs: 6, startPage: 604 }
 ]
 
+const RIWAYAT = [
+  { id: 'hafs', label: 'حفص عن عاصم' },
+  { id: 'warsh', label: 'ورش عن نافع' },
+  { id: 'qalun', label: 'قالون عن نافع' },
+  { id: 'douri', label: 'الدوري عن أبي عمرو' },
+  { id: 'shubah', label: 'شعبة عن عاصم' },
+  { id: 'sousi', label: 'السوسي عن أبي عمرو' },
+  { id: 'bazzi', label: 'البزي عن ابن كثير' },
+] as const
+
+const RECITERS = [
+  { id: 'ar.alafasy', label: 'مشاري راشد العفاسي' },
+  { id: 'ar.husary', label: 'محمود خليل الحصري' },
+  { id: 'ar.minshawi', label: 'محمد صديق المنشاوي' },
+  { id: 'ar.abdulbasitmurattal', label: 'عبد الباسط عبد الصمد' },
+  { id: 'ar.saoodshuraym', label: 'سعود الشريم' },
+] as const
+
 type FilterType = 'all' | 'مكية' | 'مدنية'
 
 function toArabicNumber(value: number) {
@@ -139,6 +158,8 @@ function toArabicNumber(value: number) {
 export default function QuranIndexPage() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterType>('all')
+  const [riwaya, setRiwaya] = useState<(typeof RIWAYAT)[number]['id']>('hafs')
+  const [reciter, setReciter] = useState<(typeof RECITERS)[number]['id']>('ar.alafasy')
 
   const filteredSurahs = useMemo(() => {
     const normalized = query.trim().replace(/^سورة\s*/i, '')
@@ -194,24 +215,51 @@ export default function QuranIndexPage() {
 
           <div className="mx-auto max-w-3xl text-center">
             <p className="text-sm leading-7 text-white/75 sm:text-base">
-              تصفّح سور القرآن الكريم بالكامل، واختر أي سورة للانتقال مباشرةً
-              إلى صفحة البداية داخل المصحف.
+              اختر الرواية والقارئ أولًا، ثم افتح السورة لتنتقل إلى صفحة المصحف
+              المطبوعة المناسبة.
             </p>
           </div>
 
-          <div className="mx-auto mt-7 grid max-w-3xl grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-white/5 p-2 backdrop-blur">
-            <div className="rounded-xl bg-white/10 px-3 py-3 text-center">
-              <div className="text-xl font-black text-mushaf-gold">١١٤</div>
-              <div className="mt-1 text-[11px] text-white/65">سورة</div>
-            </div>
-            <div className="rounded-xl bg-white/10 px-3 py-3 text-center">
-              <div className="text-xl font-black text-white">٣٠</div>
-              <div className="mt-1 text-[11px] text-white/65">جزء</div>
-            </div>
-            <div className="rounded-xl bg-white/10 px-3 py-3 text-center">
-              <div className="text-xl font-black text-white">٦٠٤</div>
-              <div className="mt-1 text-[11px] text-white/65">صفحة</div>
-            </div>
+          <div className="mx-auto mt-6 grid max-w-4xl grid-cols-1 gap-3 md:grid-cols-2">
+            <label className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur">
+              <span className="mb-2 flex items-center gap-2 text-[11px] font-black text-white/75">
+                <BookOpen size={15} className="text-mushaf-gold" />
+                الرواية
+              </span>
+              <select
+                value={riwaya}
+                onChange={(event) =>
+                  setRiwaya(event.target.value as (typeof RIWAYAT)[number]['id'])
+                }
+                className="w-full rounded-xl border border-white/15 bg-white/95 px-3 py-3 text-sm font-black text-[#175E67] outline-none"
+              >
+                {RIWAYAT.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur">
+              <span className="mb-2 flex items-center gap-2 text-[11px] font-black text-white/75">
+                <Mic2 size={15} className="text-mushaf-gold" />
+                القارئ
+              </span>
+              <select
+                value={reciter}
+                onChange={(event) =>
+                  setReciter(event.target.value as (typeof RECITERS)[number]['id'])
+                }
+                className="w-full rounded-xl border border-white/15 bg-white/95 px-3 py-3 text-sm font-black text-[#175E67] outline-none"
+              >
+                {RECITERS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
       </section>
@@ -285,7 +333,8 @@ export default function QuranIndexPage() {
           </div>
 
           <div className="rounded-full bg-mushaf-teal/8 px-4 py-2 text-xs font-bold text-mushaf-teal">
-            اضغط على السورة للانتقال للمصحف
+            {RIWAYAT.find((item) => item.id === riwaya)?.label} ·{' '}
+            {RECITERS.find((item) => item.id === reciter)?.label}
           </div>
         </div>
 
@@ -306,7 +355,7 @@ export default function QuranIndexPage() {
             {filteredSurahs.map((surah) => (
               <Link
                 key={surah.id}
-                href={`/mushaf?page=${surah.startPage}`}
+                href={`/mushaf?page=${surah.startPage}&riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(reciter)}`}
                 className="group relative overflow-hidden rounded-3xl border border-[#E9E2D4] bg-white p-4 shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-mushaf-teal/35 hover:shadow-lg"
               >
                 <div className="absolute inset-y-0 right-0 w-1 bg-mushaf-gold opacity-70" />
