@@ -191,6 +191,10 @@ function MushafContent() {
 
   const [printedMushafSvg, setPrintedMushafSvg] = useState('')
   const [printedMushafError, setPrintedMushafError] = useState('')
+  const [nextPrintedMushafSvg, setNextPrintedMushafSvg] = useState('')
+  const [nextPrintedMushafError, setNextPrintedMushafError] = useState('')
+  const [nextPageData, setNextPageData] = useState<PageData | null>(null)
+  const [isNextPageLoading, setIsNextPageLoading] = useState(false)
   const [isToolsOpen, setIsToolsOpen] = useState(false)
   const [mushafSearch, setMushafSearch] = useState('')
 
@@ -662,6 +666,87 @@ function MushafContent() {
   }, [currentPage, selectedRiwayaId])
 
   // =========================================================
+  // تحميل الصفحة المقابلة على الكمبيوتر لعرض المصحف كصفحتين
+  // =========================================================
+
+  useEffect(() => {
+    let cancelled = false
+    const nextPage = currentPage < 604 ? currentPage + 1 : null
+
+    setNextPageData(null)
+    setNextPrintedMushafSvg('')
+    setNextPrintedMushafError('')
+
+    if (!nextPage) {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const loadNextPage = async () => {
+      try {
+        setIsNextPageLoading(true)
+
+        const nextAyahs = await fetchQuranPageDirect(
+          nextPage,
+          selectedRiwayaId
+        )
+
+        if (!cancelled) {
+          setNextPageData({
+            number: nextPage,
+            ayahs: nextAyahs,
+          })
+        }
+
+        if (!PRINTED_MUSHAF_RIWAYAT.has(selectedRiwayaId)) {
+          return
+        }
+
+        const response = await fetch(
+          `/api/mushaf-svg?riwaya=${encodeURIComponent(selectedRiwayaId)}&page=${nextPage}`,
+          {
+            method: 'GET',
+            cache: 'force-cache',
+            headers: { Accept: 'application/json' },
+          }
+        )
+
+        const payload = await response.json().catch(() => null)
+
+        if (!response.ok || typeof payload?.svg !== 'string') {
+          throw new Error(
+            typeof payload?.error === 'string'
+              ? payload.error
+              : 'تعذر تحميل الصفحة المقابلة.'
+          )
+        }
+
+        if (!cancelled) {
+          setNextPrintedMushafSvg(payload.svg)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Next spread page loading error:', error)
+          setNextPrintedMushafError(
+            'تعذر تحميل الصفحة المقابلة الآن.'
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setIsNextPageLoading(false)
+        }
+      }
+    }
+
+    void loadNextPage()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentPage, selectedRiwayaId])
+
+  // =========================================================
   // ربط طبقة الآيات داخل SVG بالتحديد والتشغيل
   // =========================================================
 
@@ -737,6 +822,83 @@ function MushafContent() {
       )
     })
   }, [selectedAyah, playingAyahKey, lastReadAyah, printedMushafSvg, pageData])
+
+  useEffect(() => {
+    const root = document.getElementById('samee3-printed-mushaf-next')
+    if (!root || !nextPrintedMushafSvg) return
+
+    const polygons = Array.from(
+      root.querySelectorAll<SVGPathElement>('.ayahPolygon')
+    )
+
+    const onAyahClick = (event: Event) => {
+      const polygon = event.currentTarget as SVGPathElement
+      const surah = Number(polygon.getAttribute('surah') || 0)
+      const ayah = Number(polygon.getAttribute('ayah') || 0)
+      if (!surah || !ayah) return
+
+      const match = nextPageData?.ayahs.find(
+        (item) =>
+          Number(item.surah?.number) === surah &&
+          Number(item.numberInSurah) === ayah
+      )
+
+      if (!match) return
+
+      setSelectedAyah(match)
+      setLastReadAyah(match)
+      setIsTafsirOpen(false)
+      setTafsirError('')
+      setTafsirText('')
+      setTafsirCopied(false)
+      setIsToolsOpen(false)
+    }
+
+    polygons.forEach((polygon) => {
+      polygon.style.cursor = 'pointer'
+      polygon.style.pointerEvents = 'visiblePainted'
+      polygon.setAttribute('fill', '#15705D')
+      polygon.addEventListener('click', onAyahClick)
+    })
+
+    return () => {
+      polygons.forEach((polygon) => {
+        polygon.removeEventListener('click', onAyahClick)
+      })
+    }
+  }, [nextPrintedMushafSvg, nextPageData])
+
+  useEffect(() => {
+    const root = document.getElementById('samee3-printed-mushaf-next')
+    if (!root || !nextPrintedMushafSvg) return
+
+    root.querySelectorAll<SVGPathElement>('.ayahPolygon').forEach((polygon) => {
+      const surah = Number(polygon.getAttribute('surah') || 0)
+      const ayah = Number(polygon.getAttribute('ayah') || 0)
+
+      const playingMatch = playingAyahKey
+        ? nextPageData?.ayahs.find((item) => item.key === playingAyahKey)
+        : undefined
+
+      const isPlayingHit = !!playingMatch &&
+        Number(playingMatch.surah?.number) === surah &&
+        playingMatch.numberInSurah === ayah
+
+      const isSelectedHit = !!selectedAyah &&
+        Number(selectedAyah.surah?.number) === surah &&
+        selectedAyah.numberInSurah === ayah
+
+      const isResumeHit = !!lastReadAyah &&
+        Number(lastReadAyah.surah?.number) === surah &&
+        lastReadAyah.numberInSurah === ayah
+
+      polygon.setAttribute('fill', '#15705D')
+      polygon.setAttribute(
+        'fill-opacity',
+        isPlayingHit ? '0.38' : isSelectedHit ? '0.28' : isResumeHit ? '0.18' : '0'
+      )
+    })
+  }, [selectedAyah, playingAyahKey, lastReadAyah, nextPrintedMushafSvg, nextPageData])
 
   // =========================================================
   // استعادة الآية الأخيرة داخل الصفحة
@@ -2443,31 +2605,30 @@ function MushafContent() {
 
   return (
     <div
-      className="min-h-screen bg-[#f6efdd] flex flex-col pb-44 relative overflow-x-hidden"
+      className="min-h-[100svh] bg-[#f6efdd] flex flex-col relative overflow-x-hidden"
       dir="rtl"
     >
       {/* =====================================================
-          أدوات القراءة العلوية + صفحة المصحف الحقيقية
+          زر أدوات المصحف
       ====================================================== */}
-
-      <div className="fixed inset-x-0 top-0 z-[60] pointer-events-none">
-        <div className="relative mx-auto max-w-[760px]">
+      <div className="fixed inset-x-0 top-0 z-[80] pointer-events-none">
+        <div className="relative mx-auto w-full max-w-[1560px]">
           <button
             type="button"
             onClick={() => setIsToolsOpen((value) => !value)}
-            className="pointer-events-auto absolute left-1/2 top-0 -translate-x-1/2 w-12 h-6 rounded-b-2xl border-x border-b border-[#b78945]/45 bg-[#fffaf0]/95 text-[#175e67] shadow-md backdrop-blur-md flex items-center justify-center hover:h-7 transition-all"
+            className="pointer-events-auto absolute left-1/2 top-0 -translate-x-1/2 w-14 h-9 rounded-b-[22px] border-x border-b border-[#b78945]/55 bg-[#fffaf0]/98 text-[#175e67] shadow-md backdrop-blur-md flex items-center justify-center transition-all duration-200 hover:h-10"
             aria-label="فتح أدوات المصحف"
             aria-expanded={isToolsOpen}
           >
             <ChevronDown
-              size={15}
+              size={18}
               className={`transition-transform duration-200 ${isToolsOpen ? 'rotate-180' : ''}`}
             />
           </button>
 
           {isToolsOpen && (
-            <div className="pointer-events-auto absolute top-7 left-3 right-3 sm:left-6 sm:right-6 rounded-[24px] border border-[#d8c79c] bg-[#fffaf3]/98 p-3 sm:p-4 shadow-2xl backdrop-blur-xl">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="pointer-events-auto absolute top-9 left-3 right-3 sm:left-6 sm:right-6 rounded-[24px] border border-[#d8c79c] bg-[#fffaf3]/98 p-3 sm:p-4 shadow-2xl backdrop-blur-xl">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="block">
                   <span className="mb-1.5 flex items-center gap-2 text-[11px] font-black text-[#6c5230]">
                     <BookOpen size={14} className="text-[#b78945]" />
@@ -2478,7 +2639,7 @@ function MushafContent() {
                       value={selectedRiwayaId}
                       onChange={handleRiwayaChange}
                       disabled={isLoadingRiwaya}
-                      className="w-full appearance-none rounded-2xl border border-[#d8c79c] bg-white py-3 pr-3 pl-10 text-xs sm:text-sm font-black text-[#175e67] outline-none focus:border-[#175e67] focus:ring-4 focus:ring-[#175e67]/10 disabled:opacity-60"
+                      className="w-full appearance-none rounded-2xl border border-[#d8c79c] bg-white py-3 pr-3 pl-10 text-xs font-black text-[#175e67] outline-none focus:border-[#175e67] focus:ring-4 focus:ring-[#175e67]/10 disabled:opacity-60 sm:text-sm"
                     >
                       {RIWAYAT.map((riwaya) => (
                         <option
@@ -2507,13 +2668,18 @@ function MushafContent() {
                       value={selectedReciterId}
                       onChange={handleReciterChange}
                       disabled={isLoadingReciters}
-                      className="w-full appearance-none rounded-2xl border border-[#d8c79c] bg-white py-3 pr-3 pl-10 text-xs sm:text-sm font-black text-[#175e67] outline-none focus:border-[#175e67] focus:ring-4 focus:ring-[#175e67]/10 disabled:opacity-60"
+                      className="w-full appearance-none rounded-2xl border border-[#d8c79c] bg-white py-3 pr-3 pl-10 text-xs font-black text-[#175e67] outline-none focus:border-[#175e67] focus:ring-4 focus:ring-[#175e67]/10 disabled:opacity-60 sm:text-sm"
                     >
                       {isLoadingReciters ? (
-                        <option value={selectedReciterId}>جاري تحميل القراء...</option>
+                        <option value={selectedReciterId}>
+                          جاري تحميل القراء...
+                        </option>
                       ) : (
                         reciters.map((reciter) => (
-                          <option key={reciter.identifier} value={reciter.identifier}>
+                          <option
+                            key={reciter.identifier}
+                            value={reciter.identifier}
+                          >
                             {reciter.name || reciter.englishName || reciter.identifier}
                           </option>
                         ))
@@ -2527,205 +2693,291 @@ function MushafContent() {
                 </label>
               </div>
 
-              <div className="mt-3">
-                <div className="relative">
-                  <Search
-                    size={16}
-                    className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#175e67]"
-                  />
-                  <input
-                    value={mushafSearch}
-                    onChange={(event) => setMushafSearch(event.target.value)}
-                    placeholder="ابحث عن سورة أو رقمها..."
-                    className="w-full rounded-2xl border border-[#d8c79c] bg-white py-3 pr-10 pl-10 text-xs sm:text-sm font-bold text-[#3f2a13] outline-none focus:border-[#175e67] focus:ring-4 focus:ring-[#175e67]/10"
-                  />
-                  {mushafSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setMushafSearch('')}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-black/5 text-gray-500"
-                      aria-label="مسح البحث"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-
-                {surahSearchResults.length > 0 && (
-                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {surahSearchResults.map((surah) => (
-                      <button
-                        key={surah.id}
-                        type="button"
-                        onClick={() => {
-                          setCurrentPage(surah.page)
-                          setMushafSearch('')
-                          setIsToolsOpen(false)
-                        }}
-                        className="flex items-center justify-between rounded-xl border border-[#eadfca] bg-white px-3 py-2.5 text-right hover:border-[#175e67]/30 hover:bg-[#f7f1e4] transition"
-                      >
-                        <span>
-                          <span className="block text-sm font-black text-[#175e67]">
-                            سورة {surah.name}
-                          </span>
-                          <span className="block mt-0.5 text-[10px] font-bold text-[#8a7456]">
-                            صفحة {surah.page.toLocaleString('ar-EG')}
-                          </span>
-                        </span>
-                        <ChevronLeft size={15} className="text-[#b78945]" />
-                      </button>
-                    ))}
-                  </div>
+              <div className="mt-3 relative">
+                <Search
+                  size={16}
+                  className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#175e67]"
+                />
+                <input
+                  value={mushafSearch}
+                  onChange={(event) => setMushafSearch(event.target.value)}
+                  placeholder="ابحث عن سورة أو رقمها..."
+                  className="w-full rounded-2xl border border-[#d8c79c] bg-white py-3 pr-10 pl-10 text-xs font-bold text-[#3f2a13] outline-none focus:border-[#175e67] focus:ring-4 focus:ring-[#175e67]/10 sm:text-sm"
+                />
+                {mushafSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setMushafSearch('')}
+                    className="absolute left-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-black/5 text-gray-500"
+                    aria-label="مسح البحث"
+                  >
+                    <X size={14} />
+                  </button>
                 )}
               </div>
+
+              {surahSearchResults.length > 0 && (
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {surahSearchResults.map((surah) => (
+                    <button
+                      key={surah.id}
+                      type="button"
+                      onClick={() => {
+                        setCurrentPage(surah.page)
+                        setMushafSearch('')
+                        setIsToolsOpen(false)
+                      }}
+                      className="flex items-center justify-between rounded-xl border border-[#eadfca] bg-white px-3 py-2.5 text-right transition hover:border-[#175e67]/30 hover:bg-[#f7f1e4]"
+                    >
+                      <span>
+                        <span className="block text-sm font-black text-[#175e67]">
+                          سورة {surah.name}
+                        </span>
+                        <span className="mt-0.5 block text-[10px] font-bold text-[#8a7456]">
+                          صفحة {surah.page.toLocaleString('ar-EG')}
+                        </span>
+                      </span>
+                      <ChevronLeft size={15} className="text-[#b78945]" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-0 pt-4 pb-28 sm:pt-6">
-        <div className="w-full flex flex-col items-center">
-          <div className="w-full max-w-[720px] px-3 sm:px-6 mb-2">
-            <div className="flex items-center justify-between gap-3 text-[10px] sm:text-xs font-black text-[#6f5533]">
-              <span className="truncate">
-                {currentSurah}
-              </span>
-
-              <span className="shrink-0 rounded-full border border-[#b78945]/35 bg-[#fffaf0]/85 px-3 py-1.5 text-[#175e67] shadow-sm">
-                الصفحة {currentPage.toLocaleString('ar-EG')}
-              </span>
-
-              <span className="truncate text-left">
-                {currentJuz ? `الجزء ${Number(currentJuz).toLocaleString('ar-EG')}` : ''}
-              </span>
-            </div>
-          </div>
-
-          <div
-            className="relative w-full max-w-[720px] px-2 sm:px-4"
-            aria-label={`صفحة المصحف ${currentPage}`}
-          >
-            <div className="relative overflow-hidden rounded-[18px] sm:rounded-[24px] border border-[#9e824d]/55 bg-[#fbfaf3] shadow-[0_18px_60px_rgba(68,45,18,0.20)]">
-              <div className="pointer-events-none absolute inset-0 z-10 rounded-[18px] sm:rounded-[24px] ring-1 ring-inset ring-[#b78945]/25" />
-
-              {isLoading ? (
-                <div className="flex min-h-[72vh] items-center justify-center bg-[#fbfaf3] px-5">
-                  <div className="flex flex-col items-center gap-3 text-[#175e67]">
-                    <Loader2 className="animate-spin" size={38} />
-                    <p className="text-sm font-black">جاري فتح صفحة المصحف...</p>
-                  </div>
-                </div>
-              ) : printedMushafSvg ? (
-                <div
-                  id="samee3-printed-mushaf"
-                  className="w-full bg-[#fbfaf3] [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
-                  dangerouslySetInnerHTML={{ __html: printedMushafSvg }}
-                />
-              ) : pageData?.ayahs?.length ? (
-                <div className="min-h-[72vh] bg-[#fbfaf3] px-5 py-10 sm:px-10">
-                  <div className="mx-auto max-w-3xl text-center">
-                    <p className="mb-7 text-[10px] font-black tracking-wide text-[#b78945]">
-                      {selectedRiwayaId === 'sousi'
-                        ? 'السوسي عن أبي عمرو'
-                        : 'البزي عن ابن كثير'}
-                    </p>
-
-                    <p
-                      className="font-uthmani text-[24px] sm:text-[31px] leading-[2.4] text-[#171717]"
-                      style={{ textAlignLast: 'center' }}
-                    >
-                      {pageData.ayahs.map((ayah) => (
-                        <span
-                          key={ayah.number}
-                          onClick={() => {
-                            setSelectedAyah(ayah)
-                            setLastReadAyah(ayah)
-                            setIsTafsirOpen(false)
-                            setTafsirError('')
-                            setTafsirText('')
-                            setTafsirCopied(false)
-                          }}
-                          className={`cursor-pointer rounded-lg px-0.5 transition-colors ${
-                            selectedAyah?.key === ayah.key ||
-                            playingAyahKey === ayah.key ||
-                            lastReadAyah?.key === ayah.key
-                              ? 'bg-[#15705D]/12'
-                              : 'hover:bg-[#15705D]/7'
-                          }`}
-                        >
-                          {ayah.text}
-                          <span className="mx-1 text-[#b78945]">
-                            ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
-                          </span>
-                        </span>
-                      ))}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex min-h-[72vh] flex-col items-center justify-center gap-4 bg-[#fbfaf3] px-5 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full border border-red-100 bg-red-50 text-xl text-red-500">
-                    !
-                  </div>
-                  <div>
-                    <p className="font-extrabold text-[#7f1d1d]">
-                      تعذر تحميل الصفحة
-                    </p>
-                    <p className="mt-1 max-w-md text-xs text-[#8a7456]">
-                      {printedMushafError || riwayaError || 'حدث خطأ مؤقت أثناء تحميل بيانات المصحف.'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => fetchPage(currentPage, selectedRiwayaId)}
-                    className="rounded-2xl bg-[#175e67] px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-95 active:scale-[0.98]"
-                  >
-                    إعادة المحاولة
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-2 flex w-full max-w-[720px] items-center justify-between px-5 text-[10px] font-bold text-[#8a7456]">
-            <span>مصحف سَميع</span>
-            <span>
-              {currentReciterName}
+      <main className="flex-1 flex flex-col items-center justify-start px-0 pt-12 sm:pt-14 pb-3">
+        <div className="w-full max-w-[1560px]">
+          {/* رأس خفيف يحاكي المصحف الورقي */}
+          <div className="mx-auto mb-2 flex w-full max-w-[1540px] items-center justify-between px-3 text-[11px] font-black text-[#6f5533] sm:px-5 md:text-xs">
+            <span className="min-w-0 truncate">
+              {currentSurah}
             </span>
+            <span className="shrink-0 rounded-full border border-[#b78945]/35 bg-[#fffaf0]/80 px-3 py-1 text-[#175e67] shadow-sm">
+              {currentPage.toLocaleString('ar-EG')}
+            </span>
+            <span className="min-w-0 truncate text-left">
+              {currentJuz ? `الجزء ${Number(currentJuz).toLocaleString('ar-EG')}` : ''}
+            </span>
+          </div>
+
+          {/* =====================================================
+              مصحف حقيقي — صفحة واحدة على الهاتف / صفحتان على الكمبيوتر
+          ====================================================== */}
+          <div className="relative mx-auto w-full">
+            <div
+              className="grid w-full grid-cols-1 items-start gap-2 md:grid-cols-2 md:gap-3"
+              dir="rtl"
+            >
+              {/* الصفحة الحالية — يمين المصحف على الكمبيوتر */}
+              <section
+                className="relative w-full overflow-hidden border-y border-[#9e824d]/55 bg-[#fbfaf3] shadow-[0_12px_40px_rgba(68,45,18,0.14)] md:rounded-[16px] md:border"
+                aria-label={`صفحة المصحف ${currentPage}`}
+              >
+                <div className="pointer-events-none absolute inset-0 z-20 ring-1 ring-inset ring-[#b78945]/25 md:rounded-[16px]" />
+
+                {isLoading ? (
+                  <div className="flex min-h-[calc(100svh-180px)] w-full items-center justify-center bg-[#fbfaf3] px-5 md:min-h-[calc(100vh-150px)]">
+                    <div className="flex flex-col items-center gap-3 text-[#175e67]">
+                      <Loader2 className="animate-spin" size={38} />
+                      <p className="text-sm font-black">
+                        جاري فتح صفحة المصحف...
+                      </p>
+                    </div>
+                  </div>
+                ) : printedMushafSvg ? (
+                  <div
+                    id="samee3-printed-mushaf"
+                    className="w-full bg-[#fbfaf3] [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
+                    dangerouslySetInnerHTML={{ __html: printedMushafSvg }}
+                  />
+                ) : pageData?.ayahs?.length ? (
+                  <div className="min-h-[calc(100svh-180px)] w-full bg-[#fbfaf3] px-4 py-8 sm:px-8 md:min-h-[calc(100vh-150px)]">
+                    <div className="mx-auto max-w-3xl text-center">
+                      <p className="mb-6 text-[10px] font-black tracking-wide text-[#b78945]">
+                        {selectedRiwayaId === 'sousi'
+                          ? 'السوسي عن أبي عمرو'
+                          : 'البزي عن ابن كثير'}
+                      </p>
+
+                      <p
+                        className="font-uthmani text-[24px] leading-[2.35] text-[#171717] sm:text-[31px]"
+                        style={{ textAlignLast: 'center' }}
+                      >
+                        {pageData.ayahs.map((ayah) => (
+                          <span
+                            key={ayah.number}
+                            onClick={() => {
+                              setSelectedAyah(ayah)
+                              setLastReadAyah(ayah)
+                              setIsTafsirOpen(false)
+                              setTafsirError('')
+                              setTafsirText('')
+                              setTafsirCopied(false)
+                            }}
+                            className={`cursor-pointer rounded-lg px-0.5 transition-colors ${
+                              selectedAyah?.key === ayah.key ||
+                              playingAyahKey === ayah.key ||
+                              lastReadAyah?.key === ayah.key
+                                ? 'bg-[#15705D]/12'
+                                : 'hover:bg-[#15705D]/7'
+                            }`}
+                          >
+                            {ayah.text}
+                            <span className="mx-1 text-[#b78945]">
+                              ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
+                            </span>
+                          </span>
+                        ))}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-[calc(100svh-180px)] w-full flex-col items-center justify-center gap-4 bg-[#fbfaf3] px-5 text-center md:min-h-[calc(100vh-150px)]">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full border border-red-100 bg-red-50 text-xl text-red-500">
+                      !
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-[#7f1d1d]">
+                        تعذر تحميل الصفحة
+                      </p>
+                      <p className="mt-1 max-w-md text-xs text-[#8a7456]">
+                        {printedMushafError || riwayaError || 'حدث خطأ مؤقت أثناء تحميل بيانات المصحف.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void fetchPage(currentPage, selectedRiwayaId)}
+                      className="rounded-2xl bg-[#175e67] px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-95 active:scale-[0.98]"
+                    >
+                      إعادة المحاولة
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-3 border-t border-[#b78945]/20 px-4 py-2.5 text-[10px] font-bold text-[#8a7456] md:px-5">
+                  <span>مصحف سَميع</span>
+                  <span>{currentPage.toLocaleString('ar-EG')}</span>
+                  <span className="truncate text-left">{currentSurah}</span>
+                </div>
+              </section>
+
+              {/* الصفحة المقابلة — تظهر على الكمبيوتر فقط */}
+              {currentPage < 604 ? (
+                <section
+                  className="relative hidden w-full overflow-hidden border border-[#9e824d]/55 bg-[#fbfaf3] shadow-[0_12px_40px_rgba(68,45,18,0.14)] md:block md:rounded-[16px]"
+                  aria-label={`صفحة المصحف ${currentPage + 1}`}
+                >
+                  <div className="pointer-events-none absolute inset-0 z-20 ring-1 ring-inset ring-[#b78945]/25 md:rounded-[16px]" />
+
+                  {isNextPageLoading && !nextPrintedMushafSvg ? (
+                    <div className="flex min-h-[calc(100vh-150px)] items-center justify-center bg-[#fbfaf3] px-5">
+                      <div className="flex flex-col items-center gap-3 text-[#175e67]">
+                        <Loader2 className="animate-spin" size={32} />
+                        <p className="text-xs font-black">
+                          جاري تحميل الصفحة المقابلة...
+                        </p>
+                      </div>
+                    </div>
+                  ) : nextPrintedMushafSvg ? (
+                    <div
+                      id="samee3-printed-mushaf-next"
+                      className="w-full bg-[#fbfaf3] [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
+                      dangerouslySetInnerHTML={{ __html: nextPrintedMushafSvg }}
+                    />
+                  ) : nextPageData?.ayahs?.length ? (
+                    <div className="min-h-[calc(100vh-150px)] w-full bg-[#fbfaf3] px-6 py-10">
+                      <div className="mx-auto max-w-3xl text-center">
+                        <p className="mb-6 text-[10px] font-black tracking-wide text-[#b78945]">
+                          {selectedRiwayaId === 'sousi'
+                            ? 'السوسي عن أبي عمرو'
+                            : 'البزي عن ابن كثير'}
+                        </p>
+
+                        <p
+                          className="font-uthmani text-[27px] leading-[2.35] text-[#171717]"
+                          style={{ textAlignLast: 'center' }}
+                        >
+                          {nextPageData.ayahs.map((ayah) => (
+                            <span
+                              key={ayah.number}
+                              onClick={() => {
+                                setSelectedAyah(ayah)
+                                setLastReadAyah(ayah)
+                                setIsTafsirOpen(false)
+                                setTafsirError('')
+                                setTafsirText('')
+                                setTafsirCopied(false)
+                              }}
+                              className={`cursor-pointer rounded-lg px-0.5 transition-colors ${
+                                selectedAyah?.key === ayah.key ||
+                                playingAyahKey === ayah.key ||
+                                lastReadAyah?.key === ayah.key
+                                  ? 'bg-[#15705D]/12'
+                                  : 'hover:bg-[#15705D]/7'
+                              }`}
+                            >
+                              {ayah.text}
+                              <span className="mx-1 text-[#b78945]">
+                                ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
+                              </span>
+                            </span>
+                          ))}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[calc(100vh-150px)] flex-col items-center justify-center gap-3 bg-[#fbfaf3] px-5 text-center">
+                      <p className="font-extrabold text-[#7f1d1d]">
+                        تعذر تحميل الصفحة المقابلة
+                      </p>
+                      <p className="text-xs text-[#8a7456]">
+                        {nextPrintedMushafError || 'حاول تقليب الصفحة مرة أخرى.'}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-3 border-t border-[#b78945]/20 px-4 py-2.5 text-[10px] font-bold text-[#8a7456] md:px-5">
+                    <span>مصحف سَميع</span>
+                    <span>{(currentPage + 1).toLocaleString('ar-EG')}</span>
+                    <span className="truncate text-left">
+                      {nextPageData?.ayahs?.[0]?.surah?.name || ''}
+                    </span>
+                  </div>
+                </section>
+              ) : null}
+            </div>
+
+            {/* أدوات التقليب داخل مساحة المصحف بدل أزرار عائمة أسفل الشاشة */}
+            <div className="pointer-events-none absolute inset-y-0 left-0 right-0 hidden items-center justify-between px-1 md:flex">
+              <button
+                type="button"
+                onClick={prevPage}
+                disabled={currentPage === 1}
+                className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-[#b78945]/35 bg-[#fffaf0]/90 text-[#175e67] shadow-md backdrop-blur-md transition hover:bg-[#175e67] hover:text-white disabled:pointer-events-none disabled:opacity-30"
+                aria-label="الصفحة السابقة"
+              >
+                <ChevronRight size={20} />
+              </button>
+
+              <button
+                type="button"
+                onClick={nextPage}
+                disabled={currentPage === 604}
+                className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-[#b78945]/35 bg-[#fffaf0]/90 text-[#175e67] shadow-md backdrop-blur-md transition hover:bg-[#175e67] hover:text-white disabled:pointer-events-none disabled:opacity-30"
+                aria-label="الصفحة التالية"
+              >
+                <ChevronLeft size={20} />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-2 flex items-center justify-center px-4 text-[10px] font-bold text-[#8a7456] md:text-xs">
+            <span>{currentReciterName}</span>
           </div>
         </div>
       </main>
-
-      {/* =====================================================
-          أزرار التقليب
-      ====================================================== */}
-
-      <div
-        className="fixed bottom-6 left-0 w-full flex justify-center gap-10 sm:gap-16 px-4 z-30 pointer-events-none"
-        dir="ltr"
-      >
-        <button
-          type="button"
-          onClick={nextPage}
-          disabled={
-            currentPage === 604
-          }
-          className="pointer-events-auto bg-[#fffaf0]/95 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-[#175e67] hover:bg-[#175e67] hover:text-white transition border border-[#b78945]/40 disabled:opacity-40"
-        >
-          <ChevronLeft size={28} />
-        </button>
-
-        <button
-          type="button"
-          onClick={prevPage}
-          disabled={
-            currentPage === 1
-          }
-          className="pointer-events-auto bg-[#fffaf0]/95 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-[#175e67] hover:bg-[#175e67] hover:text-white transition border border-[#b78945]/40 disabled:opacity-40"
-        >
-          <ChevronRight size={28} />
-        </button>
-      </div>
 
       {/* =====================================================
           خيارات الآية
