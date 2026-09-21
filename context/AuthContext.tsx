@@ -1,35 +1,64 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
+import { onAuthStateChanged, type User } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
-import { onAuthStateChanged, User } from 'firebase/auth'
 
-// إنشاء سياق (Context) لحفظ بيانات المستخدم
-const AuthContext = createContext<{ user: User | null; loading: boolean }>({
+interface AuthContextValue {
+  user: User | null
+  loading: boolean
+}
+
+const AuthContext = createContext<AuthContextValue>({
   user: null,
   loading: true,
 })
 
-export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+export function AuthProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // مراقبة حالة تسجيل الدخول من فايربيس
+    let mounted = true
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!mounted) return
+
       setUser(currentUser)
       setLoading(false)
     })
 
-    return () => unsubscribe()
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
   }, [])
 
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      loading,
+    }),
+    [user, loading],
+  )
+
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   )
 }
 
-// دالة مخصصة لاستخدام بيانات المستخدم في أي صفحة بسهولة
-export const useAuth = () => useContext(AuthContext)
+export function useAuth() {
+  return useContext(AuthContext)
+}
