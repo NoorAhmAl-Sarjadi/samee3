@@ -139,28 +139,6 @@ async function fetchQuranPageDirect(
   }
 }
 
-function SurahTitleFrame({
-  name,
-}: {
-  name: string
-}) {
-  return (
-    <span
-      className="my-5 flex w-full items-center justify-center px-2 sm:my-7"
-      aria-label={`سورة ${name}`}
-    >
-      <span className="relative inline-flex min-w-[180px] items-center justify-center">
-        <span className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-[#b78945]/55 to-transparent" />
-        <span className="relative inline-flex items-center gap-3 rounded-[999px] border border-[#b78945]/55 bg-[#fffaf0] px-6 py-2.5 text-[16px] font-black text-[#175e67] shadow-[0_4px_16px_rgba(68,45,18,0.10)] sm:px-8 sm:py-3 sm:text-[18px]">
-          <span className="text-[12px] text-[#b78945]">❋</span>
-          <span>سورة {name}</span>
-          <span className="text-[12px] text-[#b78945]">❋</span>
-        </span>
-      </span>
-    </span>
-  )
-}
-
 function MushafContent() {
   const searchParams = useSearchParams()
   const { user } = useAuth()
@@ -294,11 +272,8 @@ function MushafContent() {
   const pendingResumeAyahKeyRef = useRef<string | null>(null)
   const restoredReciterRef = useRef(false)
 
-  const swipeStartRef = useRef<{
-    x: number
-    y: number
-    pointerId: number
-  } | null>(null)
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null)
+  const swipingRef = useRef(false)
 
   // =========================================================
   // القارئ المحدد
@@ -327,10 +302,6 @@ function MushafContent() {
 
   const currentJuz =
     pageData?.ayahs?.[0]?.juz || ''
-
-  const currentRiwayaLabel =
-    RIWAYAT.find((item) => item.id === selectedRiwayaId)?.label ||
-    selectedRiwayaId
 
   const SURAH_START_PAGES = [1, 2, 50, 77, 106, 128, 151, 177, 187, 208, 221, 235, 249, 255, 262, 267, 282, 293, 305, 312, 322, 332, 342, 350, 359, 367, 377, 385, 396, 404, 411, 415, 418, 428, 434, 440, 446, 453, 458, 467, 477, 483, 489, 496, 499, 502, 507, 511, 515, 518, 520, 523, 526, 528, 531, 534, 537, 542, 545, 549, 551, 553, 554, 556, 558, 560, 562, 564, 566, 568, 570, 572, 574, 575, 577, 578, 580, 582, 583, 585, 586, 587, 587, 589, 590, 591, 591, 592, 593, 594, 595, 595, 596, 596, 597, 597, 598, 598, 599, 599, 600, 600, 601, 601, 601, 602, 602, 602, 603, 603, 603, 604, 604, 604] as const
 
@@ -815,7 +786,7 @@ function MushafContent() {
 
     polygons.forEach((polygon) => {
       polygon.style.cursor = 'pointer'
-      polygon.style.pointerEvents = 'visiblePainted'
+      polygon.style.pointerEvents = 'all'
       polygon.setAttribute('fill', '#15705D')
       polygon.addEventListener('click', onAyahClick)
     })
@@ -888,7 +859,7 @@ function MushafContent() {
 
     polygons.forEach((polygon) => {
       polygon.style.cursor = 'pointer'
-      polygon.style.pointerEvents = 'visiblePainted'
+      polygon.style.pointerEvents = 'all'
       polygon.setAttribute('fill', '#15705D')
       polygon.addEventListener('click', onAyahClick)
     })
@@ -1159,13 +1130,24 @@ function MushafContent() {
 
   const getAudioUrl = useCallback(
     async (ayah: Ayah) => {
+      const bitrate =
+        selectedReciter.bitrate &&
+        [192, 128, 64, 48, 40, 32].includes(Number(selectedReciter.bitrate))
+          ? Number(selectedReciter.bitrate)
+          : 128
+
+      if (ayah.audioNumber) {
+        return (
+          `https://cdn.islamic.network/quran/audio/` +
+          `${bitrate}/${selectedReciter.identifier}/` +
+          `${ayah.audioNumber}.mp3`
+        )
+      }
+
+      const surahNumber = ayah.surah?.number
+      if (!surahNumber) throw new Error('رقم السورة غير متوفر')
+
       try {
-        const surahNumber = ayah.surah?.number
-
-        if (!surahNumber) {
-          throw new Error('رقم السورة غير متوفر')
-        }
-
         const response = await fetch(
           `https://api.alquran.cloud/v1/ayah/${surahNumber}:${ayah.numberInSurah}/${selectedReciter.identifier}`,
           { cache: 'no-store' }
@@ -1174,40 +1156,13 @@ function MushafContent() {
         if (response.ok) {
           const data = await response.json()
           const remoteUrl = data?.data?.audio
-
-          if (
-            typeof remoteUrl === 'string' &&
-            remoteUrl
-          ) {
-            return remoteUrl
-          }
+          if (typeof remoteUrl === 'string' && remoteUrl) return remoteUrl
         }
       } catch (error) {
-        console.error(
-          'Audio URL lookup error:',
-          error
-        )
+        console.error('Audio URL lookup error:', error)
       }
 
-      if (ayah.audioNumber) {
-        const bitrate =
-          selectedReciter.bitrate &&
-          [192, 128, 64, 48, 40, 32].includes(
-            Number(selectedReciter.bitrate)
-          )
-            ? Number(selectedReciter.bitrate)
-            : 128
-
-        return (
-          `https://cdn.islamic.network/quran/audio/` +
-          `${bitrate}/${selectedReciter.identifier}/` +
-          `${ayah.audioNumber}.mp3`
-        )
-      }
-
-      throw new Error(
-        'تعذر العثور على ملف الصوت لهذه الآية.'
-      )
+      throw new Error('تعذر العثور على ملف الصوت لهذه الآية.')
     },
     [selectedReciter]
   )
@@ -1260,18 +1215,22 @@ function MushafContent() {
 
         const audio = new Audio()
         audio.preload = 'auto'
-        audio.src = await getAudioUrl(ayah)
 
         audioRef.current = audio
-
         setLastReadAyah(ayah)
         setPlayingAyahKey(ayah.key)
         setIsPlaying(false)
         setIsLooping(loop)
         setContinuousPlay(continuous)
 
-        audio.oncanplay = async () => {
+        let fallbackTried = false
+
+        const startAudio = async () => {
           try {
+            if (!audio.src) {
+              audio.src = await getAudioUrl(ayah)
+              audio.load()
+            }
             await audio.play()
             setIsPlaying(true)
           } catch (error) {
@@ -1280,13 +1239,38 @@ function MushafContent() {
           }
         }
 
-        audio.onerror = () => {
-          console.error('Audio file failed:', audio.src)
+        audio.oncanplay = () => {
+          void startAudio()
+        }
+
+        audio.onerror = async () => {
+          if (!fallbackTried && ayah.surah?.number) {
+            fallbackTried = true
+            try {
+              const response = await fetch(
+                `https://api.alquran.cloud/v1/ayah/${ayah.surah.number}:${ayah.numberInSurah}/${selectedReciter.identifier}`,
+                { cache: 'no-store' }
+              )
+              const data = await response.json().catch(() => null)
+              const remoteUrl = data?.data?.audio
+              if (response.ok && typeof remoteUrl === 'string' && remoteUrl) {
+                audio.src = remoteUrl
+                audio.load()
+                await startAudio()
+                return
+              }
+            } catch (error) {
+              console.error('Audio fallback error:', error)
+            }
+          }
+
           setIsPlaying(false)
           setIsLooping(false)
           setContinuousPlay(false)
           setPlayingAyahKey(null)
         }
+
+        void startAudio()
 
         audio.onended = async () => {
           if (loop) {
@@ -1376,6 +1360,7 @@ function MushafContent() {
       currentPage,
       getAudioUrl,
       pageData,
+      selectedReciter.identifier,
       selectedRiwayaId,
     ]
   )
@@ -2608,64 +2593,20 @@ function MushafContent() {
 
   const nextPage = () => {
     if (currentPage < 604) {
-      setCurrentPage((previous) => previous + 1)
+      setCurrentPage(
+        (previous) =>
+          previous + 1
+      )
     }
   }
 
   const prevPage = () => {
     if (currentPage > 1) {
-      setCurrentPage((previous) => previous - 1)
+      setCurrentPage(
+        (previous) =>
+          previous - 1
+      )
     }
-  }
-
-  // تقليب الصفحات باللمس أو السحب بالماوس مثل الكتاب
-  const handleSpreadPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === 'mouse' && event.button !== 0) return
-
-    swipeStartRef.current = {
-      x: event.clientX,
-      y: event.clientY,
-      pointerId: event.pointerId,
-    }
-
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId)
-    } catch {
-      // بعض المتصفحات قد لا تسمح بـPointer Capture في بعض الحالات.
-    }
-  }
-
-  const handleSpreadPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    const start = swipeStartRef.current
-    swipeStartRef.current = null
-
-    if (!start) return
-
-    try {
-      event.currentTarget.releasePointerCapture(start.pointerId)
-    } catch {
-      // لا حاجة لأي إجراء عند عدم دعم releasePointerCapture.
-    }
-
-    const deltaX = event.clientX - start.x
-    const deltaY = event.clientY - start.y
-    const horizontalDistance = Math.abs(deltaX)
-    const verticalDistance = Math.abs(deltaY)
-
-    // السحب الأفقي الواضح فقط حتى لا يتعارض مع التمرير الرأسي أو الضغط على الآية.
-    if (horizontalDistance < 70 || horizontalDistance < verticalDistance * 1.25) {
-      return
-    }
-
-    if (deltaX < 0) {
-      nextPage()
-    } else {
-      prevPage()
-    }
-  }
-
-  const handleSpreadPointerCancel = () => {
-    swipeStartRef.current = null
   }
 
   // =========================================================
@@ -2823,10 +2764,10 @@ function MushafContent() {
         </div>
       </div>
 
-      <main className="flex-1 flex flex-col items-center justify-start px-0 pt-10 sm:pt-12 pb-3">
+      <main className="flex-1 flex flex-col items-center justify-start px-0 pt-4 sm:pt-6 pb-1">
         <div className="w-full max-w-[1560px]">
           {/* رأس خفيف يحاكي المصحف الورقي */}
-          <div className="mx-auto mb-2 flex w-full max-w-[1540px] items-center justify-between px-3 text-[11px] font-black text-[#6f5533] sm:px-5 md:text-xs">
+          <div className="mx-auto mb-1 flex w-full max-w-[1540px] items-center justify-between px-2 text-[10px] font-black text-[#6f5533] sm:px-5 sm:text-[11px] md:text-xs">
             <span className="min-w-0 truncate">
               {currentSurah}
             </span>
@@ -2842,7 +2783,8 @@ function MushafContent() {
               مصحف حقيقي — صفحة واحدة على الهاتف / صفحتان على الكمبيوتر
           ====================================================== */}
           <div
-            className="relative mx-auto w-full cursor-grab touch-pan-y active:cursor-grabbing"
+            className="relative mx-auto w-full select-none touch-pan-y"
+            style={{ touchAction: 'pan-y' }}
             onPointerDown={handleSpreadPointerDown}
             onPointerUp={handleSpreadPointerUp}
             onPointerCancel={handleSpreadPointerCancel}
@@ -2853,7 +2795,7 @@ function MushafContent() {
             >
               {/* الصفحة الحالية — يمين المصحف على الكمبيوتر */}
               <section
-                className="relative w-screen max-w-none overflow-hidden border-y border-[#9e824d]/55 bg-[#fbfaf3] shadow-[0_10px_30px_rgba(68,45,18,0.12)] md:w-full md:rounded-[16px] md:border"
+                className="relative w-full overflow-hidden border-y border-[#9e824d]/55 bg-[#fbfaf3] shadow-[0_12px_40px_rgba(68,45,18,0.14)] md:rounded-[16px] md:border"
                 aria-label={`صفحة المصحف ${currentPage}`}
               >
                 <div className="pointer-events-none absolute inset-0 z-20 ring-1 ring-inset ring-[#b78945]/25 md:rounded-[16px]" />
@@ -2874,47 +2816,41 @@ function MushafContent() {
                     dangerouslySetInnerHTML={{ __html: printedMushafSvg }}
                   />
                 ) : pageData?.ayahs?.length ? (
-                  <div className="min-h-[calc(100svh-160px)] w-full bg-[#fbfaf3] px-4 py-7 sm:px-8 sm:py-9 md:min-h-[calc(100vh-150px)]">
+                  <div className="min-h-[calc(100svh-180px)] w-full bg-[#fbfaf3] px-4 py-8 sm:px-8 md:min-h-[calc(100vh-150px)]">
                     <div className="mx-auto max-w-3xl text-center">
-                      <p className="mb-2 text-[10px] font-black tracking-wide text-[#b78945]">
-                        {currentRiwayaLabel}
+                      <p className="mb-6 text-[10px] font-black tracking-wide text-[#b78945]">
+                        {selectedRiwayaId === 'sousi'
+                          ? 'السوسي عن أبي عمرو'
+                          : 'البزي عن ابن كثير'}
                       </p>
-
-                      <SurahTitleFrame
-                        name={pageData.ayahs[0]?.surah?.name || currentSurah}
-                      />
 
                       <p
                         className="font-uthmani text-[24px] leading-[2.35] text-[#171717] sm:text-[31px]"
                         style={{ textAlignLast: 'center' }}
                       >
-                        {pageData.ayahs.map((ayah, index) => (
-                          <span key={ayah.number}>
-                            {ayah.numberInSurah === 1 && index > 0 ? (
-                              <SurahTitleFrame name={ayah.surah?.name || ''} />
-                            ) : null}
-                            <span
-                              onClick={() => {
-                                setSelectedAyah(ayah)
-                                setLastReadAyah(ayah)
-                                setIsTafsirOpen(false)
-                                setTafsirError('')
-                                setTafsirText('')
-                                setTafsirCopied(false)
-                              }}
-                              className={`cursor-pointer rounded-lg px-0.5 transition-colors ${
-                                selectedAyah?.key === ayah.key ||
-                                playingAyahKey === ayah.key ||
-                                lastReadAyah?.key === ayah.key
-                                  ? 'bg-[#15705D]/12'
-                                  : 'hover:bg-[#15705D]/7'
-                              }`}
-                            >
-                              {ayah.text}
-                              <span className="mx-1 text-[#b78945]">
-                                ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
-                              </span>
-                            </span>{' '}
+                        {pageData.ayahs.map((ayah) => (
+                          <span
+                            key={ayah.number}
+                            onClick={() => {
+                              setSelectedAyah(ayah)
+                              setLastReadAyah(ayah)
+                              setIsTafsirOpen(false)
+                              setTafsirError('')
+                              setTafsirText('')
+                              setTafsirCopied(false)
+                            }}
+                            className={`cursor-pointer rounded-lg px-0.5 transition-colors ${
+                              selectedAyah?.key === ayah.key ||
+                              playingAyahKey === ayah.key ||
+                              lastReadAyah?.key === ayah.key
+                                ? 'bg-[#15705D]/12'
+                                : 'hover:bg-[#15705D]/7'
+                            }`}
+                          >
+                            {ayah.text}
+                            <span className="mx-1 text-[#b78945]">
+                              ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
+                            </span>
                           </span>
                         ))}
                       </p>
@@ -2953,7 +2889,7 @@ function MushafContent() {
               {/* الصفحة المقابلة — تظهر على الكمبيوتر فقط */}
               {currentPage < 604 ? (
                 <section
-                  className="relative hidden w-full overflow-hidden border border-[#9e824d]/55 bg-[#fbfaf3] shadow-[0_10px_30px_rgba(68,45,18,0.12)] md:block md:rounded-[16px]"
+                  className="relative hidden w-full overflow-hidden border border-[#9e824d]/55 bg-[#fbfaf3] shadow-[0_12px_40px_rgba(68,45,18,0.14)] md:block md:rounded-[16px]"
                   aria-label={`صفحة المصحف ${currentPage + 1}`}
                 >
                   <div className="pointer-events-none absolute inset-0 z-20 ring-1 ring-inset ring-[#b78945]/25 md:rounded-[16px]" />
@@ -2974,47 +2910,41 @@ function MushafContent() {
                       dangerouslySetInnerHTML={{ __html: nextPrintedMushafSvg }}
                     />
                   ) : nextPageData?.ayahs?.length ? (
-                    <div className="min-h-[calc(100vh-150px)] w-full bg-[#fbfaf3] px-5 py-8 sm:px-7 sm:py-10">
+                    <div className="min-h-[calc(100vh-150px)] w-full bg-[#fbfaf3] px-6 py-10">
                       <div className="mx-auto max-w-3xl text-center">
-                        <p className="mb-2 text-[10px] font-black tracking-wide text-[#b78945]">
-                          {currentRiwayaLabel}
+                        <p className="mb-6 text-[10px] font-black tracking-wide text-[#b78945]">
+                          {selectedRiwayaId === 'sousi'
+                            ? 'السوسي عن أبي عمرو'
+                            : 'البزي عن ابن كثير'}
                         </p>
-
-                        <SurahTitleFrame
-                          name={nextPageData.ayahs[0]?.surah?.name || currentSurah}
-                        />
 
                         <p
                           className="font-uthmani text-[27px] leading-[2.35] text-[#171717]"
                           style={{ textAlignLast: 'center' }}
                         >
-                          {nextPageData.ayahs.map((ayah, index) => (
-                            <span key={ayah.number}>
-                              {ayah.numberInSurah === 1 && index > 0 ? (
-                                <SurahTitleFrame name={ayah.surah?.name || ''} />
-                              ) : null}
-                              <span
-                                onClick={() => {
-                                  setSelectedAyah(ayah)
-                                  setLastReadAyah(ayah)
-                                  setIsTafsirOpen(false)
-                                  setTafsirError('')
-                                  setTafsirText('')
-                                  setTafsirCopied(false)
-                                }}
-                                className={`cursor-pointer rounded-lg px-0.5 transition-colors ${
-                                  selectedAyah?.key === ayah.key ||
-                                  playingAyahKey === ayah.key ||
-                                  lastReadAyah?.key === ayah.key
-                                    ? 'bg-[#15705D]/12'
-                                    : 'hover:bg-[#15705D]/7'
-                                }`}
-                              >
-                                {ayah.text}
-                                <span className="mx-1 text-[#b78945]">
-                                  ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
-                                </span>
-                              </span>{' '}
+                          {nextPageData.ayahs.map((ayah) => (
+                            <span
+                              key={ayah.number}
+                              onClick={() => {
+                                setSelectedAyah(ayah)
+                                setLastReadAyah(ayah)
+                                setIsTafsirOpen(false)
+                                setTafsirError('')
+                                setTafsirText('')
+                                setTafsirCopied(false)
+                              }}
+                              className={`cursor-pointer rounded-lg px-0.5 transition-colors ${
+                                selectedAyah?.key === ayah.key ||
+                                playingAyahKey === ayah.key ||
+                                lastReadAyah?.key === ayah.key
+                                  ? 'bg-[#15705D]/12'
+                                  : 'hover:bg-[#15705D]/7'
+                              }`}
+                            >
+                              {ayah.text}
+                              <span className="mx-1 text-[#b78945]">
+                                ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
+                              </span>
                             </span>
                           ))}
                         </p>
@@ -3713,96 +3643,54 @@ function MushafContent() {
         )}
 
       {/* =====================================================
-          المشغل العائم
+          مشغل صوت مدمج
+          لا يغطي صفحة المصحف ولا يحجب القراءة.
       ====================================================== */}
 
       {playingAyah && (
-        <div className="fixed bottom-[92px] sm:bottom-[100px] left-3 right-3 z-[45]">
-          <div className="bg-gradient-to-br from-[#175E67] to-[#0D383E] rounded-[24px] border border-mushaf-gold/30 shadow-[0_15px_50px_rgba(13,56,62,0.35)] px-4 py-3 text-white">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 shrink-0 rounded-full bg-white/10 border border-white/15 flex items-center justify-center">
-                <Volume2
-                  size={21}
-                  className={
-                    isPlaying
-                      ? 'text-mushaf-gold'
-                      : 'text-white/60'
-                  }
-                />
-              </div>
+        <div className="mx-auto mt-2 w-full max-w-[1560px] px-3 pb-2 sm:px-5 md:mt-3">
+          <div className="mx-auto flex w-full max-w-[360px] items-center gap-2 rounded-full border border-[#b78945]/30 bg-[#175e67]/95 px-2.5 py-2 text-white shadow-[0_6px_20px_rgba(23,94,103,0.18)] backdrop-blur-md">
+            <button
+              type="button"
+              onClick={toggleFloatingPlayer}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[#175e67] shadow-sm transition-transform hover:scale-105 active:scale-95"
+              aria-label={isPlaying ? 'إيقاف التلاوة' : 'تشغيل التلاوة'}
+            >
+              {isPlaying ? (
+                <Pause size={17} fill="currentColor" />
+              ) : (
+                <Play size={17} fill="currentColor" className="mr-0.5" />
+              )}
+            </button>
 
-              <div className="flex-1 min-w-0">
-                <p className="text-mushaf-gold text-xs font-bold truncate">
-                  {
-                    currentReciterName
-                  }
+            <div className="min-w-0 flex-1 text-right">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-[10px] font-extrabold text-[#f3cc79]">
+                  {currentReciterName}
                 </p>
-
-                <p className="text-white text-sm font-bold truncate mt-0.5">
-                  {
-                    currentSurah
-                  }
-                </p>
-
-                <p className="text-white/50 text-[10px] mt-0.5">
-                  آية{' '}
-                  {playingAyah.numberInSurah.toLocaleString(
-                    'ar-EG'
-                  )}
-                  {' • '}
-                  {isLooping
-                    ? 'تكرار الآية'
-                    : continuousPlay
-                    ? 'تشغيل متتابع'
-                    : 'متوقف'}
+                <p className="shrink-0 text-[9px] font-bold text-white/65">
+                  آية {playingAyah.numberInSurah.toLocaleString('ar-EG')}
                 </p>
               </div>
-
-              <button
-                type="button"
-                onClick={
-                  toggleFloatingPlayer
-                }
-                className="w-12 h-12 shrink-0 bg-white text-mushaf-teal rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition"
-              >
-                {isPlaying ? (
-                  <Pause
-                    size={23}
-                    fill="currentColor"
-                  />
-                ) : (
-                  <Play
-                    size={23}
-                    fill="currentColor"
-                    className="ml-0.5"
-                  />
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={
-                  stopAudio
-                }
-                className="w-10 h-10 shrink-0 rounded-full bg-white/10 text-white/75 flex items-center justify-center hover:bg-red-500 hover:text-white transition"
-                title="إغلاق المشغل"
-              >
-                <X size={20} />
-              </button>
+              <p className="mt-0.5 truncate text-[10px] font-bold text-white/80">
+                سورة {currentSurah}
+                {isLooping ? ' · تكرار' : continuousPlay ? ' · متتابع' : ''}
+              </p>
             </div>
 
-            <div className="mt-3 h-1 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className={`h-full rounded-full bg-mushaf-gold transition-all ${
-                  isPlaying
-                    ? 'w-full animate-pulse'
-                    : 'w-1/4'
-                }`}
-              />
-            </div>
+            <button
+              type="button"
+              onClick={stopAudio}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/75 transition hover:bg-white/20 active:scale-95"
+              title="إغلاق المشغل"
+              aria-label="إغلاق المشغل"
+            >
+              <X size={15} />
+            </button>
           </div>
         </div>
       )}
+
     </div>
   )
 }
