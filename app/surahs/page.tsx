@@ -192,6 +192,10 @@ type OfflinePackage = {
 const OFFLINE_PACKAGES_KEY = 'samee3_offline_packages_v1'
 const OFFLINE_AUDIO_CACHE = 'samee3-quran-audio-v1'
 
+function pad3(value: number) {
+  return String(value).padStart(3, '0')
+}
+
 function getOfflinePackageKey(riwayaId: RiwayaId, reciterApiId: number, moshafId?: number) {
   return `${riwayaId}:${reciterApiId}:${moshafId ?? 'default'}`
 }
