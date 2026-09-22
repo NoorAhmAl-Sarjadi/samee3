@@ -8,7 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
-  CircleStop,
+  Square,
   Download,
   FolderDown,
   HardDriveDownload,
@@ -1521,7 +1521,7 @@ export default function QuranIndexPage() {
                     onClick={cancelOfflineDownload}
                     className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-2xl border border-red-100 bg-red-50 px-4 py-2.5 text-xs font-black text-red-700 transition hover:bg-red-100"
                   >
-                    <CircleStop size={16} />
+                    <Square size={16} />
                     إيقاف الحفظ
                   </button>
                 )}
@@ -1568,7 +1568,7 @@ export default function QuranIndexPage() {
                     onClick={cancelDeviceDownload}
                     className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-2xl border border-red-100 bg-red-50 px-4 py-2.5 text-xs font-black text-red-700 transition hover:bg-red-100"
                   >
-                    <CircleStop size={16} />
+                    <Square size={16} />
                     إيقاف التنزيل
                   </button>
                 )}
