@@ -66,6 +66,16 @@ function isRiwaya(value: string | null): value is Riwaya {
   )
 }
 
+function normalizeArabic(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[ًٌٍَُِّْـ]/g, '')
+    .replace(/[إأآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+}
+
 function clampPage(page: number) {
   if (!Number.isFinite(page)) return 1
   return Math.min(604, Math.max(1, Math.floor(page)))
@@ -92,6 +102,23 @@ export default function MushafPage() {
   const [selectedAyah, setSelectedAyah] = useState<number | null>(null)
   const [showMenu, setShowMenu] = useState(false)
 
+  // بيانات القارئ التي يرسلها الفهرس إلى شاشة المصحف.
+  const reciterApiId = Number(searchParams.get('reciterId') || '0')
+  const reciterName = searchParams.get('reciterName') || 'القارئ المختار'
+  const requestedMoshafId = Number(searchParams.get('moshafId') || '0')
+  const autoplayRequested = searchParams.get('autoplay') === '1'
+
+  const [audioUrl, setAudioUrl] = useState('')
+  const [audioDisplayUrl, setAudioDisplayUrl] = useState('')
+  const [audioLoading, setAudioLoading] = useState(false)
+  const [audioError, setAudioError] = useState('')
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [audioBlocked, setAudioBlocked] = useState(false)
+
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioObjectUrlRef = useRef<string | null>(null)
+  const autoplayConsumedRef = useRef(false)
+  const audioSurahRef = useRef<number | null>(null)
   const touchStartX = useRef<number | null>(null)
   const touchStartY = useRef<number | null>(null)
   const navigatingRef = useRef(false)
@@ -381,6 +408,383 @@ export default function MushafPage() {
   }
 
   /*
+   * تشغيل التلاوة من مصدر القارئ المختار.
+   *
+   * الفهرس يرسل reciterId + moshafId، ونسترجع منه رابط المصحف الصوتي
+   * من MP3Quran. كما نبحث أولًا في Cache Storage حتى تعمل التلاوة المحفوظة
+   * عندما يكون الجهاز دون اتصال.
+   */
+  const resolveAudioServer = useCallback(
+    async (surahNumber: number) => {
+      if (!Number.isFinite(surahNumber) || surahNumber < 1 || surahNumber > 114) {
+        throw new Error('رقم السورة غير صالح')
+      }
+
+      const offlineKey = 'samee3_offline_packages_v1'
+
+      // المحفوظ محليًا له الأولوية لأنه يسمح بالتشغيل بدون إنترنت.
+      try {
+        const raw = window.localStorage.getItem(offlineKey)
+        const packages = raw ? JSON.parse(raw) : []
+
+        if (Array.isArray(packages)) {
+          const cachedPackage = packages.find(
+            (item: {
+              riwayaId?: string
+              reciterApiId?: number
+              moshafId?: number | null
+              server?: string
+              surahIds?: number[]
+            }) =>
+              item?.riwayaId === riwaya &&
+              Number(item?.reciterApiId) === reciterApiId &&
+              (requestedMoshafId <= 0 || Number(item?.moshafId ?? 0) === requestedMoshafId) &&
+              typeof item?.server === 'string' &&
+              Array.isArray(item?.surahIds) &&
+              item.surahIds.includes(surahNumber),
+          )
+
+          if (cachedPackage?.server) {
+            return cachedPackage.server.endsWith('/')
+              ? cachedPackage.server
+              : `${cachedPackage.server}/`
+          }
+        }
+      } catch {
+        // نستمر بالمصدر الشبكي.
+      }
+
+      if (!reciterApiId) {
+        throw new Error('بيانات القارئ غير متوفرة')
+      }
+
+      const response = await fetch(
+        `https://mp3quran.net/api/v3/reciters?language=ar&reciter=${encodeURIComponent(
+          String(reciterApiId),
+        )}`,
+        { cache: 'no-store' },
+      )
+
+      if (!response.ok) {
+        throw new Error('تعذر تحميل بيانات القارئ')
+      }
+
+      const payload = await response.json()
+      const sourceReciter = Array.isArray(payload?.reciters)
+        ? payload.reciters.find(
+            (item: { id?: number }) => Number(item?.id) === reciterApiId,
+          )
+        : null
+
+      const moshafs = Array.isArray(sourceReciter?.moshaf)
+        ? sourceReciter.moshaf
+        : []
+
+      let selectedMoshaf =
+        requestedMoshafId > 0
+          ? moshafs.find(
+              (item: { id?: number; server?: string; surah_list?: string }) =>
+                Number(item?.id) === requestedMoshafId,
+            )
+          : null
+
+      if (!selectedMoshaf) {
+        selectedMoshaf = moshafs.find(
+          (item: { name?: string; server?: string; surah_list?: string }) => {
+            const name = normalizeArabic(
+              String(item?.name || ''),
+            )
+            return name.includes(normalizeArabic(RIWAYA_NAMES[riwaya]))
+          },
+        )
+      }
+
+      if (!selectedMoshaf) {
+        selectedMoshaf = moshafs.find(
+          (item: { server?: string; surah_list?: string }) =>
+            typeof item?.server === 'string' &&
+            typeof item?.surah_list === 'string' &&
+            item.surah_list
+              .split(',')
+              .map((value: string) => Number(value.trim()))
+              .includes(surahNumber),
+        )
+      }
+
+      if (!selectedMoshaf?.server) {
+        throw new Error('لا توجد تلاوة للسورة المختارة عند هذا القارئ')
+      }
+
+      return selectedMoshaf.server.endsWith('/')
+        ? selectedMoshaf.server
+        : `${selectedMoshaf.server}/`
+    },
+    [reciterApiId, requestedMoshafId, riwaya],
+  )
+
+  const parseAudioStart = useCallback(() => {
+    if (!ayahFromUrl) return null
+
+    if (ayahFromUrl.includes(':')) {
+      const [surahPart, ayahPart] = ayahFromUrl.split(':')
+      const surahNumber = Number(surahPart)
+      const ayahNumber = Number(ayahPart)
+
+      if (
+        Number.isFinite(surahNumber) &&
+        Number.isFinite(ayahNumber) &&
+        surahNumber > 0 &&
+        ayahNumber > 0
+      ) {
+        return { surahNumber, ayahNumber }
+      }
+    }
+
+    const ayahNumber = Number(ayahFromUrl)
+    const surahNumber = Number(searchParams.get('surah') || '0')
+
+    if (
+      Number.isFinite(ayahNumber) &&
+      ayahNumber > 0 &&
+      Number.isFinite(surahNumber) &&
+      surahNumber > 0
+    ) {
+      return { surahNumber, ayahNumber }
+    }
+
+    return null
+  }, [ayahFromUrl, searchParams])
+
+  const loadAudioForCurrentPosition = useCallback(
+    async (shouldAutoplay: boolean) => {
+      const requestedSurah = Number(
+        searchParams.get('surah') ||
+          pageData?.ayahs?.[0]?.surah?.number ||
+          '0',
+      )
+
+      if (!Number.isFinite(requestedSurah) || requestedSurah <= 0) return
+
+      setAudioLoading(true)
+      setAudioError('')
+      setAudioBlocked(false)
+
+      try {
+        const server = await resolveAudioServer(requestedSurah)
+        const networkUrl = `${server}${String(requestedSurah).padStart(3, '0')}.mp3`
+
+        let finalUrl = networkUrl
+        let localObjectUrl: string | null = null
+
+        // Cache Storage: أولًا نحاول الملف المحفوظ دون اتصال.
+        try {
+          if ('caches' in window) {
+            const cachedResponse = await window.caches.match(networkUrl)
+            if (cachedResponse) {
+              const blob = await cachedResponse.blob()
+              localObjectUrl = URL.createObjectURL(blob)
+              finalUrl = localObjectUrl
+            }
+          }
+        } catch {
+          // نستمر بالرابط الشبكي.
+        }
+
+        if (audioObjectUrlRef.current) {
+          URL.revokeObjectURL(audioObjectUrlRef.current)
+          audioObjectUrlRef.current = null
+        }
+
+        if (localObjectUrl) {
+          audioObjectUrlRef.current = localObjectUrl
+        }
+
+        setAudioUrl(networkUrl)
+        setAudioDisplayUrl(finalUrl)
+        audioSurahRef.current = requestedSurah
+
+        const audio = audioRef.current
+        if (!audio) return
+
+        audio.pause()
+        audio.src = finalUrl
+        audio.preload = 'auto'
+        audio.load()
+
+        const startInfo = parseAudioStart()
+
+        const playAudio = async () => {
+          if (startInfo && startInfo.surahNumber === requestedSurah && startInfo.ayahNumber > 1) {
+            try {
+              const timingResponse = await fetch(
+                `https://mp3quran.net/api/v3/ayat_timing?surah=${requestedSurah}&read=${encodeURIComponent(
+                  String(reciterApiId),
+                )}`,
+                { cache: 'force-cache' },
+              )
+
+              if (timingResponse.ok) {
+                const timing = await timingResponse.json()
+                if (Array.isArray(timing)) {
+                  const target = timing.find(
+                    (item: { ayah?: number; start_time?: number }) =>
+                      Number(item?.ayah) === startInfo.ayahNumber,
+                  )
+
+                  if (target && Number.isFinite(Number(target.start_time))) {
+                    audio.currentTime = Math.max(
+                      0,
+                      Number(target.start_time) / 1000,
+                    )
+                  }
+                }
+              }
+            } catch {
+              // عدم توفر التوقيت لا يمنع تشغيل السورة.
+            }
+          }
+
+          if (!shouldAutoplay) return
+
+          try {
+            await audio.play()
+            setIsPlaying(true)
+            setAudioBlocked(false)
+          } catch (playError) {
+            console.warn('Autoplay was blocked:', playError)
+            setIsPlaying(false)
+            setAudioBlocked(true)
+          }
+        }
+
+        if (audio.readyState >= 2) {
+          await playAudio()
+        } else {
+          audio.addEventListener('canplay', () => {
+            void playAudio()
+          }, { once: true })
+        }
+      } catch (error) {
+        console.error('Mushaf audio load error:', error)
+        setAudioError(
+          error instanceof Error
+            ? error.message
+            : 'تعذر تشغيل التلاوة حاليًا',
+        )
+      } finally {
+        setAudioLoading(false)
+      }
+    },
+    [
+      pageData,
+      parseAudioStart,
+      reciterApiId,
+      resolveAudioServer,
+      searchParams,
+    ],
+  )
+
+  // تشغيل تلقائي مرة واحدة عند فتح الموضع الذي جاء به المستخدم من الفهرس.
+  useEffect(() => {
+    if (!autoplayRequested || autoplayConsumedRef.current) return
+    if (!pageData?.ayahs?.length) return
+    if (!reciterApiId) return
+
+    autoplayConsumedRef.current = true
+    void loadAudioForCurrentPosition(true)
+  }, [autoplayRequested, loadAudioForCurrentPosition, pageData, reciterApiId])
+
+  // تشغيل يدوي صغير في حال منع المتصفح التشغيل التلقائي.
+  const handleManualPlay = useCallback(async () => {
+    const audio = audioRef.current
+
+    if (!audio) {
+      void loadAudioForCurrentPosition(true)
+      return
+    }
+
+    try {
+      await audio.play()
+      setIsPlaying(true)
+      setAudioBlocked(false)
+    } catch (error) {
+      console.error('Manual audio play error:', error)
+      setAudioError('تعذر تشغيل التلاوة. حاول مرة أخرى.')
+    }
+  }, [loadAudioForCurrentPosition])
+
+  const handlePause = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    audio.pause()
+    setIsPlaying(false)
+  }, [])
+
+  /*
+   * تنظيف الصوت عند مغادرة الشاشة.
+   */
+  useEffect(() => {
+    const audio = new Audio()
+    audioRef.current = audio
+
+    const onPlay = () => setIsPlaying(true)
+    const onPause = () => setIsPlaying(false)
+    const onEnded = () => setIsPlaying(false)
+    const onError = () => {
+      setIsPlaying(false)
+      setAudioError('تعذر تشغيل ملف التلاوة.')
+    }
+
+    audio.addEventListener('play', onPlay)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('error', onError)
+
+    return () => {
+      audio.pause()
+      audio.src = ''
+      audio.removeEventListener('play', onPlay)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('error', onError)
+      audioRef.current = null
+
+      if (audioObjectUrlRef.current) {
+        URL.revokeObjectURL(audioObjectUrlRef.current)
+        audioObjectUrlRef.current = null
+      }
+    }
+  }, [])
+
+  /*
+   * لوحة تحكم صوتية صغيرة جدًا لا تغطي صفحة المصحف.
+   */
+  const compactAudioControl = autoplayRequested && (audioLoading || audioDisplayUrl || audioBlocked || audioError)
+    ? (
+      <div className="pointer-events-none absolute bottom-[calc(max(20px,env(safe-area-inset-bottom))+58px)] left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#D8C398]/70 bg-[#FFFDF8]/95 px-2 py-1.5 shadow-[0_5px_18px_rgba(80,60,30,0.12)] backdrop-blur-md">
+        <button
+          type="button"
+          onClick={isPlaying ? handlePause : handleManualPlay}
+          className="pointer-events-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0EA5E9] text-white transition hover:scale-105 active:scale-95"
+          aria-label={isPlaying ? 'إيقاف التلاوة' : 'تشغيل التلاوة'}
+        >
+          {isPlaying ? 'Ⅱ' : '▶'}
+        </button>
+        <div className="max-w-[190px] truncate text-[10px] font-bold text-[#6F6048]">
+          {audioLoading
+            ? 'جاري تشغيل التلاوة...'
+            : audioError
+              ? audioError
+              : audioBlocked
+                ? 'اضغط للتشغيل'
+                : reciterName}
+        </div>
+      </div>
+    )
+    : null
+
+  /*
    * لوحة المفاتيح للكمبيوتر.
    */
   useEffect(() => {
@@ -619,6 +1023,8 @@ export default function MushafPage() {
             </div>
           </div>
         ) : null}
+
+        {compactAudioControl}
       </div>
 
       <style jsx global>{`
@@ -639,6 +1045,7 @@ export default function MushafPage() {
           justify-content: center;
           overflow: hidden;
           touch-action: pan-y;
+          -webkit-tap-highlight-color: transparent;
         }
 
         #mushaf-svg-container > svg {
