@@ -1,255 +1,92 @@
-'use client'
-
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import {
-  Home,
-  BookOpen,
-  Heart,
-  List,
-  ChevronUp,
-  ChevronDown,
-  User,
-} from 'lucide-react'
+import { ChevronRight, ChevronLeft, Info } from 'lucide-react'
 
-export default function BottomNav() {
-  const pathname = usePathname()
-  const [mushafNavOpen, setMushafNavOpen] = useState(false)
-
-  const isMushafPage = pathname === '/mushaf'
-
-  useEffect(() => {
-    setMushafNavOpen(!isMushafPage)
-  }, [isMushafPage])
-
-  const navItems = isMushafPage
-    ? [
-        {
-          label: 'الرئيسية',
-          icon: Home,
-          href: '/',
-        },
-        {
-          label: 'المصحف',
-          icon: BookOpen,
-          href: '/mushaf',
-        },
-        {
-          label: 'الأذكار',
-          icon: Heart,
-          href: '/adhkar',
-        },
-        {
-          label: 'الفهرس',
-          icon: List,
-          href: '/surahs',
-        },
-      ]
-    : [
-        {
-          label: 'الرئيسية',
-          icon: Home,
-          href: '/',
-        },
-        {
-          label: 'المصحف',
-          icon: BookOpen,
-          href: '/mushaf',
-        },
-        {
-          label: 'الأذكار',
-          icon: Heart,
-          href: '/adhkar',
-        },
-        {
-          label: 'الحساب',
-          icon: User,
-          href: '/profile',
-        },
-        {
-          label: 'الفهرس',
-          icon: List,
-          href: '/surahs',
-        },
-      ]
-
-  const isActiveRoute = (href: string) => {
-    if (href === '/') {
-      return pathname === '/'
-    }
-
-    return pathname === href || pathname.startsWith(`${href}/`)
+// دالة لجلب النص القرآني من مصدر موثوق (API مجمع الملك فهد عبر alquran.cloud)
+async function getQuranPage(pageNumber: number) {
+  try {
+    const res = await fetch(`https://api.alquran.cloud/v1/page/${pageNumber}/quran-uthmani`, {
+      next: { revalidate: 86400 } // تخزين مؤقت لتسريع الأداء
+    })
+    if (!res.ok) return null
+    return res.json()
+  } catch (error) {
+    return null
   }
+}
 
-  /* =========================================================
-     شاشة المصحف — شريط التنقل مطوي افتراضيًا
-  ========================================================== */
-  if (isMushafPage && !mushafNavOpen) {
-    return (
-      <button
-        type="button"
-        onClick={() => setMushafNavOpen(true)}
-        aria-label="إظهار شريط التنقل"
-        className="
-          fixed bottom-0 left-1/2 z-[90]
-          flex h-5 w-24 -translate-x-1/2
-          items-center justify-center
-          rounded-t-full
-          border border-b-0
-          border-[rgba(14,165,233,0.45)]
-          bg-white/95
-          shadow-[0_-4px_20px_rgba(15,23,42,0.10)]
-          backdrop-blur-xl
-          transition-all duration-300
-          hover:h-6
-          active:scale-95
-        "
-        style={{
-          paddingBottom: 'env(safe-area-inset-bottom)',
-        }}
-      >
-        <ChevronUp
-          size={14}
-          strokeWidth={2.5}
-          className="text-[var(--royal-blue)]"
-        />
-      </button>
-    )
-  }
+export default async function MushafPage() {
+  const pageNumber = 42 // نفس الصفحة في صورتك المرجعية
+  const pageData = await getQuranPage(pageNumber)
 
   return (
-    <nav
-      aria-label="التنقل الرئيسي"
-      className="
-        fixed bottom-3 left-1/2 z-[90]
-        w-[calc(100%-20px)]
-        max-w-[620px]
-        -translate-x-1/2
-        rounded-[24px]
-        border
-        border-[rgba(14,165,233,0.28)]
-        bg-white/95
-        shadow-[0_10px_35px_rgba(15,23,42,0.12)]
-        backdrop-blur-xl
-      "
-      style={{
-        marginBottom: 'env(safe-area-inset-bottom)',
-      }}
-    >
-      {isMushafPage && (
-        <button
-          type="button"
-          onClick={() => setMushafNavOpen(false)}
-          aria-label="إخفاء شريط التنقل"
-          className="
-            absolute -top-4 left-1/2
-            flex h-6 w-12
-            -translate-x-1/2
-            items-center justify-center
-            rounded-t-xl
-            border border-b-0
-            border-[rgba(14,165,233,0.40)]
-            bg-white
-            shadow-[0_-3px_12px_rgba(15,23,42,0.07)]
-            transition-transform duration-200
-            active:scale-95
-          "
-        >
-          <ChevronDown
-            size={14}
-            strokeWidth={2.5}
-            className="text-[var(--royal-blue)]"
-          />
+    <div className="min-h-screen bg-mushaf-paper flex flex-col pb-28 md:pb-8">
+      
+      {/* الشريط العلوي للتنقل */}
+      <div className="flex justify-between items-center p-4 bg-mushaf-paper shadow-sm z-10 relative">
+        <Link href="/" className="text-mushaf-teal bg-white p-2 rounded-full shadow-sm hover:bg-mushaf-paper transition">
+          <ChevronRight size={24} />
+        </Link>
+        <h1 className="font-bold text-mushaf-dark text-lg">المصحف الشريف</h1>
+        <button className="text-mushaf-gold">
+          <Info size={24} />
         </button>
-      )}
-
-      <div className="flex h-[70px] items-stretch px-1.5 sm:px-3">
-        {navItems.map((item) => {
-          const Icon = item.icon
-          const isActive = isActiveRoute(item.href)
-
-          return (
-            <Link
-              key={`${item.href}-${item.label}`}
-              href={item.href}
-              aria-current={isActive ? 'page' : undefined}
-              onClick={() => {
-                if (isMushafPage) {
-                  setMushafNavOpen(false)
-                }
-              }}
-              className="
-                relative
-                flex min-w-0 flex-1
-                flex-col
-                items-center
-                justify-center
-                rounded-[18px]
-                transition-all duration-200
-                active:scale-95
-              "
-            >
-              {isActive && (
-                <span
-                  aria-hidden="true"
-                  className="
-                    absolute top-0
-                    h-1 w-10
-                    rounded-b-full
-                    bg-[var(--royal-blue)]
-                    shadow-[0_3px_10px_rgba(2,132,199,0.28)]
-                  "
-                />
-              )}
-
-              <span
-                className={`
-                  flex h-9 w-9 items-center justify-center
-                  rounded-full
-                  transition-all duration-200
-                  ${
-                    isActive
-                      ? 'bg-[rgba(2,132,199,0.10)]'
-                      : 'bg-transparent'
-                  }
-                `}
-              >
-                <Icon
-                  size={23}
-                  strokeWidth={isActive ? 2.5 : 2}
-                  className={`
-                    transition-colors duration-200
-                    ${
-                      isActive
-                        ? 'text-[var(--royal-blue)]'
-                        : 'text-slate-400'
-                    }
-                  `}
-                />
-              </span>
-
-              <span
-                className={`
-                  mt-0.5
-                  whitespace-nowrap
-                  text-[11px]
-                  font-bold
-                  leading-none
-                  transition-colors duration-200
-                  ${
-                    isActive
-                      ? 'text-[var(--royal-blue)]'
-                      : 'text-slate-400'
-                  }
-                `}
-              >
-                {item.label}
-              </span>
-            </Link>
-          )
-        })}
       </div>
-    </nav>
+
+      {/* حاوية المصحف الورقي */}
+      <div className="flex-1 flex items-center justify-center p-3 sm:p-5">
+        <div className="w-full max-w-2xl bg-mushaf-paper border-[6px] border-mushaf-border p-1.5 rounded-sm shadow-2xl relative">
+          <div className="border-[2px] border-mushaf-gold p-4 sm:p-6 h-full flex flex-col relative bg-[#FEFCF8]">
+            
+            {/* رأس الصفحة (الهيدر الورقي) */}
+            <div className="flex justify-between items-center border-b-2 border-mushaf-gold pb-3 mb-6 text-mushaf-gold font-bold text-sm sm:text-base">
+              <span>البقرة</span>
+              <span className="font-uthmani text-2xl">سُورَةُ البَقَرَةِ</span>
+              <span>الجزء ٣</span>
+            </div>
+
+            {/* النص القرآني */}
+            <div className="flex-1 flex flex-col justify-center">
+              {pageData ? (
+                <p 
+                  className="font-uthmani text-[26px] sm:text-[32px] leading-[2.6] sm:leading-[2.8] text-mushaf-dark text-justify" 
+                  dir="rtl"
+                  style={{ textAlignLast: 'center' }}
+                >
+                  {pageData.data.ayahs.map((ayah: any) => (
+                    <span key={ayah.number}>
+                      {ayah.text}
+                      <span className="text-mushaf-gold mx-2 text-2xl inline-block align-middle">
+                        ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
+                      </span>
+                    </span>
+                  ))}
+                </p>
+              ) : (
+                <div className="text-center text-mushaf-teal">جاري تحميل الآيات...</div>
+              )}
+            </div>
+
+            {/* تذييل الصفحة (الفوتر الورقي) */}
+            <div className="flex justify-between items-center border-t-2 border-mushaf-gold pt-3 mt-6 text-mushaf-gold font-bold text-sm">
+              <span>الحزب ٥</span>
+              <span className="text-lg">{pageNumber.toLocaleString('ar-EG')}</span>
+              <span>الجزء ٤٢</span>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      {/* أزرار تقليب الصفحات */}
+      <div className="fixed bottom-24 md:bottom-8 left-0 w-full flex justify-center gap-16 px-4 z-40">
+        <button className="bg-white/90 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-mushaf-teal hover:bg-mushaf-teal hover:text-white transition transform hover:scale-105 border border-mushaf-teal/20">
+          <ChevronLeft size={28} />
+        </button>
+        <button className="bg-white/90 backdrop-blur-md shadow-lg p-3 sm:p-4 rounded-full text-mushaf-teal hover:bg-mushaf-teal hover:text-white transition transform hover:scale-105 border border-mushaf-teal/20">
+          <ChevronRight size={28} />
+        </button>
+      </div>
+
+    </div>
   )
 }
