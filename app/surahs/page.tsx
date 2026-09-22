@@ -8,13 +8,18 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
+  CircleStop,
   Download,
+  FolderDown,
   HardDriveDownload,
   Loader2,
   Mic2,
   Moon,
   Search,
+  Smartphone,
   Sun,
+  Trash2,
+  WifiOff,
   X,
 } from 'lucide-react'
 
@@ -186,11 +191,29 @@ type OfflinePackage = {
   moshafId: number | null
   server: string
   surahIds: number[]
+  downloadedSurahIds: number[]
+  status: 'complete' | 'partial'
   downloadedAt: string
 }
 
 const OFFLINE_PACKAGES_KEY = 'samee3_offline_packages_v1'
 const OFFLINE_AUDIO_CACHE = 'samee3-quran-audio-v1'
+
+type Samee3WritableFile = {
+  write: (data: Blob) => Promise<void>
+  close: () => Promise<void>
+}
+
+type Samee3FileHandle = {
+  createWritable: () => Promise<Samee3WritableFile>
+}
+
+type Samee3DirectoryHandle = {
+  getFileHandle: (
+    name: string,
+    options?: { create?: boolean },
+  ) => Promise<Samee3FileHandle>
+}
 
 function pad3(value: number) {
   return String(value).padStart(3, '0')
@@ -207,15 +230,47 @@ function readOfflinePackages(): OfflinePackage[] {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
 
-    return parsed.filter((item): item is OfflinePackage =>
-      !!item &&
-      typeof item.key === 'string' &&
-      typeof item.riwayaId === 'string' &&
-      typeof item.reciterApiId === 'number' &&
-      typeof item.reciterLabel === 'string' &&
-      typeof item.server === 'string' &&
-      Array.isArray(item.surahIds),
-    )
+    return parsed
+      .filter(
+        (item) =>
+          !!item &&
+          typeof item.key === 'string' &&
+          typeof item.riwayaId === 'string' &&
+          typeof item.reciterApiId === 'number' &&
+          typeof item.reciterLabel === 'string' &&
+          typeof item.server === 'string' &&
+          Array.isArray(item.surahIds),
+      )
+      .map((item) => {
+        const downloadedSurahIds = Array.isArray(item.downloadedSurahIds)
+          ? item.downloadedSurahIds
+          : item.surahIds
+
+        const status =
+          item.status === 'partial' || item.status === 'complete'
+            ? item.status
+            : 'complete'
+
+        return {
+          key: String(item.key),
+          riwayaId: item.riwayaId as RiwayaId,
+          reciterApiId: Number(item.reciterApiId),
+          reciterLabel: String(item.reciterLabel),
+          moshafId:
+            typeof item.moshafId === 'number' ? item.moshafId : null,
+          server: String(item.server),
+          surahIds: Array.isArray(item.surahIds)
+            ? item.surahIds
+                .map(Number)
+                .filter((id: number) => Number.isInteger(id) && id >= 1 && id <= 114)
+            : [],
+          downloadedSurahIds: downloadedSurahIds
+            .map(Number)
+            .filter((id: number) => Number.isInteger(id) && id >= 1 && id <= 114),
+          status,
+          downloadedAt: String(item.downloadedAt || ''),
+        } satisfies OfflinePackage
+      })
   } catch {
     return []
   }
@@ -357,6 +412,13 @@ export default function QuranIndexPage() {
   const [offlineDownloadProgress, setOfflineDownloadProgress] = useState(0)
   const [offlineDownloadLabel, setOfflineDownloadLabel] = useState('')
   const [offlineError, setOfflineError] = useState('')
+
+  const [deviceDownloading, setDeviceDownloading] = useState(false)
+  const [deviceDownloadProgress, setDeviceDownloadProgress] = useState(0)
+  const [deviceDownloadLabel, setDeviceDownloadLabel] = useState('')
+
+  const offlineAbortRef = useRef<AbortController | null>(null)
+  const deviceAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     try {
@@ -634,8 +696,192 @@ export default function QuranIndexPage() {
       (pkg) =>
         pkg.riwayaId === riwaya &&
         pkg.reciterApiId === item.apiId &&
-        pkg.moshafId === (item.moshaf.id ?? null),
+        pkg.moshafId === (item.moshaf.id ?? null) &&
+        pkg.downloadedSurahIds.length > 0,
     )
+
+  const selectedOfflineCount = selectedOfflinePackage?.downloadedSurahIds.length || 0
+  const selectedOfflineTotal = selectedOfflinePackage?.surahIds.length || availableSurahIds.length
+  const selectedOfflineComplete =
+    !!selectedOfflinePackage &&
+    selectedOfflinePackage.status === 'complete' &&
+    selectedOfflineCount >= selectedOfflineTotal
+
+  const saveBlobToDevice = async (
+    blob: Blob,
+    filename: string,
+    directoryHandle?: Samee3DirectoryHandle,
+  ) => {
+    if (directoryHandle) {
+      const fileHandle = await directoryHandle.getFileHandle(filename, {
+        create: true,
+      })
+      const writable = await fileHandle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+      return
+    }
+
+    const blobUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = blobUrl
+    anchor.download = filename
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000)
+  }
+
+  const getDeviceDirectoryHandle = async () => {
+    const picker = (
+      window as Window & {
+        showDirectoryPicker?: (
+          options?: { mode?: 'read' | 'readwrite' },
+        ) => Promise<Samee3DirectoryHandle>
+      }
+    ).showDirectoryPicker
+
+    if (typeof picker !== 'function') {
+      return null
+    }
+
+    return picker({ mode: 'readwrite' })
+  }
+
+  const cancelOfflineDownload = () => {
+    offlineAbortRef.current?.abort()
+  }
+
+  const cancelDeviceDownload = () => {
+    deviceAbortRef.current?.abort()
+  }
+
+  const removeOfflinePackage = async (pkg: OfflinePackage) => {
+    try {
+      if ('caches' in window) {
+        const cache = await caches.open(OFFLINE_AUDIO_CACHE)
+        const server = pkg.server.endsWith('/') ? pkg.server : `${pkg.server}/`
+
+        for (const surahId of pkg.downloadedSurahIds) {
+          const audioUrl = `${server}${pad3(surahId)}.mp3`
+          await cache.delete(audioUrl)
+        }
+      }
+
+      const nextPackages = offlinePackages.filter(
+        (item) => item.key !== pkg.key,
+      )
+
+      writeOfflinePackages(nextPackages)
+      setOfflinePackages(nextPackages)
+
+      if (
+        selectedReciter &&
+        pkg.reciterApiId === selectedReciter.apiId &&
+        pkg.riwayaId === riwaya
+      ) {
+        setOfflineDownloadProgress(0)
+        setOfflineDownloadLabel('تمت إزالة النسخة المحفوظة من هذا الجهاز.')
+      }
+    } catch (error) {
+      console.error('Remove offline package error:', error)
+      setOfflineError('تعذر إزالة النسخة المحفوظة حاليًا.')
+    }
+  }
+
+  const downloadSelectedReciterToDevice = async () => {
+    if (!selectedReciter || deviceDownloading) return
+
+    const surahIds = parseSurahList(selectedReciter.moshaf.surah_list)
+
+    if (!surahIds.length) {
+      setOfflineError('لا توجد ملفات صوتية متاحة لهذا القارئ في الرواية المختارة.')
+      return
+    }
+
+    if (!selectedReciter.moshaf.server) {
+      setOfflineError('لا يوجد مصدر صوتي صالح لهذا القارئ.')
+      return
+    }
+
+    setOfflineError('')
+    setDeviceDownloading(true)
+    setDeviceDownloadProgress(0)
+    setDeviceDownloadLabel('تجهيز ملفات التلاوة...')
+
+    const controller = new AbortController()
+    deviceAbortRef.current = controller
+
+    try {
+      let directoryHandle: Samee3DirectoryHandle | null = null
+
+      try {
+        directoryHandle = await getDeviceDirectoryHandle()
+      } catch (error) {
+        if ((error as DOMException)?.name === 'AbortError') {
+          throw error
+        }
+        directoryHandle = null
+      }
+
+      const server = selectedReciter.moshaf.server.endsWith('/')
+        ? selectedReciter.moshaf.server
+        : `${selectedReciter.moshaf.server}/`
+
+      for (let index = 0; index < surahIds.length; index += 1) {
+        if (controller.signal.aborted) {
+          throw new DOMException('تم إيقاف التنزيل', 'AbortError')
+        }
+
+        const surahId = surahIds[index]
+        const surah = surahsList.find((item) => item.id === surahId)
+        const filename = `${pad3(surahId)} - ${surah?.name || `السورة ${surahId}`}.mp3`
+        const audioUrl = `${server}${pad3(surahId)}.mp3`
+
+        setDeviceDownloadLabel(
+          `جاري تنزيل ${surah?.name || `السورة ${surahId}`}...`,
+        )
+
+        const response = await fetch(audioUrl, {
+          cache: 'no-store',
+          mode: 'cors',
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          throw new Error(`تعذر تنزيل ${surah?.name || surahId}`)
+        }
+
+        const blob = await response.blob()
+        await saveBlobToDevice(blob, filename, directoryHandle || undefined)
+
+        setDeviceDownloadProgress(
+          Math.round(((index + 1) / surahIds.length) * 100),
+        )
+      }
+
+      setDeviceDownloadProgress(100)
+      setDeviceDownloadLabel(
+        directoryHandle
+          ? 'تم تنزيل ملفات التلاوة إلى المجلد الذي اخترته.'
+          : 'بدأ تنزيل ملفات التلاوة على الجهاز. قد يطلب المتصفح تأكيدًا لبعض التنزيلات.',
+      )
+    } catch (error) {
+      if ((error as DOMException)?.name === 'AbortError') {
+        setDeviceDownloadLabel('تم إيقاف تنزيل الملفات وحفظ الملفات المكتملة فقط.')
+      } else {
+        console.error('Device download error:', error)
+        setOfflineError(
+          'تعذر تنزيل الملفات على الجهاز. قد يمنع المتصفح أو الخادم التنزيل المباشر.',
+        )
+      }
+    } finally {
+      deviceAbortRef.current = null
+      setDeviceDownloading(false)
+    }
+  }
 
   const downloadSelectedReciterOffline = async () => {
     if (!selectedReciter || offlineDownloading) return
@@ -655,7 +901,25 @@ export default function QuranIndexPage() {
     setOfflineError('')
     setOfflineDownloading(true)
     setOfflineDownloadProgress(0)
-    setOfflineDownloadLabel('تهيئة الحفظ على الجهاز...')
+    setOfflineDownloadLabel('تهيئة الحفظ داخل مصحف سميع...')
+
+    const controller = new AbortController()
+    offlineAbortRef.current = controller
+
+    const server = selectedReciter.moshaf.server.endsWith('/')
+      ? selectedReciter.moshaf.server
+      : `${selectedReciter.moshaf.server}/`
+
+    const key = getOfflinePackageKey(
+      riwaya,
+      selectedReciter.apiId,
+      selectedReciter.moshaf.id,
+    )
+
+    const previous = offlinePackages.find((item) => item.key === key)
+    const alreadyDownloaded = new Set<number>(
+      previous?.downloadedSurahIds || [],
+    )
 
     try {
       if (typeof window === 'undefined' || !('caches' in window)) {
@@ -663,49 +927,68 @@ export default function QuranIndexPage() {
       }
 
       const cache = await caches.open(OFFLINE_AUDIO_CACHE)
-      const server = selectedReciter.moshaf.server.endsWith('/')
-        ? selectedReciter.moshaf.server
-        : `${selectedReciter.moshaf.server}/`
 
-      let completed = 0
-
-      for (const surahId of surahIds) {
-        const audioUrl = `${server}${pad3(surahId)}.mp3`
-        setOfflineDownloadLabel(`جارٍ حفظ ${surahsList.find((item) => item.id === surahId)?.name || `السورة ${surahId}`}...`)
-
-        let response: Response | null = null
-
-        try {
-          response = await fetch(audioUrl, { cache: 'no-store', mode: 'cors' })
-        } catch {
-          // بعض الخوادم تسمح بالحفظ كاستجابة opaque فقط.
-          response = await fetch(audioUrl, { cache: 'no-store', mode: 'no-cors' })
+      for (let index = 0; index < surahIds.length; index += 1) {
+        if (controller.signal.aborted) {
+          throw new DOMException('تم إيقاف الحفظ', 'AbortError')
         }
 
-        if (!response || (!response.ok && response.type !== 'opaque')) {
+        const surahId = surahIds[index]
+        const audioUrl = `${server}${pad3(surahId)}.mp3`
+
+        if (alreadyDownloaded.has(surahId)) {
+          setOfflineDownloadProgress(
+            Math.round(((index + 1) / surahIds.length) * 100),
+          )
+          continue
+        }
+
+        setOfflineDownloadLabel(
+          `جاري حفظ ${surahsList.find((item) => item.id === surahId)?.name || `السورة ${surahId}`}...`,
+        )
+
+        let response: Response
+
+        try {
+          response = await fetch(audioUrl, {
+            cache: 'no-store',
+            mode: 'cors',
+            signal: controller.signal,
+          })
+        } catch (error) {
+          if ((error as DOMException)?.name === 'AbortError') throw error
+
+          response = await fetch(audioUrl, {
+            cache: 'no-store',
+            mode: 'no-cors',
+            signal: controller.signal,
+          })
+        }
+
+        if (!response.ok && response.type !== 'opaque') {
           throw new Error(`فشل حفظ السورة رقم ${surahId}`)
         }
 
         await cache.put(audioUrl, response.clone())
+        alreadyDownloaded.add(surahId)
 
-        completed += 1
         setOfflineDownloadProgress(
-          Math.round((completed / surahIds.length) * 100),
+          Math.round(((index + 1) / surahIds.length) * 100),
         )
       }
 
+      const complete = surahIds.every((id) => alreadyDownloaded.has(id))
+
       const pkg: OfflinePackage = {
-        key: getOfflinePackageKey(
-          riwaya,
-          selectedReciter.apiId,
-          selectedReciter.moshaf.id,
-        ),
+        key,
         riwayaId: riwaya,
         reciterApiId: selectedReciter.apiId,
         reciterLabel: selectedReciter.label,
         moshafId: selectedReciter.moshaf.id ?? null,
         server,
         surahIds,
+        downloadedSurahIds: Array.from(alreadyDownloaded),
+        status: complete ? 'complete' : 'partial',
         downloadedAt: new Date().toISOString(),
       }
 
@@ -717,16 +1000,55 @@ export default function QuranIndexPage() {
       writeOfflinePackages(nextPackages)
       setOfflinePackages(nextPackages)
       setOfflineDownloadProgress(100)
-      setOfflineDownloadLabel('تم حفظ المصحف المختار على هذا الجهاز.')
-    } catch (error) {
-      console.error('Offline Quran download error:', error)
-      setOfflineError(
-        'تعذر إكمال الحفظ. قد يمنع الخادم التخزين المحلي؛ أعد المحاولة مع اتصال مستقر.',
+      setOfflineDownloadLabel(
+        complete
+          ? 'تم حفظ تلاوة القارئ كاملة داخل مصحف سميع لتعمل دون اتصال.'
+          : 'تم حفظ الجزء المكتمل من التلاوة ويمكنك متابعة الحفظ لاحقًا.',
       )
+    } catch (error) {
+      if ((error as DOMException)?.name === 'AbortError') {
+        const downloadedSurahIds = Array.from(alreadyDownloaded)
+
+        if (downloadedSurahIds.length) {
+          const pkg: OfflinePackage = {
+            key,
+            riwayaId: riwaya,
+            reciterApiId: selectedReciter.apiId,
+            reciterLabel: selectedReciter.label,
+            moshafId: selectedReciter.moshaf.id ?? null,
+            server,
+            surahIds,
+            downloadedSurahIds,
+            status: 'partial',
+            downloadedAt: new Date().toISOString(),
+          }
+
+          const nextPackages = [
+            ...offlinePackages.filter((item) => item.key !== pkg.key),
+            pkg,
+          ]
+
+          writeOfflinePackages(nextPackages)
+          setOfflinePackages(nextPackages)
+        }
+
+        setOfflineDownloadLabel(
+          downloadedSurahIds.length
+            ? `تم إيقاف الحفظ. حُفظت ${toArabicNumber(downloadedSurahIds.length)} سورة ويمكن استكمالها لاحقًا.`
+            : 'تم إيقاف الحفظ.',
+        )
+      } else {
+        console.error('Offline Quran download error:', error)
+        setOfflineError(
+          'تعذر إكمال الحفظ. تحقق من الاتصال ومصدر الصوت ثم أعد المحاولة.',
+        )
+      }
     } finally {
+      offlineAbortRef.current = null
       setOfflineDownloading(false)
     }
   }
+
 
   const filteredSurahs = useMemo(() => {
     const term = normalizeArabic(query).replace(/^سوره/, '')
@@ -1113,83 +1435,232 @@ export default function QuranIndexPage() {
           <div className="pointer-events-none absolute -bottom-20 -right-10 h-40 w-40 rounded-full bg-[#D97706]/8 blur-3xl" />
 
           <div className="relative z-10 flex flex-col gap-5">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#EAF7FB] text-[#0284C7]">
-                    <HardDriveDownload size={23} />
+                <div className="flex items-start gap-3">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#EAF7FB] text-[#0284C7]">
+                    <WifiOff size={24} />
                   </span>
+
                   <div>
-                    <h2 className="text-lg font-black text-[#0F172A]">حفظ المصحف دون اتصال</h2>
-                    <p className="mt-1 text-xs font-bold text-slate-400">حفظ تلاوة القارئ المختار على هذا الجهاز لتعمل عند انقطاع الإنترنت.</p>
+                    <h2 className="text-lg font-black text-[#0F172A]">
+                      مصحفك معك دون اتصال
+                    </h2>
+                    <p className="mt-1 text-xs font-bold leading-6 text-slate-400">
+                      احفظ تلاوة القارئ المختار لهذه الرواية داخل مصحف سميع لتعمل عند انقطاع الإنترنت، أو نزّل الملفات الصوتية على جهازك.
+                    </p>
                   </div>
                 </div>
               </div>
 
               {selectedOfflinePackage && (
-                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-700">
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-2 text-[10px] font-black ${
+                    selectedOfflineComplete
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-amber-50 text-amber-700'
+                  }`}
+                >
                   <CheckCircle2 size={14} />
-                  تم تحميله
+                  {selectedOfflineComplete
+                    ? 'تم تحميله'
+                    : `محفوظ ${toArabicNumber(selectedOfflineCount)} من ${toArabicNumber(selectedOfflineTotal)}`}
                 </span>
               )}
             </div>
 
-            <div className="rounded-2xl border border-[#E8E5DC] bg-[#FCFBF8] px-4 py-3 text-xs font-bold leading-6 text-slate-500">
-              سيتم حفظ جميع السور المتاحة في تسجيلات <span className="font-black text-[#175E67]">{selectedReciter?.label || 'القارئ المختار'}</span> ضمن رواية <span className="font-black text-[#175E67]">{getRiwaya(riwaya).label}</span>. بعد اكتمال الحفظ ستظهر علامة «تم تحميله» بجوار القارئ ويمكن استخدام الصوت المحفوظ دون اتصال.
-            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-[22px] border border-[#D8EAF0] bg-white p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#EAF7FB] text-[#0284C7]">
+                    <HardDriveDownload size={20} />
+                  </span>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <button
-                type="button"
-                onClick={() => void downloadSelectedReciterOffline()}
-                disabled={!selectedReciter || offlineDownloading || !!selectedOfflinePackage}
-                className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-[#0284C7] px-5 py-3 text-sm font-black text-white shadow-[0_8px_22px_rgba(2,132,199,0.20)] transition hover:-translate-y-0.5 hover:bg-[#0369A1] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {offlineDownloading ? (
-                  <>
-                    <Loader2 size={19} className="animate-spin" />
-                    جاري الحفظ {toArabicNumber(offlineDownloadProgress)}٪
-                  </>
-                ) : selectedOfflinePackage ? (
-                  <>
-                    <CheckCircle2 size={19} />
-                    القارئ محفوظ دون اتصال
-                  </>
-                ) : (
-                  <>
-                    <Download size={19} />
-                    حفظ تلاوة القارئ دون اتصال
-                  </>
-                )}
-              </button>
-
-              <div className="min-w-0 flex-1 text-xs font-bold text-slate-400 sm:max-w-sm">
-                {offlineDownloading ? (
                   <div>
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="truncate">{offlineDownloadLabel}</span>
-                      <span>{toArabicNumber(offlineDownloadProgress)}٪</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                      <div className="h-full rounded-full bg-[#0284C7] transition-all duration-300" style={{ width: `${offlineDownloadProgress}%` }} />
-                    </div>
+                    <h3 className="text-sm font-black text-[#0F172A]">
+                      حفظ داخل مصحف سميع
+                    </h3>
+                    <p className="mt-1 text-[10px] font-bold leading-5 text-slate-400">
+                      الخيار الأنسب للتشغيل داخل الموقع دون إنترنت.
+                    </p>
                   </div>
-                ) : offlineDownloadLabel ? (
-                  <p className="text-emerald-700">{offlineDownloadLabel}</p>
-                ) : (
-                  <p>الحفظ يتم داخل مساحة تخزين الموقع على جهازك، ولا يحتاج إلى تنزيل ملف منفصل.</p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void downloadSelectedReciterOffline()}
+                  disabled={!selectedReciter || offlineDownloading || deviceDownloading}
+                  className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#0284C7] px-4 py-3 text-xs font-black text-white shadow-[0_8px_22px_rgba(2,132,199,0.18)] transition hover:-translate-y-0.5 hover:bg-[#0369A1] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {offlineDownloading ? (
+                    <>
+                      <Loader2 size={17} className="animate-spin" />
+                      جاري الحفظ {toArabicNumber(offlineDownloadProgress)}٪
+                    </>
+                  ) : selectedOfflineComplete ? (
+                    <>
+                      <CheckCircle2 size={17} />
+                      محفوظ ويعمل دون اتصال
+                    </>
+                  ) : selectedOfflinePackage ? (
+                    <>
+                      <Download size={17} />
+                      استكمال الحفظ
+                    </>
+                  ) : (
+                    <>
+                      <Download size={17} />
+                      حفظ التلاوة دون اتصال
+                    </>
+                  )}
+                </button>
+
+                {offlineDownloading && (
+                  <button
+                    type="button"
+                    onClick={cancelOfflineDownload}
+                    className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-2xl border border-red-100 bg-red-50 px-4 py-2.5 text-xs font-black text-red-700 transition hover:bg-red-100"
+                  >
+                    <CircleStop size={16} />
+                    إيقاف الحفظ
+                  </button>
+                )}
+              </div>
+
+              <div className="rounded-[22px] border border-[#F2E2C5] bg-[#FFFCF6] p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0D9] text-[#D97706]">
+                    <Smartphone size={20} />
+                  </span>
+
+                  <div>
+                    <h3 className="text-sm font-black text-[#0F172A]">
+                      تنزيل الملفات على الجهاز
+                    </h3>
+                    <p className="mt-1 text-[10px] font-bold leading-5 text-slate-400">
+                      تنزيل ملفات MP3 الفعلية للقارئ والرواية المختارين وحفظها في جهازك.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void downloadSelectedReciterToDevice()}
+                  disabled={!selectedReciter || deviceDownloading || offlineDownloading}
+                  className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#D97706] px-4 py-3 text-xs font-black text-white shadow-[0_8px_22px_rgba(217,119,6,0.18)] transition hover:-translate-y-0.5 hover:bg-[#B45309] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {deviceDownloading ? (
+                    <>
+                      <Loader2 size={17} className="animate-spin" />
+                      جاري التنزيل {toArabicNumber(deviceDownloadProgress)}٪
+                    </>
+                  ) : (
+                    <>
+                      <FolderDown size={17} />
+                      تنزيل ملفات التلاوة
+                    </>
+                  )}
+                </button>
+
+                {deviceDownloading && (
+                  <button
+                    type="button"
+                    onClick={cancelDeviceDownload}
+                    className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-2xl border border-red-100 bg-red-50 px-4 py-2.5 text-xs font-black text-red-700 transition hover:bg-red-100"
+                  >
+                    <CircleStop size={16} />
+                    إيقاف التنزيل
+                  </button>
                 )}
               </div>
             </div>
+
+            {(offlineDownloading || deviceDownloading || offlineDownloadLabel || deviceDownloadLabel) && (
+              <div className="rounded-2xl border border-[#E8E5DC] bg-[#FCFBF8] p-4">
+                <div className="mb-2 flex items-center justify-between gap-3 text-xs font-bold text-slate-500">
+                  <span className="truncate">
+                    {deviceDownloading
+                      ? deviceDownloadLabel
+                      : offlineDownloading
+                        ? offlineDownloadLabel
+                        : deviceDownloadLabel || offlineDownloadLabel}
+                  </span>
+
+                  <span className="shrink-0 font-black text-[#0284C7]">
+                    {toArabicNumber(
+                      deviceDownloading
+                        ? deviceDownloadProgress
+                        : offlineDownloadProgress,
+                    )}
+                    ٪
+                  </span>
+                </div>
+
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-[#0284C7] transition-all duration-300"
+                    style={{
+                      width: `${
+                        deviceDownloading
+                          ? deviceDownloadProgress
+                          : offlineDownloadProgress
+                      }%`,
+                    }}
+                  />
+                </div>
+
+                <p className="mt-2 text-[10px] font-bold leading-5 text-slate-400">
+                  {deviceDownloading
+                    ? 'يمكنك إيقاف العملية في أي وقت، وستبقى الملفات التي اكتمل تنزيلها.'
+                    : offlineDownloading
+                      ? 'يمكنك إيقاف الحفظ في أي وقت واستكماله لاحقًا دون إعادة حفظ الملفات المكتملة.'
+                      : 'النسخة المحفوظة داخل مصحف سميع مخصصة للتشغيل دون اتصال، والتنزيل على الجهاز يحفظ ملفات MP3 الفعلية.'}
+                </p>
+              </div>
+            )}
+
+            {selectedOfflinePackage && (
+              <div className="flex flex-col gap-2 rounded-2xl border border-[#E8E5DC] bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs font-bold leading-6 text-slate-500">
+                  <span className="font-black text-[#175E67]">
+                    {selectedOfflinePackage.reciterLabel}
+                  </span>
+                  {' · '}
+                  {getRiwaya(riwaya).label}
+                  {' · '}
+                  {selectedOfflineCount}/{selectedOfflineTotal} سورة محفوظة
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void removeOfflinePackage(selectedOfflinePackage)}
+                  disabled={offlineDownloading || deviceDownloading}
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-xs font-black text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Trash2 size={15} />
+                  إزالة النسخة المحفوظة
+                </button>
+              </div>
+            )}
 
             {offlineError && (
               <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold leading-6 text-red-700">
                 {offlineError}
               </div>
             )}
+
+            <div className="rounded-2xl border border-[#D8EAF0] bg-[#F5FCFE] px-4 py-3 text-[10px] font-bold leading-6 text-[#4B6670]">
+              <span className="font-black text-[#175E67]">حالة القارئ:</span>{' '}
+              {selectedOfflinePackage
+                ? selectedOfflineComplete
+                  ? 'هذه التلاوة محفوظة بالكامل داخل مصحف سميع، وستظهر أولًا في قائمة القراء مع وسم «تم تحميله».'
+                  : `تم حفظ ${toArabicNumber(selectedOfflineCount)} من ${toArabicNumber(selectedOfflineTotal)} سورة، ويمكن متابعة الحفظ لاحقًا.`
+                : 'لم يتم حفظ تلاوة هذا القارئ على الجهاز بعد.'}
+            </div>
           </div>
         </div>
       </section>
+
     </main>
   )
 }
