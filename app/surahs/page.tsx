@@ -5,13 +5,15 @@ import Link from 'next/link'
 import {
   ArrowLeft,
   BookOpen,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
+  Download,
+  HardDriveDownload,
   Loader2,
   Mic2,
   Moon,
   Search,
-  Sparkles,
   Sun,
   X,
 } from 'lucide-react'
@@ -176,6 +178,53 @@ type Reciter = {
   moshaf: ApiMoshaf
 }
 
+type OfflinePackage = {
+  key: string
+  riwayaId: RiwayaId
+  reciterApiId: number
+  reciterLabel: string
+  moshafId: number | null
+  server: string
+  surahIds: number[]
+  downloadedAt: string
+}
+
+const OFFLINE_PACKAGES_KEY = 'samee3_offline_packages_v1'
+const OFFLINE_AUDIO_CACHE = 'samee3-quran-audio-v1'
+
+function getOfflinePackageKey(riwayaId: RiwayaId, reciterApiId: number, moshafId?: number) {
+  return `${riwayaId}:${reciterApiId}:${moshafId ?? 'default'}`
+}
+
+function readOfflinePackages(): OfflinePackage[] {
+  try {
+    const raw = localStorage.getItem(OFFLINE_PACKAGES_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+
+    return parsed.filter((item): item is OfflinePackage =>
+      !!item &&
+      typeof item.key === 'string' &&
+      typeof item.riwayaId === 'string' &&
+      typeof item.reciterApiId === 'number' &&
+      typeof item.reciterLabel === 'string' &&
+      typeof item.server === 'string' &&
+      Array.isArray(item.surahIds),
+    )
+  } catch {
+    return []
+  }
+}
+
+function writeOfflinePackages(packages: OfflinePackage[]) {
+  try {
+    localStorage.setItem(OFFLINE_PACKAGES_KEY, JSON.stringify(packages))
+  } catch {
+    // تجاهل فشل التخزين المحلي
+  }
+}
+
 type SearchMatch = {
   number: number
   numberInSurah: number
@@ -261,11 +310,15 @@ function matchesRemoteRiwaya(remoteName: string, local: typeof RIWAYAT[number]) 
 
 function getMoshaf(reciter: ApiReciter, local: typeof RIWAYAT[number]) {
   const list = Array.isArray(reciter.moshaf) ? reciter.moshaf : []
+
+  // لا نأخذ أول مصحف كبديل؛ لأن ذلك قد يعرض قارئًا لا يملك الرواية المختارة.
   return (
     list.find((item) => {
       const name = normalizeArabic(String(item.name || ''))
-      return local.keywords.some((keyword) => name.includes(normalizeArabic(keyword)))
-    }) || list[0] || null
+      return local.keywords.some((keyword) =>
+        name.includes(normalizeArabic(keyword)),
+      )
+    }) || null
   )
 }
 
@@ -295,6 +348,12 @@ export default function QuranIndexPage() {
   const [ayahResults, setAyahResults] = useState<SearchMatch[]>([])
   const [ayahSearching, setAyahSearching] = useState(false)
 
+  const [offlinePackages, setOfflinePackages] = useState<OfflinePackage[]>([])
+  const [offlineDownloading, setOfflineDownloading] = useState(false)
+  const [offlineDownloadProgress, setOfflineDownloadProgress] = useState(0)
+  const [offlineDownloadLabel, setOfflineDownloadLabel] = useState('')
+  const [offlineError, setOfflineError] = useState('')
+
   useEffect(() => {
     try {
       const savedRiwaya = localStorage.getItem('samee3_selected_riwaya_v2') as RiwayaId | null
@@ -313,6 +372,10 @@ export default function QuranIndexPage() {
     } catch {
       // تجاهل أخطاء التخزين المحلي
     }
+  }, [])
+
+  useEffect(() => {
+    setOfflinePackages(readOfflinePackages())
   }, [])
 
   const loadRiwayat = useCallback(async () => {
@@ -337,12 +400,46 @@ export default function QuranIndexPage() {
   }, [loadRiwayat])
 
   const loadRecitersForRiwaya = useCallback(async (riwayaId: RiwayaId) => {
-    if (!apiRiwayat.length) return
-
     const localRiwaya = getRiwaya(riwayaId)
-    const remoteRiwaya = apiRiwayat.find((item) => matchesRemoteRiwaya(item.name, localRiwaya))
+    const downloadedForRiwaya = offlinePackages.filter(
+      (item) => item.riwayaId === riwayaId,
+    )
 
     setRecitersLoading(true)
+
+    const createOfflineReciters = (): Reciter[] =>
+      downloadedForRiwaya.map((pkg) => ({
+        id: `offline-${pkg.key}`,
+        apiId: pkg.reciterApiId,
+        label: pkg.reciterLabel,
+        moshaf: {
+          id: pkg.moshafId ?? undefined,
+          name: `${localRiwaya.label} — محفوظ دون اتصال`,
+          server: pkg.server,
+          surah_total: pkg.surahIds.length,
+          moshaf_type: undefined,
+          surah_list: pkg.surahIds.join(','),
+        },
+      }))
+
+    // عند انقطاع الإنترنت نستطيع إظهار القارئ المحفوظ محليًا دون الحاجة للمصدر.
+    if (!apiRiwayat.length) {
+      const offlineReciters = createOfflineReciters()
+      setReciters(offlineReciters)
+      setSelectedReciter((current) =>
+        current && offlineReciters.some((item) => item.id === current.id)
+          ? current
+          : offlineReciters[0] || null,
+      )
+      setRecitersLoading(false)
+      if (!offlineReciters.length) {
+        setRecitersError('لا توجد بيانات قراء محفوظة لهذا الجهاز في وضع عدم الاتصال.')
+      }
+      return
+    }
+
+    const remoteRiwaya = apiRiwayat.find((item) => matchesRemoteRiwaya(item.name, localRiwaya))
+
     setRecitersError('')
     setReciters([])
     setSelectedReciter(null)
@@ -382,11 +479,51 @@ export default function QuranIndexPage() {
         })
         .filter((item): item is Reciter => item !== null)
 
+      for (const pkg of downloadedForRiwaya) {
+        const exists = nextReciters.some(
+          (item) =>
+            item.apiId === pkg.reciterApiId &&
+            (item.moshaf.id ?? null) === pkg.moshafId,
+        )
+
+        if (!exists) {
+          nextReciters.push({
+            id: `offline-${pkg.key}`,
+            apiId: pkg.reciterApiId,
+            label: pkg.reciterLabel,
+            moshaf: {
+              id: pkg.moshafId ?? undefined,
+              name: `${localRiwaya.label} — محفوظ دون اتصال`,
+              server: pkg.server,
+              surah_total: pkg.surahIds.length,
+              moshaf_type: undefined,
+              surah_list: pkg.surahIds.join(','),
+            },
+          })
+        }
+      }
+
       const uniqueReciters = Array.from(
         new Map(nextReciters.map((item) => [`${item.apiId}-${item.moshaf.id ?? riwayaId}`, item])).values(),
       )
 
       uniqueReciters.sort((a, b) => {
+        const aDownloaded = offlinePackages.some(
+          (item) =>
+            item.riwayaId === riwayaId &&
+            item.reciterApiId === a.apiId &&
+            item.moshafId === (a.moshaf.id ?? null),
+        )
+        const bDownloaded = offlinePackages.some(
+          (item) =>
+            item.riwayaId === riwayaId &&
+            item.reciterApiId === b.apiId &&
+            item.moshafId === (b.moshaf.id ?? null),
+        )
+
+        if (aDownloaded && !bDownloaded) return -1
+        if (!aDownloaded && bDownloaded) return 1
+
         const priority = [
           'مشاري',
           'العفاسي',
@@ -432,11 +569,11 @@ export default function QuranIndexPage() {
     } finally {
       setRecitersLoading(false)
     }
-  }, [apiRiwayat])
+  }, [apiRiwayat, offlinePackages])
 
   useEffect(() => {
-    if (apiRiwayat.length) void loadRecitersForRiwaya(riwaya)
-  }, [apiRiwayat, loadRecitersForRiwaya, riwaya])
+    void loadRecitersForRiwaya(riwaya)
+  }, [apiRiwayat, loadRecitersForRiwaya, offlinePackages, riwaya])
 
   const handleRiwayaChange = (value: RiwayaId) => {
     setRiwaya(value)
@@ -474,6 +611,118 @@ export default function QuranIndexPage() {
     selectedReciter ? parseSurahList(selectedReciter.moshaf.surah_list) : [],
     [selectedReciter],
   )
+
+  const selectedOfflinePackage = useMemo(() => {
+    if (!selectedReciter) return null
+
+    return (
+      offlinePackages.find(
+        (item) =>
+          item.riwayaId === riwaya &&
+          item.reciterApiId === selectedReciter.apiId &&
+          item.moshafId === (selectedReciter.moshaf.id ?? null),
+      ) || null
+    )
+  }, [offlinePackages, riwaya, selectedReciter])
+
+  const isReciterDownloaded = (item: Reciter) =>
+    offlinePackages.some(
+      (pkg) =>
+        pkg.riwayaId === riwaya &&
+        pkg.reciterApiId === item.apiId &&
+        pkg.moshafId === (item.moshaf.id ?? null),
+    )
+
+  const downloadSelectedReciterOffline = async () => {
+    if (!selectedReciter || offlineDownloading) return
+
+    if (!selectedReciter.moshaf.server) {
+      setOfflineError('لا يوجد رابط صوتي صالح لهذا القارئ في المصدر.')
+      return
+    }
+
+    const surahIds = parseSurahList(selectedReciter.moshaf.surah_list)
+
+    if (!surahIds.length) {
+      setOfflineError('لا توجد سور متاحة للتحميل لهذا القارئ في الرواية المختارة.')
+      return
+    }
+
+    setOfflineError('')
+    setOfflineDownloading(true)
+    setOfflineDownloadProgress(0)
+    setOfflineDownloadLabel('تهيئة الحفظ على الجهاز...')
+
+    try {
+      if (typeof window === 'undefined' || !('caches' in window)) {
+        throw new Error('Cache Storage غير متاح في هذا المتصفح.')
+      }
+
+      const cache = await caches.open(OFFLINE_AUDIO_CACHE)
+      const server = selectedReciter.moshaf.server.endsWith('/')
+        ? selectedReciter.moshaf.server
+        : `${selectedReciter.moshaf.server}/`
+
+      let completed = 0
+
+      for (const surahId of surahIds) {
+        const audioUrl = `${server}${pad3(surahId)}.mp3`
+        setOfflineDownloadLabel(`جارٍ حفظ ${surahsList.find((item) => item.id === surahId)?.name || `السورة ${surahId}`}...`)
+
+        let response: Response | null = null
+
+        try {
+          response = await fetch(audioUrl, { cache: 'no-store', mode: 'cors' })
+        } catch {
+          // بعض الخوادم تسمح بالحفظ كاستجابة opaque فقط.
+          response = await fetch(audioUrl, { cache: 'no-store', mode: 'no-cors' })
+        }
+
+        if (!response || (!response.ok && response.type !== 'opaque')) {
+          throw new Error(`فشل حفظ السورة رقم ${surahId}`)
+        }
+
+        await cache.put(audioUrl, response.clone())
+
+        completed += 1
+        setOfflineDownloadProgress(
+          Math.round((completed / surahIds.length) * 100),
+        )
+      }
+
+      const pkg: OfflinePackage = {
+        key: getOfflinePackageKey(
+          riwaya,
+          selectedReciter.apiId,
+          selectedReciter.moshaf.id,
+        ),
+        riwayaId: riwaya,
+        reciterApiId: selectedReciter.apiId,
+        reciterLabel: selectedReciter.label,
+        moshafId: selectedReciter.moshaf.id ?? null,
+        server,
+        surahIds,
+        downloadedAt: new Date().toISOString(),
+      }
+
+      const nextPackages = [
+        ...offlinePackages.filter((item) => item.key !== pkg.key),
+        pkg,
+      ]
+
+      writeOfflinePackages(nextPackages)
+      setOfflinePackages(nextPackages)
+      setOfflineDownloadProgress(100)
+      setOfflineDownloadLabel('تم حفظ المصحف المختار على هذا الجهاز.')
+    } catch (error) {
+      console.error('Offline Quran download error:', error)
+      setOfflineError(
+        'تعذر إكمال الحفظ. قد يمنع الخادم التخزين المحلي؛ أعد المحاولة مع اتصال مستقر.',
+      )
+    } finally {
+      setOfflineDownloading(false)
+    }
+  }
 
   const filteredSurahs = useMemo(() => {
     const term = normalizeArabic(query).replace(/^سوره/, '')
@@ -548,6 +797,9 @@ export default function QuranIndexPage() {
     if (selectedReciter.moshaf.id != null) {
       params.set('moshafId', String(selectedReciter.moshaf.id))
     }
+
+    // يخبر شاشة المصحف أن تبدأ التشغيل فور الوصول إلى الموضع المطلوب.
+    params.set('autoplay', '1')
 
     if (ayah) params.set('ayah', String(ayah))
 
@@ -648,7 +900,9 @@ export default function QuranIndexPage() {
                 >
                   {filteredReciters.length ? (
                     filteredReciters.map((item) => (
-                      <option key={item.id} value={item.id}>{item.label}</option>
+                      <option key={item.id} value={item.id}>
+                        {isReciterDownloaded(item) ? `✓ ${item.label} · تم تحميله` : item.label}
+                      </option>
                     ))
                   ) : (
                     <option value="">{recitersLoading ? 'جاري تحميل القراء...' : 'لا توجد تسجيلات متاحة'}</option>
@@ -684,31 +938,105 @@ export default function QuranIndexPage() {
         </div>
       </section>
 
+
+      <section className="mx-auto mt-4 max-w-6xl px-4 sm:px-7">
+        <div className="rounded-[26px] border border-[#E9E2D4] bg-white p-3 shadow-[0_10px_32px_rgba(56,40,20,0.07)] sm:p-4">
+          <div className="relative">
+            <Search size={20} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[#0284C7]" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="ابحث باسم السورة أو رقمها أو الصفحة أو كلمة من الآية..."
+              className="w-full rounded-2xl border border-[#E6E0D2] bg-[#FCFBF8] py-4 pr-12 pl-12 text-sm font-bold outline-none focus:border-[#0284C7]/40 focus:ring-4 focus:ring-[#0284C7]/8"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="absolute left-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/5 text-slate-500"
+                aria-label="مسح البحث"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+            {[
+              ['all', 'كل السور', BookOpen],
+              ['مكية', `مكية • ${makkiyaCount}`, Sun],
+              ['مدنية', `مدنية • ${madaniyaCount}`, Moon],
+            ].map(([value, label, Icon]) => {
+              const active = filter === value
+              const IconComponent = Icon as typeof BookOpen
+              return (
+                <button
+                  key={String(value)}
+                  type="button"
+                  onClick={() => setFilter(value as FilterType)}
+                  className={`shrink-0 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-black transition ${active ? 'bg-[#0284C7] text-white shadow-sm' : 'bg-[#F7F4EC] text-slate-500 hover:bg-[#EAF7FB] hover:text-[#0284C7]'}`}
+                >
+                  <IconComponent size={15} />
+                  {String(label)}
+                </button>
+              )
+            })}
+          </div>
+
+          {ayahSearching && (
+            <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#F0FAFD] px-3 py-2 text-xs font-bold text-[#0284C7]">
+              <Loader2 size={15} className="animate-spin" />
+              جاري البحث داخل الآيات...
+            </div>
+          )}
+
+          {!ayahSearching && ayahResults.length > 0 && (
+            <div className="mt-3 rounded-2xl border border-[#D8EAF0] bg-[#F5FCFE] p-3">
+              <div className="mb-2 text-xs font-black">نتائج البحث داخل الآيات</div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {ayahResults.map((match) => (
+                  <Link
+                    key={`${match.number}-${match.numberInSurah}`}
+                    href={`/mushaf?page=${match.page || 1}&riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(selectedReciter?.id || '')}&autoplay=1&ayah=${encodeURIComponent(`${match.surah?.number || ''}:${match.numberInSurah}`)}`}
+                    className="rounded-xl border border-white bg-white p-3 transition hover:shadow-sm"
+                  >
+                    <div className="text-[10px] font-black text-[#0284C7]">
+                      {match.surah?.name || 'القرآن الكريم'} · الآية {toArabicNumber(match.numberInSurah)} · الصفحة {toArabicNumber(match.page || 1)}
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-sm leading-7">{match.text}</p>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
       <section className="mx-auto -mt-3 max-w-6xl px-4 sm:px-7">
         <div className="rounded-[28px] border border-[#E9E2D4] bg-white p-3 shadow-[0_12px_45px_rgba(56,40,20,0.10)] sm:p-4">
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => setPanel(panel === 'surahs' ? null : 'surahs')}
-              className={`flex items-center justify-between rounded-[20px] border px-4 py-4 text-right transition ${panel === 'surahs' ? 'border-[#0284C7]/30 bg-[#EAF7FB]' : 'border-[#ECE4D5] bg-[#FCFBF8] hover:border-[#0284C7]/20'}`}
+              className={`flex min-h-[120px] items-center justify-between rounded-[22px] border px-4 py-5 text-right transition ${panel === 'surahs' ? 'border-[#0284C7]/30 bg-[#EAF7FB]' : 'border-[#ECE4D5] bg-[#FCFBF8] hover:border-[#0284C7]/20'}`}
             >
               <div>
-                <p className="text-lg font-black">السور</p>
-                <p className="mt-1 text-[10px] font-bold text-slate-400">اضغط لإظهار السور المتاحة</p>
+                <p className="text-xl font-black">السور</p>
+                <p className="mt-2 text-[10px] font-bold text-slate-400">اضغط لإظهار السور المتاحة</p>
               </div>
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#E8F5F9] text-[#0284C7]"><BookOpen size={24} /></span>
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E8F5F9] text-[#0284C7]"><BookOpen size={25} /></span>
             </button>
 
             <button
               type="button"
               onClick={() => setPanel(panel === 'juz' ? null : 'juz')}
-              className={`flex items-center justify-between rounded-[20px] border px-4 py-4 text-right transition ${panel === 'juz' ? 'border-[#D97706]/30 bg-[#FFF7E8]' : 'border-[#ECE4D5] bg-[#FCFBF8] hover:border-[#D97706]/20'}`}
+              className={`flex min-h-[120px] items-center justify-between rounded-[22px] border px-4 py-5 text-right transition ${panel === 'juz' ? 'border-[#D97706]/30 bg-[#FFF7E8]' : 'border-[#ECE4D5] bg-[#FCFBF8] hover:border-[#D97706]/20'}`}
             >
               <div>
-                <p className="text-lg font-black">الأجزاء الثلاثون</p>
-                <p className="mt-1 text-[10px] font-bold text-slate-400">اضغط لإظهار الأجزاء</p>
+                <p className="text-xl font-black">الأجزاء</p>
+                <p className="mt-2 text-[10px] font-bold text-slate-400">ثلاثون جزءًا • اضغط لعرضها</p>
               </div>
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#FFF0D9] text-[#D97706]"><BookOpen size={24} /></span>
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF0D9] text-[#D97706]"><BookOpen size={25} /></span>
             </button>
           </div>
 
@@ -719,20 +1047,20 @@ export default function QuranIndexPage() {
                   <div>
                     <h3 className="font-black">السور المتاحة للقارئ</h3>
                     <p className="mt-1 text-[10px] font-bold text-slate-400">
-                      {selectedReciter ? `تم تحميل السور المسجلة فعليًا لـ ${selectedReciter.label}` : 'اختر الرواية والقارئ أولًا'}
+                      {selectedReciter ? `السور المسجلة فعليًا لـ ${selectedReciter.label} في ${getRiwaya(riwaya).label}` : 'اختر الرواية والقارئ أولًا'}
                     </p>
                   </div>
-                  <button type="button" onClick={() => setPanel(null)} className="flex h-8 w-8 items-center justify-center rounded-full bg-black/5 text-slate-500"><X size={15} /></button>
+                  <button type="button" onClick={() => setPanel(null)} className="flex h-8 w-8 items-center justify-center rounded-full bg-black/5 text-slate-500" aria-label="إغلاق السور"><X size={15} /></button>
                 </div>
                 <div className="mt-3 rounded-xl border border-[#D8EAF0] bg-[#F0FAFD] px-3 py-2 text-[11px] font-bold leading-6 text-[#25636B]">
-                  اختر الرواية والقارئ أولًا، ثم اضغط على السورة للانتقال مباشرة إلى صفحة المصحف الفعلية.
+                  اختر الرواية والقارئ أولًا؛ هذه القائمة تعرض فقط السور الموجودة فعلًا في تسجيلات القارئ لهذه الرواية.
                 </div>
               </div>
 
               <div className="max-h-[55vh] overflow-y-auto p-3">
                 {selectedReciter ? (
                   filteredSurahs.length ? (
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                       {filteredSurahs.map((surah) => (
                         <button key={surah.id} type="button" onClick={() => openMushaf(surah.startPage, surah.id)} className="group flex items-center justify-between rounded-2xl border border-[#E9E2D4] bg-white px-3 py-3 text-right transition hover:-translate-y-0.5 hover:border-[#0284C7]/35 hover:shadow-sm">
                           <div className="flex min-w-0 items-center gap-2.5">
@@ -757,8 +1085,8 @@ export default function QuranIndexPage() {
             <div className="mt-3 overflow-hidden rounded-[22px] border border-[#E9E2D4] bg-[#FCFBF8]">
               <div className="border-b border-[#EEE7DA] px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div><h3 className="font-black">الأجزاء الثلاثون</h3><p className="mt-1 text-[10px] font-bold text-slate-400">اضغط على الجزء لفتح بدايته الفعلية</p></div>
-                  <button type="button" onClick={() => setPanel(null)} className="flex h-8 w-8 items-center justify-center rounded-full bg-black/5 text-slate-500"><X size={15} /></button>
+                  <div><h3 className="font-black">الأجزاء الثلاثون</h3><p className="mt-1 text-[10px] font-bold text-slate-400">اضغط على الجزء لفتح بدايته الفعلية في المصحف.</p></div>
+                  <button type="button" onClick={() => setPanel(null)} className="flex h-8 w-8 items-center justify-center rounded-full bg-black/5 text-slate-500" aria-label="إغلاق الأجزاء"><X size={15} /></button>
                 </div>
               </div>
 
@@ -775,79 +1103,88 @@ export default function QuranIndexPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pt-5 sm:px-7">
-        <div className="rounded-[26px] border border-[#E9E2D4] bg-white p-3 shadow-sm">
-          <div className="relative">
-            <Search size={20} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[#0284C7]" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث باسم السورة أو رقمها أو الصفحة أو كلمة من الآية..." className="w-full rounded-2xl border border-[#E6E0D2] bg-[#FCFBF8] py-4 pr-12 pl-12 text-sm font-bold outline-none focus:border-[#0284C7]/40 focus:ring-4 focus:ring-[#0284C7]/8" />
-            {query && <button type="button" onClick={() => setQuery('')} className="absolute left-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/5 text-slate-500"><X size={15} /></button>}
-          </div>
+      <section className="mx-auto max-w-6xl px-4 pt-6 sm:px-7">
+        <div className="relative overflow-hidden rounded-[30px] border border-[#D8EAF0] bg-gradient-to-br from-white to-[#F3FBFD] p-5 shadow-[0_12px_35px_rgba(2,132,199,0.08)] sm:p-6">
+          <div className="pointer-events-none absolute -left-16 -top-16 h-36 w-36 rounded-full bg-[#0284C7]/5 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-20 -right-10 h-40 w-40 rounded-full bg-[#D97706]/8 blur-3xl" />
 
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-            {[
-              ['all', 'كل السور', BookOpen],
-              ['مكية', `مكية • ${makkiyaCount}`, Sun],
-              ['مدنية', `مدنية • ${madaniyaCount}`, Moon],
-            ].map(([value, label, Icon]) => {
-              const active = filter === value
-              const IconComponent = Icon as typeof BookOpen
-              return (
-                <button key={String(value)} type="button" onClick={() => setFilter(value as FilterType)} className={`shrink-0 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-black transition ${active ? 'bg-[#0284C7] text-white shadow-sm' : 'bg-[#F7F4EC] text-slate-500 hover:bg-[#EAF7FB] hover:text-[#0284C7]'}`}>
-                  <IconComponent size={15} />
-                  {String(label)}
-                </button>
-              )
-            })}
-          </div>
+          <div className="relative z-10 flex flex-col gap-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#EAF7FB] text-[#0284C7]">
+                    <HardDriveDownload size={23} />
+                  </span>
+                  <div>
+                    <h2 className="text-lg font-black text-[#0F172A]">حفظ المصحف دون اتصال</h2>
+                    <p className="mt-1 text-xs font-bold text-slate-400">حفظ تلاوة القارئ المختار على هذا الجهاز لتعمل عند انقطاع الإنترنت.</p>
+                  </div>
+                </div>
+              </div>
 
-          {ayahSearching && <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#F0FAFD] px-3 py-2 text-xs font-bold text-[#0284C7]"><Loader2 size={15} className="animate-spin" /> جاري البحث داخل الآيات...</div>}
+              {selectedOfflinePackage && (
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-700">
+                  <CheckCircle2 size={14} />
+                  تم تحميله
+                </span>
+              )}
+            </div>
 
-          {!ayahSearching && ayahResults.length > 0 && (
-            <div className="mt-3 rounded-2xl border border-[#D8EAF0] bg-[#F5FCFE] p-3">
-              <div className="mb-2 text-xs font-black">نتائج البحث داخل الآيات</div>
-              <div className="grid gap-2 md:grid-cols-2">
-                {ayahResults.map((match) => (
-                  <Link key={`${match.number}-${match.numberInSurah}`} href={`/mushaf?page=${match.page || 1}&riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(selectedReciter?.id || '')}&ayah=${encodeURIComponent(`${match.surah?.number || ''}:${match.numberInSurah}`)}`} className="rounded-xl border border-white bg-white p-3 transition hover:shadow-sm">
-                    <div className="text-[10px] font-black text-[#0284C7]">{match.surah?.name || 'القرآن الكريم'} · الآية {toArabicNumber(match.numberInSurah)} · الصفحة {toArabicNumber(match.page || 1)}</div>
-                    <p className="mt-1 line-clamp-2 text-sm leading-7">{match.text}</p>
-                  </Link>
-                ))}
+            <div className="rounded-2xl border border-[#E8E5DC] bg-[#FCFBF8] px-4 py-3 text-xs font-bold leading-6 text-slate-500">
+              سيتم حفظ جميع السور المتاحة في تسجيلات <span className="font-black text-[#175E67]">{selectedReciter?.label || 'القارئ المختار'}</span> ضمن رواية <span className="font-black text-[#175E67]">{getRiwaya(riwaya).label}</span>. بعد اكتمال الحفظ ستظهر علامة «تم تحميله» بجوار القارئ ويمكن استخدام الصوت المحفوظ دون اتصال.
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                onClick={() => void downloadSelectedReciterOffline()}
+                disabled={!selectedReciter || offlineDownloading || !!selectedOfflinePackage}
+                className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-[#0284C7] px-5 py-3 text-sm font-black text-white shadow-[0_8px_22px_rgba(2,132,199,0.20)] transition hover:-translate-y-0.5 hover:bg-[#0369A1] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {offlineDownloading ? (
+                  <>
+                    <Loader2 size={19} className="animate-spin" />
+                    جاري الحفظ {toArabicNumber(offlineDownloadProgress)}٪
+                  </>
+                ) : selectedOfflinePackage ? (
+                  <>
+                    <CheckCircle2 size={19} />
+                    القارئ محفوظ دون اتصال
+                  </>
+                ) : (
+                  <>
+                    <Download size={19} />
+                    حفظ تلاوة القارئ دون اتصال
+                  </>
+                )}
+              </button>
+
+              <div className="min-w-0 flex-1 text-xs font-bold text-slate-400 sm:max-w-sm">
+                {offlineDownloading ? (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="truncate">{offlineDownloadLabel}</span>
+                      <span>{toArabicNumber(offlineDownloadProgress)}٪</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-full rounded-full bg-[#0284C7] transition-all duration-300" style={{ width: `${offlineDownloadProgress}%` }} />
+                    </div>
+                  </div>
+                ) : offlineDownloadLabel ? (
+                  <p className="text-emerald-700">{offlineDownloadLabel}</p>
+                ) : (
+                  <p>الحفظ يتم داخل مساحة تخزين الموقع على جهازك، ولا يحتاج إلى تنزيل ملف منفصل.</p>
+                )}
               </div>
             </div>
-          )}
-        </div>
-      </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-16 pt-6 sm:px-7">
-        <div className="mb-4 flex items-end justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2"><Sparkles size={18} className="text-[#D97706]" /><h2 className="text-xl font-black">السور المتاحة</h2></div>
-            <p className="mt-1 text-xs font-bold text-slate-400">{selectedReciter ? `${toArabicNumber(filteredSurahs.length)} سورة متاحة للقارئ ${selectedReciter.label}` : 'اختر الرواية والقارئ لعرض السور'}</p>
+            {offlineError && (
+              <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold leading-6 text-red-700">
+                {offlineError}
+              </div>
+            )}
           </div>
-          {selectedReciter && <span className="rounded-full bg-[#EAF7FB] px-3 py-2 text-[10px] font-black text-[#0284C7]">{getRiwaya(riwaya).label}</span>}
         </div>
-
-        {!selectedReciter ? (
-          <div className="rounded-3xl border border-dashed border-[#DCCFB8] bg-white px-5 py-16 text-center"><BookOpen size={30} className="mx-auto mb-3 text-[#D97706]" /><p className="text-lg font-black">اختر الرواية ثم القارئ</p><p className="mt-2 text-sm font-bold leading-7 text-slate-400">بعد اختيار القارئ ستظهر هنا السور الموجودة فعليًا في تسجيلاته لهذه الرواية.</p></div>
-        ) : filteredSurahs.length ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredSurahs.map((surah) => (
-              <button key={surah.id} type="button" onClick={() => openMushaf(surah.startPage, surah.id)} className="group relative overflow-hidden rounded-3xl border border-[#E9E2D4] bg-white p-4 text-right shadow-sm transition hover:-translate-y-0.5 hover:border-[#0284C7]/25 hover:shadow-md">
-                <div className="absolute inset-y-0 right-0 w-1 bg-[#D97706]/70" />
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#F4F9FE] text-lg font-black text-[#0284C7]">{toArabicNumber(surah.id)}</div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2"><h3 className="truncate text-base font-black group-hover:text-[#0284C7]">سورة {surah.name}</h3><span className="shrink-0 rounded-full bg-[#F7F4EC] px-2 py-1 text-[9px] font-black text-slate-500">{surah.type}</span></div>
-                    <div className="mt-2 flex items-center gap-2 text-[10px] font-bold text-slate-400"><span>آيات {toArabicNumber(surah.ayahs)}</span><span>•</span><span>صفحة {toArabicNumber(surah.startPage)}</span></div>
-                  </div>
-                  <ChevronLeft size={19} className="shrink-0 text-[#D97706] transition-transform group-hover:-translate-x-1" />
-                </div>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-3xl border border-dashed border-[#DCCFB8] bg-white px-5 py-14 text-center"><Search size={28} className="mx-auto mb-3 text-[#D97706]" /><p className="font-black">لا توجد سور مطابقة</p><p className="mt-2 text-sm font-bold text-slate-400">جرّب تغيير البحث أو الفلتر.</p></div>
-        )}
       </section>
     </main>
   )
