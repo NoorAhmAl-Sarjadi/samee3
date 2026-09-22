@@ -141,25 +141,63 @@ const RIWAYAT = [
   { id: 'bazzi', label: 'البزي عن ابن كثير' },
 ] as const
 
-const RECITERS = [
-  { id: 'ar.alafasy', label: 'مشاري راشد العفاسي' },
-  { id: 'ar.husary', label: 'محمود خليل الحصري' },
-  { id: 'ar.minshawi', label: 'محمد صديق المنشاوي' },
-  { id: 'ar.abdulbasitmurattal', label: 'عبد الباسط عبد الصمد' },
-  { id: 'ar.saoodshuraym', label: 'سعود الشريم' },
-] as const
-
 type FilterType = 'all' | 'مكية' | 'مدنية'
+
+type Reciter = {
+  id: string
+  label: string
+  englishName?: string
+  style?: string
+}
+
+type SearchMatch = {
+  number: number
+  numberInSurah: number
+  text: string
+  page?: number
+  juz?: number
+  surah?: { number: number; name: string }
+}
+
+const DEFAULT_RECITER: Reciter = {
+  id: 'ar.alafasy',
+  label: 'مشاري راشد العفاسي',
+}
+
+const JUZ_START_PAGES = [
+  1, 22, 42, 62, 82, 102, 122, 142, 162, 182,
+  202, 222, 242, 262, 282, 302, 322, 342, 362, 382,
+  402, 422, 442, 462, 482, 502, 522, 542, 562, 582,
+]
+
+const JUZ_LIST = JUZ_START_PAGES.map((startPage, index) => ({
+  id: index + 1,
+  startPage,
+}))
 
 function toArabicNumber(value: number) {
   return value.toString().replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[Number(d)])
+}
+
+function normalizeArabic(value: string) {
+  return value
+    .trim()
+    .replace(/[إأآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/[ًٌٍَُِّْـ]/g, '')
 }
 
 export default function QuranIndexPage() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterType>('all')
   const [riwaya, setRiwaya] = useState<(typeof RIWAYAT)[number]['id']>('hafs')
-  const [reciter, setReciter] = useState<(typeof RECITERS)[number]['id']>('ar.alafasy')
+  const [reciter, setReciter] = useState<Reciter>(DEFAULT_RECITER)
+  const [reciters, setReciters] = useState<Reciter[]>([DEFAULT_RECITER])
+  const [recitersLoading, setRecitersLoading] = useState(true)
+  const [showJuz, setShowJuz] = useState(false)
+  const [ayahResults, setAyahResults] = useState<SearchMatch[]>([])
+  const [ayahSearching, setAyahSearching] = useState(false)
 
   useEffect(() => {
     try {
@@ -170,12 +208,87 @@ export default function QuranIndexPage() {
         setRiwaya(savedRiwaya as (typeof RIWAYAT)[number]['id'])
       }
 
-      if (savedReciter && RECITERS.some((item) => item.id === savedReciter)) {
-        setReciter(savedReciter as (typeof RECITERS)[number]['id'])
+      if (savedReciter) {
+        const parsed = JSON.parse(savedReciter)
+        if (parsed?.id && parsed?.label) {
+          setReciter(parsed)
+        } else if (typeof parsed === 'string') {
+          setReciter({ id: parsed, label: parsed })
+        }
       }
     } catch {
       // تجاهل أي خطأ من localStorage
     }
+  }, [])
+
+  // نجلب قائمة القراء كاملة من Al Quran Cloud بدل قائمة ثابتة من 5 أو 6 قراء.
+  useEffect(() => {
+    const controller = new AbortController()
+
+    const loadReciters = async () => {
+      setRecitersLoading(true)
+      try {
+        const response = await fetch(
+          'https://api.alquran.cloud/v1/edition/format/audio',
+          { signal: controller.signal, cache: 'force-cache' }
+        )
+
+        if (!response.ok) throw new Error('تعذر تحميل قائمة القراء')
+
+        const payload = await response.json()
+        const editions = Array.isArray(payload?.data) ? payload.data : []
+
+        const seen = new Set<string>()
+        const available: Reciter[] = []
+
+        for (const edition of editions) {
+          if (
+            !edition ||
+            edition.format !== 'audio' ||
+            edition.language !== 'ar' ||
+            !edition.identifier ||
+            seen.has(edition.identifier)
+          ) {
+            continue
+          }
+
+          // التسجيلات المطلوبة لتشغيل الآية واحدة واحدة.
+          if (edition.type && edition.type !== 'versebyverse') continue
+
+          seen.add(edition.identifier)
+          available.push({
+            id: String(edition.identifier),
+            label: String(edition.name || edition.englishName || edition.identifier),
+            englishName: edition.englishName,
+            style: edition.type,
+          })
+        }
+
+        available.sort((a, b) => {
+          if (a.id === 'ar.alafasy') return -1
+          if (b.id === 'ar.alafasy') return 1
+          return a.label.localeCompare(b.label, 'ar')
+        })
+
+        if (available.length) {
+          setReciters(available)
+
+          setReciter((current) => {
+            const stillAvailable = available.find((item) => item.id === current.id)
+            return stillAvailable || available[0]
+          })
+        }
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          console.error('Reciters load error:', error)
+        }
+      } finally {
+        if (!controller.signal.aborted) setRecitersLoading(false)
+      }
+    }
+
+    void loadReciters()
+    return () => controller.abort()
   }, [])
 
   const handleRiwayaChange = (value: (typeof RIWAYAT)[number]['id']) => {
@@ -187,32 +300,71 @@ export default function QuranIndexPage() {
     }
   }
 
-  const handleReciterChange = (value: (typeof RECITERS)[number]['id']) => {
+  const handleReciterChange = (value: Reciter) => {
     setReciter(value)
     try {
-      localStorage.setItem('samee3_selected_reciter_v2', value)
+      localStorage.setItem('samee3_selected_reciter_v2', JSON.stringify(value))
     } catch {
       // تجاهل فشل التخزين
     }
   }
 
-  const mushafHref = `/mushaf?riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(reciter)}`
-
   const filteredSurahs = useMemo(() => {
-    const normalized = query.trim().replace(/^سورة\s*/i, '')
+    const normalized = normalizeArabic(query).replace(/^سوره\s*/, '')
 
     return surahsList.filter((surah) => {
       const matchesQuery =
         !normalized ||
-        surah.name.includes(normalized) ||
+        normalizeArabic(surah.name).includes(normalized) ||
         String(surah.id).includes(normalized) ||
         String(surah.startPage).includes(normalized)
 
       const matchesFilter = filter === 'all' || surah.type === filter
-
       return matchesQuery && matchesFilter
     })
   }, [query, filter])
+
+  // البحث في الآيات بالإضافة إلى البحث المحلي في السور والصفحات.
+  useEffect(() => {
+    const term = query.trim()
+    if (term.length < 2) {
+      setAyahResults([])
+      setAyahSearching(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setAyahSearching(true)
+      try {
+        const response = await fetch(
+          `https://api.alquran.cloud/v1/search/${encodeURIComponent(term)}/all/ar`,
+          { signal: controller.signal }
+        )
+
+        if (!response.ok) throw new Error('فشل البحث في الآيات')
+
+        const payload = await response.json()
+        const matches = Array.isArray(payload?.data?.matches)
+          ? payload.data.matches
+          : []
+
+        setAyahResults(matches.slice(0, 30))
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          console.error('Ayah search error:', error)
+          setAyahResults([])
+        }
+      } finally {
+        if (!controller.signal.aborted) setAyahSearching(false)
+      }
+    }, 350)
+
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [query])
 
   const makkiyaCount = surahsList.filter((s) => s.type === 'مكية').length
   const madaniyaCount = surahsList.filter((s) => s.type === 'مدنية').length
@@ -243,9 +395,6 @@ export default function QuranIndexPage() {
               <h1 className="mt-1 text-3xl font-black sm:text-4xl">
                 فهرس السور
               </h1>
-              <p className="mt-2 text-[11px] font-bold text-white/55">
-                اختر الرواية والقارئ قبل بدء القراءة
-              </p>
             </div>
 
             <div className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-white/10">
@@ -255,8 +404,7 @@ export default function QuranIndexPage() {
 
           <div className="mx-auto max-w-3xl text-center">
             <p className="text-sm leading-7 text-white/75 sm:text-base">
-              اختر الرواية والقارئ أولًا، ثم افتح السورة لتنتقل إلى صفحة المصحف
-              المطبوعة المناسبة.
+              اختر الرواية والقارئ أولًا، ثم افتح السورة لتنتقل إلى صفحة المصحف المطبوعة المناسبة.
             </p>
           </div>
 
@@ -268,64 +416,61 @@ export default function QuranIndexPage() {
               </span>
               <select
                 value={riwaya}
-                onChange={(event) =>
-                  handleRiwayaChange(event.target.value as (typeof RIWAYAT)[number]['id'])
-                }
+                onChange={(event) => handleRiwayaChange(event.target.value as (typeof RIWAYAT)[number]['id'])}
                 className="w-full rounded-xl border border-white/15 bg-white/95 px-3 py-3 text-sm font-black text-[#175E67] outline-none"
               >
                 {RIWAYAT.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
+                  <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
               </select>
             </label>
 
             <label className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur">
-              <span className="mb-2 flex items-center gap-2 text-[11px] font-black text-white/75">
-                <Mic2 size={15} className="text-mushaf-gold" />
-                القارئ
+              <span className="mb-2 flex items-center justify-between gap-2 text-[11px] font-black text-white/75">
+                <span className="flex items-center gap-2">
+                  <Mic2 size={15} className="text-mushaf-gold" />
+                  القارئ
+                </span>
+                <span className="text-[10px] text-white/45">جميع التسجيلات المتاحة</span>
               </span>
               <select
-                value={reciter}
-                onChange={(event) =>
-                  handleReciterChange(event.target.value as (typeof RECITERS)[number]['id'])
-                }
-                className="w-full rounded-xl border border-white/15 bg-white/95 px-3 py-3 text-sm font-black text-[#175E67] outline-none"
+                value={reciter.id}
+                onChange={(event) => {
+                  const next = reciters.find((item) => item.id === event.target.value)
+                  if (next) handleReciterChange(next)
+                }}
+                disabled={recitersLoading && reciters.length <= 1}
+                className="w-full rounded-xl border border-white/15 bg-white/95 px-3 py-3 text-sm font-black text-[#175E67] outline-none disabled:opacity-70"
               >
-                {RECITERS.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
+                {reciters.map((item) => (
+                  <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
               </select>
+              {recitersLoading && (
+                <span className="mt-2 block text-[10px] text-white/55">جاري تحميل قائمة القراء كاملة...</span>
+              )}
             </label>
           </div>
 
-          <div className="mx-auto mt-4 flex justify-center">
-            <Link
-              href={mushafHref}
-              className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-gold px-5 py-3 text-sm font-black text-[#173C39] shadow-lg shadow-black/10 transition hover:-translate-y-0.5 hover:brightness-105"
-            >
-              <BookOpen size={17} />
-              فتح المصحف بهذه الاختيارات
-              <ChevronLeft size={16} />
-            </Link>
-          </div>
+          <Link
+            href={`/mushaf?page=1&riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(reciter.id)}`}
+            className="mx-auto mt-4 flex w-fit items-center gap-2 rounded-2xl bg-mushaf-gold px-6 py-3 text-sm font-black text-[#173F43] shadow-lg shadow-black/10 transition hover:-translate-y-0.5"
+          >
+            <BookOpen size={19} />
+            فتح المصحف بهذه الاختيارات
+            <ChevronLeft size={18} />
+          </Link>
         </div>
       </section>
 
       <section className="mx-auto -mt-5 max-w-6xl px-5 sm:px-8">
         <div className="rounded-3xl border border-black/5 bg-white p-4 shadow-xl shadow-black/5 sm:p-5">
           <div className="relative">
-            <Search
-              size={20}
-              className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-mushaf-teal"
-            />
+            <Search size={20} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-mushaf-teal" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="ابحث باسم السورة أو رقمها أو رقم الصفحة..."
+              placeholder="ابحث باسم السورة أو رقمها أو الصفحة أو اكتب كلمة من الآية..."
               className="w-full rounded-2xl border border-[#E6E0D2] bg-[#FCFBF8] py-4 pr-12 pl-12 text-sm font-bold text-mushaf-dark outline-none transition placeholder:text-gray-400 focus:border-mushaf-teal focus:ring-4 focus:ring-mushaf-teal/10"
             />
             {query && (
@@ -348,24 +493,89 @@ export default function QuranIndexPage() {
             ].map(([value, label, Icon]) => {
               const active = filter === value
               const IconComponent = Icon as typeof BookOpen
-
               return (
                 <button
                   key={value as string}
                   type="button"
                   onClick={() => setFilter(value as FilterType)}
-                  className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-black transition ${
-                    active
-                      ? 'bg-mushaf-teal text-white shadow-md'
-                      : 'bg-[#F7F4EC] text-gray-500 hover:bg-mushaf-teal/10 hover:text-mushaf-teal'
-                  }`}
+                  className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-black transition ${active ? 'bg-mushaf-teal text-white shadow-md' : 'bg-[#F7F4EC] text-gray-500 hover:bg-mushaf-teal/10 hover:text-mushaf-teal'}`}
                 >
                   <IconComponent size={15} />
                   {label as string}
                 </button>
               )
             })}
+
+            <button
+              type="button"
+              onClick={() => setShowJuz((value) => !value)}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-black transition ${showJuz ? 'bg-mushaf-gold text-[#173F43] shadow-md' : 'bg-[#F7F4EC] text-gray-500 hover:bg-mushaf-gold/15 hover:text-[#8B5A0B]'}`}
+            >
+              <BookOpen size={15} />
+              الأجزاء الثلاثون
+            </button>
           </div>
+
+          {showJuz && (
+            <div className="mt-4 rounded-2xl border border-mushaf-gold/20 bg-[#FCFBF8] p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-black text-mushaf-dark">اختر الجزء</h3>
+                  <p className="mt-1 text-[11px] text-gray-400">اضغط على أي جزء لفتح بدايته في المصحف.</p>
+                </div>
+                <button type="button" onClick={() => setShowJuz(false)} className="flex h-8 w-8 items-center justify-center rounded-full bg-black/5 text-gray-500" aria-label="إغلاق الأجزاء">
+                  <X size={15} />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-10">
+                {JUZ_LIST.map((juz) => (
+                  <Link
+                    key={juz.id}
+                    href={`/mushaf?page=${juz.startPage}&riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(reciter.id)}`}
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#E8DFCF] bg-white px-2 py-3 text-center transition hover:border-mushaf-teal/40 hover:bg-mushaf-teal/5"
+                  >
+                    <span className="text-sm font-black text-mushaf-teal">الجزء {toArabicNumber(juz.id)}</span>
+                    <span className="mt-1 text-[9px] font-bold text-gray-400">صفحة {toArabicNumber(juz.startPage)}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ayahSearching && (
+            <div className="mt-4 rounded-2xl border border-mushaf-teal/15 bg-mushaf-teal/5 px-4 py-3 text-xs font-bold text-mushaf-teal">
+              جاري البحث داخل الآيات...
+            </div>
+          )}
+
+          {!ayahSearching && ayahResults.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-mushaf-teal/15 bg-mushaf-teal/5 p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-black text-mushaf-dark">نتائج البحث في الآيات</h3>
+                  <p className="mt-1 text-[10px] text-gray-400">اضغط على النتيجة لفتح صفحة الآية في المصحف.</p>
+                </div>
+                <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black text-mushaf-teal">{toArabicNumber(ayahResults.length)} نتيجة</span>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {ayahResults.map((match) => {
+                  const targetPage = match.page || 1
+                  return (
+                    <Link
+                      key={`${match.number}-${match.numberInSurah}`}
+                      href={`/mushaf?page=${targetPage}&riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(reciter.id)}&ayah=${encodeURIComponent(`${match.surah?.number || ''}:${match.numberInSurah}`)}`}
+                      className="rounded-xl border border-white bg-white p-3 text-right transition hover:border-mushaf-teal/30 hover:shadow-sm"
+                    >
+                      <div className="mb-1 text-[10px] font-black text-mushaf-teal">
+                        {match.surah?.name || 'القرآن الكريم'} · الآية {toArabicNumber(match.numberInSurah)} · الصفحة {toArabicNumber(targetPage)}
+                      </div>
+                      <p className="line-clamp-2 text-sm leading-7 text-mushaf-dark">{match.text}</p>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -374,78 +584,45 @@ export default function QuranIndexPage() {
           <div>
             <div className="mb-2 flex items-center gap-2">
               <Sparkles size={18} className="text-mushaf-gold" />
-              <h2 className="text-xl font-black text-mushaf-dark">
-                السور المتاحة
-              </h2>
+              <h2 className="text-xl font-black text-mushaf-dark">السور المتاحة</h2>
             </div>
-            <p className="text-sm text-gray-500">
-              عرض {toArabicNumber(filteredSurahs.length)} من أصل ١١٤ سورة
-            </p>
+            <p className="text-sm text-gray-500">عرض {toArabicNumber(filteredSurahs.length)} من أصل ١١٤ سورة</p>
           </div>
 
           <div className="rounded-full bg-mushaf-teal/8 px-4 py-2 text-xs font-bold text-mushaf-teal">
-            {RIWAYAT.find((item) => item.id === riwaya)?.label} ·{' '}
-            {RECITERS.find((item) => item.id === reciter)?.label}
+            {RIWAYAT.find((item) => item.id === riwaya)?.label} · {reciter.label}
           </div>
         </div>
 
         {filteredSurahs.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-gray-300 bg-white px-5 py-14 text-center shadow-sm">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-mushaf-paper text-mushaf-teal">
-              <Search size={26} />
-            </div>
-            <h3 className="font-black text-mushaf-dark">
-              لم نجد سورة مطابقة
-            </h3>
-            <p className="mt-2 text-sm text-gray-500">
-              جرّب البحث باسم السورة أو رقمها.
-            </p>
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-mushaf-paper text-mushaf-teal"><Search size={26} /></div>
+            <h3 className="font-black text-mushaf-dark">لم نجد سورة مطابقة</h3>
+            <p className="mt-2 text-sm text-gray-500">جرّب البحث باسم السورة أو رقمها أو رقم الصفحة.</p>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {filteredSurahs.map((surah) => (
               <Link
                 key={surah.id}
-                href={`/mushaf?page=${surah.startPage}&riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(reciter)}`}
+                href={`/mushaf?page=${surah.startPage}&riwaya=${encodeURIComponent(riwaya)}&reciter=${encodeURIComponent(reciter.id)}`}
                 className="group relative overflow-hidden rounded-3xl border border-[#E9E2D4] bg-white p-4 shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-mushaf-teal/35 hover:shadow-lg"
               >
                 <div className="absolute inset-y-0 right-0 w-1 bg-mushaf-gold opacity-70" />
-
                 <div className="flex items-center gap-4">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-mushaf-gold/25 bg-mushaf-paper text-xl font-black text-mushaf-teal">
-                    {toArabicNumber(surah.id)}
-                  </div>
-
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-mushaf-gold/25 bg-mushaf-paper text-xl font-black text-mushaf-teal">{toArabicNumber(surah.id)}</div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="truncate text-lg font-black text-mushaf-dark group-hover:text-mushaf-teal">
-                        سورة {surah.name}
-                      </h3>
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-black ${
-                          surah.type === 'مكية'
-                            ? 'bg-amber-50 text-amber-700'
-                            : 'bg-emerald-50 text-emerald-700'
-                        }`}
-                      >
-                        {surah.type}
-                      </span>
+                      <h3 className="truncate text-lg font-black text-mushaf-dark group-hover:text-mushaf-teal">سورة {surah.name}</h3>
+                      <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-black ${surah.type === 'مكية' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{surah.type}</span>
                     </div>
-
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-bold text-gray-400">
                       <span>آيات {toArabicNumber(surah.ayahs)}</span>
                       <span className="h-1 w-1 rounded-full bg-gray-300" />
-                      <span className="inline-flex items-center gap-1">
-                        <MapPin size={12} />
-                        صفحة {toArabicNumber(surah.startPage)}
-                      </span>
+                      <span className="inline-flex items-center gap-1"><MapPin size={12} /> صفحة {toArabicNumber(surah.startPage)}</span>
                     </div>
                   </div>
-
-                  <ChevronLeft
-                    size={20}
-                    className="shrink-0 text-mushaf-gold transition-transform group-hover:-translate-x-1"
-                  />
+                  <ChevronLeft size={20} className="shrink-0 text-mushaf-gold transition-transform group-hover:-translate-x-1" />
                 </div>
               </Link>
             ))}
