@@ -1769,7 +1769,7 @@ export default function QuranIndexPage() {
         </div>
       </section>
 
-      <section className="mx-auto -mt-3 max-w-6xl px-4 sm:px-7">
+      <section className="mx-auto mt-5 max-w-6xl px-4 sm:px-7">
         <div className="rounded-[28px] border border-[#E9E2D4] bg-white p-3 shadow-[0_12px_45px_rgba(56,40,20,0.10)] sm:p-4">
           <div className="grid grid-cols-2 gap-3">
             <button
