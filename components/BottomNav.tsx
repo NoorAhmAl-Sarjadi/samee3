@@ -20,8 +20,14 @@ export default function BottomNav() {
   const isMushafPage = pathname === '/mushaf'
 
   useEffect(() => {
-    setMushafNavOpen(!isMushafPage)
+    setMushafNavOpen(false)
   }, [isMushafPage])
+
+  // شاشة المصحف تحتوي على شريطها العائم الخاص داخل صفحة المصحف،
+  // لذلك لا نعرض BottomNav العام هنا حتى لا يظهر زر السهم/الشريط الأبيض الزائد.
+  if (isMushafPage) {
+    return null
+  }
 
   const navItems = isMushafPage
     ? [
