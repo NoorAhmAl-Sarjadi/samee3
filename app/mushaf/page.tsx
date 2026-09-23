@@ -1605,6 +1605,12 @@ export default function MushafPage() {
 
   const loadAudioForCurrentSurah = useCallback(async (shouldPlay: boolean) => {
     const surahNumber = requestedSurah || currentSurahNumber
+
+    if (!surahNumber) {
+      setAudioError('رقم السورة غير متوفر.')
+      return
+    }
+
     await loadAudioForSurah(surahNumber, shouldPlay)
   }, [currentSurahNumber, loadAudioForSurah, requestedSurah])
 
