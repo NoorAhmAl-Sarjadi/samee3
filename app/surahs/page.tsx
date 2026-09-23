@@ -1339,7 +1339,7 @@ export default function QuranIndexPage() {
   }, [availableSurahIds, filter])
 
   useEffect(() => {
-    const term = query.trim()
+    const term = normalizeArabic(query)
 
     if (term.length < 2) {
       setAyahResults([])
@@ -1354,12 +1354,8 @@ export default function QuranIndexPage() {
       setAyahSearchError('')
 
       try {
-        // البحث يجب أن يكون داخل النص القرآني العربي نفسه، وليس داخل
-        // ترجمة أو إصدار عام باللغة العربية. quran-uthmani يعيد نص الآية
-        // العربي مع بيانات السورة والصفحة.
-        const searchTerm = normalizeArabic(term)
         const response = await fetch(
-          `https://api.alquran.cloud/v1/search/${encodeURIComponent(searchTerm)}/all/quran-uthmani`,
+          `https://api.alquran.cloud/v1/search/${encodeURIComponent(term)}/all/quran-uthmani`,
           {
             signal: controller.signal,
             cache: 'no-store',
@@ -1377,24 +1373,66 @@ export default function QuranIndexPage() {
           )
         }
 
-        const matches = Array.isArray(payload?.data?.matches)
+        const rawMatches = Array.isArray(payload?.data?.matches)
           ? payload.data.matches
           : []
 
-        setAyahResults(
-          matches
-            .filter(
-              (match: SearchMatch) =>
-                match &&
-                typeof match.text === 'string' &&
-                typeof match.numberInSurah === 'number',
-            )
-            .slice(0, 40),
+        // لا نعتمد على نتائج المصدر وحدها؛ نتحقق أن كلمة البحث موجودة
+        // فعلًا داخل نص الآية حتى لا تظهر سورة/آية لا علاقة لها بالبحث.
+        const verifiedMatches = rawMatches.filter((match: SearchMatch) => {
+          if (
+            !match ||
+            typeof match.text !== 'string' ||
+            typeof match.numberInSurah !== 'number' ||
+            !match.surah ||
+            typeof match.surah.number !== 'number'
+          ) {
+            return false
+          }
+
+          return normalizeArabic(match.text).includes(term)
+        })
+
+        // تأكيد رقم الصفحة. عادةً يأتي من نتيجة البحث، وإذا غاب نجيبه
+        // من مرجع الآية نفسه حتى لا نعود إلى الصفحة الأولى.
+        const firstMatches = verifiedMatches.slice(0, 30)
+        const hydrated = await Promise.all(
+          firstMatches.map(async (match: SearchMatch) => {
+            if (Number.isFinite(match.page) && Number(match.page) >= 1) {
+              return match
+            }
+
+            try {
+              const reference = `${match.surah?.number}:${match.numberInSurah}`
+              const ayahResponse = await fetch(
+                `https://api.alquran.cloud/v1/ayah/${encodeURIComponent(reference)}/quran-uthmani`,
+                {
+                  signal: controller.signal,
+                  cache: 'no-store',
+                  headers: { Accept: 'application/json' },
+                },
+              )
+
+              const ayahPayload = await ayahResponse.json().catch(() => null)
+              const page = Number(ayahPayload?.data?.page)
+
+              return Number.isFinite(page) && page > 0
+                ? { ...match, page }
+                : match
+            } catch (error) {
+              if ((error as Error).name === 'AbortError') throw error
+              return match
+            }
+          }),
         )
 
-        if (!matches.length) {
-          setAyahSearchError('لا توجد آيات مطابقة لهذه العبارة.')
+        if (!hydrated.length) {
+          setAyahResults([])
+          setAyahSearchError('لا توجد آيات مطابقة لهذه الكلمة.')
+          return
         }
+
+        setAyahResults(hydrated)
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
           console.error('Ayah search error:', error)
@@ -1653,7 +1691,7 @@ export default function QuranIndexPage() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="ابحث داخل الآيات فقط… اكتب كلمة أو جزءًا من الآية"
+              placeholder="ابحث عن آية"
               className="w-full rounded-2xl border border-[#E6E0D2] bg-[#FCFBF8] py-4 pr-12 pl-12 text-sm font-bold outline-none focus:border-[#0284C7]/40 focus:ring-4 focus:ring-[#0284C7]/8"
               aria-label="البحث داخل الآيات فقط"
               dir="rtl"
@@ -1669,10 +1707,6 @@ export default function QuranIndexPage() {
               </button>
             )}
           </div>
-
-          <p className="mt-2 text-[10px] font-bold text-slate-400">
-            البحث بالأعلى مخصص للآيات فقط؛ السور تُعرض حسب الرواية والقارئ والفلتر المختار.
-          </p>
 
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
             {[
@@ -1711,7 +1745,7 @@ export default function QuranIndexPage() {
 
           {!ayahSearching && ayahResults.length > 0 && (
             <div className="mt-3 rounded-2xl border border-[#D8EAF0] bg-[#F5FCFE] p-3">
-              <div className="mb-2 text-xs font-black">نتائج البحث داخل الآيات</div>
+              <div className="mb-2 text-xs font-black">الآيات المطابقة</div>
               <div className="grid gap-2 md:grid-cols-2">
                 {ayahResults.map((match) => (
                   <Link
