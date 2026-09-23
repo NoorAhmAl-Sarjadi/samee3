@@ -325,6 +325,53 @@ function normalizeArabic(value: string) {
     .replace(/ى/g, 'ي')
 }
 
+type JuzRange = {
+  number: number
+  startSurah: number
+  startAyah: number
+  endSurah: number
+  endAyah: number
+}
+
+function getJuzRange(juzNumber: number): JuzRange | null {
+  const index = JUZ_LIST.findIndex((item) => item.number === juzNumber)
+  if (index < 0) return null
+
+  const start = JUZ_LIST[index]
+  const next = JUZ_LIST[index + 1]
+
+  if (!next) {
+    const lastSurah = surahsList.find((item) => item.id === 114)
+    return {
+      number: start.number,
+      startSurah: start.surah,
+      startAyah: start.ayah,
+      endSurah: 114,
+      endAyah: lastSurah?.ayahs || 6,
+    }
+  }
+
+  if (next.ayah > 1) {
+    return {
+      number: start.number,
+      startSurah: start.surah,
+      startAyah: start.ayah,
+      endSurah: next.surah,
+      endAyah: next.ayah - 1,
+    }
+  }
+
+  const previousSurah = surahsList.find((item) => item.id === next.surah - 1)
+
+  return {
+    number: start.number,
+    startSurah: start.surah,
+    startAyah: start.ayah,
+    endSurah: Math.max(1, next.surah - 1),
+    endAyah: previousSurah?.ayahs || 1,
+  }
+}
+
 function crc32(data: Uint8Array) {
   let crc = 0xffffffff
 
@@ -1452,7 +1499,12 @@ export default function QuranIndexPage() {
     }
   }, [query])
 
-  const getMushafHref = (page: number, surahId: number, ayah?: number) => {
+  const getMushafHref = (
+    page: number,
+    surahId: number,
+    ayah?: number,
+    juzNumber?: number,
+  ) => {
     if (!selectedReciter) return '/mushaf'
 
     const params = new URLSearchParams({
@@ -1471,17 +1523,35 @@ export default function QuranIndexPage() {
     }
 
     if (ayah) {
-      // شاشة المصحف تتوقع مرجع الآية بصيغة سورة:آية، حتى تفتح
-      // الموضع الصحيح وتحدد الآية المطلوبة بدل الرجوع إلى الفاتحة.
       params.set('ayah', `${surahId}:${ayah}`)
+    }
+
+    if (juzNumber) {
+      const range = getJuzRange(juzNumber)
+      if (range) {
+        params.set('juz', String(range.number))
+        params.set(
+          'juzStart',
+          `${range.startSurah}:${range.startAyah}`,
+        )
+        params.set(
+          'juzEnd',
+          `${range.endSurah}:${range.endAyah}`,
+        )
+      }
     }
 
     return `/mushaf?${params.toString()}`
   }
 
-  const openMushaf = (page: number, surahId: number, ayah?: number) => {
+  const openMushaf = (
+    page: number,
+    surahId: number,
+    ayah?: number,
+    juzNumber?: number,
+  ) => {
     if (!selectedReciter) return
-    window.location.href = getMushafHref(page, surahId, ayah)
+    window.location.href = getMushafHref(page, surahId, ayah, juzNumber)
   }
 
   const makkiyaCount = surahsList.filter((item) => item.type === 'مكية').length
@@ -1909,7 +1979,7 @@ export default function QuranIndexPage() {
 
               <div className="grid grid-cols-3 gap-2 p-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-10">
                 {JUZ_LIST.map((juz) => (
-                  <button key={juz.number} type="button" onClick={() => openMushaf(juz.page, juz.surah, juz.ayah)} className="rounded-2xl border border-[#E9E2D4] bg-white px-2 py-3 text-center transition hover:border-[#D97706]/35 hover:bg-[#FFF9EF]">
+                  <button key={juz.number} type="button" onClick={() => openMushaf(juz.page, juz.surah, juz.ayah, juz.number)} className="rounded-2xl border border-[#E9E2D4] bg-white px-2 py-3 text-center transition hover:border-[#D97706]/35 hover:bg-[#FFF9EF]">
                     <span className="block text-sm font-black text-[#D97706]">الجزء {toArabicNumber(juz.number)}</span>
                     <span className="mt-1 block text-[9px] font-bold text-slate-400">صفحة {toArabicNumber(juz.page)}</span>
                   </button>
