@@ -835,6 +835,15 @@ export default function QuranIndexPage() {
     return current ? [current, ...result.filter((item) => item.id !== riwaya)] : result
   }, [riwaya, riwayaSearch])
 
+  const isReciterDownloaded = (item: Reciter) =>
+    offlinePackages.some(
+      (pkg) =>
+        pkg.riwayaId === riwaya &&
+        pkg.reciterApiId === item.apiId &&
+        pkg.moshafId === (item.moshaf.id ?? null) &&
+        pkg.downloadedSurahIds.length > 0,
+    )
+
   const filteredReciters = useMemo(() => {
     const term = normalizeArabic(reciterSearch)
 
@@ -886,15 +895,6 @@ export default function QuranIndexPage() {
       ) || null
     )
   }, [offlinePackages, riwaya, selectedReciter])
-
-  const isReciterDownloaded = (item: Reciter) =>
-    offlinePackages.some(
-      (pkg) =>
-        pkg.riwayaId === riwaya &&
-        pkg.reciterApiId === item.apiId &&
-        pkg.moshafId === (item.moshaf.id ?? null) &&
-        pkg.downloadedSurahIds.length > 0,
-    )
 
   const selectedOfflineCount = selectedOfflinePackage?.downloadedSurahIds.length || 0
   const selectedOfflineTotal = selectedOfflinePackage?.surahIds.length || availableSurahIds.length
