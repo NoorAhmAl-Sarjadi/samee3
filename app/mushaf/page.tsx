@@ -1027,7 +1027,7 @@ export default function MushafPage() {
     return null
   }, [])
 
-  const handleAyahClick = useCallback((event: React.MouseEvent<HTMLDivElement>, sourceData: PageData | null) => {
+  const handleAyahClick = useCallback((event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => {
     const target = event.target as Element | null
     if (!target) return
     const polygon = target.closest('.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah')
@@ -1793,7 +1793,7 @@ type MushafPageSheetProps = {
   html: string
   side: 'left' | 'right' | 'single'
   meta: { surah: string; juz: number; page: number }
-  onAyahClick: (event: React.MouseEvent<HTMLDivElement>, sourceData: PageData | null) => void
+  onAyahClick: (event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => void
 }
 
 function MushafPageSheet({ page, data, html, side, meta, onAyahClick }: MushafPageSheetProps) {
