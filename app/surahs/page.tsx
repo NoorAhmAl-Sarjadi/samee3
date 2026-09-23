@@ -1354,8 +1354,12 @@ export default function QuranIndexPage() {
       setAyahSearchError('')
 
       try {
+        // البحث يجب أن يكون داخل النص القرآني العربي نفسه، وليس داخل
+        // ترجمة أو إصدار عام باللغة العربية. quran-uthmani يعيد نص الآية
+        // العربي مع بيانات السورة والصفحة.
+        const searchTerm = normalizeArabic(term)
         const response = await fetch(
-          `https://api.alquran.cloud/v1/search/${encodeURIComponent(term)}/all/ar`,
+          `https://api.alquran.cloud/v1/search/${encodeURIComponent(searchTerm)}/all/quran-uthmani`,
           {
             signal: controller.signal,
             cache: 'no-store',
@@ -1428,7 +1432,11 @@ export default function QuranIndexPage() {
       params.set('moshafId', String(selectedReciter.moshaf.id))
     }
 
-    if (ayah) params.set('ayah', String(ayah))
+    if (ayah) {
+      // شاشة المصحف تتوقع مرجع الآية بصيغة سورة:آية، حتى تفتح
+      // الموضع الصحيح وتحدد الآية المطلوبة بدل الرجوع إلى الفاتحة.
+      params.set('ayah', `${surahId}:${ayah}`)
+    }
 
     return `/mushaf?${params.toString()}`
   }
@@ -1443,11 +1451,13 @@ export default function QuranIndexPage() {
 
   return (
     <main dir="rtl" className="min-h-screen bg-[#F7F4EC] pb-32 text-[#0F172A]">
-      <section className="relative overflow-hidden bg-gradient-to-br from-[#0F525A] via-[#176F78] to-[#0A3940] text-white">
-        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-32 -left-24 h-80 w-80 rounded-full bg-[#D97706]/10 blur-3xl" />
+      <section className="relative z-50 overflow-visible bg-gradient-to-br from-[#0F525A] via-[#176F78] to-[#0A3940] text-white">
+        <div className="pointer-events-none absolute inset-0 -z-0 overflow-hidden">
+          <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-32 -left-24 h-80 w-80 rounded-full bg-[#D97706]/10 blur-3xl" />
+        </div>
 
-        <div className="relative mx-auto max-w-6xl px-4 pb-5 pt-3 sm:px-7 sm:pb-6">
+        <div className="relative z-10 mx-auto max-w-6xl px-4 pb-5 pt-3 sm:px-7 sm:pb-6">
           <div className="flex items-center justify-between gap-3">
             <Link
               href="/"
@@ -1565,7 +1575,7 @@ export default function QuranIndexPage() {
                   <div
                     id="samee3-reciter-listbox"
                     role="listbox"
-                    className="absolute right-0 z-50 mt-2 max-h-72 w-full overflow-y-auto rounded-2xl border border-[#E8E5DC] bg-white p-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.18)]"
+                    className="absolute right-0 top-full z-[100] mt-2 max-h-[min(18rem,45vh)] w-full overflow-y-auto overscroll-contain rounded-2xl border border-[#E8E5DC] bg-white p-1.5 shadow-[0_22px_45px_rgba(15,23,42,0.24)]"
                   >
                     {filteredReciters.length ? (
                       filteredReciters.map((item) => {
@@ -1578,7 +1588,7 @@ export default function QuranIndexPage() {
                             type="button"
                             role="option"
                             aria-selected={selected}
-                            onMouseDown={(event) => event.preventDefault()}
+                            onPointerDown={(event) => event.preventDefault()}
                             onClick={() => {
                               handleReciterChange(item)
                               setReciterSearch(item.label)
@@ -1636,7 +1646,7 @@ export default function QuranIndexPage() {
       </section>
 
 
-      <section className="mx-auto mt-4 max-w-6xl px-4 sm:px-7">
+      <section className="relative z-0 mx-auto mt-4 max-w-6xl px-4 sm:px-7">
         <div className="rounded-[26px] border border-[#E9E2D4] bg-white p-3 shadow-[0_10px_32px_rgba(56,40,20,0.07)] sm:p-4">
           <div className="relative">
             <Search size={20} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[#0284C7]" />
