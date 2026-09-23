@@ -757,6 +757,23 @@ function getJuz(data?: PageData | null) {
   return data?.ayahs?.find((ayah) => Number.isFinite(ayah.juz))?.juz || 1
 }
 
+type QuranReference = {
+  surah: number
+  ayah: number
+}
+
+function parseQuranReference(value: string | null): QuranReference | null {
+  if (!value) return null
+  const match = value.match(/^(\d{1,3})\s*:\s*(\d{1,3})$/)
+  if (!match) return null
+
+  const surah = Number(match[1])
+  const ayah = Number(match[2])
+
+  if (surah < 1 || surah > 114 || ayah < 1) return null
+  return { surah, ayah }
+}
+
 function getMoshafForRiwaya(reciter: ApiReciter, riwaya: Riwaya) {
   const list = Array.isArray(reciter.moshaf) ? reciter.moshaf : []
   const keywords = RIWAYA_KEYWORDS[riwaya]
@@ -784,6 +801,25 @@ export default function MushafPage() {
   const requestedMoshafId = Number(searchParams.get('moshafId') || '0')
   const reciterName = searchParams.get('reciterName') || 'القارئ المختار'
   const autoplayRequested = searchParams.get('autoplay') === '1'
+  const activeJuzNumber = Number(searchParams.get('juz') || '0')
+  const activeJuzStart = parseQuranReference(searchParams.get('juzStart'))
+  const activeJuzEnd = parseQuranReference(searchParams.get('juzEnd'))
+
+  const activeJuzRange = useMemo(() => {
+    if (
+      !activeJuzNumber ||
+      !activeJuzStart ||
+      !activeJuzEnd
+    ) {
+      return null
+    }
+
+    return {
+      number: activeJuzNumber,
+      start: activeJuzStart,
+      end: activeJuzEnd,
+    }
+  }, [activeJuzEnd, activeJuzNumber, activeJuzStart])
 
   const [isDesktop, setIsDesktop] = useState(false)
   const [showChrome, setShowChrome] = useState(false)
@@ -820,14 +856,20 @@ export default function MushafPage() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioObjectUrlRef = useRef<string | null>(null)
+  const audioSurahRef = useRef<number | null>(null)
   const ayahTimingsRef = useRef<AyahTiming[]>([])
   const repeatSeekGuardRef = useRef(false)
+  const juzCompletedGuardRef = useRef(false)
   const autoplayConsumedRef = useRef(false)
+  const startupNoticeShownRef = useRef(false)
   const navigatingRef = useRef(false)
   const touchStartX = useRef<number | null>(null)
   const touchStartY = useRef<number | null>(null)
   const [turnDirection, setTurnDirection] = useState<TurnDirection>(null)
   const [turning, setTurning] = useState(false)
+
+  const pageMemoryCacheRef = useRef(new Map<string, PageData>())
+  const svgMemoryCacheRef = useRef(new Map<string, string>())
 
   const desktopRightPage = isDesktop && pageNumber % 2 === 0 ? pageNumber - 1 : pageNumber
   const desktopLeftPage = isDesktop ? Math.min(604, desktopRightPage + 1) : null
@@ -843,6 +885,24 @@ export default function MushafPage() {
   }, [])
 
   useEffect(() => {
+    if (startupNoticeShownRef.current) return
+    startupNoticeShownRef.current = true
+
+    try {
+      const raw = localStorage.getItem('samee3_last_completed_juz')
+      if (!raw) return
+
+      const saved = JSON.parse(raw) as { number?: number }
+      if (saved?.number) {
+        triggerToast(`تم الانتهاء من الجزء ${arabicNumber(Number(saved.number))}`)
+      }
+      localStorage.removeItem('samee3_last_completed_juz')
+    } catch {
+      // لا نوقف فتح المصحف بسبب إشعار سابق.
+    }
+  }, [triggerToast])
+
+  useEffect(() => {
     const media = window.matchMedia('(min-width: 768px)')
     const update = () => setIsDesktop(media.matches)
     update()
@@ -851,35 +911,206 @@ export default function MushafPage() {
   }, [])
 
   const fetchPageData = useCallback(async (page: number) => {
-    const response = await fetch(`/api/quran?riwaya=${encodeURIComponent(riwaya)}&page=${page}`, {
-      cache: 'no-store',
+    const safePage = clampPage(page)
+    const key = `${riwaya}:${safePage}`
+    const memoryHit = pageMemoryCacheRef.current.get(key)
+    if (memoryHit) return memoryHit
+
+    const url = `/api/quran?riwaya=${encodeURIComponent(riwaya)}&page=${safePage}`
+
+    try {
+      if ('caches' in window) {
+        const cachedResponse = await caches.match(url)
+        if (cachedResponse) {
+          const data = await cachedResponse.json()
+          const result = {
+            ayahs: Array.isArray(data?.ayahs)
+              ? data.ayahs
+              : Array.isArray(data?.data?.ayahs)
+                ? data.data.ayahs
+                : [],
+          } as PageData
+          pageMemoryCacheRef.current.set(key, result)
+          return result
+        }
+      }
+    } catch {
+      // ننتقل إلى الشبكة.
+    }
+
+    const response = await fetch(url, {
+      cache: 'force-cache',
       headers: { Accept: 'application/json' },
     })
-    if (!response.ok) throw new Error(`تعذر تحميل بيانات الصفحة ${page}`)
+    if (!response.ok) throw new Error(`تعذر تحميل بيانات الصفحة ${safePage}`)
     const data = await response.json()
-    return {
+    const result = {
       ayahs: Array.isArray(data?.ayahs)
         ? data.ayahs
         : Array.isArray(data?.data?.ayahs)
           ? data.data.ayahs
           : [],
     } as PageData
+
+    pageMemoryCacheRef.current.set(key, result)
+
+    try {
+      if ('caches' in window) {
+        const cache = await caches.open('samee3-mushaf-pages-v2')
+        await cache.put(url, new Response(JSON.stringify(data), {
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+    } catch {
+      // لا نوقف القراءة بسبب فشل التخزين المؤقت.
+    }
+
+    return result
   }, [riwaya])
 
   const fetchSvg = useCallback(async (page: number) => {
     if (!PRINTED_RIWAYAT.has(riwaya)) return ''
-    const response = await fetch(`/api/mushaf-svg?riwaya=${encodeURIComponent(riwaya)}&page=${page}`, {
+    const safePage = clampPage(page)
+    const key = `${riwaya}:${safePage}`
+    const memoryHit = svgMemoryCacheRef.current.get(key)
+    if (memoryHit) return memoryHit
+
+    const url = `/api/mushaf-svg?riwaya=${encodeURIComponent(riwaya)}&page=${safePage}`
+
+    try {
+      if ('caches' in window) {
+        const cachedResponse = await caches.match(url)
+        if (cachedResponse) {
+          const data = await cachedResponse.json()
+          if (data?.success && data?.svg) {
+            const value = String(data.svg)
+            svgMemoryCacheRef.current.set(key, value)
+            return value
+          }
+        }
+      }
+    } catch {
+      // ننتقل إلى الشبكة.
+    }
+
+    const response = await fetch(url, {
       cache: 'force-cache',
     })
-    if (!response.ok) throw new Error(`تعذر تحميل صفحة المصحف ${page}`)
+    if (!response.ok) throw new Error(`تعذر تحميل صفحة المصحف ${safePage}`)
     const data = await response.json()
-    if (!data?.success || !data?.svg) throw new Error(`لم يتم العثور على صفحة المصحف ${page}`)
-    return String(data.svg)
+    if (!data?.success || !data?.svg) throw new Error(`لم يتم العثور على صفحة المصحف ${safePage}`)
+    const value = String(data.svg)
+    svgMemoryCacheRef.current.set(key, value)
+
+    try {
+      if ('caches' in window) {
+        const cache = await caches.open('samee3-mushaf-pages-v2')
+        await cache.put(url, new Response(JSON.stringify(data), {
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+    } catch {
+      // لا نوقف القراءة بسبب فشل التخزين المؤقت.
+    }
+
+    return value
   }, [riwaya])
+
+  const prefetchRiwayaPage = useCallback(async (targetRiwaya: Riwaya, page: number) => {
+    const safePage = clampPage(page)
+    const pageUrl = `/api/quran?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
+    try {
+      if ('caches' in window) {
+        const existing = await caches.match(pageUrl)
+        if (!existing) {
+          const response = await fetch(pageUrl, {
+            cache: 'force-cache',
+            headers: { Accept: 'application/json' },
+          })
+          if (response.ok) {
+            const data = await response.clone().json()
+            pageMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, {
+              ayahs: Array.isArray(data?.ayahs)
+                ? data.ayahs
+                : Array.isArray(data?.data?.ayahs)
+                  ? data.data.ayahs
+                  : [],
+            })
+            const cache = await caches.open('samee3-mushaf-pages-v2')
+            await cache.put(pageUrl, response)
+          }
+        }
+      } else {
+        await fetch(pageUrl, { cache: 'force-cache' })
+      }
+
+      if (PRINTED_RIWAYAT.has(targetRiwaya)) {
+        const svgUrl = `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
+        const existingSvg = 'caches' in window ? await caches.match(svgUrl) : null
+        if (!existingSvg) {
+          const response = await fetch(svgUrl, { cache: 'force-cache' })
+          if (response.ok) {
+            const data = await response.clone().json()
+            if (data?.success && data?.svg) {
+              svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
+              if ('caches' in window) {
+                const cache = await caches.open('samee3-mushaf-pages-v2')
+                await cache.put(svgUrl, response)
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // التحميل المسبق اختياري ولا يعطل الصفحة الحالية.
+    }
+  }, [])
+
+  useEffect(() => {
+    const run = () => {
+      const nearby = [
+        pageNumber,
+        clampPage(pageNumber + 1),
+        clampPage(pageNumber - 1),
+        clampPage(pageNumber + 2),
+        clampPage(pageNumber - 2),
+      ]
+
+      const riwayat = Object.keys(RIWAYA_NAMES) as Riwaya[]
+      const queue: Array<Promise<unknown>> = []
+
+      // الصفحة الحالية لكل الروايات، ثم صفحات قريبة للرواية المختارة.
+      for (const target of riwayat) {
+        queue.push(prefetchRiwayaPage(target, pageNumber))
+      }
+
+      for (const page of nearby.filter((item, index, list) => list.indexOf(item) === index)) {
+        queue.push(prefetchRiwayaPage(riwaya, page))
+      }
+
+      void Promise.allSettled(queue)
+    }
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+    }
+
+    if (idleWindow.requestIdleCallback) {
+      const id = idleWindow.requestIdleCallback(run, { timeout: 1800 })
+      return () => {
+        if ('cancelIdleCallback' in window) {
+          ;(window as Window & { cancelIdleCallback?: (handle: number) => void }).cancelIdleCallback?.(id)
+        }
+      }
+    }
+
+    const id = window.setTimeout(run, 350)
+    return () => window.clearTimeout(id)
+  }, [pageNumber, prefetchRiwayaPage, riwaya])
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    setLoading(false)
     setError('')
 
     const rightPage = desktopRightPage
@@ -887,46 +1118,62 @@ export default function MushafPage() {
 
     ;(async () => {
       try {
-        const mainData = await fetchPageData(pageNumber)
+        const dataPromises: Array<Promise<PageData>> = [
+          fetchPageData(pageNumber),
+        ]
+
+        if (isDesktop && rightPage !== pageNumber) {
+          dataPromises.push(fetchPageData(rightPage))
+        }
+
+        if (isDesktop && leftPage && leftPage !== pageNumber && leftPage !== rightPage) {
+          dataPromises.push(fetchPageData(leftPage))
+        }
+
+        const dataResults = await Promise.all(dataPromises)
         if (cancelled) return
+
+        const mainData = dataResults[0]
         setPageData(mainData)
 
         if (isDesktop) {
-          if (rightPage === pageNumber) {
-            setRightPageData(mainData)
-          } else {
-            const spreadRightData = await fetchPageData(rightPage)
-            if (cancelled) return
-            setRightPageData(spreadRightData)
-          }
+          let dataIndex = 1
+          const rightData = rightPage === pageNumber
+            ? mainData
+            : dataResults[dataIndex++] || mainData
 
-          if (leftPage && leftPage !== rightPage) {
-            const extra = leftPage === pageNumber ? mainData : await fetchPageData(leftPage)
-            if (!cancelled) setLeftPageData(extra)
-          } else {
-            setLeftPageData(null)
-          }
+          const leftData = leftPage && leftPage !== rightPage
+            ? dataResults[dataIndex++] || null
+            : null
+
+          setRightPageData(rightData)
+          setLeftPageData(leftData)
         } else {
           setRightPageData(mainData)
           setLeftPageData(null)
         }
 
         if (PRINTED_RIWAYAT.has(riwaya)) {
-          if (isDesktop && rightPage !== pageNumber) {
-            const [rightSvg, extraSvg] = await Promise.all([
-              fetchSvg(rightPage),
-              leftPage && leftPage !== rightPage ? fetchSvg(leftPage) : Promise.resolve(''),
-            ])
-            if (!cancelled) {
-              setSvg(rightSvg)
-              setLeftSvg(extraSvg)
+          const svgPromises: Array<Promise<string>> = []
+          if (isDesktop) {
+            if (rightPage === pageNumber) svgPromises.push(fetchSvg(pageNumber))
+            else svgPromises.push(fetchSvg(rightPage))
+            if (leftPage && leftPage !== rightPage) {
+              svgPromises.push(fetchSvg(leftPage))
             }
           } else {
-            const mainSvg = await fetchSvg(pageNumber)
-            if (!cancelled) {
-              setSvg(mainSvg)
-              setLeftSvg('')
-            }
+            svgPromises.push(fetchSvg(pageNumber))
+          }
+
+          const svgResults = await Promise.all(svgPromises)
+          if (cancelled) return
+
+          if (isDesktop) {
+            setSvg(svgResults[0] || '')
+            setLeftSvg(svgResults[1] || '')
+          } else {
+            setSvg(svgResults[0] || '')
+            setLeftSvg('')
           }
         } else {
           setSvg('')
@@ -936,11 +1183,7 @@ export default function MushafPage() {
         console.error(loadError)
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'تعذر تحميل المصحف')
-          setSvg('')
-          setLeftSvg('')
         }
-      } finally {
-        if (!cancelled) setLoading(false)
       }
     })()
 
@@ -1139,7 +1382,11 @@ export default function MushafPage() {
     setPressedAyahNumber(null)
   }, [])
 
-  const navigateTo = useCallback((page: number, extra?: { surah?: number; ayah?: string }, direction: 'next' | 'prev' = 'next') => {
+  const navigateTo = useCallback((
+    page: number,
+    extra?: { surah?: number; ayah?: string; clearJuz?: boolean },
+    direction: 'next' | 'prev' = 'next',
+  ) => {
     const nextPage = clampPage(page)
     if (navigatingRef.current) return
     if (nextPage === pageNumber && !extra?.ayah && !extra?.surah) return
@@ -1153,6 +1400,12 @@ export default function MushafPage() {
     if (extra?.surah) params.set('surah', String(extra.surah))
     if (extra?.ayah) params.set('ayah', extra.ayah)
     else params.delete('ayah')
+
+    if (extra?.clearJuz) {
+      params.delete('juz')
+      params.delete('juzStart')
+      params.delete('juzEnd')
+    }
 
     window.setTimeout(() => {
       router.push(`/mushaf?${params.toString()}`)
@@ -1252,12 +1505,24 @@ export default function MushafPage() {
       const info = SURAH_LIST.find((item) => item.id === nextSurah)
       params.set('surah', String(nextSurah))
       params.set('page', String(info?.page || pageNumber))
+      params.delete('juz')
+      params.delete('juzStart')
+      params.delete('juzEnd')
+      params.delete('ayah')
     }
     router.push(`/mushaf?${params.toString()}`)
   }, [pageNumber, router, searchParams])
 
   const handleRiwayaSelect = async (value: Riwaya) => {
     if (value === riwaya) return
+
+    const audio = audioRef.current
+    audio?.pause()
+    setIsPlaying(false)
+    setPlayingAyahNumber(null)
+    setRepeatAyahNumber(null)
+    setAudioError('')
+
     const loaded = await fetchReciters(value)
     const preferred = loaded.find((item) => item.apiId === selectedReciterId) || loaded[0] || null
     setSelectedReciterId(preferred?.apiId || 0)
@@ -1272,8 +1537,22 @@ export default function MushafPage() {
     const wasPlaying = !!audio && !audio.paused && !!audio.src
     const wasLoaded = !!audio && !!audio.src
     const preservedTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0
-    const activeLocalAyah = selectedAyah?.numberInSurah || undefined
-    const currentSurah = selectedAyah?.surah?.number || requestedSurah || currentSurahNumber
+
+    const visibleAyahs = [pageData, rightPageData, leftPageData]
+      .filter(Boolean)
+      .flatMap((source) => (source as PageData).ayahs)
+
+    const playingAyah = playingAyahNumber !== null
+      ? visibleAyahs.find((ayah) => ayah.number === playingAyahNumber)
+      : null
+
+    const activeLocalAyah = playingAyah?.numberInSurah || selectedAyah?.numberInSurah || undefined
+    const currentSurah =
+      audioSurahRef.current ||
+      playingAyah?.surah?.number ||
+      selectedAyah?.surah?.number ||
+      requestedSurah ||
+      currentSurahNumber
 
     setSelectedReciterId(id)
     updateRouteAudioSelection(riwaya, item)
@@ -1369,6 +1648,7 @@ export default function MushafPage() {
       navigateTo(target.page, {
         surah: target.surah,
         ayah: target.ayah && target.surah ? `${target.surah}:${target.ayah}` : undefined,
+        clearJuz: true,
       }, target.page >= pageNumber ? 'next' : 'prev')
     } catch (error) {
       console.error(error)
@@ -1436,6 +1716,84 @@ export default function MushafPage() {
     return Math.max(0, Number(target.start_time) / 1000)
   }, [])
 
+  const findTimingEnd = useCallback((timings: AyahTiming[], ayahNumber?: number) => {
+    if (!ayahNumber) return null
+    const index = timings.findIndex((item) => Number(item.ayah) === ayahNumber)
+    if (index < 0) return null
+
+    const target = timings[index]
+    if (Number.isFinite(Number(target.end_time)) && Number(target.end_time) > 0) {
+      return Number(target.end_time) / 1000
+    }
+
+    const next = timings[index + 1]
+    if (next && Number.isFinite(Number(next.start_time))) {
+      return Number(next.start_time) / 1000
+    }
+
+    return null
+  }, [])
+
+  const playCompletionTone = useCallback(() => {
+    try {
+      const win = window as Window & {
+        webkitAudioContext?: typeof AudioContext
+      }
+      const ContextCtor = window.AudioContext || win.webkitAudioContext
+      if (!ContextCtor) return
+
+      const context = new ContextCtor()
+      const oscillator = context.createOscillator()
+      const gain = context.createGain()
+
+      oscillator.type = 'sine'
+      oscillator.frequency.setValueAtTime(660, context.currentTime)
+      oscillator.frequency.exponentialRampToValueAtTime(880, context.currentTime + 0.16)
+
+      gain.gain.setValueAtTime(0.0001, context.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.22)
+
+      oscillator.connect(gain)
+      gain.connect(context.destination)
+      oscillator.start()
+      oscillator.stop(context.currentTime + 0.24)
+
+      window.setTimeout(() => {
+        void context.close().catch(() => {})
+      }, 320)
+    } catch {
+      // التنبيه الصوتي اختياري ولا يوقف التلاوة.
+    }
+  }, [])
+
+  const notifyJuzCompleted = useCallback((juzNumber: number) => {
+    if (!juzNumber || juzCompletedGuardRef.current) return
+    juzCompletedGuardRef.current = true
+
+    const message = `تم الانتهاء من الجزء ${arabicNumber(juzNumber)}`
+    try {
+      localStorage.setItem(
+        'samee3_last_completed_juz',
+        JSON.stringify({
+          number: juzNumber,
+          message,
+          at: new Date().toISOString(),
+        }),
+      )
+    } catch {}
+
+    setRepeatAyahNumber(null)
+    setPlayingAyahNumber(null)
+    setIsPlaying(false)
+    playCompletionTone()
+    triggerToast(message)
+  }, [playCompletionTone, triggerToast])
+
+  useEffect(() => {
+    juzCompletedGuardRef.current = false
+  }, [activeJuzNumber])
+
   const updatePlayingAyahFromTime = useCallback((currentTime: number) => {
     const timings = ayahTimingsRef.current
     if (!timings.length) {
@@ -1463,7 +1821,8 @@ export default function MushafPage() {
     }
 
     const currentSurah = Number(
-      requestedSurah ||
+      audioSurahRef.current ||
+        requestedSurah ||
         currentSurahNumber ||
         0,
     )
@@ -1566,6 +1925,7 @@ export default function MushafPage() {
       }
 
       const networkUrl = `${server}/${String(surahNumber).padStart(3, '0')}.mp3`
+      audioSurahRef.current = surahNumber
       let finalUrl = networkUrl
 
       try {
@@ -1665,9 +2025,35 @@ export default function MushafPage() {
   useEffect(() => {
     const audio = new Audio()
     audioRef.current = audio
+    audio.preload = 'auto'
 
     const onPlay = () => setIsPlaying(true)
     const onPause = () => setIsPlaying(false)
+
+    const onJuzEnd = () => {
+      if (!activeJuzRange || !activeJuzNumber) return false
+
+      const currentSurah = Number(audioSurahRef.current || 0)
+
+      if (currentSurah === activeJuzRange.end.surah) {
+        void Promise.resolve().then(() => {
+          notifyJuzCompleted(activeJuzNumber)
+        })
+        audio.pause()
+        return true
+      }
+
+      if (currentSurah > 0 && currentSurah < activeJuzRange.end.surah) {
+        const nextSurah = currentSurah + 1
+        audio.pause()
+        setPlayingAyahNumber(null)
+        void loadAudioForSurah(nextSurah, true)
+        return true
+      }
+
+      return false
+    }
+
     const onEnded = () => {
       if (repeatAyahNumber !== null && ayahTimingsRef.current.length) {
         const repeatStart = findTimingStart(
@@ -1682,12 +2068,36 @@ export default function MushafPage() {
         }
       }
 
+      if (onJuzEnd()) return
+
       setIsPlaying(false)
       setPlayingAyahNumber(null)
     }
 
     const onTimeUpdate = () => {
       updatePlayingAyahFromTime(audio.currentTime)
+
+      if (!activeJuzRange || !activeJuzNumber) return
+      const currentSurah = Number(audioSurahRef.current || 0)
+      if (currentSurah !== activeJuzRange.end.surah) return
+
+      const endTime = findTimingEnd(
+        ayahTimingsRef.current,
+        activeJuzRange.end.ayah,
+      )
+
+      const effectiveEnd = endTime ?? (
+        Number.isFinite(audio.duration) && audio.duration > 0
+          ? audio.duration
+          : null
+      )
+
+      if (
+        effectiveEnd !== null &&
+        audio.currentTime >= Math.max(0, effectiveEnd - 0.08)
+      ) {
+        onJuzEnd()
+      }
     }
 
     const onLoadedMetadata = () => {
@@ -1711,6 +2121,7 @@ export default function MushafPage() {
       audio.pause()
       audio.src = ''
       audioRef.current = null
+      audioSurahRef.current = null
       audio.removeEventListener('play', onPlay)
       audio.removeEventListener('pause', onPause)
       audio.removeEventListener('ended', onEnded)
@@ -1722,11 +2133,21 @@ export default function MushafPage() {
         audioObjectUrlRef.current = null
       }
     }
-  }, [findTimingStart, repeatAyahNumber, updatePlayingAyahFromTime])
+  }, [
+    activeJuzNumber,
+    activeJuzRange,
+    findTimingEnd,
+    findTimingStart,
+    loadAudioForSurah,
+    notifyJuzCompleted,
+    repeatAyahNumber,
+    triggerToast,
+    updatePlayingAyahFromTime,
+  ])
 
   useEffect(() => {
     autoplayConsumedRef.current = false
-  }, [ayahFromUrl, pageNumber, reciterApiId, requestedSurah, riwaya])
+  }, [activeJuzNumber, ayahFromUrl, reciterApiId, requestedSurah, riwaya])
 
   useEffect(() => {
     if (
@@ -1863,9 +2284,16 @@ export default function MushafPage() {
 
   const downloadAyahCard = async (withTafsir: boolean) => {
     if (!selectedAyah) return
+
     let interpretation = tafsirText
     if (withTafsir && !interpretation) {
       interpretation = await fetchTafsir(selectedAyah)
+    }
+
+    try {
+      await document.fonts?.ready
+    } catch {
+      // نكمل حتى لو لم يدعم المتصفح document.fonts.
     }
 
     const canvas = document.createElement('canvas')
@@ -1883,6 +2311,11 @@ export default function MushafPage() {
     context.strokeStyle = '#c7934f'
     context.lineWidth = 4
     context.strokeRect(28, 28, canvas.width - 56, canvas.height - 56)
+
+    // إطار زخرفي داخلي خفيف.
+    context.strokeStyle = 'rgba(199,147,79,.45)'
+    context.lineWidth = 2
+    context.strokeRect(48, 48, canvas.width - 96, canvas.height - 96)
 
     context.textAlign = 'center'
     try { context.direction = 'rtl' } catch {}
@@ -1904,14 +2337,77 @@ export default function MushafPage() {
       context.fillText('التفسير', canvas.width / 2, 670)
       context.fillStyle = '#4b5563'
       context.font = '30px "Amiri", serif'
-      drawWrappedArabicText(context, interpretation || 'لم يتوفر التفسير الآن.', 1180, 735, 56, 54)
+      drawWrappedArabicText(
+        context,
+        interpretation || 'لم يتوفر التفسير الآن.',
+        1180,
+        735,
+        56,
+        54,
+      )
     }
 
-    const link = document.createElement('a')
-    link.download = `samee3-ayah-${selectedAyah.surah?.number || 0}-${selectedAyah.numberInSurah}${withTafsir ? '-tafsir' : ''}.png`
-    link.href = canvas.toDataURL('image/png')
-    link.click()
-    triggerToast(withTafsir ? 'تم تجهيز صورة الآية مع التفسير.' : 'تم تجهيز صورة الآية.')
+    const filename = `samee3-ayah-${selectedAyah.surah?.number || 0}-${selectedAyah.numberInSurah}${withTafsir ? '-tafsir' : ''}.png`
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/png', 1)
+    })
+
+    if (!blob) {
+      triggerToast('تعذر إنشاء الصورة.')
+      return
+    }
+
+    const file = new File([blob], filename, { type: 'image/png' })
+    const nav = navigator as Navigator & {
+      canShare?: (data: { files: File[] }) => boolean
+      share?: (data: ShareData) => Promise<void>
+    }
+
+    try {
+      if (nav.share && nav.canShare?.({ files: [file] })) {
+        await nav.share({
+          files: [file],
+          title: withTafsir ? 'آية مع التفسير — مصحف سميع' : 'آية — مصحف سميع',
+        })
+        triggerToast(withTafsir ? 'تم إنشاء الصورة وجاهزة للمشاركة أو الحفظ.' : 'تم إنشاء صورة الآية وجاهزة للحفظ.')
+        return
+      }
+    } catch (error) {
+      const shareError = error as DOMException
+      if (shareError?.name === 'AbortError') {
+        return
+      }
+    }
+
+    const url = URL.createObjectURL(blob)
+    const isAppleMobile =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+      !(window as Window & { MSStream?: unknown }).MSStream
+
+    try {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.rel = 'noopener'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+
+      // Safari على iPhone/iPad قد لا ينفذ download؛ فتح الصورة في صفحة مستقلة
+      // يجعل حفظها من قائمة المشاركة/الضغط المطول ممكنًا.
+      if (isAppleMobile) {
+        window.setTimeout(() => {
+          try {
+            window.open(url, '_blank', 'noopener,noreferrer')
+          } catch {}
+        }, 250)
+      }
+
+      triggerToast(withTafsir ? 'تم إنشاء صورة الآية مع التفسير.' : 'تم إنشاء صورة الآية.')
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    }
   }
 
   const dismissChrome = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -1938,15 +2434,6 @@ export default function MushafPage() {
       onTouchEnd={handleTouchEnd}
     >
       <div className="samee3-book-stage" onClick={dismissChrome}>
-        {loading ? (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#f5f0e4]/90 backdrop-blur-[2px]">
-            <div className="flex flex-col items-center gap-3 text-[#776345]">
-              <Loader2 size={30} className="animate-spin text-[#0e99d4]" />
-              <span className="text-sm font-bold">جاري فتح المصحف...</span>
-            </div>
-          </div>
-        ) : null}
-
         {error ? (
           <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
             <div className="max-w-sm rounded-[26px] border border-[#dfd1b9] bg-[#fffdf7] p-6 text-center shadow-xl">
