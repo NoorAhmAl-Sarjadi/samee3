@@ -24,12 +24,12 @@ import {
   ImageIcon,
   List,
   Loader2,
-  Menu,
   Mic2,
   Pause,
   Play,
   Search,
   Sparkles,
+  Repeat,
   X,
 } from 'lucide-react'
 
@@ -88,6 +88,12 @@ type SearchTarget = {
   page: number
   surah?: number
   ayah?: number
+}
+
+type AyahTiming = {
+  ayah?: number
+  start_time?: number
+  end_time?: number
 }
 
 const PRINTED_RIWAYAT = new Set<Riwaya>([
@@ -802,9 +808,13 @@ export default function MushafPage() {
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
+  const [playingAyahNumber, setPlayingAyahNumber] = useState<number | null>(null)
+  const [repeatAyahNumber, setRepeatAyahNumber] = useState<number | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioObjectUrlRef = useRef<string | null>(null)
+  const ayahTimingsRef = useRef<AyahTiming[]>([])
+  const repeatSeekGuardRef = useRef(false)
   const autoplayConsumedRef = useRef(false)
   const navigatingRef = useRef(false)
   const touchStartX = useRef<number | null>(null)
@@ -954,23 +964,67 @@ export default function MushafPage() {
   }, [ayahFromUrl, leftPageData, pageData, rightPageData])
 
   const highlightSearchedAyah = useCallback(() => {
-    if (!selectedAyah) return
-    const nodes = document.querySelectorAll('.samee3-page-art .ayahPolygon, .samee3-page-art [data-ayah], .samee3-page-art [data-ayah-number], .samee3-page-art .samee3-text-ayah')
+    const nodes = document.querySelectorAll(
+      '.samee3-page-art .ayahPolygon, .samee3-page-art [data-ayah], .samee3-page-art [data-ayah-number], .samee3-page-art .samee3-text-ayah',
+    )
+
+    const visibleSources = [pageData, rightPageData, leftPageData].filter(Boolean) as PageData[]
+    const visiblePlayingAyah =
+      playingAyahNumber !== null
+        ? visibleSources
+            .flatMap((source) => source.ayahs)
+            .find((item) => item.number === playingAyahNumber) || null
+        : null
+
     nodes.forEach((node) => {
-      node.classList.remove('samee3-selected-ayah')
-      const values = [node.getAttribute('data-ayah'), node.getAttribute('data-ayah-number'), node.getAttribute('id')].filter(Boolean) as string[]
-      const matches = values.some((value) => {
-        const match = value.match(/\d+/)
-        return match && Number(match[0]) === selectedAyah.number
-      })
-      if (matches) node.classList.add('samee3-selected-ayah')
+      node.classList.remove('samee3-selected-ayah', 'samee3-playing-ayah')
+
+      const values = [
+        node.getAttribute('data-ayah'),
+        node.getAttribute('data-ayah-number'),
+        node.getAttribute('id'),
+      ].filter(Boolean) as string[]
+
+      const numbers = values
+        .map((value) => value.match(/\d+/))
+        .filter(Boolean)
+        .map((match) => Number(match![0]))
+
+      const sheet = node.closest('.samee3-page-sheet') as HTMLElement | null
+      const sheetSurah = Number(sheet?.dataset.surahNumber || 0)
+
+      const selectedMatch =
+        !!selectedAyah &&
+        (
+          numbers.some((number) => number === selectedAyah.number) ||
+          (
+            sheetSurah > 0 &&
+            Number(selectedAyah.surah?.number) === sheetSurah &&
+            numbers.some((number) => number === selectedAyah.numberInSurah)
+          )
+        )
+
+      const playingMatch =
+        !!visiblePlayingAyah &&
+        (
+          numbers.some((number) => number === visiblePlayingAyah.number) ||
+          (
+            sheetSurah > 0 &&
+            Number(visiblePlayingAyah.surah?.number) === sheetSurah &&
+            numbers.some((number) => number === visiblePlayingAyah.numberInSurah)
+          )
+        )
+
+      if (selectedMatch) node.classList.add('samee3-selected-ayah')
+      if (playingMatch) node.classList.add('samee3-playing-ayah')
     })
-  }, [selectedAyah])
+  }, [leftPageData, pageData, playingAyahNumber, rightPageData, selectedAyah])
+
 
   useEffect(() => {
     const timer = window.setTimeout(highlightSearchedAyah, 120)
     return () => window.clearTimeout(timer)
-  }, [highlightSearchedAyah, svg, leftSvg, selectedAyah])
+  }, [highlightSearchedAyah, svg, leftSvg, selectedAyah, playingAyahNumber])
 
   const mainDisplayedSvg = useMemo(() => {
     if (PRINTED_RIWAYAT.has(riwaya)) return svg
@@ -1171,11 +1225,31 @@ export default function MushafPage() {
     updateRouteAudioSelection(value, preferred)
   }
 
-  const handleReciterSelect = (id: number) => {
+  const handleReciterSelect = async (id: number) => {
     const item = reciters.find((candidate) => candidate.apiId === id) || null
     if (!item) return
+
+    const audio = audioRef.current
+    const wasPlaying = !!audio && !audio.paused && !!audio.src
+    const wasLoaded = !!audio && !!audio.src
+    const preservedTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0
+    const activeLocalAyah = selectedAyah?.numberInSurah || undefined
+    const currentSurah = selectedAyah?.surah?.number || requestedSurah || currentSurahNumber
+
     setSelectedReciterId(id)
     updateRouteAudioSelection(riwaya, item)
+
+    if (currentSurah && (wasPlaying || wasLoaded)) {
+      await loadAudioForSurah(
+        Number(currentSurah),
+        wasPlaying,
+        activeLocalAyah,
+        item,
+        activeLocalAyah ? undefined : preservedTime,
+      )
+    }
+
+    triggerToast(wasPlaying ? `تم تبديل القارئ إلى ${item.label}` : `تم اختيار ${item.label}`)
   }
 
   const handleSurahSelect = (id: number) => {
@@ -1258,8 +1332,152 @@ export default function MushafPage() {
     }
   }
 
-  const loadAudioForCurrentSurah = async (shouldPlay: boolean) => {
-    const surahNumber = requestedSurah || currentSurahNumber
+  const loadAyahTimings = useCallback(async (surahNumber: number, readId: number) => {
+    if (!surahNumber || !readId) {
+      ayahTimingsRef.current = []
+      return [] as AyahTiming[]
+    }
+
+    try {
+      const timingResponse = await fetch(
+        `https://mp3quran.net/api/v3/ayat_timing?surah=${surahNumber}&read=${encodeURIComponent(String(readId))}`,
+        { cache: 'force-cache' },
+      )
+
+      if (!timingResponse.ok) {
+        ayahTimingsRef.current = []
+        return [] as AyahTiming[]
+      }
+
+      const payload = await timingResponse.json()
+      const raw = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.ayat_timing)
+          ? payload.ayat_timing
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : []
+
+      const timings = raw
+        .map((item: unknown) => {
+          const row = item as Record<string, unknown>
+          return {
+            ayah: Number(row.ayah),
+            start_time: Number(row.start_time),
+            end_time: Number(row.end_time),
+          } satisfies AyahTiming
+        })
+        .filter(
+          (item: AyahTiming) =>
+            Number.isFinite(Number(item.ayah)) &&
+            Number(item.ayah) > 0 &&
+            Number.isFinite(Number(item.start_time)),
+        )
+        .sort((a: AyahTiming, b: AyahTiming) => Number(a.start_time) - Number(b.start_time))
+
+      ayahTimingsRef.current = timings
+      return timings
+    } catch {
+      ayahTimingsRef.current = []
+      return [] as AyahTiming[]
+    }
+  }, [])
+
+  const findTimingStart = useCallback((timings: AyahTiming[], ayahNumber?: number) => {
+    if (!ayahNumber) return null
+    const target = timings.find((item) => Number(item.ayah) === ayahNumber)
+    if (!target || !Number.isFinite(Number(target.start_time))) return null
+    return Math.max(0, Number(target.start_time) / 1000)
+  }, [])
+
+  const updatePlayingAyahFromTime = useCallback((currentTime: number) => {
+    const timings = ayahTimingsRef.current
+    if (!timings.length) {
+      setPlayingAyahNumber(null)
+      return
+    }
+
+    let active: AyahTiming | null = null
+    for (let index = 0; index < timings.length; index += 1) {
+      const current = timings[index]
+      const start = Number(current.start_time || 0) / 1000
+      const nextStart =
+        index < timings.length - 1
+          ? Number(timings[index + 1].start_time || 0) / 1000
+          : Number.POSITIVE_INFINITY
+
+      if (currentTime >= start && currentTime < nextStart) {
+        active = current
+        break
+      }
+    }
+
+    if (!active || !Number.isFinite(Number(active.ayah))) {
+      return
+    }
+
+    const currentSurah = Number(
+      requestedSurah ||
+        currentSurahNumber ||
+        0,
+    )
+
+    const visibleSources = [pageData, rightPageData, leftPageData].filter(Boolean) as PageData[]
+    const visibleAyah = visibleSources
+      .flatMap((source) => source.ayahs)
+      .find(
+        (item) =>
+          Number(item.surah?.number) === currentSurah &&
+          Number(item.numberInSurah) === Number(active?.ayah),
+      )
+
+    if (visibleAyah) {
+      setPlayingAyahNumber(visibleAyah.number)
+    }
+
+    if (repeatAyahNumber !== null && !repeatSeekGuardRef.current) {
+      const index = timings.findIndex(
+        (item) => Number(item.ayah) === repeatAyahNumber,
+      )
+      const nextStart =
+        index >= 0 && index < timings.length - 1
+          ? Number(timings[index + 1].start_time || 0) / 1000
+          : null
+      const repeatStart = findTimingStart(timings, repeatAyahNumber)
+
+      if (
+        repeatStart !== null &&
+        nextStart !== null &&
+        currentTime >= nextStart - 0.05
+      ) {
+        repeatSeekGuardRef.current = true
+        const audio = audioRef.current
+        if (audio) {
+          audio.currentTime = repeatStart
+          void audio.play().catch(() => {})
+        }
+        window.setTimeout(() => {
+          repeatSeekGuardRef.current = false
+        }, 180)
+      }
+    }
+  }, [
+    currentSurahNumber,
+    findTimingStart,
+    leftPageData,
+    pageData,
+    repeatAyahNumber,
+    requestedSurah,
+    rightPageData,
+  ])
+
+  const loadAudioForSurah = useCallback(async (
+    surahNumber: number,
+    shouldPlay: boolean,
+    targetAyahNumber?: number,
+    reciterOverride?: LocalReciter | null,
+    fallbackStartSeconds?: number,
+  ) => {
     if (!surahNumber) {
       triggerToast('لم يتم تحديد السورة الحالية.')
       return
@@ -1269,14 +1487,22 @@ export default function MushafPage() {
     setAudioError('')
 
     try {
-      let server = selectedReciter?.server || ''
-      let activeReciter = selectedReciter
+      let server = reciterOverride?.server || selectedReciter?.server || ''
+      let activeReciter = reciterOverride || selectedReciter
 
       if (!server && reciterApiId) {
-        const remote = await fetch(`https://mp3quran.net/api/v3/reciters?language=ar&reciter=${reciterApiId}`, { cache: 'no-store' })
+        const remote = await fetch(
+          `https://mp3quran.net/api/v3/reciters?language=ar&reciter=${reciterApiId}`,
+          { cache: 'no-store' },
+        )
         const payload = await remote.json()
-        const source = Array.isArray(payload?.reciters) ? (payload.reciters as ApiReciter[]).find((item) => Number(item.id) === reciterApiId) : null
+        const source = Array.isArray(payload?.reciters)
+          ? (payload.reciters as ApiReciter[]).find(
+              (item) => Number(item.id) === reciterApiId,
+            )
+          : null
         const moshaf = source ? getMoshafForRiwaya(source, riwaya) : null
+
         if (moshaf?.server) {
           server = String(moshaf.server).replace(/\/$/, '')
           activeReciter = {
@@ -1289,7 +1515,9 @@ export default function MushafPage() {
         }
       }
 
-      if (!server) throw new Error('لا يوجد رابط صوتي صالح للقارئ المختار.')
+      if (!server) {
+        throw new Error('لا يوجد رابط صوتي صالح للقارئ المختار.')
+      }
 
       const networkUrl = `${server}/${String(surahNumber).padStart(3, '0')}.mp3`
       let finalUrl = networkUrl
@@ -1299,76 +1527,181 @@ export default function MushafPage() {
           const cached = await caches.match(networkUrl)
           if (cached) {
             const blob = await cached.blob()
-            if (audioObjectUrlRef.current) URL.revokeObjectURL(audioObjectUrlRef.current)
+
+            if (audioObjectUrlRef.current) {
+              URL.revokeObjectURL(audioObjectUrlRef.current)
+            }
+
             const localUrl = URL.createObjectURL(blob)
             audioObjectUrlRef.current = localUrl
             finalUrl = localUrl
           }
         }
       } catch {
-        // network fallback
+        // نستخدم المصدر الشبكي.
       }
 
       const audio = audioRef.current
       if (!audio) return
+
+      const timings = await loadAyahTimings(
+        surahNumber,
+        activeReciter?.apiId || reciterApiId,
+      )
+
+      const targetStart =
+        findTimingStart(timings, targetAyahNumber) ??
+        fallbackStartSeconds ??
+        0
+
       audio.pause()
       audio.src = finalUrl
       audio.preload = 'auto'
       audio.load()
       setAudioDisplayUrl(finalUrl)
 
-      const startInfo = ayahFromUrl.includes(':') ? ayahFromUrl.split(':') : []
-      if (startInfo.length === 2 && Number(startInfo[0]) === surahNumber) {
-        try {
-          const timingResponse = await fetch(`https://mp3quran.net/api/v3/ayat_timing?surah=${surahNumber}&read=${activeReciter?.apiId || reciterApiId}`, { cache: 'force-cache' })
-          if (timingResponse.ok) {
-            const timing = await timingResponse.json()
-            const target = Array.isArray(timing) ? timing.find((item: { ayah?: number; start_time?: number }) => Number(item?.ayah) === Number(startInfo[1])) : null
-            if (target && Number.isFinite(Number(target.start_time))) audio.currentTime = Math.max(0, Number(target.start_time) / 1000)
-          }
-        } catch {
-          // timing is optional
-        }
-      }
+      audio.currentTime = targetStart
+      setPlayingAyahNumber(
+        targetAyahNumber
+          ? (
+              [pageData, rightPageData, leftPageData]
+                .filter(Boolean)
+                .flatMap((source) => (source as PageData).ayahs)
+                .find(
+                  (item) =>
+                    Number(item.surah?.number) === surahNumber &&
+                    Number(item.numberInSurah) === targetAyahNumber,
+                )?.number ?? null
+            )
+          : null,
+      )
 
       if (shouldPlay) {
         await audio.play()
       }
     } catch (error) {
       console.error(error)
-      setAudioError(error instanceof Error ? error.message : 'تعذر تشغيل التلاوة.')
+      setAudioError(
+        error instanceof Error
+          ? error.message
+          : 'تعذر تشغيل التلاوة.',
+      )
     } finally {
       setAudioLoading(false)
     }
-  }
+  }, [
+    findTimingStart,
+    leftPageData,
+    loadAyahTimings,
+    pageData,
+    reciterApiId,
+    reciterName,
+    requestedSurah,
+    rightPageData,
+    riwaya,
+    selectedReciter,
+    triggerToast,
+  ])
+
+  const loadAudioForCurrentSurah = useCallback(async (shouldPlay: boolean) => {
+    const surahNumber = requestedSurah || currentSurahNumber
+    await loadAudioForSurah(surahNumber, shouldPlay)
+  }, [currentSurahNumber, loadAudioForSurah, requestedSurah])
 
   useEffect(() => {
     const audio = new Audio()
     audioRef.current = audio
-    audio.addEventListener('play', () => setIsPlaying(true))
-    audio.addEventListener('pause', () => setIsPlaying(false))
-    audio.addEventListener('ended', () => setIsPlaying(false))
-    audio.addEventListener('error', () => {
+
+    const onPlay = () => setIsPlaying(true)
+    const onPause = () => setIsPlaying(false)
+    const onEnded = () => {
+      if (repeatAyahNumber !== null && ayahTimingsRef.current.length) {
+        const repeatStart = findTimingStart(
+          ayahTimingsRef.current,
+          repeatAyahNumber,
+        )
+
+        if (repeatStart !== null) {
+          audio.currentTime = repeatStart
+          void audio.play().catch(() => {})
+          return
+        }
+      }
+
+      setIsPlaying(false)
+      setPlayingAyahNumber(null)
+    }
+
+    const onTimeUpdate = () => {
+      updatePlayingAyahFromTime(audio.currentTime)
+    }
+
+    const onLoadedMetadata = () => {
+      if (audio.currentTime < 0) audio.currentTime = 0
+    }
+
+    const onError = () => {
       setIsPlaying(false)
       setAudioError('تعذر تشغيل ملف التلاوة.')
-    })
+    }
+
+    audio.addEventListener('play', onPlay)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('timeupdate', onTimeUpdate)
+    audio.addEventListener('loadedmetadata', onLoadedMetadata)
+    audio.addEventListener('error', onError)
+
     return () => {
       audio.pause()
       audio.src = ''
       audioRef.current = null
-      if (audioObjectUrlRef.current) URL.revokeObjectURL(audioObjectUrlRef.current)
+      audio.removeEventListener('play', onPlay)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('timeupdate', onTimeUpdate)
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+      audio.removeEventListener('error', onError)
+      if (audioObjectUrlRef.current) {
+        URL.revokeObjectURL(audioObjectUrlRef.current)
+        audioObjectUrlRef.current = null
+      }
     }
-  }, [])
+  }, [findTimingStart, repeatAyahNumber, updatePlayingAyahFromTime])
 
   useEffect(() => {
     autoplayConsumedRef.current = false
   }, [ayahFromUrl, pageNumber, reciterApiId, requestedSurah, riwaya])
 
   useEffect(() => {
-    if (!autoplayRequested || autoplayConsumedRef.current || !pageData?.ayahs?.length || !reciterApiId) return
+    if (
+      !autoplayRequested ||
+      autoplayConsumedRef.current ||
+      !pageData?.ayahs?.length ||
+      !reciterApiId
+    ) {
+      return
+    }
+
     autoplayConsumedRef.current = true
-    void loadAudioForCurrentSurah(true)
-  }, [autoplayRequested, pageData, reciterApiId])
+    const initialAyah = ayahFromUrl.includes(':')
+      ? Number(ayahFromUrl.split(':')[1])
+      : undefined
+
+    void loadAudioForSurah(
+      requestedSurah || currentSurahNumber || Number(ayahFromUrl.split(':')[0]) || 0,
+      true,
+      initialAyah,
+    )
+  }, [
+    autoplayRequested,
+    ayahFromUrl,
+    currentSurahNumber,
+    loadAudioForSurah,
+    pageData,
+    reciterApiId,
+    requestedSurah,
+  ])
 
   const toggleAudio = async () => {
     const audio = audioRef.current
@@ -1376,12 +1709,52 @@ export default function MushafPage() {
       await loadAudioForCurrentSurah(true)
       return
     }
+
     if (audio.paused) {
       await audio.play()
     } else {
       audio.pause()
     }
   }
+
+  const playSelectedAyah = useCallback(async () => {
+    if (!selectedAyah?.surah?.number) return
+    setRepeatAyahNumber(null)
+    repeatSeekGuardRef.current = false
+    await loadAudioForSurah(
+      Number(selectedAyah.surah.number),
+      true,
+      Number(selectedAyah.numberInSurah),
+    )
+    setShowAyahActions(false)
+  }, [loadAudioForSurah, selectedAyah])
+
+  const toggleRepeatSelectedAyah = useCallback(async () => {
+    if (!selectedAyah?.surah?.number) return
+
+    const localAyah = Number(selectedAyah.numberInSurah)
+
+    if (
+      repeatAyahNumber === selectedAyah.number ||
+      repeatAyahNumber === localAyah
+    ) {
+      setRepeatAyahNumber(null)
+      repeatSeekGuardRef.current = false
+      triggerToast('تم إيقاف تكرار الآية.')
+      return
+    }
+
+    setRepeatAyahNumber(localAyah)
+    repeatSeekGuardRef.current = false
+
+    await loadAudioForSurah(
+      Number(selectedAyah.surah.number),
+      true,
+      localAyah,
+    )
+    setShowAyahActions(false)
+  }, [loadAudioForSurah, repeatAyahNumber, selectedAyah, triggerToast])
+
 
   const fetchTafsir = async (ayah: Ayah): Promise<string> => {
     if (!ayah.surah?.number) return 'لم يتوفر التفسير الآن.'
@@ -1645,17 +2018,6 @@ export default function MushafPage() {
           </>
         ) : null}
 
-        <button
-          type="button"
-          className={`samee3-reveal-button ${showChrome ? 'open' : ''}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            setShowChrome((value) => !value)
-          }}
-          aria-label="إظهار أو إخفاء القوائم"
-        >
-          <Menu size={18} />
-        </button>
       </div>
 
       {showAyahActions && selectedAyah ? (
@@ -1672,6 +2034,19 @@ export default function MushafPage() {
             <div className="samee3-ayah-preview">{selectedAyah.text}</div>
 
             <div className="samee3-ayah-actions-grid">
+              <button type="button" onClick={() => void playSelectedAyah()}><Play size={19} /><span>تشغيل</span></button>
+              <button
+                type="button"
+                className={repeatAyahNumber === selectedAyah.number || repeatAyahNumber === selectedAyah.numberInSurah ? 'saved' : ''}
+                onClick={() => void toggleRepeatSelectedAyah()}
+              >
+                <Repeat size={19} />
+                <span>
+                  {repeatAyahNumber === selectedAyah.number || repeatAyahNumber === selectedAyah.numberInSurah
+                    ? 'إيقاف التكرار'
+                    : 'تكرار'}
+                </span>
+              </button>
               <button type="button" onClick={() => void copyAyah()}><Copy size={19} /><span>نسخ</span></button>
               <button type="button" onClick={() => void downloadAyahCard(false)}><ImageIcon size={19} /><span>تصميم كصورة</span></button>
               <button type="button" onClick={() => void downloadAyahCard(true)}><FileText size={19} /><span>صورة مع التفسير</span></button>
@@ -1721,10 +2096,27 @@ export default function MushafPage() {
         .samee3-text-page { width:100%; height:100%; box-sizing:border-box; overflow:hidden; padding:20px 26px; direction:rtl; background:#fcfbf7; color:#1c2736; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(25px,2.25vw,39px); line-height:2.24; text-align:justify; }
         .samee3-text-ayah { display:inline; cursor:pointer; border-radius:9px; transition:background .16s ease; }
         .samee3-text-selected, .samee3-selected-ayah { background:rgba(14,153,212,.14) !important; border-radius:9px; }
+        .samee3-playing-ayah {
+          background:rgba(215,138,18,.16) !important;
+          border-radius:11px !important;
+          box-shadow:inset 0 0 0 2px rgba(197,137,44,.72), 0 0 0 1px rgba(197,137,44,.18) !important;
+        }
+        .samee3-page-art .ayahPolygon.samee3-playing-ayah,
+        .samee3-page-art [data-ayah].samee3-playing-ayah,
+        .samee3-page-art [data-ayah-number].samee3-playing-ayah {
+          opacity:1 !important;
+          stroke:#c58b32 !important;
+          stroke-width:3 !important;
+          stroke-opacity:.86 !important;
+          filter:drop-shadow(0 1px 2px rgba(132,84,20,.18));
+        }
+        .samee3-page-art .ayahPolygon.samee3-playing-ayah * {
+          stroke:#c58b32 !important;
+          stroke-width:3 !important;
+          stroke-opacity:.86 !important;
+          filter:drop-shadow(0 1px 2px rgba(132,84,20,.18));
+        }
         .samee3-ayah-number { display:inline-block; margin:0 5px; color:#b78945; font-family:'Amiri',serif; font-size:.72em; }
-
-        .samee3-reveal-button { position:absolute; z-index:80; left:50%; bottom:max(10px, env(safe-area-inset-bottom)); transform:translateX(-50%); width:42px; height:42px; border-radius:999px; border:1px solid rgba(153,123,76,.26); background:rgba(255,253,248,.95); color:#0e99d4; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 28px rgba(76,58,29,.16); backdrop-filter:blur(10px); transition:.2s ease; }
-        .samee3-reveal-button.open { transform:translateX(-50%) rotate(180deg); }
 
         .samee3-top-controls { position:absolute; z-index:70; top:max(10px,env(safe-area-inset-top)); left:50%; transform:translateX(-50%); width:min(94vw,900px); padding:10px; border-radius:24px; background:rgba(255,253,248,.93); border:1px solid rgba(198,177,142,.55); box-shadow:0 14px 40px rgba(75,58,33,.17); backdrop-filter:blur(16px); }
         .samee3-search-row { display:flex; gap:8px; align-items:center; }
@@ -1798,7 +2190,11 @@ type MushafPageSheetProps = {
 
 function MushafPageSheet({ page, data, html, side, meta, onAyahClick }: MushafPageSheetProps) {
   return (
-    <section className={`samee3-page-sheet ${side}`} onClick={(event) => onAyahClick(event, data)}>
+    <section
+      className={`samee3-page-sheet ${side}`}
+      data-surah-number={data?.ayahs?.[0]?.surah?.number || ''}
+      onClick={(event) => onAyahClick(event, data)}
+    >
       <div className="samee3-page-meta">
         <div className="meta-side">
           <span className="meta-badge">⌁</span>
