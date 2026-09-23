@@ -126,13 +126,14 @@ const RIWAYA_REMOTE_IDS: Record<Riwaya, number> = {
 }
 
 const RIWAYA_KEYWORDS: Record<Riwaya, string[]> = {
-  hafs: ['حفص', 'عاصم'],
-  warsh: ['ورش', 'نافع'],
-  qalun: ['قالون', 'نافع'],
-  douri: ['الدوري', 'أبي عمرو', 'ابي عمرو'],
-  shubah: ['شعبة', 'شعبه', 'عاصم'],
-  sousi: ['السوسي', 'أبي عمرو', 'ابي عمرو'],
-  bazzi: ['البزي', 'ابن كثير'],
+  // كلمة اسم الرواية وحدها هي معيار المطابقة؛ اسم الشيخ/الإمام قد يختلف في صياغة الـ API.
+  hafs: ['حفص'],
+  warsh: ['ورش'],
+  qalun: ['قالون'],
+  douri: ['الدوري'],
+  shubah: ['شعبة', 'شعبه'],
+  sousi: ['السوسي', 'سوسي'],
+  bazzi: ['البزي', 'بزي'],
 }
 
 const SURAH_LIST = [
@@ -776,15 +777,17 @@ function parseQuranReference(value: string | null): QuranReference | null {
 
 function getMoshafForRiwaya(reciter: ApiReciter, riwaya: Riwaya) {
   const list = Array.isArray(reciter.moshaf) ? reciter.moshaf : []
-  const keywords = RIWAYA_KEYWORDS[riwaya]
+  if (!list.length) return null
 
-  // نأخذ المصحف المطابق للرواية فقط، ولا نستخدم مصحفًا آخر كبديل.
-  return (
-    list.find((item) => {
-      const name = normalizeArabic(String(item.name || ''))
-      return keywords.every((keyword) => name.includes(normalizeArabic(keyword)))
-    }) || null
-  )
+  const keywords = RIWAYA_KEYWORDS[riwaya].map(normalizeArabic)
+  const matches = (item: ApiMoshaf) => {
+    const name = normalizeArabic(String(item.name || ''))
+    return keywords.length > 0 && keywords.every((keyword) => name.includes(keyword))
+  }
+
+  // endpoint الخاص بـ rewaya يحدد القراء حسب الرواية، ثم نتحقق أيضًا من اسم المصحف
+  // حتى لا تتسلل قراءة لرواية أخرى إلى القائمة. لا يوجد fallback إلى أول مصحف عام.
+  return list.find((item) => matches(item) && item.server && item.surah_list) || null
 }
 
 export default function MushafPage() {
@@ -842,6 +845,12 @@ export default function MushafPage() {
   const [tafsirText, setTafsirText] = useState('')
   const [tafsirLoading, setTafsirLoading] = useState(false)
   const [toast, setToast] = useState('')
+  const [imageGenerating, setImageGenerating] = useState(false)
+  const [imagePreview, setImagePreview] = useState<{
+    url: string
+    filename: string
+    withTafsir: boolean
+  } | null>(null)
 
   const [reciters, setReciters] = useState<LocalReciter[]>([])
   const [recitersLoading, setRecitersLoading] = useState(false)
@@ -1067,49 +1076,59 @@ export default function MushafPage() {
   }, [])
 
   useEffect(() => {
-    const run = () => {
-      const nearby = [
+    let cancelled = false
+
+    const run = async () => {
+      const nearby = Array.from(new Set([
         pageNumber,
         clampPage(pageNumber + 1),
         clampPage(pageNumber - 1),
         clampPage(pageNumber + 2),
         clampPage(pageNumber - 2),
-      ]
+      ]))
 
+      // لا نضرب الشبكة بـ 7 روايات × عدة صفحات مرة واحدة.
+      // نبدأ بالصفحة الحالية من كل الروايات، ثم نوسع التخزين للرواية المفتوحة.
       const riwayat = Object.keys(RIWAYA_NAMES) as Riwaya[]
-      const queue: Array<Promise<unknown>> = []
-
-      // الصفحة الحالية لكل الروايات، ثم صفحات قريبة للرواية المختارة.
       for (const target of riwayat) {
-        queue.push(prefetchRiwayaPage(target, pageNumber))
+        if (cancelled) return
+        void prefetchRiwayaPage(target, pageNumber)
+        await new Promise((resolve) => window.setTimeout(resolve, 55))
       }
 
-      for (const page of nearby.filter((item, index, list) => list.indexOf(item) === index)) {
-        queue.push(prefetchRiwayaPage(riwaya, page))
+      for (const page of nearby) {
+        if (cancelled) return
+        if (page === pageNumber) continue
+        void prefetchRiwayaPage(riwaya, page)
+        await new Promise((resolve) => window.setTimeout(resolve, 45))
       }
-
-      void Promise.allSettled(queue)
     }
 
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
     }
+
+    let idleId: number | null = null
+    let timeoutId: number | null = null
 
     if (idleWindow.requestIdleCallback) {
-      const id = idleWindow.requestIdleCallback(run, { timeout: 1800 })
-      return () => {
-        if ('cancelIdleCallback' in window) {
-          ;(window as Window & { cancelIdleCallback?: (handle: number) => void }).cancelIdleCallback?.(id)
-        }
-      }
+      idleId = idleWindow.requestIdleCallback(() => void run(), { timeout: 1200 })
+    } else {
+      timeoutId = window.setTimeout(() => void run(), 120)
     }
 
-    const id = window.setTimeout(run, 350)
-    return () => window.clearTimeout(id)
+    return () => {
+      cancelled = true
+      if (idleId !== null) idleWindow.cancelIdleCallback?.(idleId)
+      if (timeoutId !== null) window.clearTimeout(timeoutId)
+    }
   }, [pageNumber, prefetchRiwayaPage, riwaya])
 
   useEffect(() => {
     let cancelled = false
+    // لا نعرض طبقة تحميل فوق الصفحة في كل انتقال؛ الصفحة السابقة تبقى ظاهرة
+    // حتى تكتمل الصفحة الجديدة، ومع الـ cache غالبًا ستكون فورية.
     setLoading(false)
     setError('')
 
@@ -1407,15 +1426,14 @@ export default function MushafPage() {
       params.delete('juzEnd')
     }
 
-    window.setTimeout(() => {
-      router.push(`/mushaf?${params.toString()}`)
-    }, 240)
+    // ندفع المسار مباشرة حتى تبدأ الصفحة التالية بالاعتماد على الـ cache/prefetch فورًا.
+    router.push(`/mushaf?${params.toString()}`)
 
     window.setTimeout(() => {
       navigatingRef.current = false
       setTurning(false)
       setTurnDirection(null)
-    }, 560)
+    }, 260)
   }, [pageNumber, router, searchParams])
 
   const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
@@ -2284,132 +2302,216 @@ export default function MushafPage() {
   }
 
   const downloadAyahCard = async (withTafsir: boolean) => {
-    if (!selectedAyah) return
+    if (!selectedAyah || imageGenerating) return
 
-    let interpretation = tafsirText
-    if (withTafsir && !interpretation) {
-      interpretation = await fetchTafsir(selectedAyah)
-    }
-
+    setImageGenerating(true)
     try {
-      await document.fonts?.ready
-    } catch {
-      // نكمل حتى لو لم يدعم المتصفح document.fonts.
-    }
+      let interpretation = tafsirText
+      if (withTafsir && !interpretation) {
+        interpretation = await fetchTafsir(selectedAyah)
+      }
 
-    const canvas = document.createElement('canvas')
-    canvas.width = 1400
-    canvas.height = withTafsir ? 1050 : 820
-    const context = canvas.getContext('2d')
-    if (!context) return
+      try {
+        await document.fonts?.ready
+      } catch {
+        // بعض المتصفحات لا تدعم document.fonts.
+      }
 
-    const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height)
-    gradient.addColorStop(0, '#fffaf0')
-    gradient.addColorStop(1, '#edf8fa')
-    context.fillStyle = gradient
-    context.fillRect(0, 0, canvas.width, canvas.height)
+      const canvas = document.createElement('canvas')
+      const width = 1400
+      const contentWidth = 1160
+      const centerX = width / 2
+      const ayahText = selectedAyah.text.trim()
 
-    context.strokeStyle = '#c7934f'
-    context.lineWidth = 4
-    context.strokeRect(28, 28, canvas.width - 56, canvas.height - 56)
-
-    // إطار زخرفي داخلي خفيف.
-    context.strokeStyle = 'rgba(199,147,79,.45)'
-    context.lineWidth = 2
-    context.strokeRect(48, 48, canvas.width - 96, canvas.height - 96)
-
-    context.textAlign = 'center'
-    try { context.direction = 'rtl' } catch {}
-    context.fillStyle = '#155e67'
-    context.font = 'bold 54px serif'
-    context.fillText(`سورة ${getSurahName(selectedAyah.surah?.number)}`, canvas.width / 2, 105)
-
-    context.fillStyle = '#a56c2a'
-    context.font = 'bold 34px serif'
-    context.fillText(`الآية ${arabicNumber(selectedAyah.numberInSurah)} · مصحف سميع`, canvas.width / 2, 158)
-
-    context.fillStyle = '#162033'
-    context.font = '44px "Amiri Quran", "Amiri", serif'
-    drawWrappedArabicText(context, selectedAyah.text, 1180, 250, 78, 70)
-
-    if (withTafsir) {
-      context.fillStyle = '#155e67'
-      context.font = 'bold 34px serif'
-      context.fillText('التفسير', canvas.width / 2, 670)
-      context.fillStyle = '#4b5563'
-      context.font = '30px "Amiri", serif'
-      drawWrappedArabicText(
-        context,
-        interpretation || 'لم يتوفر التفسير الآن.',
-        1180,
-        735,
-        56,
-        54,
+      const ayahLayout = fitArabicLines(
+        canvas,
+        ayahText,
+        '"Amiri Quran", "Amiri", serif',
+        88,
+        42,
+        contentWidth,
+        withTafsir ? 7 : 10,
       )
-    }
 
-    const filename = `samee3-ayah-${selectedAyah.surah?.number || 0}-${selectedAyah.numberInSurah}${withTafsir ? '-tafsir' : ''}.png`
+      const tafsirLayout = withTafsir
+        ? fitArabicLines(
+            canvas,
+            interpretation || 'لم يتوفر التفسير الآن.',
+            '"Amiri", serif',
+            38,
+            24,
+            contentWidth,
+            9,
+          )
+        : null
 
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, 'image/png', 1)
-    })
+      const ayahTop = 292
+      const ayahHeight = ayahLayout.lines.length * ayahLayout.lineHeight
+      const tafsirTop = ayahTop + ayahHeight + 94
+      const tafsirHeight = tafsirLayout
+        ? tafsirLayout.lines.length * tafsirLayout.lineHeight
+        : 0
 
-    if (!blob) {
-      triggerToast('تعذر إنشاء الصورة.')
-      return
-    }
+      const targetHeight = withTafsir
+        ? Math.min(1820, Math.max(1080, tafsirTop + tafsirHeight + 150))
+        : Math.min(1160, Math.max(820, ayahTop + ayahHeight + 125))
 
-    const file = new File([blob], filename, { type: 'image/png' })
-    const nav = navigator as Navigator & {
-      canShare?: (data: { files: File[] }) => boolean
-      share?: (data: ShareData) => Promise<void>
-    }
+      canvas.width = width
+      canvas.height = targetHeight
 
-    try {
-      if (nav.share && nav.canShare?.({ files: [file] })) {
-        await nav.share({
-          files: [file],
-          title: withTafsir ? 'آية مع التفسير — مصحف سميع' : 'آية — مصحف سميع',
-        })
-        triggerToast(withTafsir ? 'تم إنشاء الصورة وجاهزة للمشاركة أو الحفظ.' : 'تم إنشاء صورة الآية وجاهزة للحفظ.')
+      const context = canvas.getContext('2d')
+      if (!context) {
+        triggerToast('تعذر إنشاء الصورة.')
         return
       }
+
+      // خلفية فاخرة هادئة مستوحاة من ورق المصحف مع تدرج أخضر-عاجي.
+      const gradient = context.createLinearGradient(0, 0, width, targetHeight)
+      gradient.addColorStop(0, '#fffaf1')
+      gradient.addColorStop(0.52, '#fbf8ef')
+      gradient.addColorStop(1, '#eef8f8')
+      context.fillStyle = gradient
+      context.fillRect(0, 0, width, targetHeight)
+
+      // هالة خفيفة جدًا في الوسط.
+      const glow = context.createRadialGradient(centerX, targetHeight * 0.42, 80, centerX, targetHeight * 0.42, 760)
+      glow.addColorStop(0, 'rgba(255,255,255,.78)')
+      glow.addColorStop(1, 'rgba(255,255,255,0)')
+      context.fillStyle = glow
+      context.fillRect(0, 0, width, targetHeight)
+
+      context.strokeStyle = '#bd8b48'
+      context.lineWidth = 5
+      context.strokeRect(30, 30, width - 60, targetHeight - 60)
+
+      context.strokeStyle = 'rgba(189,139,72,.38)'
+      context.lineWidth = 2
+      context.strokeRect(54, 54, width - 108, targetHeight - 108)
+
+      // زوايا زخرفية بسيطة بدل الزحمة البصرية.
+      const drawCorner = (x: number, y: number, sx: number, sy: number) => {
+        context.save()
+        context.translate(x, y)
+        context.scale(sx, sy)
+        context.strokeStyle = 'rgba(21,94,103,.38)'
+        context.lineWidth = 3
+        context.beginPath()
+        context.moveTo(0, 50)
+        context.quadraticCurveTo(0, 0, 50, 0)
+        context.stroke()
+        context.beginPath()
+        context.moveTo(16, 42)
+        context.quadraticCurveTo(20, 20, 42, 16)
+        context.stroke()
+        context.restore()
+      }
+      drawCorner(64, 64, 1, 1)
+      drawCorner(width - 64, 64, -1, 1)
+      drawCorner(64, targetHeight - 64, 1, -1)
+      drawCorner(width - 64, targetHeight - 64, -1, -1)
+
+      context.textAlign = 'center'
+      try { context.direction = 'rtl' } catch {}
+
+      context.fillStyle = '#155e67'
+      context.font = '700 62px "Aref Ruqaa", "Amiri", serif'
+      context.fillText(`سورة ${getSurahName(selectedAyah.surah?.number)}`, centerX, 122)
+
+      context.fillStyle = '#a66f2d'
+      context.font = '700 29px "Tajawal", sans-serif'
+      context.fillText(
+        `الآية ${arabicNumber(selectedAyah.numberInSurah)}  •  مصحف سميع`,
+        centerX,
+        174,
+      )
+
+      // ميدالية رقم الآية.
+      context.fillStyle = '#fffaf0'
+      context.strokeStyle = '#c7934f'
+      context.lineWidth = 3
+      context.beginPath()
+      context.arc(centerX, 231, 34, 0, Math.PI * 2)
+      context.fill()
+      context.stroke()
+      context.fillStyle = '#9a662b'
+      context.font = '700 24px "Amiri", serif'
+      context.fillText(arabicNumber(selectedAyah.numberInSurah), centerX, 239)
+
+      drawFittedArabicLines(
+        context,
+        ayahLayout,
+        centerX,
+        ayahTop,
+        '#172235',
+      )
+
+      if (tafsirLayout) {
+        const dividerY = ayahTop + ayahHeight + 34
+        context.strokeStyle = 'rgba(189,139,72,.32)'
+        context.lineWidth = 2
+        context.beginPath()
+        context.moveTo(260, dividerY)
+        context.lineTo(width - 260, dividerY)
+        context.stroke()
+
+        context.fillStyle = '#155e67'
+        context.font = '700 30px "Tajawal", sans-serif'
+        context.fillText('التفسير الميسر', centerX, dividerY + 56)
+
+        drawFittedArabicLines(
+          context,
+          tafsirLayout,
+          centerX,
+          tafsirTop,
+          '#4c5563',
+        )
+      }
+
+      context.fillStyle = 'rgba(21,94,103,.66)'
+      context.font = '700 20px "Tajawal", sans-serif'
+      context.fillText('مصحف سميع', centerX, targetHeight - 82)
+
+      const filename = `samee3-ayah-${selectedAyah.surah?.number || 0}-${selectedAyah.numberInSurah}${withTafsir ? '-tafsir' : ''}.png`
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, 'image/png', 1)
+      })
+
+      if (!blob) {
+        triggerToast('تعذر إنشاء الصورة.')
+        return
+      }
+
+      const url = URL.createObjectURL(blob)
+      setImagePreview((previous) => {
+        if (previous?.url) URL.revokeObjectURL(previous.url)
+        return { url, filename, withTafsir }
+      })
+      setShowAyahActions(false)
     } catch (error) {
-      const shareError = error as DOMException
-      if (shareError?.name === 'AbortError') {
-        return
-      }
-    }
-
-    const url = URL.createObjectURL(blob)
-    const isAppleMobile =
-      /iPad|iPhone|iPod/.test(navigator.userAgent) &&
-      !(window as Window & { MSStream?: unknown }).MSStream
-
-    try {
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      link.rel = 'noopener'
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-
-      // Safari على iPhone/iPad قد لا ينفذ download؛ فتح الصورة في صفحة مستقلة
-      // يجعل حفظها من قائمة المشاركة/الضغط المطول ممكنًا.
-      if (isAppleMobile) {
-        window.setTimeout(() => {
-          try {
-            window.open(url, '_blank', 'noopener,noreferrer')
-          } catch {}
-        }, 250)
-      }
-
-      triggerToast(withTafsir ? 'تم إنشاء صورة الآية مع التفسير.' : 'تم إنشاء صورة الآية.')
+      console.error('Ayah image generation error:', error)
+      triggerToast('تعذر تجهيز تصميم الصورة الآن.')
     } finally {
-      window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+      setImageGenerating(false)
     }
   }
+
+  const downloadImagePreview = useCallback(() => {
+    if (!imagePreview) return
+    const link = document.createElement('a')
+    link.href = imagePreview.url
+    link.download = imagePreview.filename
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    triggerToast('تم تحميل الصورة.')
+  }, [imagePreview, triggerToast])
+
+  useEffect(() => {
+    return () => {
+      if (imagePreview?.url) URL.revokeObjectURL(imagePreview.url)
+    }
+  }, [imagePreview?.url])
 
   const dismissChrome = (event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as Element | null
@@ -2522,7 +2624,7 @@ export default function MushafPage() {
               <div className="samee3-audio-toolbar">
                 <button type="button" onClick={() => void toggleAudio()} disabled={audioLoading} className="samee3-play-button">
                   {audioLoading ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} /> : <Play size={20} />}
-                  <span>{isPlaying ? 'إيقاف السورة' : 'تشغيل السورة'}</span>
+                  <span>{isPlaying ? 'إيقاف' : 'تشغيل'}</span>
                 </button>
 
                 <div className="samee3-select-wrap">
@@ -2619,8 +2721,8 @@ export default function MushafPage() {
                 </span>
               </button>
               <button type="button" onClick={() => void copyAyah()}><Copy size={19} /><span>نسخ</span></button>
-              <button type="button" onClick={() => void downloadAyahCard(false)}><ImageIcon size={19} /><span>تصميم كصورة</span></button>
-              <button type="button" onClick={() => void downloadAyahCard(true)}><FileText size={19} /><span>صورة مع التفسير</span></button>
+              <button type="button" disabled={imageGenerating} onClick={() => void downloadAyahCard(false)}><ImageIcon size={19} /><span>{imageGenerating ? 'جاري التجهيز...' : 'تصميم كصورة'}</span></button>
+              <button type="button" disabled={imageGenerating} onClick={() => void downloadAyahCard(true)}><FileText size={19} /><span>{imageGenerating ? 'جاري التجهيز...' : 'صورة مع التفسير'}</span></button>
               <button type="button" onClick={() => { setShowAyahActions(false); void fetchTafsir(selectedAyah) }}><Sparkles size={19} /><span>التفسير</span></button>
               <button type="button" className={isSaved ? 'saved' : ''} onClick={bookmarkAyah}><Bookmark size={19} /><span>{isSaved ? 'محفوظة' : 'الحفظ'}</span></button>
             </div>
@@ -2635,17 +2737,52 @@ export default function MushafPage() {
         </div>
       ) : null}
 
+      {imagePreview ? (
+        <div className="samee3-image-preview-overlay" onClick={() => setImagePreview(null)}>
+          <div
+            className="samee3-image-preview-sheet"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="samee3-image-preview-head">
+              <div>
+                <span>{imagePreview.withTafsir ? 'صورة الآية مع التفسير' : 'تصميم الآية'}</span>
+                <strong>مصحف سميع</strong>
+              </div>
+              <button type="button" onClick={() => setImagePreview(null)} aria-label="إغلاق المعاينة">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="samee3-image-preview-frame">
+              <img
+                src={imagePreview.url}
+                alt={imagePreview.withTafsir ? 'صورة الآية مع التفسير' : 'تصميم الآية'}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="samee3-image-download-btn"
+              onClick={downloadImagePreview}
+            >
+              <Download size={20} />
+              <span>تحميل الصورة</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {toast ? <div className="samee3-toast"><Check size={16} />{toast}</div> : null}
 
       <style jsx global>{`
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
         .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; }
         .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; perspective:1800px; background:#f5f0e4; }
-        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .45s ease, filter .45s ease; }
+        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .20s cubic-bezier(.2,.8,.25,1); will-change:transform; }
         .samee3-spread.is-desktop { padding:18px 18px 24px; }
         .samee3-spread.is-mobile { padding:0; }
-        .samee3-spread.is-turning.next { transform:rotateY(-8deg) translateX(-7px); filter:drop-shadow(0 16px 25px rgba(70,50,20,.13)); }
-        .samee3-spread.is-turning.prev { transform:rotateY(8deg) translateX(7px); filter:drop-shadow(0 16px 25px rgba(70,50,20,.13)); }
+        .samee3-spread.is-turning.next { transform:rotateY(-4deg) translateX(-3px); }
+        .samee3-spread.is-turning.prev { transform:rotateY(4deg) translateX(3px); }
         .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 10px 42px rgba(83,63,34,.11); isolation:isolate; }
         .is-desktop .samee3-page-sheet { height:min(calc(100dvh - 42px), 920px); max-width:calc(50vw - 32px); }
         .is-mobile .samee3-page-sheet { width:100%; height:100%; max-height:100%; border-left:0; border-right:0; box-shadow:none; }
@@ -2736,6 +2873,16 @@ export default function MushafPage() {
         .samee3-ayah-actions-grid button.saved { background:#effaf7; border-color:#b8e2d1; color:#127457; }
         .samee3-tafsir-box { margin-top:14px; padding:14px; border-radius:18px; background:#f2fafc; border:1px solid #cfe8ef; color:#4c5968; font-size:12px; line-height:2; }
         .samee3-tafsir-box p { margin-top:8px; white-space:pre-wrap; }
+        .samee3-image-preview-overlay { position:absolute; z-index:150; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(25,34,39,.46); backdrop-filter:blur(8px); }
+        .samee3-image-preview-sheet { width:min(94vw,620px); max-height:94dvh; overflow:auto; border-radius:28px; background:#fffdf8; border:1px solid rgba(189,139,72,.42); box-shadow:0 24px 90px rgba(22,35,40,.30); padding:14px; }
+        .samee3-image-preview-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 4px 12px; }
+        .samee3-image-preview-head > div { display:flex; flex-direction:column; gap:3px; }
+        .samee3-image-preview-head span { color:#9a662b; font-size:10px; font-weight:900; }
+        .samee3-image-preview-head strong { color:#155e67; font-family:'Aref Ruqaa','Amiri',serif; font-size:22px; }
+        .samee3-image-preview-head button { width:36px; height:36px; border:0; border-radius:50%; background:#f2eee7; color:#5d6b75; display:flex; align-items:center; justify-content:center; }
+        .samee3-image-preview-frame { display:flex; align-items:center; justify-content:center; padding:10px; border-radius:22px; background:linear-gradient(180deg,#f7f1e6,#eef8f8); border:1px solid #e8decc; overflow:hidden; }
+        .samee3-image-preview-frame img { display:block; width:100%; height:auto; max-height:72dvh; object-fit:contain; border-radius:14px; }
+        .samee3-image-download-btn { width:100%; margin-top:12px; min-height:48px; border:0; border-radius:16px; background:linear-gradient(135deg,#d78a12,#c36f05); color:#fff; font-size:14px; font-weight:900; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 8px 20px rgba(195,111,5,.18); }
         .samee3-toast { position:absolute; z-index:130; left:50%; bottom:calc(max(12px,env(safe-area-inset-bottom)) + 84px); transform:translateX(-50%); display:flex; align-items:center; gap:7px; padding:10px 14px; border-radius:999px; background:#173d45; color:#fff; font-size:11px; font-weight:900; box-shadow:0 10px 30px rgba(18,49,57,.25); }
 
         @media (max-width:767px) {
@@ -2750,6 +2897,8 @@ export default function MushafPage() {
           .samee3-bottom-shell { width:calc(100% - 14px); }
           .samee3-ayah-actions-grid { grid-template-columns:repeat(2,1fr); }
           .samee3-ayah-preview { font-size:21px; }
+          .samee3-image-preview-sheet { width:calc(100vw - 20px); max-height:94dvh; padding:10px; }
+          .samee3-image-preview-frame img { max-height:64dvh; }
         }
 
         @media (min-width:768px) {
@@ -2808,31 +2957,97 @@ function MushafPageSheet({ page, data, html, side, meta, onAyahClick, onAyahPoin
   )
 }
 
-function drawWrappedArabicText(
-  context: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  startY: number,
-  lineHeight: number,
-  maxLines: number,
-) {
-  const words = text.split(/\s+/)
-  let line = ''
-  let y = startY
-  let count = 0
 
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word
-    if (context.measureText(test).width > maxWidth && line) {
-      context.fillText(line, 700, y)
-      y += lineHeight
-      count += 1
-      if (count >= maxLines) break
-      line = word
-    } else {
-      line = test
+type ArabicTextLayout = {
+  fontSize: number
+  lineHeight: number
+  lines: string[]
+  fontFamily: string
+}
+
+function fitArabicLines(
+  canvas: HTMLCanvasElement,
+  text: string,
+  fontFamily: string,
+  maxFontSize: number,
+  minFontSize: number,
+  maxWidth: number,
+  maxLines: number,
+): ArabicTextLayout {
+  const context = canvas.getContext('2d')
+  if (!context) {
+    return {
+      fontSize: minFontSize,
+      lineHeight: Math.round(minFontSize * 1.65),
+      lines: [text],
+      fontFamily,
     }
   }
 
-  if (count < maxLines && line) context.fillText(line, 700, y)
+  const clean = text.replace(/\s+/g, ' ').trim() || '—'
+
+  for (let size = maxFontSize; size >= minFontSize; size -= 2) {
+    context.font = `${size}px ${fontFamily}`
+    const words = clean.split(' ')
+    const lines: string[] = []
+    let line = ''
+
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word
+      if (context.measureText(candidate).width <= maxWidth || !line) {
+        line = candidate
+      } else {
+        lines.push(line)
+        line = word
+      }
+    }
+    if (line) lines.push(line)
+
+    if (lines.length <= maxLines) {
+      return {
+        fontSize: size,
+        lineHeight: Math.round(size * 1.55),
+        lines,
+        fontFamily,
+      }
+    }
+  }
+
+  context.font = `${minFontSize}px ${fontFamily}`
+  const lines: string[] = []
+  let line = ''
+  for (const word of clean.split(' ')) {
+    const candidate = line ? `${line} ${word}` : word
+    if (context.measureText(candidate).width <= maxWidth || !line) {
+      line = candidate
+    } else {
+      lines.push(line)
+      line = word
+    }
+  }
+  if (line) lines.push(line)
+
+  return {
+    fontSize: minFontSize,
+    lineHeight: Math.round(minFontSize * 1.55),
+    lines,
+    fontFamily,
+  }
+}
+
+function drawFittedArabicLines(
+  context: CanvasRenderingContext2D,
+  layout: ArabicTextLayout,
+  centerX: number,
+  startY: number,
+  color: string,
+) {
+  try { context.direction = 'rtl' } catch {}
+  context.textAlign = 'center'
+  context.fillStyle = color
+  context.font = `${layout.fontSize}px ${layout.fontFamily}`
+
+  layout.lines.forEach((line, index) => {
+    context.fillText(line, centerX, startY + index * layout.lineHeight)
+  })
 }
