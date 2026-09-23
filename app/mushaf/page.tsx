@@ -1948,6 +1948,19 @@ export default function MushafPage() {
           )}
         </div>
 
+        <button
+          type="button"
+          aria-label={showChrome ? 'إغلاق خيارات المصحف' : 'إظهار خيارات المصحف'}
+          aria-expanded={showChrome}
+          onClick={(event) => {
+            event.stopPropagation()
+            setShowChrome((value) => !value)
+          }}
+          className="samee3-chrome-toggle"
+        >
+          <List size={22} strokeWidth={2.4} />
+        </button>
+
         {showChrome ? (
           <>
             <div className="samee3-top-controls" onClick={(event) => event.stopPropagation()}>
@@ -2101,29 +2114,59 @@ export default function MushafPage() {
         .samee3-page-footer span { min-width:75px; height:28px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(177,126,59,.48); border-radius:999px; background:rgba(255,249,236,.88); box-shadow:0 2px 7px rgba(85,62,27,.08); }
         .samee3-text-page { width:100%; height:100%; box-sizing:border-box; overflow:hidden; padding:20px 26px; direction:rtl; background:#fcfbf7; color:#1c2736; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(25px,2.25vw,39px); line-height:2.24; text-align:justify; }
         .samee3-text-ayah { display:inline; cursor:pointer; border-radius:9px; transition:background .16s ease; }
-        .samee3-text-selected, .samee3-selected-ayah { background:rgba(14,153,212,.14) !important; border-radius:9px; }
+        .samee3-text-selected, .samee3-selected-ayah {
+          background:rgba(196,143,65,.08) !important;
+          border-radius:10px !important;
+          box-shadow:0 2px 9px rgba(125,88,33,.10) !important;
+          filter:drop-shadow(0 2px 5px rgba(125,88,33,.12));
+        }
+        .samee3-page-art .ayahPolygon.samee3-selected-ayah,
+        .samee3-page-art [data-ayah].samee3-selected-ayah,
+        .samee3-page-art [data-ayah-number].samee3-selected-ayah {
+          opacity:1 !important;
+          fill:rgba(196,143,65,.055) !important;
+          stroke:#b98535 !important;
+          stroke-width:1.7 !important;
+          stroke-opacity:.48 !important;
+          filter:drop-shadow(0 2px 5px rgba(125,88,33,.15)) !important;
+        }
+        .samee3-page-art .ayahPolygon.samee3-selected-ayah *,
+        .samee3-page-art [data-ayah].samee3-selected-ayah *,
+        .samee3-page-art [data-ayah-number].samee3-selected-ayah * {
+          stroke:#b98535 !important;
+          stroke-width:1.7 !important;
+          stroke-opacity:.42 !important;
+          filter:drop-shadow(0 2px 4px rgba(125,88,33,.12));
+        }
         .samee3-playing-ayah {
-          background:rgba(215,138,18,.16) !important;
-          border-radius:11px !important;
-          box-shadow:inset 0 0 0 2px rgba(197,137,44,.72), 0 0 0 1px rgba(197,137,44,.18) !important;
+          background:rgba(14,153,212,.08) !important;
+          border-radius:10px !important;
+          box-shadow:0 2px 10px rgba(14,119,164,.12) !important;
+          filter:drop-shadow(0 2px 6px rgba(14,119,164,.13));
         }
         .samee3-page-art .ayahPolygon.samee3-playing-ayah,
         .samee3-page-art [data-ayah].samee3-playing-ayah,
         .samee3-page-art [data-ayah-number].samee3-playing-ayah {
           opacity:1 !important;
-          stroke:#c58b32 !important;
-          stroke-width:3 !important;
-          stroke-opacity:.86 !important;
-          filter:drop-shadow(0 1px 2px rgba(132,84,20,.18));
+          fill:rgba(14,153,212,.045) !important;
+          stroke:#0e99d4 !important;
+          stroke-width:1.9 !important;
+          stroke-opacity:.56 !important;
+          filter:drop-shadow(0 2px 6px rgba(14,119,164,.18)) !important;
         }
-        .samee3-page-art .ayahPolygon.samee3-playing-ayah * {
-          stroke:#c58b32 !important;
-          stroke-width:3 !important;
-          stroke-opacity:.86 !important;
-          filter:drop-shadow(0 1px 2px rgba(132,84,20,.18));
+        .samee3-page-art .ayahPolygon.samee3-playing-ayah *,
+        .samee3-page-art [data-ayah].samee3-playing-ayah *,
+        .samee3-page-art [data-ayah-number].samee3-playing-ayah * {
+          stroke:#0e99d4 !important;
+          stroke-width:1.9 !important;
+          stroke-opacity:.48 !important;
+          filter:drop-shadow(0 2px 5px rgba(14,119,164,.14));
         }
         .samee3-ayah-number { display:inline-block; margin:0 5px; color:#b78945; font-family:'Amiri',serif; font-size:.72em; }
 
+        .samee3-chrome-toggle { position:absolute; z-index:88; right:max(14px,env(safe-area-inset-right)); bottom:max(20px,env(safe-area-inset-bottom)); width:46px; height:46px; border-radius:50%; border:1px solid rgba(169,200,216,.86); background:rgba(255,253,248,.96); color:#0e99d4; display:flex; align-items:center; justify-content:center; box-shadow:0 10px 28px rgba(35,73,86,.18), 0 0 0 1px rgba(255,255,255,.7) inset; backdrop-filter:blur(14px); transition:transform .2s ease, box-shadow .2s ease, background .2s ease; }
+        .samee3-chrome-toggle:hover { transform:translateY(-2px); box-shadow:0 14px 32px rgba(35,73,86,.22), 0 0 0 1px rgba(255,255,255,.75) inset; }
+        .samee3-chrome-toggle:active { transform:scale(.94); }
         .samee3-top-controls { position:absolute; z-index:70; top:max(10px,env(safe-area-inset-top)); left:50%; transform:translateX(-50%); width:min(94vw,900px); padding:10px; border-radius:24px; background:rgba(255,253,248,.93); border:1px solid rgba(198,177,142,.55); box-shadow:0 14px 40px rgba(75,58,33,.17); backdrop-filter:blur(16px); }
         .samee3-search-row { display:flex; gap:8px; align-items:center; }
         .samee3-search-box { flex:1; height:46px; display:flex; align-items:center; gap:9px; padding:0 13px; border-radius:16px; border:1px solid #e4d8c1; background:#fff; color:#0e99d4; }
@@ -2169,6 +2212,7 @@ export default function MushafPage() {
           .samee3-surah-frame { top:43px; left:5.5%; right:5.5%; height:41px; }
           .samee3-surah-frame strong { min-width:140px; font-size:20px; }
           .samee3-page-art { inset:84px 2px 42px; }
+          .samee3-chrome-toggle { right:12px; bottom:12px; width:44px; height:44px; }
           .samee3-top-controls { width:calc(100% - 20px); }
           .samee3-audio-toolbar { grid-template-columns:1fr 1fr; }
           .samee3-bottom-shell { width:calc(100% - 14px); }
