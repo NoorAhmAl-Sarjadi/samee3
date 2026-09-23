@@ -80,6 +80,7 @@ type LocalReciter = {
   label: string
   moshafId: number | null
   server: string
+  surahIds: number[]
 }
 
 type TurnDirection = 'next' | 'prev' | null
@@ -734,6 +735,14 @@ function clampPage(page: number) {
   return Math.min(604, Math.max(1, Math.floor(page)))
 }
 
+function parseSurahList(value?: string) {
+  if (!value) return []
+  return value
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isInteger(item) && item >= 1 && item <= 114)
+}
+
 function arabicNumber(value: number) {
   return String(value).replace(/\d/g, (digit) => '٠١٢٣٤٥٦٧٨٩'[Number(digit)])
 }
@@ -751,16 +760,13 @@ function getJuz(data?: PageData | null) {
 function getMoshafForRiwaya(reciter: ApiReciter, riwaya: Riwaya) {
   const list = Array.isArray(reciter.moshaf) ? reciter.moshaf : []
   const keywords = RIWAYA_KEYWORDS[riwaya]
+
+  // نأخذ المصحف المطابق للرواية فقط، ولا نستخدم مصحفًا آخر كبديل.
   return (
     list.find((item) => {
       const name = normalizeArabic(String(item.name || ''))
       return keywords.every((keyword) => name.includes(normalizeArabic(keyword)))
-    }) ||
-    list.find((item) => {
-      const name = normalizeArabic(String(item.name || ''))
-      return keywords.some((keyword) => name.includes(normalizeArabic(keyword)))
-    }) ||
-    null
+    }) || null
   )
 }
 
@@ -794,6 +800,7 @@ export default function MushafPage() {
   const [error, setError] = useState('')
 
   const [selectedAyah, setSelectedAyah] = useState<Ayah | null>(null)
+  const [pressedAyahNumber, setPressedAyahNumber] = useState<number | null>(null)
   const [showAyahActions, setShowAyahActions] = useState(false)
   const [isSaved, setIsSaved] = useState(false)
   const [tafsirText, setTafsirText] = useState('')
@@ -965,7 +972,7 @@ export default function MushafPage() {
 
   const highlightSearchedAyah = useCallback(() => {
     const nodes = document.querySelectorAll(
-      '.samee3-page-art .ayahPolygon, .samee3-page-art [data-ayah], .samee3-page-art [data-ayah-number], .samee3-page-art .samee3-text-ayah',
+      '.samee3-page-art .ayahPolygon, .samee3-page-art .samee3-text-ayah',
     )
 
     const visibleSources = [pageData, rightPageData, leftPageData].filter(Boolean) as PageData[]
@@ -977,49 +984,41 @@ export default function MushafPage() {
         : null
 
     nodes.forEach((node) => {
-      node.classList.remove('samee3-selected-ayah', 'samee3-playing-ayah')
-
-      const values = [
-        node.getAttribute('data-ayah'),
-        node.getAttribute('data-ayah-number'),
-        node.getAttribute('id'),
-      ].filter(Boolean) as string[]
-
-      const numbers = values
-        .map((value) => value.match(/\d+/))
-        .filter(Boolean)
-        .map((match) => Number(match![0]))
+      node.classList.remove('samee3-pressed-ayah', 'samee3-playing-ayah')
 
       const sheet = node.closest('.samee3-page-sheet') as HTMLElement | null
       const sheetSurah = Number(sheet?.dataset.surahNumber || 0)
 
-      const selectedMatch =
-        !!selectedAyah &&
-        (
-          numbers.some((number) => number === selectedAyah.number) ||
-          (
-            sheetSurah > 0 &&
-            Number(selectedAyah.surah?.number) === sheetSurah &&
-            numbers.some((number) => number === selectedAyah.numberInSurah)
-          )
-        )
+      const nodeSurah = Number(
+        node.getAttribute('surah') ||
+          node.getAttribute('data-surah') ||
+          sheetSurah ||
+          0,
+      )
+
+      const nodeAyah = Number(
+        node.getAttribute('ayah') ||
+          node.getAttribute('data-ayah-number') ||
+          node.getAttribute('data-ayah') ||
+          0,
+      )
 
       const playingMatch =
         !!visiblePlayingAyah &&
-        (
-          numbers.some((number) => number === visiblePlayingAyah.number) ||
-          (
-            sheetSurah > 0 &&
-            Number(visiblePlayingAyah.surah?.number) === sheetSurah &&
-            numbers.some((number) => number === visiblePlayingAyah.numberInSurah)
-          )
-        )
+        nodeSurah === Number(visiblePlayingAyah.surah?.number) &&
+        nodeAyah === Number(visiblePlayingAyah.numberInSurah)
 
-      if (selectedMatch) node.classList.add('samee3-selected-ayah')
+      const pressedMatch =
+        pressedAyahNumber !== null &&
+        !!selectedAyah &&
+        nodeSurah === Number(selectedAyah.surah?.number) &&
+        nodeAyah === Number(selectedAyah.numberInSurah) &&
+        nodeAyah === pressedAyahNumber
+
       if (playingMatch) node.classList.add('samee3-playing-ayah')
+      if (pressedMatch) node.classList.add('samee3-pressed-ayah')
     })
-  }, [leftPageData, pageData, playingAyahNumber, rightPageData, selectedAyah])
-
+  }, [leftPageData, pageData, playingAyahNumber, pressedAyahNumber, rightPageData, selectedAyah])
 
   useEffect(() => {
     const timer = window.setTimeout(highlightSearchedAyah, 120)
@@ -1032,13 +1031,12 @@ export default function MushafPage() {
     if (!displayData?.ayahs?.length) return ''
 
     const lines = displayData.ayahs.map((ayah) => {
-      const selected = selectedAyah?.number === ayah.number
       const safe = String(ayah.text || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
-      return `<span class="samee3-text-ayah ${selected ? 'samee3-text-selected' : ''}" data-ayah="${ayah.number}">${safe} <span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span></span> `
+      return `<span class="samee3-text-ayah" data-ayah="${ayah.number}">${safe} <span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span></span> `
     }).join('')
 
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1400" preserveAspectRatio="xMidYMid meet" width="100%" height="100%"><foreignObject x="55" y="45" width="890" height="1310"><div xmlns="http://www.w3.org/1999/xhtml" class="samee3-text-page">${lines}</div></foreignObject></svg>`
@@ -1049,33 +1047,56 @@ export default function MushafPage() {
     if (PRINTED_RIWAYAT.has(riwaya)) return leftSvg
 
     const lines = leftPageData.ayahs.map((ayah) => {
-      const selected = selectedAyah?.number === ayah.number
       const safe = String(ayah.text || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
-      return `<span class="samee3-text-ayah ${selected ? 'samee3-text-selected' : ''}" data-ayah="${ayah.number}">${safe} <span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span></span> `
+      return `<span class="samee3-text-ayah" data-ayah="${ayah.number}">${safe} <span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span></span> `
     }).join('')
 
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1400" preserveAspectRatio="xMidYMid meet" width="100%" height="100%"><foreignObject x="55" y="45" width="890" height="1310"><div xmlns="http://www.w3.org/1999/xhtml" class="samee3-text-page">${lines}</div></foreignObject></svg>`
   }, [isDesktop, leftPageData, leftSvg, riwaya, selectedAyah])
 
   const resolveSelectedAyahFromElement = useCallback((element: Element, sourceData: PageData | null) => {
-    const values = [
+    const sourceAyahs = sourceData?.ayahs || []
+    const svgSurah = Number(element.getAttribute('surah') || element.getAttribute('data-surah') || 0)
+    const svgAyah = Number(element.getAttribute('ayah') || element.getAttribute('data-ayah') || element.getAttribute('data-ayah-number') || 0)
+
+    // الـSVG المطبوع يضع السورة والآية على نفس عنصر ayahPolygon.
+    if (svgSurah > 0 && svgAyah > 0) {
+      const exact = sourceAyahs.find(
+        (item) =>
+          Number(item.surah?.number) === svgSurah &&
+          (Number(item.numberInSurah) === svgAyah || Number(item.number) === svgAyah),
+      )
+      if (exact) return exact
+    }
+
+    // للروايات النصية نستخدم رقم الآية العامة/المحلية مع سورة الصفحة.
+    const fallbackValues = [
       element.getAttribute('data-ayah'),
       element.getAttribute('data-ayah-number'),
       element.getAttribute('id'),
     ].filter(Boolean) as string[]
 
-    for (const value of values) {
+    const parentSheet = element.closest('.samee3-page-sheet') as HTMLElement | null
+    const sheetSurah = Number(parentSheet?.dataset.surahNumber || 0)
+
+    for (const value of fallbackValues) {
       const match = value.match(/\d+/)
       if (!match) continue
       const numeric = Number(match[0])
-      const exact = sourceData?.ayahs?.find((ayah) => ayah.number === numeric)
-      if (exact) return exact
-      const byInSurah = sourceData?.ayahs?.find((ayah) => ayah.numberInSurah === numeric)
-      if (byInSurah) return byInSurah
+
+      const exactGlobal = sourceAyahs.find((ayah) => ayah.number === numeric)
+      if (exactGlobal) return exactGlobal
+
+      const exactLocal = sourceAyahs.find(
+        (ayah) =>
+          Number(ayah.numberInSurah) === numeric &&
+          (!sheetSurah || Number(ayah.surah?.number) === sheetSurah),
+      )
+      if (exactLocal) return exactLocal
     }
 
     return null
@@ -1100,6 +1121,23 @@ export default function MushafPage() {
       setIsSaved(false)
     }
   }, [resolveSelectedAyahFromElement])
+
+  const handleAyahPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => {
+    const target = event.target as Element | null
+    if (!target) return
+    const polygon = target.closest('.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah')
+    if (!polygon) {
+      setPressedAyahNumber(null)
+      return
+    }
+
+    const found = resolveSelectedAyahFromElement(polygon, sourceData)
+    setPressedAyahNumber(found?.numberInSurah || found?.number || null)
+  }, [resolveSelectedAyahFromElement])
+
+  const handleAyahPointerUp = useCallback(() => {
+    setPressedAyahNumber(null)
+  }, [])
 
   const navigateTo = useCallback((page: number, extra?: { surah?: number; ayah?: string }, direction: 'next' | 'prev' = 'next') => {
     const nextPage = clampPage(page)
@@ -1177,6 +1215,7 @@ export default function MushafPage() {
           label: item.name,
           moshafId: moshaf.id ?? null,
           server: String(moshaf.server).replace(/\/$/, ''),
+          surahIds: parseSurahList(moshaf.surah_list),
         }]
       })
       setReciters(mapped)
@@ -1252,8 +1291,15 @@ export default function MushafPage() {
     triggerToast(wasPlaying ? `تم تبديل القارئ إلى ${item.label}` : `تم اختيار ${item.label}`)
   }
 
+  const availableSurahs = useMemo(() => {
+    if (!selectedReciter) return []
+    if (!selectedReciter.surahIds.length) return []
+    const allowed = new Set(selectedReciter.surahIds)
+    return SURAH_LIST.filter((item) => allowed.has(item.id))
+  }, [selectedReciter])
+
   const handleSurahSelect = (id: number) => {
-    const info = SURAH_LIST.find((item) => item.id === id)
+    const info = availableSurahs.find((item) => item.id === id)
     if (!info) return
     updateRouteAudioSelection(riwaya, selectedReciter, id)
   }
@@ -1581,11 +1627,13 @@ export default function MushafPage() {
       }
     } catch (error) {
       console.error(error)
-      setAudioError(
-        error instanceof Error
-          ? error.message
-          : 'تعذر تشغيل التلاوة.',
-      )
+      const message = error instanceof Error ? error.message : ''
+      if (/not allowed|not supported|operation is not supported|user agent/i.test(message)) {
+        setAudioError('')
+        triggerToast('اضغط تشغيل لبدء التلاوة.')
+      } else {
+        setAudioError('تعذر تشغيل التلاوة حاليًا.')
+      }
     } finally {
       setAudioLoading(false)
     }
@@ -1648,7 +1696,8 @@ export default function MushafPage() {
 
     const onError = () => {
       setIsPlaying(false)
-      setAudioError('تعذر تشغيل ملف التلاوة.')
+      setAudioError('')
+      triggerToast('تعذر تحميل ملف التلاوة لهذا القارئ أو السورة.')
     }
 
     audio.addEventListener('play', onPlay)
@@ -1926,6 +1975,8 @@ export default function MushafPage() {
                 side="left"
                 meta={leftMeta}
                 onAyahClick={handleAyahClick}
+                onAyahPointerDown={handleAyahPointerDown}
+                onAyahPointerUp={handleAyahPointerUp}
               />
               <MushafPageSheet
                 page={desktopRightPage}
@@ -1934,6 +1985,8 @@ export default function MushafPage() {
                 side="right"
                 meta={rightMeta}
                 onAyahClick={handleAyahClick}
+                onAyahPointerDown={handleAyahPointerDown}
+                onAyahPointerUp={handleAyahPointerUp}
               />
             </>
           ) : (
@@ -1944,22 +1997,11 @@ export default function MushafPage() {
               side="single"
               meta={rightMeta}
               onAyahClick={handleAyahClick}
+              onAyahPointerDown={handleAyahPointerDown}
+              onAyahPointerUp={handleAyahPointerUp}
             />
           )}
         </div>
-
-        <button
-          type="button"
-          aria-label={showChrome ? 'إغلاق خيارات المصحف' : 'إظهار خيارات المصحف'}
-          aria-expanded={showChrome}
-          onClick={(event) => {
-            event.stopPropagation()
-            setShowChrome((value) => !value)
-          }}
-          className="samee3-chrome-toggle"
-        >
-          <List size={22} strokeWidth={2.4} />
-        </button>
 
         {showChrome ? (
           <>
@@ -2018,14 +2060,23 @@ export default function MushafPage() {
 
                 <div className="samee3-select-wrap">
                   <span>السورة</span>
-                  <select value={currentSurahNumber || requestedSurah || 1} onChange={(event) => handleSurahSelect(Number(event.target.value))}>
-                    {SURAH_LIST.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  <select
+                    value={availableSurahs.some((item) => item.id === (currentSurahNumber || requestedSurah))
+                      ? (currentSurahNumber || requestedSurah)
+                      : (availableSurahs[0]?.id || '')}
+                    onChange={(event) => handleSurahSelect(Number(event.target.value))}
+                    disabled={!availableSurahs.length}
+                  >
+                    {availableSurahs.length ? (
+                      availableSurahs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)
+                    ) : (
+                      <option value="">{recitersLoading ? 'جاري تحميل السور...' : 'لا توجد سور متاحة'}</option>
+                    )}
                   </select>
                   <ChevronDown size={15} />
                 </div>
               </div>
 
-              {audioError ? <div className="samee3-audio-error">{audioError}</div> : null}
 
               <div className="samee3-bottom-nav">
                 <button type="button" onClick={() => router.push('/')}><Home size={22} /><span>الرئيسية</span></button>
@@ -2036,6 +2087,19 @@ export default function MushafPage() {
             </div>
           </>
         ) : null}
+
+        <button
+          type="button"
+          aria-label={showChrome ? 'إخفاء خيارات المصحف' : 'إظهار خيارات المصحف'}
+          aria-expanded={showChrome}
+          onClick={(event) => {
+            event.stopPropagation()
+            setShowChrome((value) => !value)
+          }}
+          className={`samee3-reader-toggle ${showChrome ? 'is-open' : ''}`}
+        >
+          <List size={26} strokeWidth={2.35} />
+        </button>
 
       </div>
 
@@ -2113,60 +2177,37 @@ export default function MushafPage() {
         .samee3-page-footer { position:absolute; inset:auto 0 5px; z-index:8; height:36px; display:flex; align-items:center; justify-content:center; pointer-events:none; color:#9a662b; font-weight:900; font-size:15px; }
         .samee3-page-footer span { min-width:75px; height:28px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(177,126,59,.48); border-radius:999px; background:rgba(255,249,236,.88); box-shadow:0 2px 7px rgba(85,62,27,.08); }
         .samee3-text-page { width:100%; height:100%; box-sizing:border-box; overflow:hidden; padding:20px 26px; direction:rtl; background:#fcfbf7; color:#1c2736; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(25px,2.25vw,39px); line-height:2.24; text-align:justify; }
-        .samee3-text-ayah { display:inline; cursor:pointer; border-radius:9px; transition:background .16s ease; }
-        .samee3-text-selected, .samee3-selected-ayah {
-          background:rgba(196,143,65,.08) !important;
-          border-radius:10px !important;
-          box-shadow:0 2px 9px rgba(125,88,33,.10) !important;
-          filter:drop-shadow(0 2px 5px rgba(125,88,33,.12));
+        .samee3-text-ayah { display:inline; cursor:pointer; border-radius:8px; transition:background .12s ease, box-shadow .12s ease, filter .12s ease; }
+        .samee3-text-ayah.samee3-pressed-ayah {
+          background:transparent !important;
+          box-shadow:inset 0 -0.34em 0 rgba(14,153,212,.16), 0 3px 7px rgba(14,153,212,.13) !important;
         }
-        .samee3-page-art .ayahPolygon.samee3-selected-ayah,
-        .samee3-page-art [data-ayah].samee3-selected-ayah,
-        .samee3-page-art [data-ayah-number].samee3-selected-ayah {
-          opacity:1 !important;
-          fill:rgba(196,143,65,.055) !important;
-          stroke:#b98535 !important;
-          stroke-width:1.7 !important;
-          stroke-opacity:.48 !important;
-          filter:drop-shadow(0 2px 5px rgba(125,88,33,.15)) !important;
+        .samee3-text-ayah.samee3-playing-ayah {
+          background:transparent !important;
+          box-shadow:inset 0 -0.36em 0 rgba(199,147,79,.18), 0 3px 8px rgba(160,105,36,.12) !important;
         }
-        .samee3-page-art .ayahPolygon.samee3-selected-ayah *,
-        .samee3-page-art [data-ayah].samee3-selected-ayah *,
-        .samee3-page-art [data-ayah-number].samee3-selected-ayah * {
-          stroke:#b98535 !important;
-          stroke-width:1.7 !important;
-          stroke-opacity:.42 !important;
-          filter:drop-shadow(0 2px 4px rgba(125,88,33,.12));
+        .samee3-page-art .ayahPolygon.samee3-pressed-ayah {
+          fill:#0e99d4 !important;
+          fill-opacity:.10 !important;
+          stroke:none !important;
+          filter:drop-shadow(0 2px 4px rgba(14,153,212,.28));
         }
-        .samee3-playing-ayah {
-          background:rgba(14,153,212,.08) !important;
-          border-radius:10px !important;
-          box-shadow:0 2px 10px rgba(14,119,164,.12) !important;
-          filter:drop-shadow(0 2px 6px rgba(14,119,164,.13));
+        .samee3-page-art .ayahPolygon.samee3-playing-ayah {
+          fill:#c7934f !important;
+          fill-opacity:.14 !important;
+          stroke:none !important;
+          filter:drop-shadow(0 2px 4px rgba(157,101,32,.22));
         }
-        .samee3-page-art .ayahPolygon.samee3-playing-ayah,
-        .samee3-page-art [data-ayah].samee3-playing-ayah,
-        .samee3-page-art [data-ayah-number].samee3-playing-ayah {
-          opacity:1 !important;
-          fill:rgba(14,153,212,.045) !important;
-          stroke:#0e99d4 !important;
-          stroke-width:1.9 !important;
-          stroke-opacity:.56 !important;
-          filter:drop-shadow(0 2px 6px rgba(14,119,164,.18)) !important;
+        .samee3-page-art .ayahPolygon.samee3-pressed-ayah * {
+          stroke:none !important;
+          filter:drop-shadow(0 2px 4px rgba(14,153,212,.20));
         }
-        .samee3-page-art .ayahPolygon.samee3-playing-ayah *,
-        .samee3-page-art [data-ayah].samee3-playing-ayah *,
-        .samee3-page-art [data-ayah-number].samee3-playing-ayah * {
-          stroke:#0e99d4 !important;
-          stroke-width:1.9 !important;
-          stroke-opacity:.48 !important;
-          filter:drop-shadow(0 2px 5px rgba(14,119,164,.14));
+        .samee3-page-art .ayahPolygon.samee3-playing-ayah * {
+          stroke:none !important;
+          filter:drop-shadow(0 2px 4px rgba(157,101,32,.16));
         }
         .samee3-ayah-number { display:inline-block; margin:0 5px; color:#b78945; font-family:'Amiri',serif; font-size:.72em; }
 
-        .samee3-chrome-toggle { position:absolute; z-index:88; right:max(14px,env(safe-area-inset-right)); bottom:max(20px,env(safe-area-inset-bottom)); width:46px; height:46px; border-radius:50%; border:1px solid rgba(169,200,216,.86); background:rgba(255,253,248,.96); color:#0e99d4; display:flex; align-items:center; justify-content:center; box-shadow:0 10px 28px rgba(35,73,86,.18), 0 0 0 1px rgba(255,255,255,.7) inset; backdrop-filter:blur(14px); transition:transform .2s ease, box-shadow .2s ease, background .2s ease; }
-        .samee3-chrome-toggle:hover { transform:translateY(-2px); box-shadow:0 14px 32px rgba(35,73,86,.22), 0 0 0 1px rgba(255,255,255,.75) inset; }
-        .samee3-chrome-toggle:active { transform:scale(.94); }
         .samee3-top-controls { position:absolute; z-index:70; top:max(10px,env(safe-area-inset-top)); left:50%; transform:translateX(-50%); width:min(94vw,900px); padding:10px; border-radius:24px; background:rgba(255,253,248,.93); border:1px solid rgba(198,177,142,.55); box-shadow:0 14px 40px rgba(75,58,33,.17); backdrop-filter:blur(16px); }
         .samee3-search-row { display:flex; gap:8px; align-items:center; }
         .samee3-search-box { flex:1; height:46px; display:flex; align-items:center; gap:9px; padding:0 13px; border-radius:16px; border:1px solid #e4d8c1; background:#fff; color:#0e99d4; }
@@ -2178,6 +2219,10 @@ export default function MushafPage() {
         .samee3-search-message { margin-top:7px; text-align:center; font-size:11px; font-weight:800; color:#8b5f28; }
 
         .samee3-bottom-shell { position:absolute; z-index:75; left:50%; bottom:max(10px,env(safe-area-inset-bottom)); transform:translateX(-50%); width:min(96vw,1040px); padding:10px; border-radius:26px; background:rgba(255,253,248,.95); border:1px solid rgba(169,200,216,.8); box-shadow:0 18px 50px rgba(35,73,86,.20); backdrop-filter:blur(17px); }
+        .samee3-reader-toggle { position:absolute; z-index:95; right:max(16px,env(safe-area-inset-right)); bottom:calc(max(14px,env(safe-area-inset-bottom)) + 10px); width:54px; height:54px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:1.4px solid rgba(14,153,212,.34); background:rgba(255,253,248,.96); color:#0e99d4; box-shadow:0 10px 28px rgba(35,73,86,.17); backdrop-filter:blur(15px); transition:transform .24s ease, box-shadow .24s ease, background .24s ease, color .24s ease; }
+        .samee3-reader-toggle:hover { transform:translateY(-2px) scale(1.02); box-shadow:0 14px 32px rgba(35,73,86,.20); }
+        .samee3-reader-toggle:active { transform:scale(.94); }
+        .samee3-reader-toggle.is-open { background:#0e99d4; color:#fff; transform:rotate(90deg) scale(1.03); box-shadow:0 12px 30px rgba(14,153,212,.28); }
         .samee3-audio-toolbar { display:grid; grid-template-columns:1.1fr 1fr 1fr 1fr; gap:8px; }
         .samee3-play-button { min-height:45px; border:0; border-radius:15px; background:linear-gradient(135deg,#d78a12,#c36f05); color:#fff; font-weight:900; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:0 8px 18px rgba(195,111,5,.19); }
         .samee3-select-wrap { position:relative; min-width:0; display:flex; flex-direction:column; justify-content:center; padding:4px 33px 3px 10px; border-radius:15px; border:1px solid #e3d9c7; background:#fff; }
@@ -2212,7 +2257,6 @@ export default function MushafPage() {
           .samee3-surah-frame { top:43px; left:5.5%; right:5.5%; height:41px; }
           .samee3-surah-frame strong { min-width:140px; font-size:20px; }
           .samee3-page-art { inset:84px 2px 42px; }
-          .samee3-chrome-toggle { right:12px; bottom:12px; width:44px; height:44px; }
           .samee3-top-controls { width:calc(100% - 20px); }
           .samee3-audio-toolbar { grid-template-columns:1fr 1fr; }
           .samee3-bottom-shell { width:calc(100% - 14px); }
@@ -2236,14 +2280,19 @@ type MushafPageSheetProps = {
   side: 'left' | 'right' | 'single'
   meta: { surah: string; juz: number; page: number }
   onAyahClick: (event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => void
+  onAyahPointerDown: (event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => void
+  onAyahPointerUp: () => void
 }
 
-function MushafPageSheet({ page, data, html, side, meta, onAyahClick }: MushafPageSheetProps) {
+function MushafPageSheet({ page, data, html, side, meta, onAyahClick, onAyahPointerDown, onAyahPointerUp }: MushafPageSheetProps) {
   return (
     <section
       className={`samee3-page-sheet ${side}`}
       data-surah-number={data?.ayahs?.[0]?.surah?.number || ''}
       onClick={(event) => onAyahClick(event, data)}
+      onPointerDown={(event) => onAyahPointerDown(event, data)}
+      onPointerUp={onAyahPointerUp}
+      onPointerCancel={onAyahPointerUp}
     >
       <div className="samee3-page-meta">
         <div className="meta-side">
