@@ -1916,6 +1916,7 @@ export default function MushafPage() {
             label: source?.name || reciterName,
             moshafId: moshaf.id ?? null,
             server,
+            surahIds: parseSurahList(moshaf.surah_list),
           }
         }
       }
