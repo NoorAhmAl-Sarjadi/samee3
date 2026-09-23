@@ -381,7 +381,9 @@ async function compressForZip(data: Uint8Array) {
     try {
       const rawStream = new CompressionStreamCtor('deflate-raw')
       const writer = rawStream.writable.getWriter()
-      await writer.write(data)
+      const rawInputBuffer = new ArrayBuffer(data.byteLength)
+      new Uint8Array(rawInputBuffer).set(data)
+      await writer.write(rawInputBuffer)
       await writer.close()
 
       const compressed = new Uint8Array(await new Response(rawStream.readable).arrayBuffer())
@@ -395,7 +397,9 @@ async function compressForZip(data: Uint8Array) {
 
     const zlibStream = new CompressionStreamCtor('deflate')
     const zlibWriter = zlibStream.writable.getWriter()
-    await zlibWriter.write(data)
+    const zlibInputBuffer = new ArrayBuffer(data.byteLength)
+    new Uint8Array(zlibInputBuffer).set(data)
+    await zlibWriter.write(zlibInputBuffer)
     await zlibWriter.close()
 
     const wrapped = new Uint8Array(
