@@ -1084,7 +1084,8 @@ export default function MushafPage() {
   }, [riwaya])
 
   const fetchSvg = useCallback(async (page: number) => {
-    if (!PRINTED_RIWAYAT.has(riwaya)) return ''
+    // مسار SVG يدعم الآن الروايات السبع: الخمس ذات الصفحات المطبوعة،
+    // والسوسي والبزي المرسومتين من نص الرواية الحقيقي وخطها الخاص.
     const safePage = clampPage(page)
     const key = `${riwaya}:${safePage}`
     const memoryHit = svgMemoryCacheRef.current.get(key)
@@ -1159,19 +1160,19 @@ export default function MushafPage() {
         await fetch(pageUrl, { cache: 'force-cache' })
       }
 
-      if (PRINTED_RIWAYAT.has(targetRiwaya)) {
-        const svgUrl = `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
-        const existingSvg = 'caches' in window ? await caches.match(svgUrl) : null
-        if (!existingSvg) {
-          const response = await fetch(svgUrl, { cache: 'force-cache' })
-          if (response.ok) {
-            const data = await response.clone().json()
-            if (data?.success && data?.svg) {
-              svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
-              if ('caches' in window) {
-                const cache = await caches.open('samee3-mushaf-pages-v2')
-                await cache.put(svgUrl, response)
-              }
+      // نُحمّل SVG لكل الروايات، بما فيها السوسي والبزي، حتى تكون
+      // طبقة العرض واحدة ولا تعود الروايتان النصيتان إلى تصميم مختلف.
+      const svgUrl = `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
+      const existingSvg = 'caches' in window ? await caches.match(svgUrl) : null
+      if (!existingSvg) {
+        const response = await fetch(svgUrl, { cache: 'force-cache' })
+        if (response.ok) {
+          const data = await response.clone().json()
+          if (data?.success && data?.svg) {
+            svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
+            if ('caches' in window) {
+              const cache = await caches.open('samee3-mushaf-pages-v2')
+              await cache.put(svgUrl, response)
             }
           }
         }
@@ -1278,30 +1279,28 @@ export default function MushafPage() {
           setLeftPageData(null)
         }
 
-        if (PRINTED_RIWAYAT.has(riwaya)) {
-          const svgPromises: Array<Promise<string>> = []
-          if (isDesktop) {
-            if (rightPage === pageNumber) svgPromises.push(fetchSvg(pageNumber))
-            else svgPromises.push(fetchSvg(rightPage))
-            if (leftPage && leftPage !== rightPage) {
-              svgPromises.push(fetchSvg(leftPage))
-            }
-          } else {
-            svgPromises.push(fetchSvg(pageNumber))
-          }
-
-          const svgResults = await Promise.all(svgPromises)
-          if (cancelled) return
-
-          if (isDesktop) {
-            setSvg(svgResults[0] || '')
-            setLeftSvg(svgResults[1] || '')
-          } else {
-            setSvg(svgResults[0] || '')
-            setLeftSvg('')
+        // نفس طبقة SVG تُستخدم لكل الروايات.
+        // للسوسي والبزي يأتي SVG من نص الرواية الحقيقي + الخط الخاص بها،
+        // بينما الخمس الأخرى تأتي من صفحات المصحف المطبوعة الأصلية.
+        const svgPromises: Array<Promise<string>> = []
+        if (isDesktop) {
+          if (rightPage === pageNumber) svgPromises.push(fetchSvg(pageNumber))
+          else svgPromises.push(fetchSvg(rightPage))
+          if (leftPage && leftPage !== rightPage) {
+            svgPromises.push(fetchSvg(leftPage))
           }
         } else {
-          setSvg('')
+          svgPromises.push(fetchSvg(pageNumber))
+        }
+
+        const svgResults = await Promise.all(svgPromises)
+        if (cancelled) return
+
+        if (isDesktop) {
+          setSvg(svgResults[0] || '')
+          setLeftSvg(svgResults[1] || '')
+        } else {
+          setSvg(svgResults[0] || '')
           setLeftSvg('')
         }
       } catch (loadError) {
@@ -1340,7 +1339,7 @@ export default function MushafPage() {
 
   const highlightSearchedAyah = useCallback(() => {
     const nodes = document.querySelectorAll(
-      '.samee3-page-art .ayahPolygon, .samee3-page-art .samee3-text-ayah',
+      '.samee3-page-art .ayahPolygon, .samee3-page-art .samee3-text-ayah, .samee3-page-art .samee3-ayah',
     )
 
     const visibleSources = [pageData, rightPageData, leftPageData].filter(Boolean) as PageData[]
@@ -1394,16 +1393,13 @@ export default function MushafPage() {
   }, [highlightSearchedAyah, svg, leftSvg, selectedAyah, playingAyahNumber])
 
   const mainDisplayedSvg = useMemo(() => {
-    if (PRINTED_RIWAYAT.has(riwaya)) return svg
-    const displayData = isDesktop ? rightPageData : pageData
-    return buildTextMushafSvg(displayData)
-  }, [isDesktop, pageData, rightPageData, riwaya, svg])
+    return svg
+  }, [svg])
 
   const leftDisplayedSvg = useMemo(() => {
     if (!isDesktop || !leftPageData) return ''
-    if (PRINTED_RIWAYAT.has(riwaya)) return leftSvg
-    return buildTextMushafSvg(leftPageData)
-  }, [isDesktop, leftPageData, leftSvg, riwaya])
+    return leftSvg
+  }, [isDesktop, leftPageData, leftSvg])
 
 
   const resolveSelectedAyahFromElement = useCallback((element: Element, sourceData: PageData | null) => {
@@ -1453,7 +1449,7 @@ export default function MushafPage() {
   const handleAyahClick = useCallback((event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => {
     const target = event.target as Element | null
     if (!target) return
-    const polygon = target.closest('.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah')
+    const polygon = target.closest('.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah, .samee3-ayah')
     if (!polygon) return
 
     event.stopPropagation()
@@ -1473,7 +1469,7 @@ export default function MushafPage() {
   const handleAyahPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => {
     const target = event.target as Element | null
     if (!target) return
-    const polygon = target.closest('.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah')
+    const polygon = target.closest('.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah, .samee3-ayah')
     if (!polygon) {
       setPressedAyahNumber(null)
       return
