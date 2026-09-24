@@ -1654,28 +1654,68 @@ export default function MushafPage() {
     try {
       const remoteRiwayaId = RIWAYA_REMOTE_IDS[riwayaId]
 
-      const response = await fetch(
-        `https://mp3quran.net/api/v3/reciters?language=ar&rewaya=${remoteRiwayaId}`,
-        {
-          cache: 'no-store',
-        },
-      )
+      /*
+       * نستخدم قائمة جميع القراء أولًا حتى لا تختفي القراءات التي لا يملك
+       * أصحابها المصحف كاملًا؛ فـ API قد يعيد هذه القراءات فقط عند طلب
+       * rewaya مع أن بعض القراء لديهم سور محدودة. ثم ندمج معها استجابة
+       * الرواية نفسها للاستفادة من الموشف الذي تؤكده الـ API للرواية المختارة.
+       */
+      const [allResponse, riwayaResponse] = await Promise.all([
+        fetch(
+          'https://mp3quran.net/api/v3/reciters?language=ar',
+          { cache: 'no-store' },
+        ),
+        fetch(
+          `https://mp3quran.net/api/v3/reciters?language=ar&rewaya=${remoteRiwayaId}`,
+          { cache: 'no-store' },
+        ),
+      ])
 
-      if (!response.ok) {
+      if (!allResponse.ok && !riwayaResponse.ok) {
         throw new Error('تعذر تحميل القراء')
       }
 
-      const payload = await response.json()
+      const allPayload = allResponse.ok
+        ? await allResponse.json()
+        : null
+      const riwayaPayload = riwayaResponse.ok
+        ? await riwayaResponse.json()
+        : null
 
-      const rawReciters = Array.isArray(payload?.reciters)
-        ? (payload.reciters as ApiReciter[])
+      const allReciters = Array.isArray(allPayload?.reciters)
+        ? (allPayload.reciters as ApiReciter[])
         : []
+      const riwayaReciters = Array.isArray(riwayaPayload?.reciters)
+        ? (riwayaPayload.reciters as ApiReciter[])
+        : []
+
+      const mergedById = new Map<number, ApiReciter>()
+      for (const item of allReciters) {
+        if (Number.isFinite(Number(item.id))) {
+          mergedById.set(Number(item.id), item)
+        }
+      }
+      for (const item of riwayaReciters) {
+        if (Number.isFinite(Number(item.id))) {
+          const previous = mergedById.get(Number(item.id))
+          mergedById.set(Number(item.id), {
+            ...previous,
+            ...item,
+            moshaf: [
+              ...(Array.isArray(previous?.moshaf) ? previous.moshaf : []),
+              ...(Array.isArray(item.moshaf) ? item.moshaf : []),
+            ],
+          })
+        }
+      }
+
+      const rawReciters = Array.from(mergedById.values())
 
       const mapped = rawReciters.flatMap((item) => {
         const moshaf = getMoshafForRiwaya(
           item,
           riwayaId,
-          true,
+          false,
         )
 
         if (!moshaf?.server || !moshaf.surah_list) {
@@ -1825,6 +1865,20 @@ export default function MushafPage() {
     const item = reciters.find((candidate) => candidate.apiId === id) || null
     if (!item) return
 
+    const currentTargetSurah =
+      selectedAyah?.surah?.number ||
+      requestedSurah ||
+      currentSurahNumber ||
+      0
+    const currentSurahIsAvailable =
+      currentTargetSurah > 0 && item.surahIds.includes(currentTargetSurah)
+
+    if (item.surahIds.length < 114) {
+      triggerToast(
+        `تم اختيار ${item.label}. هذا القارئ متاح لـ ${arabicNumber(item.surahIds.length)} سورة فقط، اختر السورة من القائمة.`,
+      )
+    }
+
     const audio = audioRef.current
     const wasPlaying = !!audio && !audio.paused && !!audio.src
     const wasLoaded = !!audio && !!audio.src
@@ -1849,7 +1903,7 @@ export default function MushafPage() {
     setSelectedReciterId(id)
     updateRouteAudioSelection(riwaya, item)
 
-    if (currentSurah && (wasPlaying || wasLoaded)) {
+    if (currentSurah && currentSurahIsAvailable && (wasPlaying || wasLoaded)) {
       await loadAudioForSurah(
         Number(currentSurah),
         wasPlaying,
@@ -1859,7 +1913,13 @@ export default function MushafPage() {
       )
     }
 
-    triggerToast(wasPlaying ? `تم تبديل القارئ إلى ${item.label}` : `تم اختيار ${item.label}`)
+    triggerToast(
+      currentSurah && !currentSurahIsAvailable
+        ? `تم اختيار ${item.label}. اختر السورة المتاحة من قائمة السور.`
+        : wasPlaying
+          ? `تم تبديل القارئ إلى ${item.label}`
+          : `تم اختيار ${item.label}`,
+    )
   }
 
   const availableSurahs = useMemo(() => {
@@ -3640,13 +3700,13 @@ export default function MushafPage() {
         .samee3-surah-frame::before { content:""; position:absolute; inset:0; border:1.4px solid rgba(177,126,59,.9); border-radius:8px; background:linear-gradient(180deg, rgba(255,251,240,.92), rgba(245,232,205,.70)); box-shadow:inset 0 0 0 3px rgba(255,255,255,.48); }
         .samee3-surah-frame .ornament { position:relative; z-index:2; color:#a86e2e; font-size:18px; line-height:1; }
         .samee3-surah-frame strong { position:relative; z-index:2; min-width:180px; padding:0 18px; text-align:center; color:#392b1e; font-family:'Aref Ruqaa','Amiri',serif; font-size:22px; font-weight:700; }
-        .samee3-page-art { position:absolute; inset:94px 7px 46px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+        .samee3-page-art { position:absolute; inset:94px 7px 88px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
         .samee3-page-art > svg { width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
         .samee3-page-art svg { user-select:none; }
         .samee3-page-footer {
           position:absolute;
           left:50%;
-          bottom:calc(max(3px,env(safe-area-inset-bottom)) + 58px);
+          bottom:calc(max(3px,env(safe-area-inset-bottom)) + 68px);
           z-index:88;
           height:26px;
           transform:translateX(-50%);
@@ -3750,7 +3810,7 @@ export default function MushafPage() {
           position:absolute;
           z-index:95;
           left:50%;
-          bottom:calc(max(3px,env(safe-area-inset-bottom)) + 3px);
+          bottom:calc(max(3px,env(safe-area-inset-bottom)) + 12px);
           transform:translateX(-50%);
           width:52px;
           height:52px;
@@ -3772,7 +3832,7 @@ export default function MushafPage() {
         .samee3-reader-toggle:hover { transform:translateX(-50%) translateY(-2px) scale(1.02); box-shadow:0 14px 32px rgba(35,73,86,.20); }
         .samee3-reader-toggle:active { transform:translateX(-50%) scale(.94); }
         .samee3-reader-toggle.is-open { background:#0e99d4; color:#fff; transform:translateX(-50%) rotate(90deg) scale(1.03); box-shadow:0 12px 30px rgba(14,153,212,.28); }
-        .samee3-bottom-shell + .samee3-page-footer { bottom:calc(max(3px,env(safe-area-inset-bottom)) + 186px); }
+        .samee3-bottom-shell { bottom:calc(max(4px,env(safe-area-inset-bottom)) + 82px); }
         .samee3-audio-toolbar { display:grid; grid-template-columns:1.1fr 1fr 1fr 1fr; gap:8px; }
         .samee3-play-button { min-height:45px; border:0; border-radius:15px; background:linear-gradient(135deg,#d78a12,#c36f05); color:#fff; font-weight:900; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:0 8px 18px rgba(195,111,5,.19); }
         .samee3-select-wrap { position:relative; min-width:0; display:flex; flex-direction:column; justify-content:center; padding:4px 33px 3px 10px; border-radius:15px; border:1px solid #e3d9c7; background:#fff; }
@@ -3816,12 +3876,12 @@ export default function MushafPage() {
           .samee3-page-meta .meta-badge { height:26px; min-width:26px; }
           .samee3-surah-frame { top:43px; left:5.5%; right:5.5%; height:41px; }
           .samee3-surah-frame strong { min-width:140px; font-size:20px; }
-          .samee3-page-art { inset:84px 2px 42px; }
+          .samee3-page-art { inset:84px 2px 78px; }
           .samee3-top-controls { width:calc(100% - 20px); }
           .samee3-audio-toolbar { grid-template-columns:1fr 1fr; }
           .samee3-bottom-shell {
             width:calc(100% - 14px);
-            bottom:calc(max(4px,env(safe-area-inset-bottom)) + 61px);
+            bottom:calc(max(4px,env(safe-area-inset-bottom)) + 82px);
           }
           .samee3-ayah-actions-grid { grid-template-columns:repeat(2,1fr); }
           .samee3-ayah-preview { font-size:21px; }
@@ -3831,7 +3891,7 @@ export default function MushafPage() {
 
         @media (min-width:768px) {
           .samee3-page-art > svg { width:100% !important; height:100% !important; }
-          .samee3-bottom-shell { bottom:calc(max(4px,env(safe-area-inset-bottom)) + 61px); }
+          .samee3-bottom-shell { bottom:calc(max(4px,env(safe-area-inset-bottom)) + 82px); }
         }
       `}</style>
     </main>
