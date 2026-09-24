@@ -200,6 +200,348 @@ async function fetchQuranTextMushaf(
   return mushaf
 }
 
+
+/**
+ * مصدر صور صفحات المصاحف عالية الجودة للسوسي والبزي.
+ * المستودع يعلن عن 606 صور لكل رواية، ونستخدم منه صفحات 1..604
+ * المطابقة لواجهة المصحف الحالية.
+ */
+const REAL_MUSHAF_IMAGE_BASES: Record<TextRiwaya, string[]> = {
+  sousi: [
+    'https://zuper4.github.io/mushaf-qiraats/abu_amr_susi',
+  ],
+  bazzi: [
+    'https://zuper4.github.io/mushaf-qiraats/ibn_kathir_bazzi',
+  ],
+}
+
+const REAL_MUSHAF_IMAGE_TIMEOUT = 8_000
+
+function buildImageCandidates(
+  riwaya: TextRiwaya,
+  page: number,
+): string[] {
+  const bases = REAL_MUSHAF_IMAGE_BASES[riwaya] ?? []
+  const padded3 = String(page).padStart(3, '0')
+  const padded4 = String(page).padStart(4, '0')
+  const names = [
+    `${padded3}.jpg`,
+    `${padded3}.jpeg`,
+    `${padded4}.jpg`,
+    `${padded4}.jpeg`,
+    `${page}.jpg`,
+    `${page}.jpeg`,
+    `page-${padded3}.jpg`,
+    `page-${padded3}.jpeg`,
+    `page_${padded3}.jpg`,
+    `page_${padded3}.jpeg`,
+    `page-${page}.jpg`,
+    `page-${page}.jpeg`,
+    `page_${page}.jpg`,
+    `page_${page}.jpeg`,
+  ]
+
+  return bases.flatMap((base) =>
+    names.map((name) => `${base}/${name}`),
+  )
+}
+
+async function findRealMushafImage(
+  riwaya: TextRiwaya,
+  page: number,
+): Promise<string | null> {
+  const candidates = buildImageCandidates(riwaya, page)
+
+  for (const url of candidates) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      REAL_MUSHAF_IMAGE_TIMEOUT,
+    )
+
+    try {
+      const response = await fetch(url, {
+        method: 'HEAD',
+        cache: 'force-cache',
+        signal: controller.signal,
+      })
+
+      if (response.ok) {
+        return url
+      }
+    } catch {
+      // جرّب الاسم التالي.
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
+  return null
+}
+
+function buildRealImageMushafSvg(
+  riwaya: TextRiwaya,
+  page: number,
+  imageUrl: string,
+  mushaf: QuranTextMushaf,
+) {
+  const words = mushaf.words ?? []
+  const ayahStarts = mushaf.ayah_starts ?? []
+  const pageStarts = mushaf.page_starts ?? []
+  const lineStarts = mushaf.line_starts ?? []
+  const surahs = mushaf.surahs ?? []
+
+  const pageStart = pageStarts[page - 1]
+  const pageEnd = pageStarts[page] ?? words.length
+
+  if (!Number.isInteger(pageStart) || pageStart < 0) {
+    throw new Error(`Missing page start for ${riwaya} page ${page}.`)
+  }
+
+  const getAyahIndexForPosition = (position: number) =>
+    binarySearchLastStart(ayahStarts, position)
+
+  const getSurahForAyahIndex = (ayahIndex: number) => {
+    let selected = -1
+
+    for (let i = 0; i < surahs.length; i += 1) {
+      const firstAyah = Number(surahs[i]?.first_ayah)
+
+      if (
+        Number.isInteger(firstAyah) &&
+        firstAyah <= ayahIndex
+      ) {
+        selected = i
+      } else if (
+        Number.isInteger(firstAyah) &&
+        firstAyah > ayahIndex
+      ) {
+        break
+      }
+    }
+
+    return selected
+  }
+
+  /**
+   * نحدد نطاق كل آية على مستوى السطور.
+   * الطبقة نفسها شفافة؛ الصورة هي المصحف الحقيقي.
+   * الغرض منها إبقاء الضغط/التشغيل/التحديد متوافقًا مع واجهة المصحف.
+   */
+  const lineEntries = lineStarts
+    .map((start, index) => ({ start, index }))
+    .filter(
+      ({ start }) =>
+        start >= pageStart &&
+        start < pageEnd,
+    )
+
+  const lineRanges: Array<{
+    start: number
+    end: number
+    lineIndex: number
+  }> = []
+
+  for (let i = 0; i < lineEntries.length; i += 1) {
+    const start = lineEntries[i].start
+    const end =
+      lineEntries[i + 1]?.start ??
+      pageEnd
+
+    if (start < pageEnd && end > start) {
+      lineRanges.push({
+        start,
+        end: Math.min(end, pageEnd),
+        lineIndex: i,
+      })
+    }
+  }
+
+  if (!lineRanges.length) {
+    lineRanges.push({
+      start: pageStart,
+      end: pageEnd,
+      lineIndex: 0,
+    })
+  }
+
+  type AyahRange = {
+    key: string
+    surah: string
+    ayah: string
+    firstLine: number
+    lastLine: number
+  }
+
+  const ayahRanges = new Map<string, AyahRange>()
+
+  for (const line of lineRanges) {
+    for (
+      let position = line.start;
+      position < line.end;
+      position += 1
+    ) {
+      const ayahIndex =
+        getAyahIndexForPosition(position)
+      const ayahStart = ayahStarts[ayahIndex]
+      const nextAyahStart =
+        ayahStarts[ayahIndex + 1] ?? words.length
+
+      if (
+        !Number.isInteger(ayahStart) ||
+        position < ayahStart ||
+        position >= nextAyahStart
+      ) {
+        continue
+      }
+
+      const surahIndex =
+        getSurahForAyahIndex(ayahIndex)
+
+      if (surahIndex < 0) continue
+
+      const surahNumber = Number(
+        surahs[surahIndex]?.number ?? 0,
+      )
+
+      const firstAyahInSurah = Number(
+        surahs[surahIndex]?.first_ayah ??
+          ayahIndex,
+      )
+
+      if (!surahNumber) continue
+
+      const ayahNumber =
+        ayahIndex - firstAyahInSurah + 1
+
+      const key = `${surahNumber}:${ayahNumber}`
+      const existing = ayahRanges.get(key)
+
+      if (!existing) {
+        ayahRanges.set(key, {
+          key,
+          surah: String(surahNumber),
+          ayah: String(ayahNumber),
+          firstLine: line.lineIndex,
+          lastLine: line.lineIndex,
+        })
+      } else {
+        existing.lastLine = Math.max(
+          existing.lastLine,
+          line.lineIndex,
+        )
+      }
+    }
+  }
+
+  const viewWidth = 1239
+  const viewHeight = 1754
+
+  const lineCount = Math.max(
+    lineRanges.length,
+    1,
+  )
+
+  // مناطق شفافة فوق السطور. لا نغطي الصورة بصناديق مرئية.
+  const top = 210
+  const bottom = 1540
+  const lineHeight =
+    lineCount === 1
+      ? 120
+      : (bottom - top) / (lineCount - 1)
+
+  const ayahHotspots = Array.from(
+    ayahRanges.values(),
+  )
+    .map((ayah) => {
+      const y1 =
+        Math.max(
+          120,
+          top +
+            ayah.firstLine * lineHeight -
+            lineHeight * 0.58,
+        )
+
+      const y2 =
+        Math.min(
+          viewHeight - 120,
+          top +
+            ayah.lastLine * lineHeight +
+            lineHeight * 0.42,
+        )
+
+      const height = Math.max(
+        lineHeight,
+        y2 - y1,
+      )
+
+      return `
+<rect
+  class="samee3-ayah"
+  data-ayah="${escapeXml(ayah.key)}"
+  data-surah="${escapeXml(ayah.surah)}"
+  data-ayah-number="${escapeXml(ayah.ayah)}"
+  x="55"
+  y="${y1.toFixed(2)}"
+  width="${viewWidth - 110}"
+  height="${height.toFixed(2)}"
+  fill="transparent"
+  fill-opacity="0"
+  stroke="none"
+  pointer-events="all"
+/>`
+    })
+    .join('')
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 ${viewWidth} ${viewHeight}"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-label="صفحة المصحف ${escapeXml(page)} من رواية ${escapeXml(riwaya)}">
+  <style>
+    .samee3-ayah {
+      fill: transparent;
+      fill-opacity: 0;
+      stroke: none;
+      cursor: pointer;
+      pointer-events: all;
+    }
+
+    .samee3-ayah:hover {
+      fill: rgba(180, 145, 75, 0.025);
+      fill-opacity: 0.025;
+    }
+  </style>
+
+  <rect
+    x="0"
+    y="0"
+    width="${viewWidth}"
+    height="${viewHeight}"
+    fill="#fffdf7"
+  />
+
+  <image
+    href="${escapeXml(imageUrl)}"
+    x="0"
+    y="0"
+    width="${viewWidth}"
+    height="${viewHeight}"
+    preserveAspectRatio="xMidYMid meet"
+    crossorigin="anonymous"
+  />
+
+  <g
+    id="samee3-ayah-hit-layer"
+    aria-hidden="true"
+  >
+    ${ayahHotspots}
+  </g>
+</svg>`.trim()
+}
+
+
 function buildTextMushafSvg(
   riwaya: TextRiwaya,
   page: number,
@@ -632,6 +974,46 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const realImageUrl = await findRealMushafImage(
+      riwaya,
+      page,
+    )
+
+    if (realImageUrl) {
+      const svg = buildRealImageMushafSvg(
+        riwaya,
+        page,
+        realImageUrl,
+        mushaf,
+      )
+
+      return NextResponse.json(
+        {
+          success: true,
+          mode: 'printed-page-image-svg',
+          riwaya,
+          page,
+          ayahs,
+          fontFile,
+          mushafSource: 'multiqiraat-mushaf-qiraats',
+          mushafEdition:
+            mushaf.mushaf?.key ?? riwaya,
+          imageUrl: realImageUrl,
+          svg,
+          note:
+            'يتم عرض صورة صفحة المصحف الفعلية للرواية مع طبقة تفاعلية شفافة للآيات، مع الاحتفاظ ببيانات Quran Text لربط الصفحة بالآيات.',
+        },
+        {
+          headers: {
+            'Cache-Control':
+              'public, s-maxage=31536000, stale-while-revalidate=86400',
+          },
+        },
+      )
+    }
+
+    // احتياط آمن: إذا تعذر مصدر الصور مؤقتًا، لا نكسر المصحف.
+    // نرجع الرسم النصي المبني على بيانات الرواية نفسها.
     const svg = buildTextMushafSvg(
       riwaya,
       page,
@@ -642,21 +1024,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        mode: 'riwaya-text-svg',
+        mode: 'riwaya-text-svg-fallback',
         riwaya,
         page,
         ayahs,
         fontFile,
         mushafSource: 'quran-text',
-        mushafEdition: mushaf.mushaf?.key ?? riwaya,
+        mushafEdition:
+          mushaf.mushaf?.key ?? riwaya,
         svg,
         note:
-          'صفحة الرواية مبنية من ملف المصحف الخاص بالرواية مع حدود الصفحات والسطور الخاصة بها، وليست إعادة توزيع للحروف حسب طول النص.',
+          'تعذر الوصول إلى صورة الصفحة الفعلية مؤقتًا، لذلك تم استخدام عرض نصي احتياطي من بيانات الرواية نفسها.',
       },
       {
         headers: {
           'Cache-Control':
-            'public, s-maxage=31536000, stale-while-revalidate=86400',
+            'public, s-maxage=300, stale-while-revalidate=600',
         },
       },
     )
