@@ -965,6 +965,8 @@ export default function MushafPage() {
   const touchStartY = useRef<number | null>(null)
   const [turnDirection, setTurnDirection] = useState<TurnDirection>(null)
   const [turning, setTurning] = useState(false)
+  const [openPicker, setOpenPicker] = useState<'riwaya' | 'reciter' | 'surah' | null>(null)
+  const pageTurnAudioContextRef = useRef<AudioContext | null>(null)
 
   const pageMemoryCacheRef = useRef(new Map<string, PageData>())
   const svgMemoryCacheRef = useRef(new Map<string, string>())
@@ -1490,6 +1492,44 @@ export default function MushafPage() {
     setPressedAyahNumber(null)
   }, [])
 
+  const playPageTurnSound = useCallback(() => {
+    try {
+      const win = window as Window & { webkitAudioContext?: typeof AudioContext }
+      const ContextCtor = window.AudioContext || win.webkitAudioContext
+      if (!ContextCtor) return
+
+      const context = pageTurnAudioContextRef.current || new ContextCtor()
+      pageTurnAudioContextRef.current = context
+      if (context.state === 'suspended') void context.resume().catch(() => {})
+
+      const now = context.currentTime
+      const buffer = context.createBuffer(1, Math.floor(context.sampleRate * 0.16), context.sampleRate)
+      const data = buffer.getChannelData(0)
+      for (let i = 0; i < data.length; i += 1) {
+        const envelope = Math.pow(1 - i / data.length, 2.2)
+        data[i] = (Math.random() * 2 - 1) * envelope * 0.11
+      }
+
+      const source = context.createBufferSource()
+      const filter = context.createBiquadFilter()
+      const gain = context.createGain()
+      source.buffer = buffer
+      filter.type = 'bandpass'
+      filter.frequency.setValueAtTime(1700, now)
+      filter.Q.setValueAtTime(0.65, now)
+      gain.gain.setValueAtTime(0.0001, now)
+      gain.gain.exponentialRampToValueAtTime(0.22, now + 0.018)
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15)
+      source.connect(filter)
+      filter.connect(gain)
+      gain.connect(context.destination)
+      source.start(now)
+      source.stop(now + 0.16)
+    } catch {
+      // صوت التقليب تجميلي ولا يوقف التقليب.
+    }
+  }, [])
+
   const navigateTo = useCallback((
     page: number,
     extra?: { surah?: number; ayah?: string; clearJuz?: boolean },
@@ -1502,6 +1542,7 @@ export default function MushafPage() {
     navigatingRef.current = true
     setTurnDirection(direction)
     setTurning(true)
+    playPageTurnSound()
 
     const params = new URLSearchParams(searchParams.toString())
     params.set('page', String(nextPage))
@@ -1515,15 +1556,17 @@ export default function MushafPage() {
       params.delete('juzEnd')
     }
 
-    // ندفع المسار مباشرة حتى تبدأ الصفحة التالية بالاعتماد على الـ cache/prefetch فورًا.
-    router.push(`/mushaf?${params.toString()}`)
+    // نعطي حركة الورقة لحظة تبدأ قبل تبديل المحتوى حتى لا يظهر تبديل مفاجئ.
+    window.setTimeout(() => {
+      router.push(`/mushaf?${params.toString()}`)
+    }, 70)
 
     window.setTimeout(() => {
       navigatingRef.current = false
       setTurning(false)
       setTurnDirection(null)
-    }, 260)
-  }, [pageNumber, router, searchParams])
+    }, 540)
+  }, [pageNumber, playPageTurnSound, router, searchParams])
 
   /*
    * التقليب بالماوس/اللمس باستخدام Pointer Events.
@@ -1710,13 +1753,19 @@ export default function MushafPage() {
       }
 
       const rawReciters = Array.from(mergedById.values())
+      const riwayaReciterById = new Map<number, ApiReciter>(
+        riwayaReciters.map((item) => [Number(item.id), item]),
+      )
 
       const mapped = rawReciters.flatMap((item) => {
-        const moshaf = getMoshafForRiwaya(
-          item,
-          riwayaId,
-          false,
-        )
+        // نفضّل موشف استجابة الرواية نفسها؛ هذا يمنع أخذ مصحف حفص مثلًا
+        // لقارئ لديه أكثر من رواية، ويُبقي حتى السور المحدودة الظاهرة في API.
+        const riwayaSource = riwayaReciterById.get(Number(item.id))
+        const moshaf =
+          (riwayaSource
+            ? getMoshafForRiwaya(riwayaSource, riwayaId, true)
+            : null) ||
+          getMoshafForRiwaya(item, riwayaId, false)
 
         if (!moshaf?.server || !moshaf.surah_list) {
           return []
@@ -2247,6 +2296,12 @@ export default function MushafPage() {
       let server = reciterOverride?.server || selectedReciter?.server || ''
       let activeReciter = reciterOverride || selectedReciter
 
+      if (activeReciter?.surahIds?.length && !activeReciter.surahIds.includes(surahNumber)) {
+        triggerToast(`السورة ${SURAH_LIST.find((item) => item.id === surahNumber)?.name || ''} غير متاحة لهذا القارئ. اختر سورة متاحة من القائمة.`)
+        setAudioLoading(false)
+        return
+      }
+
       if (!server && reciterApiId) {
         const remote = await fetch(
           `https://mp3quran.net/api/v3/reciters?language=ar&reciter=${reciterApiId}`,
@@ -2454,6 +2509,14 @@ export default function MushafPage() {
     triggerToast,
     updateRouteAudioSelection,
   }
+
+  useEffect(() => {
+    return () => {
+      const context = pageTurnAudioContextRef.current
+      pageTurnAudioContextRef.current = null
+      if (context) void context.close().catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     const audio = new Audio()
@@ -3498,46 +3561,66 @@ export default function MushafPage() {
                   <span>{isPlaying ? 'إيقاف' : 'تشغيل'}</span>
                 </button>
 
-                <div className="samee3-select-wrap">
-                  <span>القارئ</span>
-                  <select
-                    value={selectedReciter?.apiId || selectedReciterId || ''}
-                    onChange={(event) => handleReciterSelect(Number(event.target.value))}
-                    disabled={recitersLoading || !reciters.length}
-                  >
-                    {!reciters.length ? <option value="">{recitersLoading ? 'جاري تحميل القراء...' : reciterName}</option> : null}
-                    {reciters.map((item) => <option key={item.id} value={item.apiId}>{item.label}</option>)}
-                  </select>
-                  <ChevronDown size={15} />
+                <div className={`samee3-picker ${openPicker === 'reciter' ? 'is-open' : ''}`}>
+                  <button type="button" className="samee3-picker-trigger" onClick={() => setOpenPicker(openPicker === 'reciter' ? null : 'reciter')} disabled={recitersLoading || !reciters.length}>
+                    <span>القارئ</span>
+                    <strong>{selectedReciter?.label || (recitersLoading ? 'جاري التحميل...' : 'اختر القارئ')}</strong>
+                    <ChevronDown size={16} />
+                  </button>
+                  {openPicker === 'reciter' ? (
+                    <div className="samee3-picker-menu" onClick={(event) => event.stopPropagation()}>
+                      {recitersLoading ? <div className="samee3-picker-empty"><Loader2 size={17} className="animate-spin" /> جاري تحميل القراء...</div> : null}
+                      {!recitersLoading && reciters.map((item) => (
+                        <button key={item.id} type="button" className={selectedReciter?.id === item.id ? 'is-selected' : ''} onClick={() => { setOpenPicker(null); void handleReciterSelect(item.apiId) }}>
+                          <span>{item.label}</span>
+                          <small>{item.surahIds.length < 114 ? `${arabicNumber(item.surahIds.length)} سورة` : 'المصحف كاملًا'}</small>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="samee3-select-wrap">
-                  <span>الرواية</span>
-                  <select value={riwaya} onChange={(event) => void handleRiwayaSelect(event.target.value as Riwaya)}>
-                    {Object.entries(RIWAYA_NAMES).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                  </select>
-                  <ChevronDown size={15} />
+                <div className={`samee3-picker ${openPicker === 'riwaya' ? 'is-open' : ''}`}>
+                  <button type="button" className="samee3-picker-trigger" onClick={() => setOpenPicker(openPicker === 'riwaya' ? null : 'riwaya')}>
+                    <span>الرواية</span>
+                    <strong>{RIWAYA_NAMES[riwaya]}</strong>
+                    <ChevronDown size={16} />
+                  </button>
+                  {openPicker === 'riwaya' ? (
+                    <div className="samee3-picker-menu" onClick={(event) => event.stopPropagation()}>
+                      {Object.entries(RIWAYA_NAMES).map(([id, label]) => (
+                        <button key={id} type="button" className={riwaya === id ? 'is-selected' : ''} onClick={() => { setOpenPicker(null); void handleRiwayaSelect(id as Riwaya) }}>
+                          <span>{label}</span>
+                          {riwaya === id ? <Check size={16} /> : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="samee3-select-wrap">
-                  <span>السورة</span>
-                  <select
-                    value={availableSurahs.some((item) => item.id === (currentSurahNumber || requestedSurah))
-                      ? (currentSurahNumber || requestedSurah)
-                      : (availableSurahs[0]?.id || '')}
-                    onChange={(event) => handleSurahSelect(Number(event.target.value))}
-                    disabled={!availableSurahs.length}
-                  >
-                    {availableSurahs.length ? (
-                      availableSurahs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)
-                    ) : (
-                      <option value="">{recitersLoading ? 'جاري تحميل السور...' : 'لا توجد سور متاحة'}</option>
-                    )}
-                  </select>
-                  <ChevronDown size={15} />
+                <div className={`samee3-picker ${openPicker === 'surah' ? 'is-open' : ''}`}>
+                  <button type="button" className="samee3-picker-trigger" onClick={() => {
+                    if (!availableSurahs.length) {
+                      triggerToast(selectedReciter ? 'لا توجد سور متاحة لهذا القارئ.' : 'اختر القارئ أولًا.')
+                      return
+                    }
+                    setOpenPicker(openPicker === 'surah' ? null : 'surah')
+                  }} disabled={!availableSurahs.length}>
+                    <span>السورة</span>
+                    <strong>{availableSurahs.find((item) => item.id === (currentSurahNumber || requestedSurah))?.name || 'اختر السورة'}</strong>
+                    <ChevronDown size={16} />
+                  </button>
+                  {openPicker === 'surah' ? (
+                    <div className="samee3-picker-menu samee3-picker-menu-surahs" onClick={(event) => event.stopPropagation()}>
+                      {availableSurahs.map((item) => (
+                        <button key={item.id} type="button" className={(currentSurahNumber || requestedSurah) === item.id ? 'is-selected' : ''} onClick={() => { setOpenPicker(null); handleSurahSelect(item.id) }}>
+                          <span>{item.name}</span><small>{arabicNumber(item.id)}</small>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
-
 
               <div className="samee3-bottom-nav">
                 <button type="button" onClick={() => router.push('/')}><Home size={22} /><span>الرئيسية</span></button>
@@ -3662,30 +3745,26 @@ export default function MushafPage() {
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
         .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; }
         .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; perspective:1800px; background:#f5f0e4; touch-action:pan-y; }
-        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .20s cubic-bezier(.2,.8,.25,1); will-change:transform; }
+        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .52s cubic-bezier(.22,.72,.18,1), filter .52s ease; will-change:transform, filter; transform-origin:center center; }
         .samee3-spread.is-desktop { padding:18px 18px 24px; }
         .samee3-spread.is-mobile { padding:0; }
         .samee3-spread.is-turning.next {
-          transform:
-            translateX(-28px)
-            rotateY(-7deg)
-            scale(.992);
-          filter:
-            drop-shadow(
-              -18px 0 22px
-                rgba(64,49,30,.12)
-            );
+          transform:translateX(-34px) rotateY(-15deg) rotateZ(-.35deg) scale(.985);
+          filter:drop-shadow(-24px 10px 26px rgba(64,49,30,.18));
         }
         .samee3-spread.is-turning.prev {
-          transform:
-            translateX(28px)
-            rotateY(7deg)
-            scale(.992);
-          filter:
-            drop-shadow(
-              18px 0 22px
-                rgba(64,49,30,.12)
-            );
+          transform:translateX(34px) rotateY(15deg) rotateZ(.35deg) scale(.985);
+          filter:drop-shadow(24px 10px 26px rgba(64,49,30,.18));
+        }
+        .samee3-spread.is-turning::after {
+          content:"";
+          position:absolute;
+          inset:3% 5%;
+          pointer-events:none;
+          border-radius:4px;
+          background:linear-gradient(90deg, transparent 0%, rgba(255,255,255,.34) 46%, rgba(112,82,39,.10) 50%, transparent 56%);
+          opacity:.82;
+          mix-blend-mode:multiply;
         }
         .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 10px 42px rgba(83,63,34,.11); isolation:isolate; }
         .is-desktop .samee3-page-sheet { height:min(calc(100dvh - 42px), 920px); max-width:calc(50vw - 32px); }
@@ -3706,7 +3785,7 @@ export default function MushafPage() {
         .samee3-page-footer {
           position:absolute;
           left:50%;
-          bottom:calc(max(3px,env(safe-area-inset-bottom)) + 68px);
+          bottom:calc(max(2px,env(safe-area-inset-bottom)) + 8px);
           z-index:88;
           height:26px;
           transform:translateX(-50%);
@@ -3810,7 +3889,7 @@ export default function MushafPage() {
           position:absolute;
           z-index:95;
           left:50%;
-          bottom:calc(max(3px,env(safe-area-inset-bottom)) + 12px);
+          bottom:calc(max(2px,env(safe-area-inset-bottom)) + 2px);
           transform:translateX(-50%);
           width:52px;
           height:52px;
@@ -3832,13 +3911,26 @@ export default function MushafPage() {
         .samee3-reader-toggle:hover { transform:translateX(-50%) translateY(-2px) scale(1.02); box-shadow:0 14px 32px rgba(35,73,86,.20); }
         .samee3-reader-toggle:active { transform:translateX(-50%) scale(.94); }
         .samee3-reader-toggle.is-open { background:#0e99d4; color:#fff; transform:translateX(-50%) rotate(90deg) scale(1.03); box-shadow:0 12px 30px rgba(14,153,212,.28); }
-        .samee3-bottom-shell { bottom:calc(max(4px,env(safe-area-inset-bottom)) + 82px); }
+        .samee3-bottom-shell { bottom:calc(max(3px,env(safe-area-inset-bottom)) + 58px); }
+        .samee3-picker { position:relative; min-width:0; }
+        .samee3-picker-trigger { width:100%; min-height:56px; padding:6px 38px 6px 12px; border:1px solid #e3d9c7; border-radius:15px; background:#fff; color:#263347; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; gap:2px; position:relative; text-align:right; touch-action:manipulation; }
+        .samee3-picker-trigger > span { font-size:9px; color:#a4947a; font-weight:900; }
+        .samee3-picker-trigger > strong { width:100%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:13px; line-height:1.35; font-weight:900; }
+        .samee3-picker-trigger > svg { position:absolute; right:12px; top:50%; transform:translateY(-50%); color:#d27b0a; transition:transform .18s ease; }
+        .samee3-picker.is-open .samee3-picker-trigger > svg { transform:translateY(-50%) rotate(180deg); }
+        .samee3-picker-menu { position:absolute; z-index:240; left:0; right:0; bottom:calc(100% + 8px); max-height:min(48dvh,360px); overflow:auto; padding:7px; border:1px solid rgba(169,200,216,.85); border-radius:18px; background:rgba(255,253,248,.99); box-shadow:0 18px 46px rgba(35,73,86,.24); backdrop-filter:blur(16px); overscroll-behavior:contain; }
+        .samee3-picker-menu button { width:100%; min-height:46px; padding:8px 10px; border:0; border-radius:12px; background:transparent; color:#29384a; display:flex; align-items:center; justify-content:space-between; gap:8px; text-align:right; font-weight:900; font-size:12px; }
+        .samee3-picker-menu button:hover, .samee3-picker-menu button.is-selected { background:#eef9fc; color:#0b7ea7; }
+        .samee3-picker-menu button small { color:#9b8a72; font-size:9px; font-weight:900; white-space:nowrap; }
+        .samee3-picker-empty { min-height:54px; display:flex; align-items:center; justify-content:center; gap:7px; color:#7d8b9b; font-size:11px; font-weight:900; }
+        .samee3-picker-menu-surahs { max-height:min(55dvh,430px); }
         .samee3-audio-toolbar { display:grid; grid-template-columns:1.1fr 1fr 1fr 1fr; gap:8px; }
         .samee3-play-button { min-height:45px; border:0; border-radius:15px; background:linear-gradient(135deg,#d78a12,#c36f05); color:#fff; font-weight:900; display:flex; align-items:center; justify-content:center; gap:7px; box-shadow:0 8px 18px rgba(195,111,5,.19); }
-        .samee3-select-wrap { position:relative; min-width:0; display:flex; flex-direction:column; justify-content:center; padding:4px 33px 3px 10px; border-radius:15px; border:1px solid #e3d9c7; background:#fff; }
-        .samee3-select-wrap > span { font-size:8px; color:#a4947a; font-weight:900; }
-        .samee3-select-wrap select { width:100%; border:0; outline:0; background:transparent; color:#263347; font-size:11px; font-weight:900; appearance:none; }
-        .samee3-select-wrap > svg { position:absolute; right:10px; top:50%; transform:translateY(-30%); pointer-events:none; color:#d27b0a; }
+        .samee3-select-wrap { position:relative; min-width:0; min-height:56px; display:flex; flex-direction:column; justify-content:center; gap:2px; padding:5px 42px 5px 12px; border-radius:15px; border:1px solid #e3d9c7; background:#fff; cursor:pointer; touch-action:manipulation; }
+        .samee3-select-wrap > span:first-child { font-size:9px; color:#a4947a; font-weight:900; pointer-events:none; }
+        .samee3-select-wrap .samee3-select-value { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:#263347; font-size:13px; line-height:1.35; font-weight:900; pointer-events:none; }
+        .samee3-select-wrap select { position:absolute; inset:0; width:100%; height:100%; opacity:0.01; border:0; outline:0; background:transparent; appearance:auto; cursor:pointer; z-index:3; font-size:16px; }
+        .samee3-select-wrap > svg { position:absolute; right:12px; top:50%; transform:translateY(-20%); pointer-events:none; color:#d27b0a; z-index:2; }
         .samee3-audio-error { padding:6px 8px; text-align:center; color:#a63e28; font-size:10px; font-weight:800; }
         .samee3-bottom-nav { margin-top:8px; padding-top:8px; border-top:1px solid #ece4d7; display:grid; grid-template-columns:repeat(4,1fr); }
         .samee3-bottom-nav button { border:0; background:transparent; color:#91a3b8; display:flex; flex-direction:column; align-items:center; gap:3px; padding:3px 2px; font-weight:900; font-size:9px; }
@@ -3881,8 +3973,10 @@ export default function MushafPage() {
           .samee3-audio-toolbar { grid-template-columns:1fr 1fr; }
           .samee3-bottom-shell {
             width:calc(100% - 14px);
-            bottom:calc(max(4px,env(safe-area-inset-bottom)) + 82px);
+            bottom:calc(max(3px,env(safe-area-inset-bottom)) + 58px);
           }
+          .samee3-picker-menu { max-height:min(44dvh,330px); }
+          .samee3-page-footer { bottom:calc(max(2px,env(safe-area-inset-bottom)) + 7px); }
           .samee3-ayah-actions-grid { grid-template-columns:repeat(2,1fr); }
           .samee3-ayah-preview { font-size:21px; }
           .samee3-image-preview-sheet { width:calc(100vw - 20px); max-height:94dvh; padding:10px; }
@@ -3891,7 +3985,7 @@ export default function MushafPage() {
 
         @media (min-width:768px) {
           .samee3-page-art > svg { width:100% !important; height:100% !important; }
-          .samee3-bottom-shell { bottom:calc(max(4px,env(safe-area-inset-bottom)) + 82px); }
+          .samee3-bottom-shell { bottom:calc(max(3px,env(safe-area-inset-bottom)) + 58px); }
         }
       `}</style>
     </main>
