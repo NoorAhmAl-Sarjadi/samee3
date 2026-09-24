@@ -52,184 +52,328 @@ function escapeXml(value: unknown): string {
     .replace(/'/g, '&apos;')
 }
 
-function getAyahText(item: unknown): string {
-  if (!item || typeof item !== 'object') return ''
-  const value = item as Record<string, unknown>
-  return String(
-    value.text ??
-      value.ayah_text ??
-      value.ayahText ??
-      value.content ??
-      '',
-  ).trim()
+type QuranTextMushaf = {
+  format?: string
+  format_version?: string
+  mushaf?: {
+    key?: string
+    word_count?: number
+  }
+  font?: {
+    family?: string
+    file?: string
+  }
+  words?: string[]
+  ayah_starts?: number[]
+  page_starts?: number[]
+  line_starts?: number[]
+  surahs?: Array<{
+    number?: number
+    first_ayah?: number
+    ayah_count?: number
+  }>
 }
 
-function getAyahNumber(item: unknown): string {
-  if (!item || typeof item !== 'object') return ''
-  const value = item as Record<string, unknown>
-  return String(
-    value.numberInSurah ??
-      value.ayah ??
-      value.ayahNumber ??
-      value.number ??
-      '',
-  )
-}
+const QURAN_TEXT_RAW_BASE =
+  'https://raw.githubusercontent.com/quran-ws/quran-text/main/data/mushaf'
 
-function getSurahNumber(item: unknown): string {
-  if (!item || typeof item !== 'object') return ''
-  const value = item as Record<string, unknown>
-  const surah = value.surah
+const QURAN_TEXT_DOWNLOAD_BASE = 'https://text.quran.ws/download'
 
-  if (surah && typeof surah === 'object') {
-    const record = surah as Record<string, unknown>
-    return String(record.number ?? record.id ?? '')
+function binarySearchLastStart(starts: number[], position: number): number {
+  let low = 0
+  let high = starts.length - 1
+  let answer = 0
+
+  while (low <= high) {
+    const mid = (low + high) >> 1
+    const value = starts[mid]
+
+    if (value <= position) {
+      answer = mid
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
   }
 
-  return String(
-    value.surahNumber ??
-      value.surah_id ??
-      value.surahId ??
-      '',
-  )
+  return answer
 }
 
-/**
- * SVG احتياطي أنيق للروايتين السوسي والبزي.
- * النص نفسه يأتي من /api/quran الخاص بالرواية، وليس من حفص.
- * هذا يحافظ على هوية الرواية إلى أن تُستخدم طبقة العرض النصية في page.tsx.
- */
+function normalizeQuranTextMushaf(value: unknown): QuranTextMushaf | null {
+  if (!value || typeof value !== 'object') return null
+
+  const data = value as Record<string, unknown>
+  const record = data
+  const words = Array.isArray(record.words)
+    ? record.words.filter((word): word is string => typeof word === 'string')
+    : []
+
+  const ayahStarts = Array.isArray(record.ayah_starts)
+    ? record.ayah_starts.filter((item): item is number => Number.isInteger(item))
+    : []
+
+  const pageStarts = Array.isArray(record.page_starts)
+    ? record.page_starts.filter((item): item is number => Number.isInteger(item))
+    : []
+
+  const lineStarts = Array.isArray(record.line_starts)
+    ? record.line_starts.filter((item): item is number => Number.isInteger(item))
+    : []
+
+  if (!words.length || !pageStarts.length || !lineStarts.length) {
+    return null
+  }
+
+  return {
+    format: typeof record.format === 'string' ? record.format : undefined,
+    format_version:
+      typeof record.format_version === 'string'
+        ? record.format_version
+        : undefined,
+    mushaf:
+      record.mushaf && typeof record.mushaf === 'object'
+        ? (record.mushaf as QuranTextMushaf['mushaf'])
+        : undefined,
+    font:
+      record.font && typeof record.font === 'object'
+        ? (record.font as QuranTextMushaf['font'])
+        : undefined,
+    words,
+    ayah_starts: ayahStarts,
+    page_starts: pageStarts,
+    line_starts: lineStarts,
+    surahs: Array.isArray(record.surahs)
+      ? (record.surahs as QuranTextMushaf['surahs'])
+      : undefined,
+  }
+}
+
+async function fetchQuranTextMushaf(
+  riwaya: TextRiwaya,
+): Promise<QuranTextMushaf> {
+  const rawUrl = `${QURAN_TEXT_RAW_BASE}/${riwaya}.json`
+
+  const rawResponse = await fetch(rawUrl, {
+    method: 'GET',
+    cache: 'force-cache',
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+
+  if (rawResponse.ok) {
+    const rawData = await rawResponse.json()
+    const mushaf = normalizeQuranTextMushaf(rawData)
+
+    if (mushaf) return mushaf
+  }
+
+  // fallback رسمي من نفس مشروع Quran Text، في حالة تعذر raw GitHub.
+  const downloadUrl = new URL(QURAN_TEXT_DOWNLOAD_BASE)
+  downloadUrl.searchParams.set('edition', riwaya)
+  downloadUrl.searchParams.set('format', 'json')
+  downloadUrl.searchParams.set('layout', 'lines')
+  downloadUrl.searchParams.set('by', 'word')
+  downloadUrl.searchParams.set('page', '1-604')
+
+  const downloadResponse = await fetch(downloadUrl, {
+    method: 'GET',
+    cache: 'force-cache',
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+
+  if (!downloadResponse.ok) {
+    throw new Error(
+      `Quran Text ${riwaya} download failed: ${downloadResponse.status}`,
+    )
+  }
+
+  const downloadData = await downloadResponse.json()
+  const mushaf = normalizeQuranTextMushaf(downloadData)
+
+  if (!mushaf) {
+    throw new Error(`Invalid Quran Text mushaf payload for ${riwaya}.`)
+  }
+
+  return mushaf
+}
+
 function buildTextMushafSvg(
   riwaya: TextRiwaya,
   page: number,
-  ayahs: unknown[],
+  mushaf: QuranTextMushaf,
   fontFile: string | null,
 ) {
   const fallbackFontFile =
     riwaya === 'sousi'
-      ? 'https://cdn.jsdelivr.net/gh/thetruetruth/quran-data-kfgqpc@main/soosi/font/soosi.9.woff2'
-      : 'https://cdn.jsdelivr.net/gh/thetruetruth/quran-data-kfgqpc@main/bazzi/font/bazzi.7.woff2'
+      ? 'https://text.quran.ws/data/fonts/UthmanicSousi-v-3.0.ttf'
+      : 'https://text.quran.ws/data/fonts/UthmanicBazzi-v-3.0.ttf'
 
-  const fontFamily = riwaya === 'sousi' ? 'soosi9' : 'bazzi7'
-  const safeFontFile = fontFile?.trim() || fallbackFontFile
+  const fontFamily =
+    mushaf.font?.family?.trim() ||
+    (riwaya === 'sousi'
+      ? 'KFGQPC Sousi Uthmanic Script'
+      : 'KFGQPC Bazzi Uthmanic Script')
 
-  type Token = {
+  const requestedFontFile = fontFile?.trim() || mushaf.font?.file?.trim() || ''
+  const safeFontFile =
+    /^https?:\/\//i.test(requestedFontFile)
+      ? requestedFontFile
+      : requestedFontFile
+        ? `https://text.quran.ws/data/fonts/${encodeURIComponent(requestedFontFile)}`
+        : fallbackFontFile
+
+  const words = mushaf.words ?? []
+  const ayahStarts = mushaf.ayah_starts ?? []
+  const pageStarts = mushaf.page_starts ?? []
+  const lineStarts = mushaf.line_starts ?? []
+  const surahs = mushaf.surahs ?? []
+
+  const pageStart = pageStarts[page - 1]
+  const pageEnd = pageStarts[page] ?? words.length
+
+  if (!Number.isInteger(pageStart) || pageStart < 0) {
+    throw new Error(`Missing page start for ${riwaya} page ${page}.`)
+  }
+
+  type RenderWord = {
     text: string
     surah: string
     ayah: string
-    isEnd: boolean
+    position: number
   }
 
-  const tokens: Token[] = []
+  const getAyahIndexForPosition = (position: number) =>
+    binarySearchLastStart(ayahStarts, position)
 
-  for (const item of ayahs) {
-    const text = getAyahText(item)
+  const wordsWithMeta: RenderWord[] = []
+
+  for (let position = pageStart; position < pageEnd; position += 1) {
+    const text = words[position]
     if (!text) continue
 
-    const surah = getSurahNumber(item)
-    const ayah = getAyahNumber(item)
-    const words = text.split(/\s+/).filter(Boolean)
+    const ayahIndex = getAyahIndexForPosition(position)
+    const ayahStart = ayahStarts[ayahIndex]
+    const nextAyahStart = ayahStarts[ayahIndex + 1] ?? words.length
 
-    words.forEach((word, index) => {
-      tokens.push({
-        text: word,
-        surah,
-        ayah,
-        isEnd: index === words.length - 1,
-      })
+    // في السوسي والبزي توجد مواضع مطبوعة (مثل البسملة غير المرقمة)
+    // قد تقع بين آيتين؛ لا ننسبها للآية السابقة.
+    const hasAyah =
+      ayahIndex >= 0 &&
+      Number.isInteger(ayahStart) &&
+      position >= ayahStart &&
+      position < nextAyahStart
+
+    const surahIndex = hasAyah
+      ? (() => {
+          let selected = -1
+          for (let i = 0; i < surahs.length; i += 1) {
+            const firstAyah = Number(surahs[i]?.first_ayah)
+            if (Number.isInteger(firstAyah) && firstAyah <= ayahIndex) selected = i
+            else if (Number.isInteger(firstAyah) && firstAyah > ayahIndex) break
+          }
+          return selected
+        })()
+      : -1
+
+    const surah =
+      hasAyah && surahIndex >= 0
+        ? String(surahs[surahIndex]?.number ?? '')
+        : ''
+
+    const firstAyahInSurah =
+      hasAyah && surahIndex >= 0
+        ? Number(surahs[surahIndex]?.first_ayah ?? ayahIndex)
+        : ayahIndex
+
+    const ayah =
+      hasAyah && surahIndex >= 0
+        ? String(ayahIndex - firstAyahInSurah + 1)
+        : ''
+
+    wordsWithMeta.push({
+      text,
+      surah,
+      ayah,
+      position,
     })
   }
 
-  // الصفحة المصحفية المرئية للسوسي والبزي تكون 15 سطرًا مثل صفحات
-  // المصحف المطبوعة، مع الحفاظ على النص الحقيقي للرواية وعدم استبداله.
-  const targetLines = 15
-  const totalChars = tokens.reduce((sum, token) => sum + token.text.length + 1, 0)
-  const targetCharsPerLine = Math.max(24, Math.ceil(totalChars / targetLines))
+  const pageLineStarts = lineStarts
+    .map((start, index) => ({ start, index }))
+    .filter(({ start }) => start >= pageStart && start < pageEnd)
 
-  type Line = { tokens: Token[]; chars: number }
-  const lines: Line[] = []
-  let current: Line = { tokens: [], chars: 0 }
+  const lineRanges: Array<{ start: number; end: number }> = []
 
-  for (const token of tokens) {
-    const nextChars = current.chars + token.text.length + (current.tokens.length ? 1 : 0)
+  for (let i = 0; i < pageLineStarts.length; i += 1) {
+    const start = pageLineStarts[i].start
+    const end =
+      pageLineStarts[i + 1]?.start ??
+      pageEnd
 
-    if (current.tokens.length && nextChars > targetCharsPerLine && lines.length < targetLines - 1) {
-      lines.push(current)
-      current = { tokens: [], chars: 0 }
+    if (start < pageEnd && end > start) {
+      lineRanges.push({
+        start,
+        end: Math.min(end, pageEnd),
+      })
+    }
+  }
+
+  // لو كانت بيانات line_starts لا تبدأ من نفس أول كلمة الصفحة،
+  // نستخدم نطاق الصفحة كحل آمن بدل إسقاط النص.
+  if (!lineRanges.length) {
+    lineRanges.push({ start: pageStart, end: pageEnd })
+  }
+
+  const wordByPosition = new Map(
+    wordsWithMeta.map((word) => [word.position, word]),
+  )
+
+  const toArabicDigits = (value: string) =>
+    value.replace(/[0-9]/g, (digit) => '٠١٢٣٤٥٦٧٨٩'[Number(digit)])
+
+  const lineNodes = lineRanges.map((range, lineIndex) => {
+    const lineWords: RenderWord[] = []
+
+    for (let position = range.start; position < range.end; position += 1) {
+      const word = wordByPosition.get(position)
+      if (word) lineWords.push(word)
     }
 
-    current.tokens.push(token)
-    current.chars += token.text.length + (current.tokens.length > 1 ? 1 : 0)
-  }
+    if (!lineWords.length) return ''
 
-  if (current.tokens.length) lines.push(current)
+    const content = lineWords
+      .map((word, wordIndex) => {
+        const nextWord = lineWords[wordIndex + 1]
+        const ayahEnded =
+          word.ayah &&
+          (!nextWord || nextWord.ayah !== word.ayah || nextWord.surah !== word.surah)
 
-  while (lines.length > targetLines) {
-    let mergeIndex = 0
-    let smallest = Number.POSITIVE_INFINITY
+        const marker = ayahEnded
+          ? ` <tspan class="samee3-ayah-marker">۝${toArabicDigits(word.ayah)}</tspan>`
+          : ''
 
-    for (let i = 0; i < lines.length - 1; i += 1) {
-      const combined = lines[i].chars + lines[i + 1].chars
-      if (combined < smallest) {
-        smallest = combined
-        mergeIndex = i
-      }
-    }
+        const key =
+          word.surah && word.ayah
+            ? `${word.surah}:${word.ayah}`
+            : `position:${word.position}`
 
-    const mergedTokens = [
-      ...lines[mergeIndex].tokens,
-      ...lines[mergeIndex + 1].tokens,
-    ]
-    const chars = mergedTokens.reduce(
-      (sum, token, index) => sum + token.text.length + (index ? 1 : 0),
-      0,
-    )
+        return `<tspan class="samee3-ayah" data-ayah="${escapeXml(key)}" data-surah="${escapeXml(word.surah)}" data-ayah-number="${escapeXml(word.ayah)}">${escapeXml(word.text)}${marker}</tspan>${wordIndex < lineWords.length - 1 ? ' ' : ''}`
+      })
+      .join('')
 
-    lines.splice(mergeIndex, 2, { tokens: mergedTokens, chars })
-  }
-
-  // لو حصل تكديس بسبب اختلاف أطوال الآيات، نعيد توزيع السطور الأخيرة
-  // بحيث تظل الصفحة هادئة ومتوازنة بدل أن تصغر الكتابة فجأة.
-  while (lines.length < targetLines) {
-    const largestIndex = lines.reduce(
-      (best, line, index, arr) => line.chars > arr[best].chars ? index : best,
-      0,
-    )
-    const largest = lines[largestIndex]
-    if (largest.tokens.length < 3) break
-
-    const splitAt = Math.ceil(largest.tokens.length / 2)
-    const firstTokens = largest.tokens.slice(0, splitAt)
-    const secondTokens = largest.tokens.slice(splitAt)
-    const calcChars = (items: Token[]) => items.reduce((sum, token, i) => sum + token.text.length + (i ? 1 : 0), 0)
-
-    lines.splice(
-      largestIndex,
-      1,
-      { tokens: firstTokens, chars: calcChars(firstTokens) },
-      { tokens: secondTokens, chars: calcChars(secondTokens) },
-    )
-  }
+    return `<text x="50%" y="${lineIndex + 1}" text-anchor="middle" direction="rtl" unicode-bidi="plaintext" class="samee3-quran-line">${content}</text>`
+  })
 
   const viewWidth = 382.68
   const viewHeight = 547.09
-  const textTop = 92
-  const textBottom = 505
-  const lineHeight = (textBottom - textTop) / Math.max(targetLines - 1, 1)
-  const fontSize = 18.8
-
-  const textNodes = lines.slice(0, targetLines).map((line, index) => {
-    const y = textTop + index * lineHeight
-    const content = line.tokens.map((token, tokenIndex) => {
-      const marker = token.isEnd
-        ? ` <tspan class="samee3-ayah-marker">۝${escapeXml(token.ayah)}</tspan>`
-        : ''
-      const key = `${token.surah}:${token.ayah}`
-      return `<tspan class="samee3-ayah" data-ayah="${escapeXml(key)}" data-surah="${escapeXml(token.surah)}" data-ayah-number="${escapeXml(token.ayah)}">${escapeXml(token.text)}${marker}</tspan>${tokenIndex < line.tokens.length - 1 ? ' ' : ''}`
-    }).join('')
-
-    return `<text x="${viewWidth / 2}" y="${y.toFixed(2)}" text-anchor="middle" direction="rtl" unicode-bidi="plaintext" class="samee3-quran-line">${content}</text>`
-  }).join('')
+  const lineCount = Math.max(lineRanges.length, 1)
+  const textTop = lineCount <= 10 ? 86 : 78
+  const textBottom = lineCount <= 10 ? 495 : 508
+  const lineHeight =
+    lineCount === 1 ? 0 : (textBottom - textTop) / (lineCount - 1)
 
   const normalizedFontFile = safeFontFile.toLowerCase()
   const fontFormat = normalizedFontFile.includes('.woff2')
@@ -242,37 +386,49 @@ function buildTextMushafSvg(
 
   const fontStyle = `
     @font-face {
-      font-family: '${fontFamily}';
+      font-family: '${escapeXml(fontFamily)}';
       src: url('${escapeXml(safeFontFile)}') format('${fontFormat}');
       font-display: swap;
     }
   `
+
+  const positionedLineNodes = lineNodes
+    .map((raw, lineIndex) => {
+      if (!raw) return ''
+      const y =
+        lineCount === 1
+          ? (textTop + textBottom) / 2
+          : textTop + lineIndex * lineHeight
+      return raw.replace(/ y="[^"]*"/, ` y="${y.toFixed(2)}"`)
+    })
+    .join('')
 
   return `
 <svg xmlns="http://www.w3.org/2000/svg"
      viewBox="0 0 ${viewWidth} ${viewHeight}"
      preserveAspectRatio="xMidYMid meet"
      role="img"
-     aria-label="صفحة المصحف ${escapeXml(page)}">
+     aria-label="صفحة المصحف ${escapeXml(page)} من رواية ${escapeXml(riwaya)}">
   <style>
     ${fontStyle}
     .samee3-quran-line {
-      font-family: '${fontFamily}', 'Amiri Quran', 'Amiri', serif;
-      font-size: ${fontSize}px;
+      font-family: '${escapeXml(fontFamily)}', serif;
+      font-size: 18.6px;
       font-weight: 400;
       fill: #171717;
       letter-spacing: 0;
       word-spacing: 0;
+      dominant-baseline: alphabetic;
     }
-    .samee3-ayah { cursor:pointer; }
+    .samee3-ayah { cursor: pointer; }
     .samee3-ayah-marker {
-      font-family: '${fontFamily}', 'Amiri Quran', 'Amiri', serif;
+      font-family: '${escapeXml(fontFamily)}', serif;
       font-size: 0.62em;
       fill: #9a753e;
     }
   </style>
   <rect x="0" y="0" width="${viewWidth}" height="${viewHeight}" fill="#fffdf7"/>
-  <g id="samee3-quran-content">${textNodes}</g>
+  <g id="samee3-quran-content">${positionedLineNodes}</g>
 </svg>`.trim()
 }
 
@@ -415,8 +571,9 @@ export async function GET(request: NextRequest) {
   }
 
   // =========================================================
-  // السوسي والبزي: نستخدم بيانات الرواية الحقيقية من /api/quran.
-  // لا نستخدم صفحة حفص أو الدوري كبديل.
+  // السوسي والبزي: نستخدم ملف Quran Text الخاص بالرواية نفسها.
+  // الملف يحتوي على الكلمات + بداية الصفحات + بداية السطور + بيانات السور،
+  // لذلك لا نعيد تقسيم النص حسب عدد الحروف كما كان يحدث سابقًا.
   // =========================================================
 
   const controller = new AbortController()
@@ -430,31 +587,34 @@ export async function GET(request: NextRequest) {
     apiUrl.searchParams.set('riwaya', riwaya)
     apiUrl.searchParams.set('page', String(page))
 
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      cache: 'force-cache',
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-      },
-    })
+    const [quranResponse, mushaf] = await Promise.all([
+      fetch(apiUrl, {
+        method: 'GET',
+        cache: 'force-cache',
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+        },
+      }),
+      fetchQuranTextMushaf(riwaya),
+    ])
 
-    if (!response.ok) {
-      const details = await response.text().catch(() => '')
+    if (!quranResponse.ok) {
+      const details = await quranResponse.text().catch(() => '')
 
       return NextResponse.json(
         {
-          error: 'تعذر تحميل بيانات الرواية.',
+          error: 'تعذر تحميل بيانات الآيات للرواية.',
           riwaya,
           page,
-          status: response.status,
+          status: quranResponse.status,
           details: details.slice(0, 1000),
         },
-        { status: response.status },
+        { status: quranResponse.status },
       )
     }
 
-    const data = await response.json()
+    const data = await quranResponse.json()
     const ayahs = Array.isArray(data?.ayahs) ? data.ayahs : []
     const fontFile =
       typeof data?.fontFile === 'string' && data.fontFile.trim()
@@ -475,7 +635,7 @@ export async function GET(request: NextRequest) {
     const svg = buildTextMushafSvg(
       riwaya,
       page,
-      ayahs,
+      mushaf,
       fontFile,
     )
 
@@ -487,10 +647,11 @@ export async function GET(request: NextRequest) {
         page,
         ayahs,
         fontFile,
+        mushafSource: 'quran-text',
+        mushafEdition: mushaf.mushaf?.key ?? riwaya,
         svg,
-        source: '/api/quran',
         note:
-          'هذه صفحة مرسومة من نص الرواية الحقيقي وخطها، وليست نسخة من مصحف رواية أخرى.',
+          'صفحة الرواية مبنية من ملف المصحف الخاص بالرواية مع حدود الصفحات والسطور الخاصة بها، وليست إعادة توزيع للحروف حسب طول النص.',
       },
       {
         headers: {
