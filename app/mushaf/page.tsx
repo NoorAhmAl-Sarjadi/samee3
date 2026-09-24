@@ -3748,23 +3748,14 @@ export default function MushafPage() {
         .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .52s cubic-bezier(.22,.72,.18,1), filter .52s ease; will-change:transform, filter; transform-origin:center center; }
         .samee3-spread.is-desktop { padding:18px 18px 24px; }
         .samee3-spread.is-mobile { padding:0; }
+        /* تقليب هادئ ونظيف بدون خط/شريط ظل في منتصف الصفحة */
         .samee3-spread.is-turning.next {
-          transform:translateX(-7px) rotateY(-8deg);
-          filter:drop-shadow(-14px 8px 20px rgba(64,49,30,.14));
+          transform:translate3d(-3px,0,0) rotateY(-2.5deg) scale(.998);
+          filter:drop-shadow(-7px 5px 14px rgba(64,49,30,.075));
         }
         .samee3-spread.is-turning.prev {
-          transform:translateX(7px) rotateY(8deg);
-          filter:drop-shadow(14px 8px 20px rgba(64,49,30,.14));
-        }
-        .samee3-spread.is-turning::after {
-          content:"";
-          position:absolute;
-          inset:3% 5%;
-          pointer-events:none;
-          border-radius:4px;
-          background:linear-gradient(90deg, transparent 0%, rgba(255,255,255,.34) 46%, rgba(112,82,39,.10) 50%, transparent 56%);
-          opacity:.82;
-          mix-blend-mode:multiply;
+          transform:translate3d(3px,0,0) rotateY(2.5deg) scale(.998);
+          filter:drop-shadow(7px 5px 14px rgba(64,49,30,.075));
         }
         .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 10px 42px rgba(83,63,34,.11); isolation:isolate; }
         .is-desktop .samee3-page-sheet { height:min(calc(100dvh - 42px), 920px); max-width:calc(50vw - 32px); }
