@@ -277,26 +277,50 @@ function clampPage(page: number) {
 
 function parseSurahList(value?: string) {
   if (!value) return []
+
   return value
     .split(',')
     .map((item) => Number(item.trim()))
-    .filter((item) => Number.isInteger(item) && item >= 1 && item <= 114)
+    .filter(
+      (item) =>
+        Number.isInteger(item) &&
+        item >= 1 &&
+        item <= 114,
+    )
 }
 
 function arabicNumber(value: number) {
-  return String(value).replace(/\d/g, (digit) => '٠١٢٣٤٥٦٧٨٩'[Number(digit)])
+  return String(value).replace(
+    /\d/g,
+    (digit) => '٠١٢٣٤٥٦٧٨٩'[Number(digit)],
+  )
 }
 
-function getSurahName(surahNumber?: number, data?: PageData | null) {
-  if (data?.ayahs?.[0]?.surah?.name) return data.ayahs[0].surah.name
-  if (surahNumber) {
-    return SURAH_LIST.find((item) => item.id === surahNumber)?.name || 'المصحف الشريف'
+function getSurahName(
+  surahNumber?: number,
+  data?: PageData | null,
+) {
+  if (data?.ayahs?.[0]?.surah?.name) {
+    return data.ayahs[0].surah.name
   }
+
+  if (surahNumber) {
+    return (
+      SURAH_LIST.find(
+        (item) => item.id === surahNumber,
+      )?.name || 'المصحف الشريف'
+    )
+  }
+
   return 'المصحف الشريف'
 }
 
 function getJuz(data?: PageData | null) {
-  return data?.ayahs?.find((ayah) => Number.isFinite(ayah.juz))?.juz || 1
+  return (
+    data?.ayahs?.find(
+      (ayah) => Number.isFinite(ayah.juz),
+    )?.juz || 1
+  )
 }
 
 type QuranReference = {
@@ -304,194 +328,404 @@ type QuranReference = {
   ayah: number
 }
 
-function parseQuranReference(value: string | null): QuranReference | null {
+function parseQuranReference(
+  value: string | null,
+): QuranReference | null {
   if (!value) return null
 
-  const match = value.match(/^(\d{1,3})\s*:\s*(\d{1,3})$/)
+  const match = value.match(
+    /^(\d{1,3})\s*:\s*(\d{1,3})$/,
+  )
+
   if (!match) return null
 
   const surah = Number(match[1])
   const ayah = Number(match[2])
 
-  if (surah < 1 || surah > 114 || ayah < 1) return null
-
-  return { surah, ayah }
-}
-
-function getMoshafForRiwaya(reciter: ApiReciter, riwaya: Riwaya) {
-  const list = Array.isArray(reciter.moshaf) ? reciter.moshaf : []
-  if (!list.length) return null
-
-  const keywords = RIWAYA_KEYWORDS[riwaya].map(normalizeArabic)
-
-  const matches = (item: ApiMoshaf) => {
-    const name = normalizeArabic(String(item.name || ''))
-
-    if (!item.server || !item.surah_list) return false
-    if (!keywords.length) return false
-
-    return keywords.every((keyword) => name.includes(keyword))
+  if (
+    surah < 1 ||
+    surah > 114 ||
+    ayah < 1
+  ) {
+    return null
   }
 
-  return list.find(matches) || null
+  return {
+    surah,
+    ayah,
+  }
+}
+
+/*
+ * تحديد المصحف الخاص بالرواية:
+ * 1) نحاول المطابقة الصريحة باسم الرواية.
+ * 2) إذا لم نجدها، نسمح بمصحف صالح من endpoint المفلتر بالرواية.
+ */
+function getMoshafForRiwaya(
+  reciter: ApiReciter,
+  riwaya: Riwaya,
+  allowEndpointFallback = false,
+) {
+  const list = Array.isArray(reciter.moshaf)
+    ? reciter.moshaf
+    : []
+
+  if (!list.length) return null
+
+  const keywords =
+    RIWAYA_KEYWORDS[riwaya].map(
+      normalizeArabic,
+    )
+
+  const validMoshaf = (
+    item: ApiMoshaf,
+  ) =>
+    !!item.server &&
+    !!item.surah_list
+
+  const matchesRiwaya = (
+    item: ApiMoshaf,
+  ) => {
+    if (!validMoshaf(item)) {
+      return false
+    }
+
+    const name = normalizeArabic(
+      String(item.name || ''),
+    )
+
+    if (!keywords.length) {
+      return false
+    }
+
+    return keywords.every(
+      (keyword) =>
+        name.includes(keyword),
+    )
+  }
+
+  const exactMatch =
+    list.find(matchesRiwaya)
+
+  if (exactMatch) {
+    return exactMatch
+  }
+
+  if (allowEndpointFallback) {
+    return (
+      list.find(validMoshaf) ||
+      null
+    )
+  }
+
+  return null
 }
 
 export default function MushafPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const pageFromUrl = Number(searchParams.get('page') || '1')
-  const pageNumber = clampPage(pageFromUrl)
+  const pageFromUrl = Number(
+    searchParams.get('page') || '1',
+  )
 
-  const ayahFromUrl = searchParams.get('ayah') || ''
-  const riwayaFromUrl = searchParams.get('riwaya')
-  const riwaya: Riwaya = isRiwaya(riwayaFromUrl) ? riwayaFromUrl : 'hafs'
+  const pageNumber =
+    clampPage(pageFromUrl)
 
-  const requestedSurah = Number(searchParams.get('surah') || '0')
-  const reciterApiId = Number(searchParams.get('reciterId') || '0')
-  const requestedMoshafId = Number(searchParams.get('moshafId') || '0')
-  const reciterName = searchParams.get('reciterName') || 'القارئ المختار'
-  const autoplayRequested = searchParams.get('autoplay') === '1'
+  const ayahFromUrl =
+    searchParams.get('ayah') || ''
 
-  const activeJuzNumber = Number(searchParams.get('juz') || '0')
-  const activeJuzStart = parseQuranReference(searchParams.get('juzStart'))
-  const activeJuzEnd = parseQuranReference(searchParams.get('juzEnd'))
+  const riwayaFromUrl =
+    searchParams.get('riwaya')
 
-  const activeJuzRange = useMemo(() => {
-    if (!activeJuzNumber || !activeJuzStart || !activeJuzEnd) {
-      return null
-    }
+  const riwaya: Riwaya =
+    isRiwaya(riwayaFromUrl)
+      ? riwayaFromUrl
+      : 'hafs'
 
-    return {
-      number: activeJuzNumber,
-      start: activeJuzStart,
-      end: activeJuzEnd,
-    }
-  }, [activeJuzEnd, activeJuzNumber, activeJuzStart])
+  const requestedSurah = Number(
+    searchParams.get('surah') || '0',
+  )
 
-  const [isDesktop, setIsDesktop] = useState(false)
-  const [showChrome, setShowChrome] = useState(false)
+  const reciterApiId = Number(
+    searchParams.get('reciterId') || '0',
+  )
 
-  const [searchInput, setSearchInput] = useState('')
-  const [searchLoading, setSearchLoading] = useState(false)
-  const [searchMessage, setSearchMessage] = useState('')
+  const requestedMoshafId = Number(
+    searchParams.get('moshafId') || '0',
+  )
 
-  const [pageData, setPageData] = useState<PageData | null>(null)
-  const [rightPageData, setRightPageData] = useState<PageData | null>(null)
-  const [leftPageData, setLeftPageData] = useState<PageData | null>(null)
+  const reciterName =
+    searchParams.get('reciterName') ||
+    'القارئ المختار'
 
-  const [svg, setSvg] = useState('')
-  const [leftSvg, setLeftSvg] = useState('')
+  const autoplayRequested =
+    searchParams.get('autoplay') === '1'
 
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const activeJuzNumber = Number(
+    searchParams.get('juz') || '0',
+  )
 
-  const [selectedAyah, setSelectedAyah] = useState<Ayah | null>(null)
-  const [pressedAyahNumber, setPressedAyahNumber] = useState<number | null>(null)
-  const [showAyahActions, setShowAyahActions] = useState(false)
+  const activeJuzStart =
+    parseQuranReference(
+      searchParams.get('juzStart'),
+    )
 
-  const [isSaved, setIsSaved] = useState(false)
-  const [tafsirText, setTafsirText] = useState('')
-  const [tafsirLoading, setTafsirLoading] = useState(false)
+  const activeJuzEnd =
+    parseQuranReference(
+      searchParams.get('juzEnd'),
+    )
 
-  const [toast, setToast] = useState('')
+  const activeJuzRange =
+    useMemo(() => {
+      if (
+        !activeJuzNumber ||
+        !activeJuzStart ||
+        !activeJuzEnd
+      ) {
+        return null
+      }
 
-  const [imageGenerating, setImageGenerating] = useState(false)
-  const [imagePreview, setImagePreview] = useState<{
-    url: string
-    filename: string
-    withTafsir: boolean
-  } | null>(null)
+      return {
+        number: activeJuzNumber,
+        start: activeJuzStart,
+        end: activeJuzEnd,
+      }
+    }, [
+      activeJuzEnd,
+      activeJuzNumber,
+      activeJuzStart,
+    ])
 
-  const [reciters, setReciters] = useState<LocalReciter[]>([])
-  const [recitersLoading, setRecitersLoading] = useState(false)
-  const [selectedReciterId, setSelectedReciterId] = useState(reciterApiId)
+  const [isDesktop, setIsDesktop] =
+    useState(false)
 
-  const [audioDisplayUrl, setAudioDisplayUrl] = useState('')
-  const [audioLoading, setAudioLoading] = useState(false)
-  const [audioError, setAudioError] = useState('')
+  const [showChrome, setShowChrome] =
+    useState(false)
 
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [playingAyahNumber, setPlayingAyahNumber] = useState<number | null>(null)
-  const [repeatAyahNumber, setRepeatAyahNumber] = useState<number | null>(null)
+  const [searchInput, setSearchInput] =
+    useState('')
 
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const audioObjectUrlRef = useRef<string | null>(null)
+  const [searchLoading, setSearchLoading] =
+    useState(false)
 
-  const audioSurahRef = useRef<number | null>(null)
-  const ayahTimingsRef = useRef<AyahTiming[]>([])
+  const [searchMessage, setSearchMessage] =
+    useState('')
 
-  const repeatSeekGuardRef = useRef(false)
-  const juzCompletedGuardRef = useRef(false)
-  const autoplayConsumedRef = useRef(false)
-  const startupNoticeShownRef = useRef(false)
+  const [pageData, setPageData] =
+    useState<PageData | null>(null)
 
-  const navigatingRef = useRef(false)
-  const autoPageTargetRef = useRef<number | null>(null)
+  const [rightPageData, setRightPageData] =
+    useState<PageData | null>(null)
 
-  const pointerStartX = useRef<number | null>(null)
-  const pointerStartY = useRef<number | null>(null)
-  const pointerIdRef = useRef<number | null>(null)
+  const [leftPageData, setLeftPageData] =
+    useState<PageData | null>(null)
 
-  const [turnDirection, setTurnDirection] = useState<TurnDirection>(null)
-  const [turning, setTurning] = useState(false)
+  const [svg, setSvg] =
+    useState('')
 
-  const pageMemoryCacheRef = useRef(new Map<string, PageData>())
-  const svgMemoryCacheRef = useRef(new Map<string, string>())
+  const [leftSvg, setLeftSvg] =
+    useState('')
+
+  const [loading, setLoading] =
+    useState(false)
+
+  const [error, setError] =
+    useState('')
+
+  const [selectedAyah, setSelectedAyah] =
+    useState<Ayah | null>(null)
+
+  const [pressedAyahNumber, setPressedAyahNumber] =
+    useState<number | null>(null)
+
+  const [showAyahActions, setShowAyahActions] =
+    useState(false)
+
+  const [isSaved, setIsSaved] =
+    useState(false)
+
+  const [tafsirText, setTafsirText] =
+    useState('')
+
+  const [tafsirLoading, setTafsirLoading] =
+    useState(false)
+
+  const [toast, setToast] =
+    useState('')
+
+  const [imageGenerating, setImageGenerating] =
+    useState(false)
+
+  const [imagePreview, setImagePreview] =
+    useState<{
+      url: string
+      filename: string
+      withTafsir: boolean
+    } | null>(null)
+
+  const [reciters, setReciters] =
+    useState<LocalReciter[]>([])
+
+  const [recitersLoading, setRecitersLoading] =
+    useState(false)
+
+  const [selectedReciterId, setSelectedReciterId] =
+    useState(reciterApiId)
+
+  const [audioLoading, setAudioLoading] =
+    useState(false)
+
+  const [audioError, setAudioError] =
+    useState('')
+
+  const [isPlaying, setIsPlaying] =
+    useState(false)
+
+  const [playingAyahNumber, setPlayingAyahNumber] =
+    useState<number | null>(null)
+
+  const [repeatAyahNumber, setRepeatAyahNumber] =
+    useState<number | null>(null)
+
+  const audioRef =
+    useRef<HTMLAudioElement | null>(null)
+
+  const audioObjectUrlRef =
+    useRef<string | null>(null)
+
+  const audioSurahRef =
+    useRef<number | null>(null)
+
+  const ayahTimingsRef =
+    useRef<AyahTiming[]>([])
+
+  const repeatSeekGuardRef =
+    useRef(false)
+
+  const juzCompletedGuardRef =
+    useRef(false)
+
+  const autoplayConsumedRef =
+    useRef(false)
+
+  const startupNoticeShownRef =
+    useRef(false)
+
+  const navigatingRef =
+    useRef(false)
+
+  const autoPageTargetRef =
+    useRef<number | null>(null)
+
+  const pointerStartX =
+    useRef<number | null>(null)
+
+  const pointerStartY =
+    useRef<number | null>(null)
+
+  const pointerIdRef =
+    useRef<number | null>(null)
+
+  const pageMemoryCacheRef =
+    useRef(new Map<string, PageData>())
+
+  const svgMemoryCacheRef =
+    useRef(new Map<string, string>())
+
+  const [turnDirection, setTurnDirection] =
+    useState<TurnDirection>(null)
+
+  const [turning, setTurning] =
+    useState(false)
 
   const desktopRightPage =
-    isDesktop && pageNumber % 2 === 0
+    isDesktop &&
+    pageNumber % 2 === 0
       ? pageNumber - 1
       : pageNumber
 
-  const desktopLeftPage = isDesktop
-    ? Math.min(604, desktopRightPage + 1)
-    : null
+  const desktopLeftPage =
+    isDesktop
+      ? Math.min(
+          604,
+          desktopRightPage + 1,
+        )
+      : null
 
   const currentSurahNumber =
     pageData?.ayahs?.[0]?.surah?.number ||
     requestedSurah ||
     undefined
 
-  const currentSurahName = getSurahName(currentSurahNumber, pageData)
-  const currentJuz = getJuz(pageData)
+  const currentJuz =
+    getJuz(pageData)
 
   const leftSurahNumber =
     leftPageData?.ayahs?.[0]?.surah?.number
 
-  const triggerToast = useCallback((message: string) => {
-    setToast(message)
+  const triggerToast =
+    useCallback(
+      (message: string) => {
+        setToast(message)
 
-    window.setTimeout(() => {
-      setToast('')
-    }, 2200)
-  }, [])
+        window.setTimeout(() => {
+          setToast('')
+        }, 2200)
+      },
+      [],
+    )
 
+  /*
+   * إشعار الجزء المكتمل عند فتح المصحف.
+   */
   useEffect(() => {
-    if (startupNoticeShownRef.current) return
+    if (
+      startupNoticeShownRef.current
+    ) {
+      return
+    }
 
-    startupNoticeShownRef.current = true
+    startupNoticeShownRef.current =
+      true
 
     try {
-      const raw = localStorage.getItem('samee3_last_completed_juz')
+      const raw =
+        localStorage.getItem(
+          'samee3_last_completed_juz',
+        )
+
       if (!raw) return
 
-      const saved = JSON.parse(raw) as { number?: number }
+      const saved =
+        JSON.parse(raw) as {
+          number?: number
+        }
 
       if (saved?.number) {
         triggerToast(
-          `تم الانتهاء من الجزء ${arabicNumber(Number(saved.number))}`,
+          `تم الانتهاء من الجزء ${arabicNumber(
+            Number(saved.number),
+          )}`,
         )
       }
 
-      localStorage.removeItem('samee3_last_completed_juz')
+      localStorage.removeItem(
+        'samee3_last_completed_juz',
+      )
     } catch {
-      // لا نوقف فتح المصحف بسبب إشعار سابق.
+      // لا نوقف المصحف.
     }
   }, [triggerToast])
 
+  /*
+   * معرفة هل الجهاز هاتف أو كمبيوتر.
+   */
   useEffect(() => {
-    const media = window.matchMedia('(min-width: 768px)')
+    const media =
+      window.matchMedia(
+        '(min-width: 768px)',
+      )
 
     const update = () => {
       setIsDesktop(media.matches)
@@ -499,354 +733,567 @@ export default function MushafPage() {
 
     update()
 
-    media.addEventListener?.('change', update)
+    media.addEventListener?.(
+      'change',
+      update,
+    )
 
-    return () => {
-      media.removeEventListener?.('change', update)
-    }
+    return () =>
+      media.removeEventListener?.(
+        'change',
+        update,
+      )
   }, [])
 
+  /*
+   * بمجرد تغيير الصفحة نسمح للمزامنة الآلية
+   * بتحديد هدف جديد.
+   */
   useEffect(() => {
-    autoPageTargetRef.current = null
+    autoPageTargetRef.current =
+      null
   }, [pageNumber])
 
-  const fetchPageData = useCallback(
-    async (page: number) => {
-      const safePage = clampPage(page)
-      const key = `${riwaya}:${safePage}`
+  /*
+   * تحميل بيانات صفحة القرآن مع Cache API + memory cache.
+   */
+  const fetchPageData =
+    useCallback(
+      async (page: number) => {
+        const safePage =
+          clampPage(page)
 
-      const memoryHit = pageMemoryCacheRef.current.get(key)
-      if (memoryHit) return memoryHit
+        const key =
+          `${riwaya}:${safePage}`
 
-      const url =
-        `/api/quran?riwaya=${encodeURIComponent(riwaya)}` +
-        `&page=${safePage}`
-
-      try {
-        if ('caches' in window) {
-          const cachedResponse = await caches.match(url)
-
-          if (cachedResponse) {
-            const data = await cachedResponse.json()
-
-            const result = {
-              ayahs: Array.isArray(data?.ayahs)
-                ? data.ayahs
-                : Array.isArray(data?.data?.ayahs)
-                  ? data.data.ayahs
-                  : [],
-            } as PageData
-
-            pageMemoryCacheRef.current.set(key, result)
-            return result
-          }
-        }
-      } catch {
-        // ننتقل إلى الشبكة.
-      }
-
-      const response = await fetch(url, {
-        cache: 'force-cache',
-        headers: {
-          Accept: 'application/json',
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error(
-          `تعذر تحميل بيانات الصفحة ${safePage}`,
-        )
-      }
-
-      const data = await response.json()
-
-      const result = {
-        ayahs: Array.isArray(data?.ayahs)
-          ? data.ayahs
-          : Array.isArray(data?.data?.ayahs)
-            ? data.data.ayahs
-            : [],
-      } as PageData
-
-      pageMemoryCacheRef.current.set(key, result)
-
-      try {
-        if ('caches' in window) {
-          const cache = await caches.open(
-            'samee3-mushaf-pages-v2',
+        const memoryHit =
+          pageMemoryCacheRef.current.get(
+            key,
           )
 
-          await cache.put(
-            url,
-            new Response(JSON.stringify(data), {
-              headers: {
-                'Content-Type': 'application/json',
-              },
-            }),
-          )
+        if (memoryHit) {
+          return memoryHit
         }
-      } catch {
-        // لا نوقف القراءة بسبب فشل التخزين المؤقت.
-      }
 
-      return result
-    },
-    [riwaya],
-  )
+        const url =
+          `/api/quran?riwaya=${encodeURIComponent(
+            riwaya,
+          )}&page=${safePage}`
 
-  const fetchSvg = useCallback(
-    async (page: number) => {
-      if (!PRINTED_RIWAYAT.has(riwaya)) return ''
+        try {
+          if ('caches' in window) {
+            const cachedResponse =
+              await caches.match(url)
 
-      const safePage = clampPage(page)
-      const key = `${riwaya}:${safePage}`
+            if (cachedResponse) {
+              const data =
+                await cachedResponse.json()
 
-      const memoryHit = svgMemoryCacheRef.current.get(key)
-      if (memoryHit) return memoryHit
-
-      const url =
-        `/api/mushaf-svg?riwaya=${encodeURIComponent(riwaya)}` +
-        `&page=${safePage}`
-
-      try {
-        if ('caches' in window) {
-          const cachedResponse = await caches.match(url)
-
-          if (cachedResponse) {
-            const data = await cachedResponse.json()
-
-            if (data?.success && data?.svg) {
-              const value = String(data.svg)
-              svgMemoryCacheRef.current.set(key, value)
-              return value
-            }
-          }
-        }
-      } catch {
-        // ننتقل إلى الشبكة.
-      }
-
-      const response = await fetch(url, {
-        cache: 'force-cache',
-      })
-
-      if (!response.ok) {
-        throw new Error(
-          `تعذر تحميل صفحة المصحف ${safePage}`,
-        )
-      }
-
-      const data = await response.json()
-
-      if (!data?.success || !data?.svg) {
-        throw new Error(
-          `لم يتم العثور على صفحة المصحف ${safePage}`,
-        )
-      }
-
-      const value = String(data.svg)
-
-      svgMemoryCacheRef.current.set(key, value)
-
-      try {
-        if ('caches' in window) {
-          const cache = await caches.open(
-            'samee3-mushaf-pages-v2',
-          )
-
-          await cache.put(
-            url,
-            new Response(JSON.stringify(data), {
-              headers: {
-                'Content-Type': 'application/json',
-              },
-            }),
-          )
-        }
-      } catch {
-        // لا نوقف القراءة بسبب فشل التخزين المؤقت.
-      }
-
-      return value
-    },
-    [riwaya],
-  )
-
-  const prefetchRiwayaPage = useCallback(
-    async (
-      targetRiwaya: Riwaya,
-      page: number,
-    ) => {
-      const safePage = clampPage(page)
-
-      const pageUrl =
-        `/api/quran?riwaya=${encodeURIComponent(targetRiwaya)}` +
-        `&page=${safePage}`
-
-      try {
-        if ('caches' in window) {
-          const existing = await caches.match(pageUrl)
-
-          if (!existing) {
-            const response = await fetch(pageUrl, {
-              cache: 'force-cache',
-              headers: {
-                Accept: 'application/json',
-              },
-            })
-
-            if (response.ok) {
-              const data = await response.clone().json()
-
-              pageMemoryCacheRef.current.set(
-                `${targetRiwaya}:${safePage}`,
-                {
-                  ayahs: Array.isArray(data?.ayahs)
+              const result = {
+                ayahs:
+                  Array.isArray(
+                    data?.ayahs,
+                  )
                     ? data.ayahs
-                    : Array.isArray(data?.data?.ayahs)
+                    : Array.isArray(
+                          data?.data?.ayahs,
+                        )
                       ? data.data.ayahs
                       : [],
-                },
+              } as PageData
+
+              pageMemoryCacheRef.current.set(
+                key,
+                result,
               )
 
-              const cache = await caches.open(
+              return result
+            }
+          }
+        } catch {
+          // ننتقل للشبكة.
+        }
+
+        const response =
+          await fetch(url, {
+            cache:
+              'force-cache',
+            headers: {
+              Accept:
+                'application/json',
+            },
+          })
+
+        if (!response.ok) {
+          throw new Error(
+            `تعذر تحميل بيانات الصفحة ${safePage}`,
+          )
+        }
+
+        const data =
+          await response.json()
+
+        const result = {
+          ayahs:
+            Array.isArray(
+              data?.ayahs,
+            )
+              ? data.ayahs
+              : Array.isArray(
+                    data?.data?.ayahs,
+                  )
+                ? data.data.ayahs
+                : [],
+        } as PageData
+
+        pageMemoryCacheRef.current.set(
+          key,
+          result,
+        )
+
+        try {
+          if ('caches' in window) {
+            const cache =
+              await caches.open(
                 'samee3-mushaf-pages-v2',
               )
 
-              await cache.put(pageUrl, response)
-            }
+            await cache.put(
+              url,
+              new Response(
+                JSON.stringify(data),
+                {
+                  headers: {
+                    'Content-Type':
+                      'application/json',
+                  },
+                },
+              ),
+            )
           }
-        } else {
-          await fetch(pageUrl, {
-            cache: 'force-cache',
-          })
+        } catch {
+          // التخزين اختياري.
         }
 
-        if (PRINTED_RIWAYAT.has(targetRiwaya)) {
-          const svgUrl =
-            `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}` +
-            `&page=${safePage}`
+        return result
+      },
+      [riwaya],
+    )
 
-          const existingSvg =
-            'caches' in window
-              ? await caches.match(svgUrl)
-              : null
+  /*
+   * تحميل SVG للمصحف المطبوع.
+   */
+  const fetchSvg =
+    useCallback(
+      async (page: number) => {
+        if (
+          !PRINTED_RIWAYAT.has(
+            riwaya,
+          )
+        ) {
+          return ''
+        }
 
-          if (!existingSvg) {
-            const response = await fetch(svgUrl, {
-              cache: 'force-cache',
-            })
+        const safePage =
+          clampPage(page)
 
-            if (response.ok) {
-              const data = await response.clone().json()
+        const key =
+          `${riwaya}:${safePage}`
 
-              if (data?.success && data?.svg) {
+        const memoryHit =
+          svgMemoryCacheRef.current.get(
+            key,
+          )
+
+        if (memoryHit) {
+          return memoryHit
+        }
+
+        const url =
+          `/api/mushaf-svg?riwaya=${encodeURIComponent(
+            riwaya,
+          )}&page=${safePage}`
+
+        try {
+          if ('caches' in window) {
+            const cachedResponse =
+              await caches.match(
+                url,
+              )
+
+            if (cachedResponse) {
+              const data =
+                await cachedResponse.json()
+
+              if (
+                data?.success &&
+                data?.svg
+              ) {
+                const value =
+                  String(data.svg)
+
                 svgMemoryCacheRef.current.set(
-                  `${targetRiwaya}:${safePage}`,
-                  String(data.svg),
+                  key,
+                  value,
                 )
 
-                if ('caches' in window) {
-                  const cache = await caches.open(
+                return value
+              }
+            }
+          }
+        } catch {
+          // ننتقل للشبكة.
+        }
+
+        const response =
+          await fetch(url, {
+            cache:
+              'force-cache',
+          })
+
+        if (!response.ok) {
+          throw new Error(
+            `تعذر تحميل صفحة المصحف ${safePage}`,
+          )
+        }
+
+        const data =
+          await response.json()
+
+        if (
+          !data?.success ||
+          !data?.svg
+        ) {
+          throw new Error(
+            `لم يتم العثور على صفحة المصحف ${safePage}`,
+          )
+        }
+
+        const value =
+          String(data.svg)
+
+        svgMemoryCacheRef.current.set(
+          key,
+          value,
+        )
+
+        try {
+          if ('caches' in window) {
+            const cache =
+              await caches.open(
+                'samee3-mushaf-pages-v2',
+              )
+
+            await cache.put(
+              url,
+              new Response(
+                JSON.stringify(data),
+                {
+                  headers: {
+                    'Content-Type':
+                      'application/json',
+                  },
+                },
+              ),
+            )
+          }
+        } catch {
+          // اختياري.
+        }
+
+        return value
+      },
+      [riwaya],
+    )
+
+  /*
+   * تحميل الصفحة الحالية للروايات المختلفة مسبقًا.
+   */
+  const prefetchRiwayaPage =
+    useCallback(
+      async (
+        targetRiwaya: Riwaya,
+        page: number,
+      ) => {
+        const safePage =
+          clampPage(page)
+
+        const pageUrl =
+          `/api/quran?riwaya=${encodeURIComponent(
+            targetRiwaya,
+          )}&page=${safePage}`
+
+        try {
+          if ('caches' in window) {
+            const existing =
+              await caches.match(
+                pageUrl,
+              )
+
+            if (!existing) {
+              const response =
+                await fetch(
+                  pageUrl,
+                  {
+                    cache:
+                      'force-cache',
+                    headers: {
+                      Accept:
+                        'application/json',
+                    },
+                  },
+                )
+
+              if (response.ok) {
+                const data =
+                  await response
+                    .clone()
+                    .json()
+
+                pageMemoryCacheRef.current.set(
+                  `${targetRiwaya}:${safePage}`,
+                  {
+                    ayahs:
+                      Array.isArray(
+                        data?.ayahs,
+                      )
+                        ? data.ayahs
+                        : Array.isArray(
+                              data
+                                ?.data
+                                ?.ayahs,
+                            )
+                          ? data
+                              .data
+                              .ayahs
+                          : [],
+                  },
+                )
+
+                const cache =
+                  await caches.open(
                     'samee3-mushaf-pages-v2',
                   )
 
-                  await cache.put(
+                await cache.put(
+                  pageUrl,
+                  response,
+                )
+              }
+            }
+          } else {
+            await fetch(
+              pageUrl,
+              {
+                cache:
+                  'force-cache',
+              },
+            )
+          }
+
+          if (
+            PRINTED_RIWAYAT.has(
+              targetRiwaya,
+            )
+          ) {
+            const svgUrl =
+              `/api/mushaf-svg?riwaya=${encodeURIComponent(
+                targetRiwaya,
+              )}&page=${safePage}`
+
+            const existingSvg =
+              'caches' in window
+                ? await caches.match(
                     svgUrl,
-                    response,
                   )
+                : null
+
+            if (!existingSvg) {
+              const response =
+                await fetch(
+                  svgUrl,
+                  {
+                    cache:
+                      'force-cache',
+                  },
+                )
+
+              if (response.ok) {
+                const data =
+                  await response
+                    .clone()
+                    .json()
+
+                if (
+                  data?.success &&
+                  data?.svg
+                ) {
+                  svgMemoryCacheRef.current.set(
+                    `${targetRiwaya}:${safePage}`,
+                    String(
+                      data.svg,
+                    ),
+                  )
+
+                  if (
+                    'caches' in
+                    window
+                  ) {
+                    const cache =
+                      await caches.open(
+                        'samee3-mushaf-pages-v2',
+                      )
+
+                    await cache.put(
+                      svgUrl,
+                      response,
+                    )
+                  }
                 }
               }
             }
           }
+        } catch {
+          // لا نعطل الصفحة.
         }
-      } catch {
-        // التحميل المسبق اختياري.
-      }
-    },
-    [],
-  )
+      },
+      [],
+    )
 
   useEffect(() => {
     let cancelled = false
 
-    const run = async () => {
-      const nearby = Array.from(
-        new Set([
-          pageNumber,
-          clampPage(pageNumber + 1),
-          clampPage(pageNumber - 1),
-          clampPage(pageNumber + 2),
-          clampPage(pageNumber - 2),
-        ]),
-      )
+    const run =
+      async () => {
+        const nearby =
+          Array.from(
+            new Set([
+              pageNumber,
+              clampPage(
+                pageNumber + 1,
+              ),
+              clampPage(
+                pageNumber - 1,
+              ),
+              clampPage(
+                pageNumber + 2,
+              ),
+              clampPage(
+                pageNumber - 2,
+              ),
+            ]),
+          )
 
-      const riwayat = Object.keys(RIWAYA_NAMES) as Riwaya[]
+        const riwayat =
+          Object.keys(
+            RIWAYA_NAMES,
+          ) as Riwaya[]
 
-      for (const target of riwayat) {
-        if (cancelled) return
+        for (
+          const target of riwayat
+        ) {
+          if (cancelled) {
+            return
+          }
 
-        void prefetchRiwayaPage(
-          target,
-          pageNumber,
-        )
+          void prefetchRiwayaPage(
+            target,
+            pageNumber,
+          )
 
-        await new Promise((resolve) =>
-          window.setTimeout(resolve, 55),
-        )
+          await new Promise(
+            (resolve) =>
+              window.setTimeout(
+                resolve,
+                55,
+              ),
+          )
+        }
+
+        for (
+          const page of nearby
+        ) {
+          if (cancelled) {
+            return
+          }
+
+          if (
+            page === pageNumber
+          ) {
+            continue
+          }
+
+          void prefetchRiwayaPage(
+            riwaya,
+            page,
+          )
+
+          await new Promise(
+            (resolve) =>
+              window.setTimeout(
+                resolve,
+                45,
+              ),
+          )
+        }
       }
 
-      for (const page of nearby) {
-        if (cancelled) return
-        if (page === pageNumber) continue
-
-        void prefetchRiwayaPage(
-          riwaya,
-          page,
-        )
-
-        await new Promise((resolve) =>
-          window.setTimeout(resolve, 45),
-        )
+    const idleWindow =
+      window as Window & {
+        requestIdleCallback?: (
+          callback: () => void,
+          options?: {
+            timeout: number
+          },
+        ) => number
+        cancelIdleCallback?: (
+          handle: number,
+        ) => void
       }
-    }
 
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (
-        callback: () => void,
-        options?: { timeout: number },
-      ) => number
-      cancelIdleCallback?: (
-        handle: number,
-      ) => void
-    }
+    let idleId:
+      | number
+      | null = null
 
-    let idleId: number | null = null
-    let timeoutId: number | null = null
+    let timeoutId:
+      | number
+      | null = null
 
-    if (idleWindow.requestIdleCallback) {
-      idleId = idleWindow.requestIdleCallback(
-        () => void run(),
-        {
-          timeout: 1200,
-        },
-      )
+    if (
+      idleWindow.requestIdleCallback
+    ) {
+      idleId =
+        idleWindow.requestIdleCallback(
+          () => void run(),
+          {
+            timeout: 1200,
+          },
+        )
     } else {
-      timeoutId = window.setTimeout(
-        () => void run(),
-        120,
-      )
+      timeoutId =
+        window.setTimeout(
+          () => void run(),
+          120,
+        )
     }
 
     return () => {
       cancelled = true
 
-      if (idleId !== null) {
-        idleWindow.cancelIdleCallback?.(idleId)
+      if (
+        idleId !== null
+      ) {
+        idleWindow.cancelIdleCallback?.(
+          idleId,
+        )
       }
 
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId)
+      if (
+        timeoutId !== null
+      ) {
+        window.clearTimeout(
+          timeoutId,
+        )
       }
     }
   }, [
@@ -855,40 +1302,56 @@ export default function MushafPage() {
     riwaya,
   ])
 
+  /*
+   * تحميل الصفحة/الصفحات الظاهرة.
+   */
   useEffect(() => {
     let cancelled = false
 
     setLoading(false)
     setError('')
 
-    const rightPage = desktopRightPage
-    const leftPage = desktopLeftPage
+    const rightPage =
+      desktopRightPage
+
+    const leftPage =
+      desktopLeftPage
 
     ;(async () => {
       try {
-        const dataPromises: Array<
-          Promise<PageData>
-        > = [
-          fetchPageData(pageNumber),
+        const dataPromises:
+          Array<
+            Promise<PageData>
+          > = [
+          fetchPageData(
+            pageNumber,
+          ),
         ]
 
         if (
           isDesktop &&
-          rightPage !== pageNumber
+          rightPage !==
+            pageNumber
         ) {
           dataPromises.push(
-            fetchPageData(rightPage),
+            fetchPageData(
+              rightPage,
+            ),
           )
         }
 
         if (
           isDesktop &&
           leftPage &&
-          leftPage !== pageNumber &&
-          leftPage !== rightPage
+          leftPage !==
+            pageNumber &&
+          leftPage !==
+            rightPage
         ) {
           dataPromises.push(
-            fetchPageData(leftPage),
+            fetchPageData(
+              leftPage,
+            ),
           )
         }
 
@@ -902,63 +1365,91 @@ export default function MushafPage() {
         const mainData =
           dataResults[0]
 
-        setPageData(mainData)
+        setPageData(
+          mainData,
+        )
 
         if (isDesktop) {
           let dataIndex = 1
 
           const rightData =
-            rightPage === pageNumber
+            rightPage ===
+            pageNumber
               ? mainData
-              : dataResults[dataIndex++] ||
-                mainData
+              : dataResults[
+                  dataIndex++
+                ] || mainData
 
           const leftData =
             leftPage &&
-            leftPage !== rightPage
+            leftPage !==
+              rightPage
               ? dataResults[
                   dataIndex++
                 ] || null
               : null
 
-          setRightPageData(rightData)
-          setLeftPageData(leftData)
+          setRightPageData(
+            rightData,
+          )
+
+          setLeftPageData(
+            leftData,
+          )
         } else {
-          setRightPageData(mainData)
-          setLeftPageData(null)
+          setRightPageData(
+            mainData,
+          )
+
+          setLeftPageData(
+            null,
+          )
         }
 
         if (
-          PRINTED_RIWAYAT.has(riwaya)
+          PRINTED_RIWAYAT.has(
+            riwaya,
+          )
         ) {
-          const svgPromises: Array<
-            Promise<string>
-          > = []
+          const svgPromises:
+            Array<
+              Promise<string>
+            > = []
 
           if (isDesktop) {
             if (
-              rightPage === pageNumber
+              rightPage ===
+              pageNumber
             ) {
               svgPromises.push(
-                fetchSvg(pageNumber),
+                fetchSvg(
+                  pageNumber,
+                ),
               )
             } else {
               svgPromises.push(
-                fetchSvg(rightPage),
+                fetchSvg(
+                  rightPage,
+                ),
               )
             }
 
             if (
               leftPage &&
-              leftPage !== rightPage
+              leftPage !==
+                rightPage
             ) {
               svgPromises.push(
-                fetchSvg(leftPage),
+                fetchSvg(
+                  leftPage,
+                ),
               )
             }
           } else {
             svgPromises.push(
-              fetchSvg(pageNumber),
+              fetchSvg(
+                pageNumber,
+              ),
             )
           }
 
@@ -967,19 +1458,24 @@ export default function MushafPage() {
               svgPromises,
             )
 
-          if (cancelled) return
+          if (cancelled) {
+            return
+          }
 
           if (isDesktop) {
             setSvg(
-              svgResults[0] || '',
+              svgResults[0] ||
+                '',
             )
 
             setLeftSvg(
-              svgResults[1] || '',
+              svgResults[1] ||
+                '',
             )
           } else {
             setSvg(
-              svgResults[0] || '',
+              svgResults[0] ||
+                '',
             )
 
             setLeftSvg('')
@@ -989,7 +1485,9 @@ export default function MushafPage() {
           setLeftSvg('')
         }
       } catch (loadError) {
-        console.error(loadError)
+        console.error(
+          loadError,
+        )
 
         if (!cancelled) {
           setError(
@@ -1014,21 +1512,35 @@ export default function MushafPage() {
     riwaya,
   ])
 
+  /*
+   * تحديد الآية الموجودة في الرابط.
+   */
   useEffect(() => {
     if (!ayahFromUrl) {
-      setSelectedAyah(null)
+      setSelectedAyah(
+        null,
+      )
       return
     }
 
-    const [surahPart, ayahPart] =
-      ayahFromUrl.split(':')
+    const [
+      surahPart,
+      ayahPart,
+    ] = ayahFromUrl.split(':')
 
-    const surah = Number(surahPart)
-    const ayahNumber = Number(ayahPart)
+    const surah =
+      Number(surahPart)
+
+    const ayahNumber =
+      Number(ayahPart)
 
     if (
-      !Number.isFinite(surah) ||
-      !Number.isFinite(ayahNumber) ||
+      !Number.isFinite(
+        surah,
+      ) ||
+      !Number.isFinite(
+        ayahNumber,
+      ) ||
       ayahNumber <= 0
     ) {
       return
@@ -1038,19 +1550,29 @@ export default function MushafPage() {
       pageData,
       rightPageData,
       leftPageData,
-    ].filter(Boolean) as PageData[]
+    ].filter(
+      Boolean,
+    ) as PageData[]
 
-    const found = sources
-      .flatMap((source) => source.ayahs)
-      .find(
-        (item) =>
-          item.surah?.number === surah &&
-          item.numberInSurah ===
-            ayahNumber,
-      )
+    const found =
+      sources
+        .flatMap(
+          (source) =>
+            source.ayahs,
+        )
+        .find(
+          (item) =>
+            item.surah
+              ?.number ===
+              surah &&
+            item.numberInSurah ===
+              ayahNumber,
+        )
 
     if (found) {
-      setSelectedAyah(found)
+      setSelectedAyah(
+        found,
+      )
     }
   }, [
     ayahFromUrl,
@@ -1059,129 +1581,154 @@ export default function MushafPage() {
     rightPageData,
   ])
 
-  const highlightSearchedAyah = useCallback(() => {
-    const nodes =
-      document.querySelectorAll(
-        '.samee3-page-art .ayahPolygon, .samee3-page-art .samee3-text-ayah',
-      )
+  /*
+   * تظليل الآية التي يقرأها القارئ.
+   */
+  const highlightSearchedAyah =
+    useCallback(() => {
+      const nodes =
+        document.querySelectorAll(
+          '.samee3-page-art .ayahPolygon, .samee3-page-art .samee3-text-ayah',
+        )
 
-    const visibleSources = [
-      pageData,
-      rightPageData,
-      leftPageData,
-    ].filter(Boolean) as PageData[]
+      const visibleSources = [
+        pageData,
+        rightPageData,
+        leftPageData,
+      ].filter(
+        Boolean,
+      ) as PageData[]
 
-    const visiblePlayingAyah =
-      playingAyahNumber !== null
-        ? visibleSources
-            .flatMap(
-              (source) => source.ayahs,
-            )
-            .find(
-              (item) =>
-                item.number ===
-                playingAyahNumber,
-            ) || null
-        : null
+      const visiblePlayingAyah =
+        playingAyahNumber !==
+        null
+          ? visibleSources
+              .flatMap(
+                (source) =>
+                  source.ayahs,
+              )
+              .find(
+                (item) =>
+                  item.number ===
+                  playingAyahNumber,
+              ) || null
+          : null
 
-    nodes.forEach((node) => {
-      node.classList.remove(
-        'samee3-pressed-ayah',
-        'samee3-playing-ayah',
-      )
-
-      const sheet =
-        node.closest(
-          '.samee3-page-sheet',
-        ) as HTMLElement | null
-
-      const sheetSurah = Number(
-        sheet?.dataset.surahNumber ||
-          0,
-      )
-
-      const nodeSurah = Number(
-        node.getAttribute(
-          'surah',
-        ) ||
-          node.getAttribute(
-            'data-surah',
-          ) ||
-          sheetSurah ||
-          0,
-      )
-
-      const nodeAyah = Number(
-        node.getAttribute(
-          'ayah',
-        ) ||
-          node.getAttribute(
-            'data-ayah-number',
-          ) ||
-          node.getAttribute(
-            'data-ayah',
-          ) ||
-          0,
-      )
-
-      const playingMatch =
-        !!visiblePlayingAyah &&
-        nodeSurah ===
-          Number(
-            visiblePlayingAyah
-              .surah?.number,
-          ) &&
-        nodeAyah ===
-          Number(
-            visiblePlayingAyah
-              .numberInSurah,
+      nodes.forEach(
+        (node) => {
+          node.classList.remove(
+            'samee3-pressed-ayah',
+            'samee3-playing-ayah',
           )
 
-      const pressedMatch =
-        pressedAyahNumber !== null &&
-        !!selectedAyah &&
-        nodeSurah ===
-          Number(
-            selectedAyah
-              .surah?.number,
-          ) &&
-        nodeAyah ===
-          Number(
-            selectedAyah
-              .numberInSurah,
-          ) &&
-        nodeAyah ===
-          pressedAyahNumber
+          const sheet =
+            node.closest(
+              '.samee3-page-sheet',
+            ) as HTMLElement | null
 
-      if (playingMatch) {
-        node.classList.add(
-          'samee3-playing-ayah',
-        )
-      }
+          const sheetSurah =
+            Number(
+              sheet
+                ?.dataset
+                .surahNumber ||
+                0,
+            )
 
-      if (pressedMatch) {
-        node.classList.add(
-          'samee3-pressed-ayah',
-        )
-      }
-    })
-  }, [
-    leftPageData,
-    pageData,
-    playingAyahNumber,
-    pressedAyahNumber,
-    rightPageData,
-    selectedAyah,
-  ])
+          const nodeSurah =
+            Number(
+              node.getAttribute(
+                'surah',
+              ) ||
+                node.getAttribute(
+                  'data-surah',
+                ) ||
+                sheetSurah ||
+                0,
+            )
+
+          const nodeAyah =
+            Number(
+              node.getAttribute(
+                'ayah',
+              ) ||
+                node.getAttribute(
+                  'data-ayah-number',
+                ) ||
+                node.getAttribute(
+                  'data-ayah',
+                ) ||
+                0,
+            )
+
+          const playingMatch =
+            !!visiblePlayingAyah &&
+            nodeSurah ===
+              Number(
+                visiblePlayingAyah
+                  .surah
+                  ?.number,
+              ) &&
+            nodeAyah ===
+              Number(
+                visiblePlayingAyah
+                  .numberInSurah,
+              )
+
+          const pressedMatch =
+            pressedAyahNumber !==
+              null &&
+            !!selectedAyah &&
+            nodeSurah ===
+              Number(
+                selectedAyah
+                  .surah
+                  ?.number,
+              ) &&
+            nodeAyah ===
+              Number(
+                selectedAyah
+                  .numberInSurah,
+              ) &&
+            nodeAyah ===
+              pressedAyahNumber
+
+          if (
+            playingMatch
+          ) {
+            node.classList.add(
+              'samee3-playing-ayah',
+            )
+          }
+
+          if (
+            pressedMatch
+          ) {
+            node.classList.add(
+              'samee3-pressed-ayah',
+            )
+          }
+        },
+      )
+    }, [
+      leftPageData,
+      pageData,
+      playingAyahNumber,
+      pressedAyahNumber,
+      rightPageData,
+      selectedAyah,
+    ])
 
   useEffect(() => {
-    const timer = window.setTimeout(
-      highlightSearchedAyah,
-      120,
-    )
+    const timer =
+      window.setTimeout(
+        highlightSearchedAyah,
+        120,
+      )
 
     return () =>
-      window.clearTimeout(timer)
+      window.clearTimeout(
+        timer,
+      )
   }, [
     highlightSearchedAyah,
     svg,
@@ -1190,597 +1737,755 @@ export default function MushafPage() {
     playingAyahNumber,
   ])
 
-  const mainDisplayedSvg = useMemo(() => {
-    if (PRINTED_RIWAYAT.has(riwaya)) {
-      return svg
-    }
-
-    const displayData =
-      isDesktop
-        ? rightPageData
-        : pageData
-
-    if (!displayData?.ayahs?.length) {
-      return ''
-    }
-
-    const lines = displayData.ayahs
-      .map((ayah) => {
-        const safe = String(
-          ayah.text || '',
-        )
-          .replace(
-            /&/g,
-            '&amp;',
-          )
-          .replace(
-            /</g,
-            '&lt;',
-          )
-          .replace(
-            />/g,
-            '&gt;',
-          )
-          .replace(
-            /"/g,
-            '&quot;',
-          )
-
-        return (
-          `<span class="samee3-text-ayah" data-ayah="${ayah.number}">` +
-          `${safe} ` +
-          `<span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span>` +
-          `</span> `
-        )
-      })
-      .join('')
-
-    return (
-      `<svg xmlns="http://www.w3.org/2000/svg" ` +
-      `viewBox="0 0 1000 1400" ` +
-      `preserveAspectRatio="xMidYMid meet" ` +
-      `width="100%" height="100%">` +
-      `<foreignObject x="55" y="45" width="890" height="1310">` +
-      `<div xmlns="http://www.w3.org/1999/xhtml" class="samee3-text-page">` +
-      `${lines}` +
-      `</div>` +
-      `</foreignObject>` +
-      `</svg>`
-    )
-  }, [
-    isDesktop,
-    pageData,
-    rightPageData,
-    riwaya,
-    svg,
-  ])
-
-  const leftDisplayedSvg = useMemo(() => {
-    if (!isDesktop || !leftPageData) {
-      return ''
-    }
-
-    if (PRINTED_RIWAYAT.has(riwaya)) {
-      return leftSvg
-    }
-
-    const lines = leftPageData.ayahs
-      .map((ayah) => {
-        const safe = String(
-          ayah.text || '',
-        )
-          .replace(
-            /&/g,
-            '&amp;',
-          )
-          .replace(
-            /</g,
-            '&lt;',
-          )
-          .replace(
-            />/g,
-            '&gt;',
-          )
-          .replace(
-            /"/g,
-            '&quot;',
-          )
-
-        return (
-          `<span class="samee3-text-ayah" data-ayah="${ayah.number}">` +
-          `${safe} ` +
-          `<span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span>` +
-          `</span> `
-        )
-      })
-      .join('')
-
-    return (
-      `<svg xmlns="http://www.w3.org/2000/svg" ` +
-      `viewBox="0 0 1000 1400" ` +
-      `preserveAspectRatio="xMidYMid meet" ` +
-      `width="100%" height="100%">` +
-      `<foreignObject x="55" y="45" width="890" height="1310">` +
-      `<div xmlns="http://www.w3.org/1999/xhtml" class="samee3-text-page">` +
-      `${lines}` +
-      `</div>` +
-      `</foreignObject>` +
-      `</svg>`
-    )
-  }, [
-    isDesktop,
-    leftPageData,
-    leftSvg,
-    riwaya,
-  ])
-
-  const resolveSelectedAyahFromElement = useCallback(
-    (
-      element: Element,
-      sourceData: PageData | null,
-    ) => {
-      const sourceAyahs =
-        sourceData?.ayahs || []
-
-      const svgSurah = Number(
-        element.getAttribute(
-          'surah',
-        ) ||
-          element.getAttribute(
-            'data-surah',
-          ) ||
-          0,
-      )
-
-      const svgAyah = Number(
-        element.getAttribute(
-          'ayah',
-        ) ||
-          element.getAttribute(
-            'data-ayah',
-          ) ||
-          element.getAttribute(
-            'data-ayah-number',
-          ) ||
-          0,
-      )
-
+  /*
+   * SVG النصي للروايات غير المطبوعة حاليًا.
+   */
+  const mainDisplayedSvg =
+    useMemo(() => {
       if (
-        svgSurah > 0 &&
-        svgAyah > 0
+        PRINTED_RIWAYAT.has(
+          riwaya,
+        )
       ) {
-        const exact =
-          sourceAyahs.find(
-            (item) =>
-              Number(
-                item.surah?.number,
-              ) === svgSurah &&
-              (
-                Number(
-                  item.numberInSurah,
-                ) === svgAyah ||
-                Number(
-                  item.number,
-                ) === svgAyah
-              ),
-          )
-
-        if (exact) return exact
+        return svg
       }
 
-      const fallbackValues = [
-        element.getAttribute(
-          'data-ayah',
-        ),
-        element.getAttribute(
-          'data-ayah-number',
-        ),
-        element.getAttribute(
-          'id',
-        ),
-      ].filter(Boolean) as string[]
+      const displayData =
+        isDesktop
+          ? rightPageData
+          : pageData
 
-      const parentSheet =
-        element.closest(
-          '.samee3-page-sheet',
-        ) as HTMLElement | null
+      if (
+        !displayData?.ayahs
+          ?.length
+      ) {
+        return ''
+      }
 
-      const sheetSurah = Number(
-        parentSheet?.dataset
-          .surahNumber || 0,
+      const lines =
+        displayData.ayahs
+          .map((ayah) => {
+            const safe =
+              String(
+                ayah.text || '',
+              )
+                .replace(
+                  /&/g,
+                  '&amp;',
+                )
+                .replace(
+                  /</g,
+                  '&lt;',
+                )
+                .replace(
+                  />/g,
+                  '&gt;',
+                )
+                .replace(
+                  /"/g,
+                  '&quot;',
+                )
+
+            return (
+              `<span class="samee3-text-ayah" data-ayah="${ayah.number}">` +
+              `${safe} ` +
+              `<span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span>` +
+              `</span> `
+            )
+          })
+          .join('')
+
+      return (
+        `<svg xmlns="http://www.w3.org/2000/svg" ` +
+        `viewBox="0 0 1000 1400" ` +
+        `preserveAspectRatio="xMidYMid meet" ` +
+        `width="100%" height="100%">` +
+        `<foreignObject x="55" y="45" width="890" height="1310">` +
+        `<div xmlns="http://www.w3.org/1999/xhtml" class="samee3-text-page">` +
+        `${lines}` +
+        `</div>` +
+        `</foreignObject>` +
+        `</svg>`
       )
+    }, [
+      isDesktop,
+      pageData,
+      rightPageData,
+      riwaya,
+      svg,
+    ])
 
-      for (const value of fallbackValues) {
-        const match =
-          value.match(/\d+/)
+  const leftDisplayedSvg =
+    useMemo(() => {
+      if (
+        !isDesktop ||
+        !leftPageData
+      ) {
+        return ''
+      }
 
-        if (!match) continue
+      if (
+        PRINTED_RIWAYAT.has(
+          riwaya,
+        )
+      ) {
+        return leftSvg
+      }
 
-        const numeric =
-          Number(match[0])
+      const lines =
+        leftPageData.ayahs
+          .map((ayah) => {
+            const safe =
+              String(
+                ayah.text || '',
+              )
+                .replace(
+                  /&/g,
+                  '&amp;',
+                )
+                .replace(
+                  /</g,
+                  '&lt;',
+                )
+                .replace(
+                  />/g,
+                  '&gt;',
+                )
+                .replace(
+                  /"/g,
+                  '&quot;',
+                )
 
-        const exactGlobal =
-          sourceAyahs.find(
-            (ayah) =>
-              ayah.number ===
-              numeric,
+            return (
+              `<span class="samee3-text-ayah" data-ayah="${ayah.number}">` +
+              `${safe} ` +
+              `<span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span>` +
+              `</span> `
+            )
+          })
+          .join('')
+
+      return (
+        `<svg xmlns="http://www.w3.org/2000/svg" ` +
+        `viewBox="0 0 1000 1400" ` +
+        `preserveAspectRatio="xMidYMid meet" ` +
+        `width="100%" height="100%">` +
+        `<foreignObject x="55" y="45" width="890" height="1310">` +
+        `<div xmlns="http://www.w3.org/1999/xhtml" class="samee3-text-page">` +
+        `${lines}` +
+        `</div>` +
+        `</foreignObject>` +
+        `</svg>`
+      )
+    }, [
+      isDesktop,
+      leftPageData,
+      leftSvg,
+      riwaya,
+    ])
+
+  const resolveSelectedAyahFromElement =
+    useCallback(
+      (
+        element: Element,
+        sourceData: PageData | null,
+      ) => {
+        const sourceAyahs =
+          sourceData?.ayahs ||
+          []
+
+        const svgSurah =
+          Number(
+            element.getAttribute(
+              'surah',
+            ) ||
+              element.getAttribute(
+                'data-surah',
+              ) ||
+              0,
           )
 
-        if (exactGlobal) {
-          return exactGlobal
-        }
+        const svgAyah =
+          Number(
+            element.getAttribute(
+              'ayah',
+            ) ||
+              element.getAttribute(
+                'data-ayah',
+              ) ||
+              element.getAttribute(
+                'data-ayah-number',
+              ) ||
+              0,
+          )
 
-        const exactLocal =
-          sourceAyahs.find(
-            (ayah) =>
-              Number(
-                ayah.numberInSurah,
-              ) === numeric &&
-              (
-                !sheetSurah ||
+        if (
+          svgSurah > 0 &&
+          svgAyah > 0
+        ) {
+          const exact =
+            sourceAyahs.find(
+              (item) =>
                 Number(
-                  ayah.surah
+                  item.surah
                     ?.number,
-                ) === sheetSurah
+                ) ===
+                  svgSurah &&
+                (
+                  Number(
+                    item.numberInSurah,
+                  ) ===
+                    svgAyah ||
+                  Number(
+                    item.number,
+                  ) ===
+                    svgAyah
+                ),
+            )
+
+          if (exact) {
+            return exact
+          }
+        }
+
+        const fallbackValues =
+          [
+            element.getAttribute(
+              'data-ayah',
+            ),
+            element.getAttribute(
+              'data-ayah-number',
+            ),
+            element.getAttribute(
+              'id',
+            ),
+          ].filter(
+            Boolean,
+          ) as string[]
+
+        const parentSheet =
+          element.closest(
+            '.samee3-page-sheet',
+          ) as HTMLElement | null
+
+        const sheetSurah =
+          Number(
+            parentSheet?.dataset
+              .surahNumber ||
+              0,
+          )
+
+        for (
+          const value of fallbackValues
+        ) {
+          const match =
+            value.match(
+              /\d+/,
+            )
+
+          if (!match) {
+            continue
+          }
+
+          const numeric =
+            Number(
+              match[0],
+            )
+
+          const exactGlobal =
+            sourceAyahs.find(
+              (ayah) =>
+                ayah.number ===
+                numeric,
+            )
+
+          if (exactGlobal) {
+            return exactGlobal
+          }
+
+          const exactLocal =
+            sourceAyahs.find(
+              (ayah) =>
+                Number(
+                  ayah.numberInSurah,
+                ) === numeric &&
+                (
+                  !sheetSurah ||
+                  Number(
+                    ayah.surah
+                      ?.number,
+                  ) ===
+                    sheetSurah
+                ),
+            )
+
+          if (exactLocal) {
+            return exactLocal
+          }
+        }
+
+        return null
+      },
+      [],
+    )
+
+  const handleAyahClick =
+    useCallback(
+      (
+        event: React.MouseEvent<HTMLElement>,
+        sourceData: PageData | null,
+      ) => {
+        const target =
+          event.target as Element | null
+
+        if (!target) return
+
+        const polygon =
+          target.closest(
+            '.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah',
+          )
+
+        if (!polygon) return
+
+        event.stopPropagation()
+
+        const found =
+          resolveSelectedAyahFromElement(
+            polygon,
+            sourceData,
+          )
+
+        if (!found) return
+
+        setSelectedAyah(
+          found,
+        )
+
+        setShowAyahActions(
+          true,
+        )
+
+        try {
+          const saved =
+            JSON.parse(
+              localStorage.getItem(
+                'samee3_bookmarks',
+              ) || '[]',
+            )
+
+          setIsSaved(
+            Array.isArray(
+              saved,
+            ) &&
+              saved.some(
+                (
+                  item: {
+                    number?: number
+                    surahName?: string
+                  },
+                ) =>
+                  item?.number ===
+                  found.number,
               ),
           )
-
-        if (exactLocal) {
-          return exactLocal
+        } catch {
+          setIsSaved(false)
         }
-      }
+      },
+      [
+        resolveSelectedAyahFromElement,
+      ],
+    )
 
-      return null
-    },
-    [],
-  )
+  const handleAyahPointerDown =
+    useCallback(
+      (
+        event: React.PointerEvent<HTMLElement>,
+        sourceData: PageData | null,
+      ) => {
+        const target =
+          event.target as Element | null
 
-  const handleAyahClick = useCallback(
-    (
-      event: React.MouseEvent<HTMLElement>,
-      sourceData: PageData | null,
-    ) => {
-      const target =
-        event.target as Element | null
+        if (!target) return
 
-      if (!target) return
-
-      const polygon = target.closest(
-        '.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah',
-      )
-
-      if (!polygon) return
-
-      event.stopPropagation()
-
-      const found =
-        resolveSelectedAyahFromElement(
-          polygon,
-          sourceData,
-        )
-
-      if (!found) return
-
-      setSelectedAyah(found)
-      setShowAyahActions(true)
-
-      try {
-        const saved =
-          JSON.parse(
-            localStorage.getItem(
-              'samee3_bookmarks',
-            ) || '[]',
+        const polygon =
+          target.closest(
+            '.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah',
           )
 
-        setIsSaved(
-          Array.isArray(saved) &&
-            saved.some(
-              (
-                item: {
-                  number?: number
-                  surahName?: string
-                },
-              ) =>
-                item?.number ===
-                found.number,
-            ),
+        if (!polygon) {
+          setPressedAyahNumber(
+            null,
+          )
+          return
+        }
+
+        const found =
+          resolveSelectedAyahFromElement(
+            polygon,
+            sourceData,
+          )
+
+        setPressedAyahNumber(
+          found?.numberInSurah ||
+            found?.number ||
+            null,
         )
-      } catch {
-        setIsSaved(false)
-      }
-    },
-    [resolveSelectedAyahFromElement],
-  )
-
-  const handleAyahPointerDown = useCallback(
-    (
-      event: React.PointerEvent<HTMLElement>,
-      sourceData: PageData | null,
-    ) => {
-      const target =
-        event.target as Element | null
-
-      if (!target) return
-
-      const polygon = target.closest(
-        '.ayahPolygon, [data-ayah], [data-ayah-number], .samee3-text-ayah',
-      )
-
-      if (!polygon) {
-        setPressedAyahNumber(null)
-        return
-      }
-
-      const found =
-        resolveSelectedAyahFromElement(
-          polygon,
-          sourceData,
-        )
-
-      setPressedAyahNumber(
-        found?.numberInSurah ||
-          found?.number ||
-          null,
-      )
-    },
-    [resolveSelectedAyahFromElement],
-  )
-
-  const handleAyahPointerUp = useCallback(() => {
-    setPressedAyahNumber(null)
-  }, [])
-
-  const navigateTo = useCallback(
-    (
-      page: number,
-      extra?: {
-        surah?: number
-        ayah?: string
-        clearJuz?: boolean
       },
-      direction: 'next' | 'prev' = 'next',
-    ) => {
-      const nextPage = clampPage(page)
+      [
+        resolveSelectedAyahFromElement,
+      ],
+    )
 
-      if (navigatingRef.current) {
-        return
-      }
+  const handleAyahPointerUp =
+    useCallback(() => {
+      setPressedAyahNumber(
+        null,
+      )
+    }, [])
 
-      if (
-        nextPage === pageNumber &&
-        !extra?.ayah &&
-        !extra?.surah
-      ) {
-        return
-      }
+  /*
+   * الانتقال بين صفحات المصحف.
+   */
+  const navigateTo =
+    useCallback(
+      (
+        page: number,
+        extra?: {
+          surah?: number
+          ayah?: string
+          clearJuz?: boolean
+        },
+        direction:
+          | 'next'
+          | 'prev' = 'next',
+      ) => {
+        const nextPage =
+          clampPage(page)
 
-      if (
-        direction === 'next' &&
-        nextPage >= 604 &&
-        pageNumber >= 604
-      ) {
-        return
-      }
+        if (
+          navigatingRef.current
+        ) {
+          return
+        }
 
-      if (
-        direction === 'prev' &&
-        nextPage <= 1 &&
-        pageNumber <= 1
-      ) {
-        return
-      }
+        if (
+          nextPage ===
+            pageNumber &&
+          !extra?.ayah &&
+          !extra?.surah
+        ) {
+          return
+        }
 
-      navigatingRef.current = true
+        if (
+          direction ===
+            'next' &&
+          pageNumber >=
+            604
+        ) {
+          return
+        }
 
-      setTurnDirection(direction)
-      setTurning(true)
+        if (
+          direction ===
+            'prev' &&
+          pageNumber <=
+            1
+        ) {
+          return
+        }
 
-      const params =
-        new URLSearchParams(
-          searchParams.toString(),
+        navigatingRef.current =
+          true
+
+        setTurnDirection(
+          direction,
         )
 
-      params.set(
-        'page',
-        String(nextPage),
-      )
+        setTurning(true)
 
-      if (extra?.surah) {
+        const params =
+          new URLSearchParams(
+            searchParams.toString(),
+          )
+
         params.set(
-          'surah',
-          String(extra.surah),
+          'page',
+          String(nextPage),
         )
-      }
 
-      if (extra?.ayah) {
-        params.set(
-          'ayah',
-          extra.ayah,
+        if (extra?.surah) {
+          params.set(
+            'surah',
+            String(
+              extra.surah,
+            ),
+          )
+        }
+
+        if (extra?.ayah) {
+          params.set(
+            'ayah',
+            extra.ayah,
+          )
+        } else {
+          params.delete(
+            'ayah',
+          )
+        }
+
+        if (extra?.clearJuz) {
+          params.delete(
+            'juz',
+          )
+
+          params.delete(
+            'juzStart',
+          )
+
+          params.delete(
+            'juzEnd',
+          )
+        }
+
+        autoPageTargetRef.current =
+          nextPage
+
+        /*
+         * نعطي حركة الصفحة جزءًا صغيرًا من الزمن
+         * قبل تغيير الـ route.
+         */
+        window.setTimeout(
+          () => {
+            router.push(
+              `/mushaf?${params.toString()}`,
+            )
+          },
+          100,
         )
-      } else {
-        params.delete('ayah')
-      }
 
-      if (extra?.clearJuz) {
-        params.delete('juz')
-        params.delete('juzStart')
-        params.delete('juzEnd')
-      }
+        window.setTimeout(
+          () => {
+            navigatingRef.current =
+              false
 
-      autoPageTargetRef.current =
-        nextPage
+            setTurning(
+              false,
+            )
 
-      /*
-       * نؤخر push قليلًا جدًا حتى يظهر دوران الصفحة
-       * قبل تبديل محتوى الصفحة.
-       */
-      window.setTimeout(() => {
-        router.push(
-          `/mushaf?${params.toString()}`,
+            setTurnDirection(
+              null,
+            )
+          },
+          550,
         )
-      }, 95)
+      },
+      [
+        pageNumber,
+        router,
+        searchParams,
+      ],
+    )
 
-      window.setTimeout(() => {
-        navigatingRef.current = false
-        setTurning(false)
-        setTurnDirection(null)
-      }, 470)
-    },
-    [
-      pageNumber,
-      router,
-      searchParams,
-    ],
-  )
+  /*
+   * بداية السحب بالماوس/اللمس.
+   */
+  const beginPagePointer =
+    useCallback(
+      (
+        event: React.PointerEvent<HTMLElement>,
+      ) => {
+        const target =
+          event.target as Element | null
 
-  const beginPagePointer = (
-    event: React.PointerEvent<HTMLElement>,
-  ) => {
-    const target =
-      event.target as Element | null
+        if (!target) {
+          return
+        }
 
-    if (!target) return
+        /*
+         * لا نقلب الصفحة إذا بدأ السحب من زر أو select أو القائمة.
+         */
+        if (
+          target.closest(
+            'button, select, input, textarea, a, .samee3-top-controls, .samee3-bottom-shell, .samee3-reader-toggle, .samee3-ayah-overlay, .samee3-image-preview-overlay',
+          )
+        ) {
+          return
+        }
 
-    /*
-     * عناصر التحكم لا تدخل في منطق التقليب.
-     * صفحة المصحف نفسها مسموح بالسحب فوقها حتى لو بدأ اللمس
-     * فوق موضع آية.
-     */
-    if (
-      target.closest(
-        'button, select, input, textarea, a, .samee3-top-controls, .samee3-bottom-shell, .samee3-reader-toggle, .samee3-ayah-overlay, .samee3-image-preview-overlay',
-      )
-    ) {
-      return
-    }
+        pointerStartX.current =
+          event.clientX
 
-    pointerStartX.current =
-      event.clientX
+        pointerStartY.current =
+          event.clientY
 
-    pointerStartY.current =
-      event.clientY
+        pointerIdRef.current =
+          event.pointerId
+      },
+      [],
+    )
 
-    pointerIdRef.current =
-      event.pointerId
-  }
+  /*
+   * نهاية السحب.
+   *
+   * المطلوب:
+   * يسار -> يمين = التالي
+   * يمين -> يسار = السابق
+   */
+  const finishPagePointer =
+    useCallback(
+      (
+        event: React.PointerEvent<HTMLElement>,
+      ) => {
+        if (
+          pointerIdRef.current ===
+            null ||
+          event.pointerId !==
+            pointerIdRef.current ||
+          pointerStartX.current ===
+            null ||
+          pointerStartY.current ===
+            null
+        ) {
+          return
+        }
 
-  const finishPagePointer = (
-    event: React.PointerEvent<HTMLElement>,
-  ) => {
-    if (
-      pointerIdRef.current === null ||
-      event.pointerId !==
-        pointerIdRef.current ||
-      pointerStartX.current === null ||
-      pointerStartY.current === null
-    ) {
-      return
-    }
+        const deltaX =
+          event.clientX -
+          pointerStartX.current
 
-    const deltaX =
-      event.clientX -
-      pointerStartX.current
+        const deltaY =
+          event.clientY -
+          pointerStartY.current
 
-    const deltaY =
-      event.clientY -
-      pointerStartY.current
+        pointerStartX.current =
+          null
 
-    pointerStartX.current = null
-    pointerStartY.current = null
-    pointerIdRef.current = null
+        pointerStartY.current =
+          null
 
-    /*
-     * لازم يكون السحب أفقيًا وواضحًا.
-     */
-    if (
-      Math.abs(deltaY) >
-        Math.abs(deltaX) ||
-      Math.abs(deltaX) < 42
-    ) {
-      return
-    }
+        pointerIdRef.current =
+          null
 
-    const step = isDesktop ? 2 : 1
+        if (
+          Math.abs(deltaY) >
+            Math.abs(deltaX) ||
+          Math.abs(deltaX) <
+            45
+        ) {
+          return
+        }
 
-    /*
-     * RTL:
-     * سحب الإصبع/الماوس من اليمين إلى اليسار = التالي
-     * وسحبه من اليسار إلى اليمين = السابق.
-     */
-    if (deltaX < 0) {
-      const basePage = isDesktop
-        ? desktopRightPage
-        : pageNumber
+        const step =
+          isDesktop
+            ? 2
+            : 1
 
-      navigateTo(
-        basePage + step,
-        undefined,
-        'next',
-      )
-    } else {
-      const basePage = isDesktop
-        ? desktopRightPage
-        : pageNumber
+        const basePage =
+          isDesktop
+            ? desktopRightPage
+            : pageNumber
 
-      navigateTo(
-        basePage - step,
-        undefined,
-        'prev',
-      )
-    }
-  }
+        /*
+         * يسار -> يمين = التالي
+         */
+        if (
+          deltaX > 0
+        ) {
+          navigateTo(
+            basePage + step,
+            undefined,
+            'next',
+          )
+          return
+        }
 
-  const cancelPagePointer = (
-    event?: React.PointerEvent<HTMLElement>,
-  ) => {
-    if (
-      event &&
-      pointerIdRef.current !== null &&
-      event.pointerId !==
-        pointerIdRef.current
-    ) {
-      return
-    }
-
-    pointerStartX.current = null
-    pointerStartY.current = null
-    pointerIdRef.current = null
-  }
-
-  useEffect(() => {
-    const handler = (
-      event: KeyboardEvent,
-    ) => {
-      if (
-        event.key === 'ArrowRight'
-      ) {
-        const basePage = isDesktop
-          ? desktopRightPage
-          : pageNumber
-
+        /*
+         * يمين -> يسار = السابق
+         */
         navigateTo(
-          basePage -
-            (isDesktop ? 2 : 1),
+          basePage - step,
           undefined,
           'prev',
         )
-      }
+      },
+      [
+        desktopRightPage,
+        isDesktop,
+        navigateTo,
+        pageNumber,
+      ],
+    )
 
-      if (
-        event.key === 'ArrowLeft'
-      ) {
-        const basePage = isDesktop
-          ? desktopRightPage
-          : pageNumber
+  const cancelPagePointer =
+    useCallback(
+      (
+        event?: React.PointerEvent<HTMLElement>,
+      ) => {
+        if (
+          event &&
+          pointerIdRef.current !==
+            null &&
+          event.pointerId !==
+            pointerIdRef.current
+        ) {
+          return
+        }
 
-        navigateTo(
-          basePage +
-            (isDesktop ? 2 : 1),
-          undefined,
-          'next',
-        )
+        pointerStartX.current =
+          null
+
+        pointerStartY.current =
+          null
+
+        pointerIdRef.current =
+          null
+      },
+      [],
+    )
+
+  /*
+   * الأسهم في لوحة المفاتيح.
+   */
+  useEffect(() => {
+    const handler =
+      (
+        event: KeyboardEvent,
+      ) => {
+        const basePage =
+          isDesktop
+            ? desktopRightPage
+            : pageNumber
+
+        if (
+          event.key ===
+          'ArrowRight'
+        ) {
+          navigateTo(
+            basePage -
+              (isDesktop
+                ? 2
+                : 1),
+            undefined,
+            'prev',
+          )
+        }
+
+        if (
+          event.key ===
+          'ArrowLeft'
+        ) {
+          navigateTo(
+            basePage +
+              (isDesktop
+                ? 2
+                : 1),
+            undefined,
+            'next',
+          )
+        }
       }
-    }
 
     window.addEventListener(
       'keydown',
@@ -1800,125 +2505,151 @@ export default function MushafPage() {
   ])
 
   /*
-   * مهم جدًا:
-   * الدالة كانت تستخدم `riwaya` المغلق عليها من الـ closure
-   * بدل `riwayaId` المرسل للدالة.
-   * لذلك كان تغيير الرواية لا يغيّر قائمة القراء بالشكل الصحيح.
+   * ==========================================================
+   * تحميل القراء حسب الرواية المختارة
+   * ==========================================================
+   *
+   * أهم إصلاح هنا:
+   * نستخدم riwayaId داخل الدالة نفسها.
    */
-  const fetchReciters = useCallback(
-    async (riwayaId: Riwaya) => {
-      setRecitersLoading(true)
-
-      try {
-        const remoteRiwayaId =
-          RIWAYA_REMOTE_IDS[
-            riwayaId
-          ]
-
-        const response = await fetch(
-          `https://mp3quran.net/api/v3/reciters?language=ar&rewaya=${remoteRiwayaId}`,
-          {
-            cache: 'no-store',
-          },
+  const fetchReciters =
+    useCallback(
+      async (
+        riwayaId: Riwaya,
+      ) => {
+        setRecitersLoading(
+          true,
         )
 
-        if (!response.ok) {
-          throw new Error(
-            'تعذر تحميل القراء',
+        try {
+          const remoteRiwayaId =
+            RIWAYA_REMOTE_IDS[
+              riwayaId
+            ]
+
+          const response =
+            await fetch(
+              `https://mp3quran.net/api/v3/reciters?language=ar&rewaya=${remoteRiwayaId}`,
+              {
+                cache:
+                  'no-store',
+              },
+            )
+
+          if (!response.ok) {
+            throw new Error(
+              'تعذر تحميل القراء',
+            )
+          }
+
+          const payload =
+            await response.json()
+
+          const rawReciters =
+            Array.isArray(
+              payload?.reciters,
+            )
+              ? (payload.reciters as ApiReciter[])
+              : []
+
+          const mapped =
+            rawReciters.flatMap(
+              (item) => {
+                const moshaf =
+                  getMoshafForRiwaya(
+                    item,
+                    riwayaId,
+                    true,
+                  )
+
+                if (
+                  !moshaf?.server ||
+                  !moshaf.surah_list
+                ) {
+                  return []
+                }
+
+                const surahIds =
+                  parseSurahList(
+                    moshaf.surah_list,
+                  )
+
+                if (
+                  !surahIds.length
+                ) {
+                  return []
+                }
+
+                return [
+                  {
+                    id:
+                      `${item.id}-${moshaf.id ?? 'default'}`,
+                    apiId:
+                      Number(
+                        item.id,
+                      ),
+                    label:
+                      item.name,
+                    moshafId:
+                      moshaf.id ??
+                      null,
+                    server:
+                      String(
+                        moshaf.server,
+                      ).replace(
+                        /\/$/,
+                        '',
+                      ),
+                    surahIds,
+                  },
+                ]
+              },
+            )
+
+          /*
+           * إزالة التكرارات.
+           */
+          const unique =
+            Array.from(
+              new Map(
+                mapped.map(
+                  (item) => [
+                    item.id,
+                    item,
+                  ],
+                ),
+              ).values(),
+            )
+
+          setReciters(
+            unique,
+          )
+
+          return unique
+        } catch (error) {
+          console.error(
+            error,
+          )
+
+          setReciters([])
+
+          return []
+        } finally {
+          setRecitersLoading(
+            false,
           )
         }
+      },
+      [],
+    )
 
-        const payload =
-          await response.json()
-
-        const rawReciters =
-          Array.isArray(
-            payload?.reciters,
-          )
-            ? (payload.reciters as ApiReciter[])
-            : []
-
-        const mapped =
-          rawReciters.flatMap(
-            (item) => {
-              const moshaf =
-                getMoshafForRiwaya(
-                  item,
-                  riwayaId,
-                )
-
-              if (
-                !moshaf?.server ||
-                !moshaf.surah_list
-              ) {
-                return []
-              }
-
-              const surahIds =
-                parseSurahList(
-                  moshaf.surah_list,
-                )
-
-              if (!surahIds.length) {
-                return []
-              }
-
-              return [
-                {
-                  id:
-                    `${item.id}-${moshaf.id ?? 'default'}`,
-                  apiId: Number(
-                    item.id,
-                  ),
-                  label:
-                    item.name,
-                  moshafId:
-                    moshaf.id ??
-                    null,
-                  server:
-                    String(
-                      moshaf.server,
-                    ).replace(
-                      /\/$/,
-                      '',
-                    ),
-                  surahIds,
-                },
-              ]
-            },
-          )
-
-        /*
-         * إزالة أي تكرار لنفس القارئ والمصحف.
-         */
-        const unique =
-          Array.from(
-            new Map(
-              mapped.map(
-                (item) => [
-                  item.id,
-                  item,
-                ],
-              ),
-            ).values(),
-          )
-
-        setReciters(unique)
-
-        return unique
-      } catch (error) {
-        console.error(error)
-        setReciters([])
-        return []
-      } finally {
-        setRecitersLoading(false)
-      }
-    },
-    [],
-  )
-
+  /*
+   * تحميل القراء عند فتح الخيارات.
+   */
   useEffect(() => {
-    if (!showChrome) return
+    if (!showChrome) {
+      return
+    }
 
     void fetchReciters(
       riwaya,
@@ -1929,9 +2660,12 @@ export default function MushafPage() {
     showChrome,
   ])
 
+  /*
+   * القارئ المختار.
+   */
   const selectedReciter =
     useMemo(() => {
-      const current =
+      const exact =
         reciters.find(
           (item) =>
             item.apiId ===
@@ -1944,8 +2678,8 @@ export default function MushafPage() {
             ),
         )
 
-      if (current) {
-        return current
+      if (exact) {
+        return exact
       }
 
       return (
@@ -1963,6 +2697,9 @@ export default function MushafPage() {
       selectedReciterId,
     ])
 
+  /*
+   * تحديث الرابط الخاص بالرواية والقارئ والسورة.
+   */
   const updateRouteAudioSelection =
     useCallback(
       (
@@ -1999,7 +2736,7 @@ export default function MushafPage() {
           )
 
           if (
-            nextReciter.moshafId !=
+            nextReciter.moshafId !==
             null
           ) {
             params.set(
@@ -2025,7 +2762,9 @@ export default function MushafPage() {
 
           params.set(
             'surah',
-            String(nextSurah),
+            String(
+              nextSurah,
+            ),
           )
 
           params.set(
@@ -2039,12 +2778,15 @@ export default function MushafPage() {
           params.delete(
             'juz',
           )
+
           params.delete(
             'juzStart',
           )
+
           params.delete(
             'juzEnd',
           )
+
           params.delete(
             'ayah',
           )
@@ -2061,11 +2803,21 @@ export default function MushafPage() {
       ],
     )
 
+  /*
+   * تغيير الرواية:
+   *
+   * الرواية الجديدة
+   * -> القراء الخاصون بها
+   * -> اختيار القارئ
+   * -> السور الخاصة به.
+   */
   const handleRiwayaSelect =
     async (
       value: Riwaya,
     ) => {
-      if (value === riwaya) {
+      if (
+        value === riwaya
+      ) {
         return
       }
 
@@ -2075,18 +2827,44 @@ export default function MushafPage() {
       audio?.pause()
 
       setIsPlaying(false)
-      setPlayingAyahNumber(null)
-      setRepeatAyahNumber(null)
+      setPlayingAyahNumber(
+        null,
+      )
+      setRepeatAyahNumber(
+        null,
+      )
       setAudioError('')
 
       /*
-       * نجيب قائمة القراء للرواية الجديدة نفسها.
+       * إبقاء القائمة مفتوحة.
+       */
+      setShowChrome(true)
+
+      /*
+       * اجلب قراء الرواية الجديدة قبل تغيير الاختيار النهائي.
        */
       const loaded =
         await fetchReciters(
           value,
         )
 
+      if (!loaded.length) {
+        setReciters([])
+        setSelectedReciterId(
+          0,
+        )
+
+        triggerToast(
+          `لا يوجد قراء متاحون للرواية ${RIWAYA_NAMES[value]} حاليًا.`,
+        )
+
+        return
+      }
+
+      /*
+       * نحاول الحفاظ على نفس القارئ إن كان موجودًا.
+       * وإلا نختار أول قارئ متاح للرواية الجديدة.
+       */
       const preferred =
         loaded.find(
           (item) =>
@@ -2096,8 +2874,13 @@ export default function MushafPage() {
         loaded[0] ||
         null
 
+      setReciters(
+        loaded,
+      )
+
       setSelectedReciterId(
-        preferred?.apiId || 0,
+        preferred?.apiId ||
+          0,
       )
 
       updateRouteAudioSelection(
@@ -2106,6 +2889,9 @@ export default function MushafPage() {
       )
     }
 
+  /*
+   * تغيير القارئ مع تبديل فوري أثناء التلاوة.
+   */
   const handleReciterSelect =
     async (
       id: number,
@@ -2113,10 +2899,13 @@ export default function MushafPage() {
       const item =
         reciters.find(
           (candidate) =>
-            candidate.apiId === id,
+            candidate.apiId ===
+            id,
         ) || null
 
-      if (!item) return
+      if (!item) {
+        return
+      }
 
       const audio =
         audioRef.current
@@ -2138,20 +2927,23 @@ export default function MushafPage() {
           ? audio.currentTime
           : 0
 
-      const visibleAyahs = [
-        pageData,
-        rightPageData,
-        leftPageData,
-      ]
-        .filter(Boolean)
-        .flatMap(
-          (source) =>
-            (source as PageData)
-              .ayahs,
-        )
+      const visibleAyahs =
+        [
+          pageData,
+          rightPageData,
+          leftPageData,
+        ]
+          .filter(Boolean)
+          .flatMap(
+            (source) =>
+              (
+                source as PageData
+              ).ayahs,
+          )
 
       const playingAyah =
-        playingAyahNumber !== null
+        playingAyahNumber !==
+        null
           ? visibleAyahs.find(
               (ayah) =>
                 ayah.number ===
@@ -2160,18 +2952,24 @@ export default function MushafPage() {
           : null
 
       const activeLocalAyah =
-        playingAyah?.numberInSurah ||
-        selectedAyah?.numberInSurah ||
+        playingAyah
+          ?.numberInSurah ||
+        selectedAyah
+          ?.numberInSurah ||
         undefined
 
       const currentSurah =
         audioSurahRef.current ||
-        playingAyah?.surah?.number ||
-        selectedAyah?.surah?.number ||
+        playingAyah?.surah
+          ?.number ||
+        selectedAyah?.surah
+          ?.number ||
         requestedSurah ||
         currentSurahNumber
 
-      setSelectedReciterId(id)
+      setSelectedReciterId(
+        id,
+      )
 
       updateRouteAudioSelection(
         riwaya,
@@ -2186,7 +2984,9 @@ export default function MushafPage() {
         )
       ) {
         await loadAudioForSurah(
-          Number(currentSurah),
+          Number(
+            currentSurah,
+          ),
           wasPlaying,
           activeLocalAyah,
           item,
@@ -2203,9 +3003,14 @@ export default function MushafPage() {
       )
     }
 
+  /*
+   * السور المتاحة للقارئ المختار فقط.
+   */
   const availableSurahs =
     useMemo(() => {
-      if (!selectedReciter) {
+      if (
+        !selectedReciter
+      ) {
         return []
       }
 
@@ -2222,7 +3027,9 @@ export default function MushafPage() {
 
       return SURAH_LIST.filter(
         (item) =>
-          allowed.has(item.id),
+          allowed.has(
+            item.id,
+          ),
       )
     }, [selectedReciter])
 
@@ -2231,10 +3038,13 @@ export default function MushafPage() {
       const info =
         availableSurahs.find(
           (item) =>
-            item.id === id,
+            item.id ===
+            id,
         )
 
-      if (!info) return
+      if (!info) {
+        return
+      }
 
       updateRouteAudioSelection(
         riwaya,
@@ -2243,6 +3053,9 @@ export default function MushafPage() {
       )
     }
 
+  /*
+   * البحث.
+   */
   const parseSearchTarget =
     useCallback(
       async (
@@ -2324,7 +3137,7 @@ export default function MushafPage() {
                 }
               }
             } catch {
-              // fallback
+              // نستخدم البحث النصي.
             }
           }
         }
@@ -2338,7 +3151,8 @@ export default function MushafPage() {
                 )
 
               return (
-                name === normalized ||
+                name ===
+                  normalized ||
                 name.includes(
                   normalized,
                 ) ||
@@ -2367,7 +3181,9 @@ export default function MushafPage() {
         try {
           const response =
             await fetch(
-              `https://api.alquran.cloud/v1/search/${encodeURIComponent(term)}/all/quran-uthmani`,
+              `https://api.alquran.cloud/v1/search/${encodeURIComponent(
+                term,
+              )}/all/quran-uthmani`,
               {
                 cache:
                   'no-store',
@@ -2386,7 +3202,9 @@ export default function MushafPage() {
                   .matches[0]
               : null
 
-          if (match?.page) {
+          if (
+            match?.page
+          ) {
             return {
               page:
                 clampPage(
@@ -2396,15 +3214,13 @@ export default function MushafPage() {
                 ),
               surah:
                 Number(
-                  match
-                    ?.surah
+                  match?.surah
                     ?.number,
                 ) ||
                 undefined,
               ayah:
                 Number(
-                  match
-                    ?.numberInSurah,
+                  match?.numberInSurah,
                 ) ||
                 undefined,
             }
@@ -2430,7 +3246,10 @@ export default function MushafPage() {
         return
       }
 
-      setSearchLoading(true)
+      setSearchLoading(
+        true,
+      )
+
       setSearchMessage('')
 
       try {
@@ -2465,15 +3284,23 @@ export default function MushafPage() {
             : 'prev',
         )
       } catch (error) {
-        console.error(error)
+        console.error(
+          error,
+        )
+
         setSearchMessage(
           'حدث خطأ أثناء البحث.',
         )
       } finally {
-        setSearchLoading(false)
+        setSearchLoading(
+          false,
+        )
       }
     }
 
+  /*
+   * توقيتات الآيات للقارئ.
+   */
   const loadAyahTimings =
     useCallback(
       async (
@@ -2493,7 +3320,9 @@ export default function MushafPage() {
         try {
           const timingResponse =
             await fetch(
-              `https://mp3quran.net/api/v3/ayat_timing?surah=${surahNumber}&read=${encodeURIComponent(String(readId))}`,
+              `https://mp3quran.net/api/v3/ayat_timing?surah=${surahNumber}&read=${encodeURIComponent(
+                String(readId),
+              )}`,
               {
                 cache:
                   'force-cache',
@@ -2513,7 +3342,9 @@ export default function MushafPage() {
             await timingResponse.json()
 
           const raw =
-            Array.isArray(payload)
+            Array.isArray(
+              payload,
+            )
               ? payload
               : Array.isArray(
                     payload
@@ -2537,9 +3368,10 @@ export default function MushafPage() {
                     >
 
                   return {
-                    ayah: Number(
-                      row.ayah,
-                    ),
+                    ayah:
+                      Number(
+                        row.ayah,
+                      ),
                     start_time:
                       Number(
                         row.start_time,
@@ -2609,8 +3441,9 @@ export default function MushafPage() {
         const target =
           timings.find(
             (item) =>
-              Number(item.ayah) ===
-              ayahNumber,
+              Number(
+                item.ayah,
+              ) === ayahNumber,
           )
 
         if (
@@ -2647,11 +3480,14 @@ export default function MushafPage() {
         const index =
           timings.findIndex(
             (item) =>
-              Number(item.ayah) ===
-              ayahNumber,
+              Number(
+                item.ayah,
+              ) === ayahNumber,
           )
 
-        if (index < 0) {
+        if (
+          index < 0
+        ) {
           return null
         }
 
@@ -2676,7 +3512,9 @@ export default function MushafPage() {
         }
 
         const next =
-          timings[index + 1]
+          timings[
+            index + 1
+          ]
 
         if (
           next &&
@@ -2754,7 +3592,10 @@ export default function MushafPage() {
             0.22,
         )
 
-        oscillator.connect(gain)
+        oscillator.connect(
+          gain,
+        )
+
         gain.connect(
           context.destination,
         )
@@ -2766,19 +3607,24 @@ export default function MushafPage() {
             0.24,
         )
 
-        window.setTimeout(() => {
-          void context.close().catch(
-            () => {},
-          )
-        }, 320)
+        window.setTimeout(
+          () => {
+            void context.close().catch(
+              () => {},
+            )
+          },
+          320,
+        )
       } catch {
-        // التنبيه الصوتي اختياري.
+        // اختياري.
       }
     }, [])
 
   const notifyJuzCompleted =
     useCallback(
-      (juzNumber: number) => {
+      (
+        juzNumber: number,
+      ) => {
         if (
           !juzNumber ||
           juzCompletedGuardRef.current
@@ -2790,25 +3636,38 @@ export default function MushafPage() {
           true
 
         const message =
-          `تم الانتهاء من الجزء ${arabicNumber(juzNumber)}`
+          `تم الانتهاء من الجزء ${arabicNumber(
+            juzNumber,
+          )}`
 
         try {
           localStorage.setItem(
             'samee3_last_completed_juz',
             JSON.stringify({
-              number: juzNumber,
+              number:
+                juzNumber,
               message,
-              at: new Date().toISOString(),
+              at:
+                new Date().toISOString(),
             }),
           )
         } catch {}
 
-        setRepeatAyahNumber(null)
-        setPlayingAyahNumber(null)
+        setRepeatAyahNumber(
+          null,
+        )
+
+        setPlayingAyahNumber(
+          null,
+        )
+
         setIsPlaying(false)
 
         playCompletionTone()
-        triggerToast(message)
+
+        triggerToast(
+          message,
+        )
       },
       [
         playCompletionTone,
@@ -2821,14 +3680,23 @@ export default function MushafPage() {
       false
   }, [activeJuzNumber])
 
+  /*
+   * تحديث الآية الحالية بناءً على currentTime.
+   */
   const updatePlayingAyahFromTime =
     useCallback(
-      (currentTime: number) => {
+      (
+        currentTime: number,
+      ) => {
         const timings =
           ayahTimingsRef.current
 
-        if (!timings.length) {
-          setPlayingAyahNumber(null)
+        if (
+          !timings.length
+        ) {
+          setPlayingAyahNumber(
+            null,
+          )
           return
         }
 
@@ -2855,8 +3723,9 @@ export default function MushafPage() {
             index <
             timings.length - 1
               ? Number(
-                  timings[index + 1]
-                    .start_time ||
+                  timings[
+                    index + 1
+                  ].start_time ||
                     0,
                 ) / 1000
               : Number.POSITIVE_INFINITY
@@ -2867,7 +3736,8 @@ export default function MushafPage() {
             currentTime <
               nextStart
           ) {
-            active = current
+            active =
+              current
             break
           }
         }
@@ -2875,7 +3745,9 @@ export default function MushafPage() {
         if (
           !active ||
           !Number.isFinite(
-            Number(active.ayah),
+            Number(
+              active.ayah,
+            ),
           )
         ) {
           return
@@ -2889,13 +3761,14 @@ export default function MushafPage() {
               0,
           )
 
-        const visibleSources = [
-          pageData,
-          rightPageData,
-          leftPageData,
-        ].filter(
-          Boolean,
-        ) as PageData[]
+        const visibleSources =
+          [
+            pageData,
+            rightPageData,
+            leftPageData,
+          ].filter(
+            Boolean,
+          ) as PageData[]
 
         const visibleAyah =
           visibleSources
@@ -2906,7 +3779,8 @@ export default function MushafPage() {
             .find(
               (item) =>
                 Number(
-                  item.surah?.number,
+                  item.surah
+                    ?.number,
                 ) ===
                   currentSurah &&
                 Number(
@@ -2923,6 +3797,9 @@ export default function MushafPage() {
           )
         }
 
+        /*
+         * تكرار الآية.
+         */
         if (
           repeatAyahNumber !==
             null &&
@@ -2943,8 +3820,9 @@ export default function MushafPage() {
               timings.length -
                 1
               ? Number(
-                  timings[index + 1]
-                    .start_time ||
+                  timings[
+                    index + 1
+                  ].start_time ||
                     0,
                 ) / 1000
               : null
@@ -2956,10 +3834,13 @@ export default function MushafPage() {
             )
 
           if (
-            repeatStart !== null &&
-            nextStart !== null &&
+            repeatStart !==
+              null &&
+            nextStart !==
+              null &&
             currentTime >=
-              nextStart - 0.05
+              nextStart -
+                0.05
           ) {
             repeatSeekGuardRef.current =
               true
@@ -2999,6 +3880,11 @@ export default function MushafPage() {
       ],
     )
 
+  /*
+   * ==========================================================
+   * تحميل وتشغيل ملف السورة
+   * ==========================================================
+   */
   const loadAudioForSurah =
     useCallback(
       async (
@@ -3015,7 +3901,10 @@ export default function MushafPage() {
           return
         }
 
-        setAudioLoading(true)
+        setAudioLoading(
+          true,
+        )
+
         setAudioError('')
 
         try {
@@ -3028,6 +3917,9 @@ export default function MushafPage() {
             reciterOverride ||
             selectedReciter
 
+          /*
+           * fallback عندما لا يكون server محملًا بعد.
+           */
           if (
             !server &&
             reciterApiId
@@ -3064,6 +3956,7 @@ export default function MushafPage() {
                 ? getMoshafForRiwaya(
                     source,
                     riwaya,
+                    true,
                   )
                 : null
 
@@ -3105,7 +3998,12 @@ export default function MushafPage() {
           }
 
           const networkUrl =
-            `${server}/${String(surahNumber).padStart(3, '0')}.mp3`
+            `${server}/${String(
+              surahNumber,
+            ).padStart(
+              3,
+              '0',
+            )}.mp3`
 
           audioSurahRef.current =
             surahNumber
@@ -3113,6 +4011,9 @@ export default function MushafPage() {
           let finalUrl =
             networkUrl
 
+          /*
+           * إذا كانت السورة محفوظة Offline استخدم النسخة المحلية.
+           */
           try {
             if ('caches' in window) {
               const cached =
@@ -3145,7 +4046,7 @@ export default function MushafPage() {
               }
             }
           } catch {
-            // نستخدم المصدر الشبكي.
+            // نستخدم الشبكة.
           }
 
           const audio =
@@ -3172,16 +4073,95 @@ export default function MushafPage() {
 
           audio.pause()
 
-          audio.src = finalUrl
-          audio.preload = 'auto'
+          audio.src =
+            finalUrl
+
+          audio.preload =
+            'auto'
+
           audio.load()
 
-          setAudioDisplayUrl(
-            finalUrl,
-          )
+          /*
+           * مهم:
+           * لا نعتمد على تعيين currentTime مباشرة قبل metadata.
+           * ننتظر تحميل metadata ثم نضع موضع الآية.
+           */
+          const seekToTarget =
+            () => {
+              try {
+                audio.currentTime =
+                  Number.isFinite(
+                    targetStart,
+                  ) &&
+                  targetStart >
+                    0
+                    ? targetStart
+                    : 0
+              } catch {
+                // يبقى عند البداية.
+              }
+            }
 
-          audio.currentTime =
-            targetStart
+          if (
+            audio.readyState >=
+            1
+          ) {
+            seekToTarget()
+          } else {
+            await new Promise<void>(
+              (resolve) => {
+                let doneCalled =
+                  false
+
+                const done =
+                  () => {
+                    if (
+                      doneCalled
+                    ) {
+                      return
+                    }
+
+                    doneCalled =
+                      true
+
+                    audio.removeEventListener(
+                      'loadedmetadata',
+                      done,
+                    )
+
+                    audio.removeEventListener(
+                      'error',
+                      done,
+                    )
+
+                    seekToTarget()
+
+                    resolve()
+                  }
+
+                audio.addEventListener(
+                  'loadedmetadata',
+                  done,
+                  {
+                    once: true,
+                  },
+                )
+
+                audio.addEventListener(
+                  'error',
+                  done,
+                  {
+                    once: true,
+                  },
+                )
+
+                window.setTimeout(
+                  done,
+                  2500,
+                )
+              },
+            )
+          }
 
           setPlayingAyahNumber(
             targetAyahNumber
@@ -3219,7 +4199,9 @@ export default function MushafPage() {
             await audio.play()
           }
         } catch (error) {
-          console.error(error)
+          console.error(
+            error,
+          )
 
           const message =
             error instanceof Error
@@ -3242,7 +4224,9 @@ export default function MushafPage() {
             )
           }
         } finally {
-          setAudioLoading(false)
+          setAudioLoading(
+            false,
+          )
         }
       },
       [
@@ -3288,6 +4272,11 @@ export default function MushafPage() {
       ],
     )
 
+  /*
+   * ==========================================================
+   * Audio element
+   * ==========================================================
+   */
   useEffect(() => {
     const audio =
       new Audio()
@@ -3298,175 +4287,420 @@ export default function MushafPage() {
     audio.preload =
       'auto'
 
-    const onPlay = () => {
-      setIsPlaying(true)
-    }
+    const onPlay =
+      () => {
+        setIsPlaying(
+          true,
+        )
+      }
 
-    const onPause = () => {
-      setIsPlaying(false)
-    }
+    const onPause =
+      () => {
+        setIsPlaying(
+          false,
+        )
+      }
 
-    const onJuzEnd = () => {
-      if (
-        !activeJuzRange ||
-        !activeJuzNumber
-      ) {
+    /*
+     * نهاية الجزء.
+     */
+    const onJuzEnd =
+      () => {
+        if (
+          !activeJuzRange ||
+          !activeJuzNumber
+        ) {
+          return false
+        }
+
+        const currentSurah =
+          Number(
+            audioSurahRef.current ||
+              0,
+          )
+
+        /*
+         * إذا وصلنا لسورة نهاية الجزء:
+         * الإيقاف يتم عند ayah النهاية.
+         */
+        if (
+          currentSurah ===
+          activeJuzRange.end
+            .surah
+        ) {
+          void Promise.resolve().then(
+            () => {
+              notifyJuzCompleted(
+                activeJuzNumber,
+              )
+            },
+          )
+
+          audio.pause()
+
+          return true
+        }
+
+        /*
+         * إن لم نصل للسورة الأخيرة في الجزء:
+         * انتقل للسورة التالية.
+         */
+        if (
+          currentSurah > 0 &&
+          currentSurah <
+            activeJuzRange.end
+              .surah
+        ) {
+          const nextSurah =
+            currentSurah + 1
+
+          audio.pause()
+
+          setPlayingAyahNumber(
+            null,
+          )
+
+          void loadAudioForSurah(
+            nextSurah,
+            true,
+          )
+
+          return true
+        }
+
         return false
       }
 
-      const currentSurah =
-        Number(
-          audioSurahRef.current ||
-            0,
-        )
-
-      if (
-        currentSurah ===
-        activeJuzRange.end
-          .surah
-      ) {
-        void Promise.resolve().then(
-          () => {
-            notifyJuzCompleted(
-              activeJuzNumber,
+    /*
+     * نهاية السورة:
+     * التكرار أولًا،
+     * ثم الجزء إن كان مستخدمًا،
+     * ثم السورة التالية تلقائيًا.
+     */
+    const onEnded =
+      () => {
+        if (
+          repeatAyahNumber !==
+            null &&
+          ayahTimingsRef.current
+            .length
+        ) {
+          const repeatStart =
+            findTimingStart(
+              ayahTimingsRef.current,
+              repeatAyahNumber,
             )
-          },
+
+          if (
+            repeatStart !==
+            null
+          ) {
+            audio.currentTime =
+              repeatStart
+
+            void audio
+              .play()
+              .catch(
+                () => {},
+              )
+
+            return
+          }
+        }
+
+        if (onJuzEnd()) {
+          return
+        }
+
+        /*
+         * التشغيل العادي يستمر للسورة التالية.
+         */
+        const finishedSurah =
+          Number(
+            audioSurahRef.current ||
+              0,
+          )
+
+        if (
+          finishedSurah > 0
+        ) {
+          const nextAvailable =
+            availableSurahs.find(
+              (item) =>
+                item.id >
+                finishedSurah,
+            )
+
+          const nextSurah =
+            nextAvailable?.id ||
+            (
+              availableSurahs.length
+                ? 0
+                : SURAH_LIST.find(
+                    (item) =>
+                      item.id >
+                      finishedSurah,
+                  )?.id || 0
+            )
+
+          if (
+            nextSurah
+          ) {
+            setPlayingAyahNumber(
+              null,
+            )
+
+            /*
+             * تحديث الرابط حتى يتغير عنوان السورة والصفحة
+             * بدون إطفاء عنصر الصوت.
+             */
+            updateRouteAudioSelection(
+              riwaya,
+              selectedReciter,
+              nextSurah,
+            )
+
+            void loadAudioForSurah(
+              nextSurah,
+              true,
+            )
+
+            return
+          }
+        }
+
+        setIsPlaying(
+          false,
         )
-
-        audio.pause()
-        return true
-      }
-
-      if (
-        currentSurah > 0 &&
-        currentSurah <
-          activeJuzRange.end
-            .surah
-      ) {
-        const nextSurah =
-          currentSurah + 1
-
-        audio.pause()
 
         setPlayingAyahNumber(
           null,
         )
+      }
 
-        void loadAudioForSurah(
-          nextSurah,
-          true,
+    /*
+     * مراقبة الصوت والآية + نقل الصفحة تلقائيًا.
+     */
+    const onTimeUpdate =
+      () => {
+        updatePlayingAyahFromTime(
+          audio.currentTime,
         )
 
-        return true
-      }
-
-      return false
-    }
-
-    const onEnded = () => {
-      if (
-        repeatAyahNumber !==
-          null &&
-        ayahTimingsRef.current
-          .length
-      ) {
-        const repeatStart =
-          findTimingStart(
-            ayahTimingsRef.current,
-            repeatAyahNumber,
-          )
-
+        /*
+         * ------------------------------------------------------
+         * المزامنة بين القارئ والصفحة.
+         * ------------------------------------------------------
+         */
         if (
-          repeatStart !== null
+          !audio.paused &&
+          !navigatingRef.current &&
+          ayahTimingsRef.current
+            .length
         ) {
-          audio.currentTime =
-            repeatStart
+          const timings =
+            ayahTimingsRef.current
 
-          void audio
-            .play()
-            .catch(
-              () => {},
+          let activeTiming:
+            AyahTiming | null =
+            null
+
+          for (
+            let index = 0;
+            index <
+            timings.length;
+            index += 1
+          ) {
+            const current =
+              timings[index]
+
+            const start =
+              Number(
+                current.start_time ||
+                  0,
+              ) / 1000
+
+            const nextStart =
+              index <
+              timings.length - 1
+                ? Number(
+                    timings[
+                      index + 1
+                    ].start_time ||
+                      0,
+                  ) / 1000
+                : Number.POSITIVE_INFINITY
+
+            if (
+              audio.currentTime >=
+                start &&
+              audio.currentTime <
+                nextStart
+            ) {
+              activeTiming =
+                current
+              break
+            }
+          }
+
+          const activeLocalAyah =
+            Number(
+              activeTiming?.ayah ||
+                0,
             )
 
-          return
-        }
-      }
-
-      if (onJuzEnd()) {
-        return
-      }
-
-      setIsPlaying(false)
-      setPlayingAyahNumber(
-        null,
-      )
-    }
-
-    const onTimeUpdate = () => {
-      updatePlayingAyahFromTime(
-        audio.currentTime,
-      )
-
-      /*
-       * المزامنة الجديدة:
-       * نعرف رقم الآية الحالية من الـ timings.
-       * لو الآية الحالية أصبحت خارج الآيات الظاهرة في الصفحة،
-       * نقلب تلقائيًا إلى الـ spread التالي/السابق.
-       */
-      if (
-        !audio.paused &&
-        !navigatingRef.current &&
-        ayahTimingsRef.current.length
-      ) {
-        let activeTiming:
-          AyahTiming | null =
-          null
-
-        const timings =
-          ayahTimingsRef.current
-
-        for (
-          let index = 0;
-          index <
-          timings.length;
-          index += 1
-        ) {
-          const current =
-            timings[index]
-
-          const start =
+          const currentSurah =
             Number(
-              current.start_time ||
+              audioSurahRef.current ||
                 0,
-            ) / 1000
-
-          const nextStart =
-            index <
-            timings.length - 1
-              ? Number(
-                  timings[index + 1]
-                    .start_time ||
-                    0,
-                ) / 1000
-              : Number.POSITIVE_INFINITY
+            )
 
           if (
-            audio.currentTime >=
-              start &&
-            audio.currentTime <
-              nextStart
+            activeLocalAyah >
+              0 &&
+            currentSurah >
+              0
           ) {
-            activeTiming =
-              current
-            break
+            const visibleSources =
+              [
+                pageData,
+                rightPageData,
+                leftPageData,
+              ].filter(
+                Boolean,
+              ) as PageData[]
+
+            const visibleForSurah =
+              visibleSources
+                .flatMap(
+                  (source) =>
+                    source.ayahs,
+                )
+                .filter(
+                  (ayah) =>
+                    Number(
+                      ayah.surah
+                        ?.number,
+                    ) ===
+                    currentSurah,
+                )
+
+            if (
+              visibleForSurah.length
+            ) {
+              const localNumbers =
+                visibleForSurah.map(
+                  (ayah) =>
+                    Number(
+                      ayah.numberInSurah,
+                    ),
+                )
+
+              const minLocalAyah =
+                Math.min(
+                  ...localNumbers,
+                )
+
+              const maxLocalAyah =
+                Math.max(
+                  ...localNumbers,
+                )
+
+              const currentAnchorPage =
+                isDesktop
+                  ? desktopRightPage
+                  : pageNumber
+
+              /*
+               * الآية أصبحت في الصفحة التالية.
+               */
+              if (
+                activeLocalAyah >
+                  maxLocalAyah
+              ) {
+                const targetPage =
+                  clampPage(
+                    currentAnchorPage +
+                      (
+                        isDesktop
+                          ? 2
+                          : 1
+                      ),
+                  )
+
+                if (
+                  targetPage !==
+                    pageNumber &&
+                  targetPage !==
+                    autoPageTargetRef.current &&
+                  targetPage >
+                    currentAnchorPage &&
+                  targetPage <=
+                    604
+                ) {
+                  autoPageTargetRef.current =
+                    targetPage
+
+                  navigateTo(
+                    targetPage,
+                    undefined,
+                    'next',
+                  )
+                }
+              }
+
+              /*
+               * الآية أصبحت قبل الصفحة الحالية.
+               */
+              else if (
+                activeLocalAyah <
+                minLocalAyah
+              ) {
+                const targetPage =
+                  clampPage(
+                    currentAnchorPage -
+                      (
+                        isDesktop
+                          ? 2
+                          : 1
+                      ),
+                  )
+
+                if (
+                  targetPage !==
+                    pageNumber &&
+                  targetPage !==
+                    autoPageTargetRef.current &&
+                  targetPage <
+                    currentAnchorPage &&
+                  targetPage >=
+                    1
+                ) {
+                  autoPageTargetRef.current =
+                    targetPage
+
+                  navigateTo(
+                    targetPage,
+                    undefined,
+                    'prev',
+                  )
+                }
+              }
+            }
           }
         }
 
-        const activeLocalAyah =
-          Number(
-            activeTiming?.ayah ||
-              0,
-          )
+        /*
+         * ------------------------------------------------------
+         * نهاية الجزء.
+         * ------------------------------------------------------
+         */
+        if (
+          !activeJuzRange ||
+          !activeJuzNumber
+        ) {
+          return
+        }
 
         const currentSurah =
           Number(
@@ -3475,175 +4709,45 @@ export default function MushafPage() {
           )
 
         if (
-          activeLocalAyah > 0 &&
-          currentSurah > 0
+          currentSurah !==
+          activeJuzRange.end
+            .surah
         ) {
-          const visibleSources = [
-            pageData,
-            rightPageData,
-            leftPageData,
-          ].filter(
-            Boolean,
-          ) as PageData[]
+          return
+        }
 
-          const visibleForSurah =
-            visibleSources
-              .flatMap(
-                (source) =>
-                  source.ayahs,
-              )
-              .filter(
-                (ayah) =>
-                  Number(
-                    ayah.surah
-                      ?.number,
-                  ) ===
-                  currentSurah,
-              )
+        const endTime =
+          findTimingEnd(
+            ayahTimingsRef.current,
+            activeJuzRange.end
+              .ayah,
+          )
 
-          if (
-            visibleForSurah.length
-          ) {
-            const localNumbers =
-              visibleForSurah.map(
-                (ayah) =>
-                  Number(
-                    ayah.numberInSurah,
-                  ),
-              )
+        const effectiveEnd =
+          endTime ??
+          (
+            Number.isFinite(
+              audio.duration,
+            ) &&
+            audio.duration >
+              0
+              ? audio.duration
+              : null
+          )
 
-            const minLocalAyah =
-              Math.min(
-                ...localNumbers,
-              )
-
-            const maxLocalAyah =
-              Math.max(
-                ...localNumbers,
-              )
-
-            const currentAnchorPage =
-              isDesktop
-                ? desktopRightPage
-                : pageNumber
-
-            if (
-              activeLocalAyah >
-                maxLocalAyah
-            ) {
-              const targetPage =
-                clampPage(
-                  currentAnchorPage +
-                    (isDesktop
-                      ? 2
-                      : 1),
-                )
-
-              if (
-                targetPage !==
-                  pageNumber &&
-                targetPage !==
-                  autoPageTargetRef.current &&
-                targetPage >
-                  currentAnchorPage
-              ) {
-                autoPageTargetRef.current =
-                  targetPage
-
-                navigateTo(
-                  targetPage,
-                  undefined,
-                  'next',
-                )
-              }
-            } else if (
-              activeLocalAyah <
-              minLocalAyah
-            ) {
-              const targetPage =
-                clampPage(
-                  currentAnchorPage -
-                    (isDesktop
-                      ? 2
-                      : 1),
-                )
-
-              if (
-                targetPage !==
-                  pageNumber &&
-                targetPage !==
-                  autoPageTargetRef.current &&
-                targetPage <
-                  currentAnchorPage
-              ) {
-                autoPageTargetRef.current =
-                  targetPage
-
-                navigateTo(
-                  targetPage,
-                  undefined,
-                  'prev',
-                )
-              }
-            }
-          }
+        if (
+          effectiveEnd !==
+            null &&
+          audio.currentTime >=
+            Math.max(
+              0,
+              effectiveEnd -
+                0.08,
+            )
+        ) {
+          onJuzEnd()
         }
       }
-
-      /*
-       * منطق نهاية الجزء كما هو.
-       */
-      if (
-        !activeJuzRange ||
-        !activeJuzNumber
-      ) {
-        return
-      }
-
-      const currentSurah =
-        Number(
-          audioSurahRef.current ||
-            0,
-        )
-
-      if (
-        currentSurah !==
-        activeJuzRange.end
-          .surah
-      ) {
-        return
-      }
-
-      const endTime =
-        findTimingEnd(
-          ayahTimingsRef.current,
-          activeJuzRange.end
-            .ayah,
-        )
-
-      const effectiveEnd =
-        endTime ??
-        (
-          Number.isFinite(
-            audio.duration,
-          ) &&
-          audio.duration > 0
-            ? audio.duration
-            : null
-        )
-
-      if (
-        effectiveEnd !== null &&
-        audio.currentTime >=
-          Math.max(
-            0,
-            effectiveEnd -
-              0.08,
-          )
-      ) {
-        onJuzEnd()
-      }
-    }
 
     const onLoadedMetadata =
       () => {
@@ -3651,18 +4755,23 @@ export default function MushafPage() {
           audio.currentTime <
           0
         ) {
-          audio.currentTime = 0
+          audio.currentTime =
+            0
         }
       }
 
-    const onError = () => {
-      setIsPlaying(false)
-      setAudioError('')
+    const onError =
+      () => {
+        setIsPlaying(
+          false,
+        )
 
-      triggerToast(
-        'تعذر تحميل ملف التلاوة لهذا القارئ أو السورة.',
-      )
-    }
+        setAudioError('')
+
+        triggerToast(
+          'تعذر تحميل ملف التلاوة لهذا القارئ أو السورة.',
+        )
+      }
 
     audio.addEventListener(
       'play',
@@ -3696,6 +4805,7 @@ export default function MushafPage() {
 
     return () => {
       audio.pause()
+
       audio.src = ''
 
       audioRef.current =
@@ -3748,6 +4858,7 @@ export default function MushafPage() {
   }, [
     activeJuzNumber,
     activeJuzRange,
+    availableSurahs,
     desktopRightPage,
     findTimingEnd,
     findTimingStart,
@@ -3759,11 +4870,17 @@ export default function MushafPage() {
     pageNumber,
     repeatAyahNumber,
     rightPageData,
+    riwaya,
+    selectedReciter,
     triggerToast,
     updatePlayingAyahFromTime,
+    updateRouteAudioSelection,
     leftPageData,
   ])
 
+  /*
+   * إعادة السماح بالـ autoplay عند تغير الرابط الأساسي.
+   */
   useEffect(() => {
     autoplayConsumedRef.current =
       false
@@ -3775,6 +4892,9 @@ export default function MushafPage() {
     riwaya,
   ])
 
+  /*
+   * تشغيل تلقائي قادم من الفهرس، مع احترام الآية المحددة.
+   */
   useEffect(() => {
     if (
       !autoplayRequested ||
@@ -3819,10 +4939,72 @@ export default function MushafPage() {
     requestedSurah,
   ])
 
+  /*
+   * تشغيل/إيقاف التلاوة من الشريط.
+   *
+   * لو المستخدم اختار آية:
+   * يبدأ من الآية المختارة.
+   */
   const toggleAudio =
     async () => {
       const audio =
         audioRef.current
+
+      const selectedSurah =
+        selectedAyah?.surah
+          ?.number
+          ? Number(
+              selectedAyah
+                .surah
+                .number,
+            )
+          : 0
+
+      const selectedLocalAyah =
+        selectedAyah
+          ?.numberInSurah
+          ? Number(
+              selectedAyah
+                .numberInSurah,
+            )
+          : 0
+
+      if (
+        selectedSurah &&
+        selectedLocalAyah
+      ) {
+        const loadedSurah =
+          Number(
+            audioSurahRef.current ||
+              0,
+          )
+
+        /*
+         * إذا الملف غير موجود، أو السورة مختلفة،
+         * أو المستخدم اختار آية مختلفة:
+         * ابدأ من تلك الآية.
+         */
+        if (
+          !audio ||
+          !audio.src ||
+          loadedSurah !==
+            selectedSurah ||
+          (
+            playingAyahNumber !==
+              null &&
+            playingAyahNumber !==
+              selectedAyah.number
+          )
+        ) {
+          await loadAudioForSurah(
+            selectedSurah,
+            true,
+            selectedLocalAyah,
+          )
+
+          return
+        }
+      }
 
       if (
         !audio ||
@@ -3835,13 +5017,18 @@ export default function MushafPage() {
         return
       }
 
-      if (audio.paused) {
+      if (
+        audio.paused
+      ) {
         await audio.play()
       } else {
         audio.pause()
       }
     }
 
+  /*
+   * تشغيل آية محددة من قائمة الآية.
+   */
   const playSelectedAyah =
     useCallback(
       async () => {
@@ -3870,7 +5057,9 @@ export default function MushafPage() {
           ),
         )
 
-        setShowAyahActions(false)
+        setShowAyahActions(
+          false,
+        )
       },
       [
         loadAudioForSurah,
@@ -3878,6 +5067,9 @@ export default function MushafPage() {
       ],
     )
 
+  /*
+   * تكرار الآية.
+   */
   const toggleRepeatSelectedAyah =
     useCallback(
       async () => {
@@ -3890,7 +5082,8 @@ export default function MushafPage() {
 
         const localAyah =
           Number(
-            selectedAyah.numberInSurah,
+            selectedAyah
+              .numberInSurah,
           )
 
         if (
@@ -3929,7 +5122,9 @@ export default function MushafPage() {
           localAyah,
         )
 
-        setShowAyahActions(false)
+        setShowAyahActions(
+          false,
+        )
       },
       [
         loadAudioForSurah,
@@ -3939,15 +5134,22 @@ export default function MushafPage() {
       ],
     )
 
+  /*
+   * التفسير.
+   */
   const fetchTafsir =
     async (
       ayah: Ayah,
     ): Promise<string> => {
-      if (!ayah.surah?.number) {
+      if (
+        !ayah.surah?.number
+      ) {
         return 'لم يتوفر التفسير الآن.'
       }
 
-      setTafsirLoading(true)
+      setTafsirLoading(
+        true,
+      )
 
       try {
         const response =
@@ -3975,7 +5177,9 @@ export default function MushafPage() {
           ).trim() ||
           'لم يتوفر التفسير الآن.'
 
-        setTafsirText(text)
+        setTafsirText(
+          text,
+        )
 
         return text
       } catch {
@@ -4001,7 +5205,13 @@ export default function MushafPage() {
       }
 
       await navigator.clipboard.writeText(
-        `${selectedAyah.text}\n\nسورة ${getSurahName(selectedAyah.surah?.number)} — الآية ${arabicNumber(selectedAyah.numberInSurah)}`,
+        `${selectedAyah.text}\n\nسورة ${getSurahName(
+          selectedAyah
+            .surah
+            ?.number,
+        )} — الآية ${arabicNumber(
+          selectedAyah.numberInSurah,
+        )}`,
       )
 
       triggerToast(
@@ -4024,7 +5234,9 @@ export default function MushafPage() {
           )
 
         const saved =
-          Array.isArray(raw)
+          Array.isArray(
+            raw,
+          )
             ? raw
             : []
 
@@ -4040,46 +5252,51 @@ export default function MushafPage() {
               selectedAyah.number,
           )
 
-        const next = exists
-          ? saved.filter(
-              (
-                item: {
-                  number?: number
-                },
-              ) =>
-                item?.number !==
-                selectedAyah.number,
-            )
-          : [
-              ...saved,
-              {
-                number:
+        const next =
+          exists
+            ? saved.filter(
+                (
+                  item: {
+                    number?: number
+                  },
+                ) =>
+                  item?.number !==
                   selectedAyah.number,
-                key:
-                  selectedAyah.key,
-                text:
-                  selectedAyah.text,
-                numberInSurah:
-                  selectedAyah.numberInSurah,
-                surahName:
-                  getSurahName(
-                    selectedAyah
-                      .surah
-                      ?.number,
-                  ),
-                page:
-                  selectedAyah.page ||
-                  pageNumber,
-                riwaya,
-              },
-            ]
+              )
+            : [
+                ...saved,
+                {
+                  number:
+                    selectedAyah.number,
+                  key:
+                    selectedAyah.key,
+                  text:
+                    selectedAyah.text,
+                  numberInSurah:
+                    selectedAyah.numberInSurah,
+                  surahName:
+                    getSurahName(
+                      selectedAyah
+                        .surah
+                        ?.number,
+                    ),
+                  page:
+                    selectedAyah.page ||
+                    pageNumber,
+                  riwaya,
+                },
+              ]
 
         localStorage.setItem(
           'samee3_bookmarks',
-          JSON.stringify(next),
+          JSON.stringify(
+            next,
+          ),
         )
 
-        setIsSaved(!exists)
+        setIsSaved(
+          !exists,
+        )
 
         triggerToast(
           exists
@@ -4093,6 +5310,9 @@ export default function MushafPage() {
       }
     }
 
+  /*
+   * إنشاء صورة الآية.
+   */
   const downloadAyahCard =
     async (
       withTafsir: boolean,
@@ -4104,7 +5324,9 @@ export default function MushafPage() {
         return
       }
 
-      setImageGenerating(true)
+      setImageGenerating(
+        true,
+      )
 
       try {
         let interpretation =
@@ -4122,18 +5344,19 @@ export default function MushafPage() {
 
         try {
           await document.fonts?.ready
-        } catch {
-          // بعض المتصفحات.
-        }
+        } catch {}
 
         const canvas =
           document.createElement(
             'canvas',
           )
 
-        const width = 1400
+        const width =
+          1400
+
         const contentWidth =
           1160
+
         const centerX =
           width / 2
 
@@ -4148,7 +5371,9 @@ export default function MushafPage() {
             88,
             42,
             contentWidth,
-            withTafsir ? 7 : 10,
+            withTafsir
+              ? 7
+              : 10,
           )
 
         const tafsirLayout =
@@ -4165,10 +5390,12 @@ export default function MushafPage() {
               )
             : null
 
-        const ayahTop = 292
+        const ayahTop =
+          292
 
         const ayahHeight =
-          ayahLayout.lines.length *
+          ayahLayout.lines
+            .length *
           ayahLayout.lineHeight
 
         const tafsirTop =
@@ -4178,7 +5405,8 @@ export default function MushafPage() {
 
         const tafsirHeight =
           tafsirLayout
-            ? tafsirLayout.lines.length *
+            ? tafsirLayout.lines
+                .length *
               tafsirLayout.lineHeight
             : 0
 
@@ -4203,7 +5431,9 @@ export default function MushafPage() {
                 ),
               )
 
-        canvas.width = width
+        canvas.width =
+          width
+
         canvas.height =
           targetHeight
 
@@ -4288,7 +5518,8 @@ export default function MushafPage() {
         context.strokeStyle =
           '#bd8b48'
 
-        context.lineWidth = 5
+        context.lineWidth =
+          5
 
         context.strokeRect(
           30,
@@ -4300,7 +5531,8 @@ export default function MushafPage() {
         context.strokeStyle =
           'rgba(189,139,72,.38)'
 
-        context.lineWidth = 2
+        context.lineWidth =
+          2
 
         context.strokeRect(
           54,
@@ -4309,63 +5541,65 @@ export default function MushafPage() {
           targetHeight - 108,
         )
 
-        const drawCorner = (
-          x: number,
-          y: number,
-          sx: number,
-          sy: number,
-        ) => {
-          context.save()
+        const drawCorner =
+          (
+            x: number,
+            y: number,
+            sx: number,
+            sy: number,
+          ) => {
+            context.save()
 
-          context.translate(
-            x,
-            y,
-          )
+            context.translate(
+              x,
+              y,
+            )
 
-          context.scale(
-            sx,
-            sy,
-          )
+            context.scale(
+              sx,
+              sy,
+            )
 
-          context.strokeStyle =
-            'rgba(21,94,103,.38)'
+            context.strokeStyle =
+              'rgba(21,94,103,.38)'
 
-          context.lineWidth = 3
+            context.lineWidth =
+              3
 
-          context.beginPath()
+            context.beginPath()
 
-          context.moveTo(
-            0,
-            50,
-          )
+            context.moveTo(
+              0,
+              50,
+            )
 
-          context.quadraticCurveTo(
-            0,
-            0,
-            50,
-            0,
-          )
+            context.quadraticCurveTo(
+              0,
+              0,
+              50,
+              0,
+            )
 
-          context.stroke()
+            context.stroke()
 
-          context.beginPath()
+            context.beginPath()
 
-          context.moveTo(
-            16,
-            42,
-          )
+            context.moveTo(
+              16,
+              42,
+            )
 
-          context.quadraticCurveTo(
-            20,
-            20,
-            42,
-            16,
-          )
+            context.quadraticCurveTo(
+              20,
+              20,
+              42,
+              16,
+            )
 
-          context.stroke()
+            context.stroke()
 
-          context.restore()
-        }
+            context.restore()
+          }
 
         drawCorner(
           64,
@@ -4410,7 +5644,11 @@ export default function MushafPage() {
           '700 62px "Aref Ruqaa", "Amiri", serif'
 
         context.fillText(
-          `سورة ${getSurahName(selectedAyah.surah?.number)}`,
+          `سورة ${getSurahName(
+            selectedAyah
+              .surah
+              ?.number,
+          )}`,
           centerX,
           122,
         )
@@ -4422,7 +5660,9 @@ export default function MushafPage() {
           '700 29px "Tajawal", sans-serif'
 
         context.fillText(
-          `الآية ${arabicNumber(selectedAyah.numberInSurah)}  •  مصحف سميع`,
+          `الآية ${arabicNumber(
+            selectedAyah.numberInSurah,
+          )}  •  مصحف سميع`,
           centerX,
           174,
         )
@@ -4433,7 +5673,8 @@ export default function MushafPage() {
         context.strokeStyle =
           '#c7934f'
 
-        context.lineWidth = 3
+        context.lineWidth =
+          3
 
         context.beginPath()
 
@@ -4471,7 +5712,9 @@ export default function MushafPage() {
           '#172235',
         )
 
-        if (tafsirLayout) {
+        if (
+          tafsirLayout
+        ) {
           const dividerY =
             ayahTop +
             ayahHeight +
@@ -4480,7 +5723,8 @@ export default function MushafPage() {
           context.strokeStyle =
             'rgba(189,139,72,.32)'
 
-          context.lineWidth = 2
+          context.lineWidth =
+            2
 
           context.beginPath()
 
@@ -4530,7 +5774,11 @@ export default function MushafPage() {
         )
 
         const filename =
-          `samee3-ayah-${selectedAyah.surah?.number || 0}-${selectedAyah.numberInSurah}${withTafsir ? '-tafsir' : ''}.png`
+          `samee3-ayah-${selectedAyah.surah?.number || 0}-${selectedAyah.numberInSurah}${
+            withTafsir
+              ? '-tafsir'
+              : ''
+          }.png`
 
         const blob =
           await new Promise<Blob | null>(
@@ -4595,7 +5843,9 @@ export default function MushafPage() {
 
   const downloadImagePreview =
     useCallback(() => {
-      if (!imagePreview) {
+      if (
+        !imagePreview
+      ) {
         return
       }
 
@@ -4618,6 +5868,7 @@ export default function MushafPage() {
       )
 
       link.click()
+
       link.remove()
 
       triggerToast(
@@ -4640,34 +5891,41 @@ export default function MushafPage() {
     }
   }, [imagePreview?.url])
 
-  const dismissChrome = (
-    event: React.MouseEvent<HTMLDivElement>,
-  ) => {
-    const target =
-      event.target as Element | null
+  /*
+   * الضغط في مساحة القراءة الفارغة:
+   * فتح / إغلاق الواجهة.
+   */
+  const dismissChrome =
+    (
+      event: React.MouseEvent<HTMLDivElement>,
+    ) => {
+      const target =
+        event.target as Element | null
 
-    if (!target) return
+      if (!target) {
+        return
+      }
 
-    if (
-      target.closest(
-        '.samee3-ayah-interactive',
+      if (
+        target.closest(
+          '.samee3-ayah-interactive',
+        )
+      ) {
+        return
+      }
+
+      if (
+        target.closest(
+          '.samee3-page-footer, .samee3-reader-toggle, .samee3-bottom-shell, .samee3-top-controls',
+        )
+      ) {
+        return
+      }
+
+      setShowChrome(
+        (value) => !value,
       )
-    ) {
-      return
     }
-
-    if (
-      target.closest(
-        '.samee3-page-footer, .samee3-reader-toggle, .samee3-bottom-shell, .samee3-top-controls',
-      )
-    ) {
-      return
-    }
-
-    setShowChrome(
-      (value) => !value,
-    )
-  }
 
   const pageMeta = (
     data: PageData | null,
@@ -4749,15 +6007,18 @@ export default function MushafPage() {
         ) : null}
 
         <div
-          className={
-            `samee3-spread ` +
-            `${isDesktop ? 'is-desktop' : 'is-mobile'} ` +
-            `${
-              turning
-                ? `is-turning ${turnDirection || ''}`
-                : ''
-            }`
-          }
+          className={`samee3-spread ${
+            isDesktop
+              ? 'is-desktop'
+              : 'is-mobile'
+          } ${
+            turning
+              ? `is-turning ${
+                  turnDirection ||
+                  ''
+                }`
+              : ''
+          }`}
         >
           {isDesktop ? (
             <>
@@ -4846,7 +6107,9 @@ export default function MushafPage() {
             >
               <div className="samee3-search-row">
                 <div className="samee3-search-box">
-                  <Search size={19} />
+                  <Search
+                    size={19}
+                  />
 
                   <input
                     value={
@@ -4856,7 +6119,9 @@ export default function MushafPage() {
                       event,
                     ) =>
                       setSearchInput(
-                        event.target.value,
+                        event
+                          .target
+                          .value,
                       )
                     }
                     onKeyDown={(
@@ -4878,11 +6143,15 @@ export default function MushafPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        setSearchInput('')
+                        setSearchInput(
+                          '',
+                        )
                       }
                       aria-label="مسح البحث"
                     >
-                      <X size={16} />
+                      <X
+                        size={16}
+                      />
                     </button>
                   ) : null}
                 </div>
@@ -4912,7 +6181,9 @@ export default function MushafPage() {
 
               {searchMessage ? (
                 <div className="samee3-search-message">
-                  {searchMessage}
+                  {
+                    searchMessage
+                  }
                 </div>
               ) : null}
             </div>
@@ -5029,9 +6300,7 @@ export default function MushafPage() {
                       event,
                     ) =>
                       void handleRiwayaSelect(
-                        event
-                          .target
-                          .value as Riwaya,
+                        event.target.value as Riwaya,
                       )
                     }
                   >
@@ -5071,9 +6340,7 @@ export default function MushafPage() {
                   <select
                     value={
                       availableSurahs.some(
-                        (
-                          item,
-                        ) =>
+                        (item) =>
                           item.id ===
                           (
                             currentSurahNumber ||
@@ -5102,7 +6369,8 @@ export default function MushafPage() {
                       )
                     }
                     disabled={
-                      !availableSurahs.length
+                      !availableSurahs.length ||
+                      recitersLoading
                     }
                   >
                     {availableSurahs.length ? (
@@ -5141,7 +6409,9 @@ export default function MushafPage() {
 
               {audioError ? (
                 <div className="samee3-audio-error">
-                  {audioError}
+                  {
+                    audioError
+                  }
                 </div>
               ) : null}
 
@@ -5149,10 +6419,14 @@ export default function MushafPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    router.push('/')
+                    router.push(
+                      '/',
+                    )
                   }
                 >
-                  <Home size={22} />
+                  <Home
+                    size={22}
+                  />
                   <span>
                     الرئيسية
                   </span>
@@ -5206,6 +6480,9 @@ export default function MushafPage() {
           </>
         ) : null}
 
+        /*
+         * رقم الصفحة أسفل الشاشة، وليس داخل مساحة المصحف.
+         */
         <div
           className="samee3-page-footer"
           aria-hidden="true"
@@ -5219,6 +6496,9 @@ export default function MushafPage() {
           </span>
         </div>
 
+        /*
+         * زر القائمة في المنتصف تمامًا.
+         */
         <button
           type="button"
           aria-label={
@@ -5235,27 +6515,29 @@ export default function MushafPage() {
             event.stopPropagation()
 
             setShowChrome(
-              (value) => !value,
+              (value) =>
+                !value,
             )
           }}
-          className={
-            `samee3-reader-toggle ` +
-            `${
-              showChrome
-                ? 'is-open'
-                : ''
-            }`
-          }
+          className={`samee3-reader-toggle ${
+            showChrome
+              ? 'is-open'
+              : ''
+          }`}
         >
           {showChrome ? (
             <X
               size={24}
-              strokeWidth={2.3}
+              strokeWidth={
+                2.3
+              }
             />
           ) : (
             <Menu
               size={25}
-              strokeWidth={2.3}
+              strokeWidth={
+                2.3
+              }
             />
           )}
         </button>
@@ -5327,6 +6609,7 @@ export default function MushafPage() {
                 <Play
                   size={19}
                 />
+
                 <span>
                   تشغيل
                 </span>
@@ -5569,7 +6852,9 @@ export default function MushafPage() {
 
       {toast ? (
         <div className="samee3-toast">
-          <Check size={16} />
+          <Check
+            size={16}
+          />
           {toast}
         </div>
       ) : null}
@@ -5585,7 +6870,8 @@ export default function MushafPage() {
         }
 
         .samee3-reader {
-          font-family: 'Tajawal',
+          font-family:
+            'Tajawal',
             system-ui,
             sans-serif;
           color: #1a2534;
@@ -5620,11 +6906,13 @@ export default function MushafPage() {
               ),
             filter 0.44s ease,
             opacity 0.44s ease;
-          will-change: transform;
+          will-change:
+            transform;
         }
 
         .samee3-spread.is-desktop {
-          padding: 18px 18px 24px;
+          padding:
+            18px 18px 24px;
         }
 
         .samee3-spread.is-mobile {
@@ -5632,14 +6920,14 @@ export default function MushafPage() {
         }
 
         /*
-         * حركة التقليب أصبحت أوضح،
-         * لكن بدون دوران مبالغ فيه يفسد شكل المصحف.
+         * حركة تقليب واضحة وهادئة.
          */
         .samee3-spread.is-turning.next {
           transform:
-            translateX(-28px)
+            translateX(-30px)
             rotateY(-7deg)
             scale(0.992);
+
           filter:
             drop-shadow(
               -18px 0 22px
@@ -5654,9 +6942,10 @@ export default function MushafPage() {
 
         .samee3-spread.is-turning.prev {
           transform:
-            translateX(28px)
+            translateX(30px)
             rotateY(7deg)
             scale(0.992);
+
           filter:
             drop-shadow(
               18px 0 22px
@@ -5672,9 +6961,11 @@ export default function MushafPage() {
         .samee3-page-sheet {
           position: relative;
           height: 100%;
-          aspect-ratio: 1000 / 1400;
+          aspect-ratio:
+            1000 / 1400;
           overflow: hidden;
-          background: #fffdf7;
+          background:
+            #fffdf7;
           border:
             1px solid
             rgba(
@@ -5698,13 +6989,15 @@ export default function MushafPage() {
 
         .is-desktop
           .samee3-page-sheet {
-          height: min(
-            calc(100dvh - 42px),
-            920px
-          );
-          max-width: calc(
-            50vw - 32px
-          );
+          height:
+            min(
+              calc(100dvh - 42px),
+              920px
+            );
+          max-width:
+            calc(
+              50vw - 32px
+            );
         }
 
         .is-mobile
@@ -5737,14 +7030,17 @@ export default function MushafPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 7px 13px 0;
+          padding:
+            7px 13px 0;
           color: #91571d;
-          font-family: 'Tajawal',
+          font-family:
+            'Tajawal',
             sans-serif;
           pointer-events: none;
         }
 
-        .samee3-page-meta .meta-side {
+        .samee3-page-meta
+          .meta-side {
           display: flex;
           align-items: center;
           gap: 7px;
@@ -5754,12 +7050,16 @@ export default function MushafPage() {
 
         .samee3-page-meta
           .meta-badge {
-          display: inline-flex;
+          display:
+            inline-flex;
           min-width: 28px;
           height: 28px;
-          padding: 0 8px;
-          align-items: center;
-          justify-content: center;
+          padding:
+            0 8px;
+          align-items:
+            center;
+          justify-content:
+            center;
           border-radius: 9px;
           border:
             1px solid
@@ -5839,11 +7139,13 @@ export default function MushafPage() {
           line-height: 1;
         }
 
-        .samee3-surah-frame strong {
+        .samee3-surah-frame
+          strong {
           position: relative;
           z-index: 2;
           min-width: 180px;
-          padding: 0 18px;
+          padding:
+            0 18px;
           text-align: center;
           color: #392b1e;
           font-family:
@@ -5856,7 +7158,8 @@ export default function MushafPage() {
 
         .samee3-page-art {
           position: absolute;
-          inset: 94px 7px 46px;
+          inset:
+            94px 7px 46px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -5880,8 +7183,7 @@ export default function MushafPage() {
         }
 
         /*
-         * رقم الصفحة أصبح أعلى من زر القائمة،
-         * والزّر صار في المنتصف بالضبط.
+         * رقم الصفحة في الهامش السفلي جدًا.
          */
         .samee3-page-footer {
           position: absolute;
@@ -5889,27 +7191,29 @@ export default function MushafPage() {
           bottom:
             calc(
               max(
-                10px,
+                3px,
                 env(
                   safe-area-inset-bottom
                 )
-              ) + 74px
+              ) + 60px
             );
           z-index: 88;
-          height: 34px;
-          transform: translateX(-50%);
+          height: 27px;
+          transform:
+            translateX(-50%);
           display: flex;
           align-items: center;
           justify-content: center;
           pointer-events: none;
           color: #9a662b;
           font-weight: 900;
-          font-size: 15px;
+          font-size: 13px;
         }
 
-        .samee3-page-footer span {
-          min-width: 70px;
-          height: 27px;
+        .samee3-page-footer
+          span {
+          min-width: 66px;
+          height: 25px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -5921,7 +7225,8 @@ export default function MushafPage() {
               59,
               0.48
             );
-          border-radius: 999px;
+          border-radius:
+            999px;
           background:
             rgba(
               255,
@@ -5937,31 +7242,36 @@ export default function MushafPage() {
                 27,
                 0.08
               );
-          backdrop-filter: blur(
-            7px
-          );
+          backdrop-filter:
+            blur(7px);
         }
 
         .samee3-text-page {
           width: 100%;
           height: 100%;
-          box-sizing: border-box;
+          box-sizing:
+            border-box;
           overflow: hidden;
-          padding: 20px 26px;
+          padding:
+            20px 26px;
           direction: rtl;
-          background: #fcfbf7;
+          background:
+            #fcfbf7;
           color: #1c2736;
           font-family:
             'Amiri Quran',
             'Amiri',
             serif;
-          font-size: clamp(
-            25px,
-            2.25vw,
-            39px
-          );
-          line-height: 2.24;
-          text-align: justify;
+          font-size:
+            clamp(
+              25px,
+              2.25vw,
+              39px
+            );
+          line-height:
+            2.24;
+          text-align:
+            justify;
         }
 
         .samee3-text-ayah {
@@ -5969,13 +7279,16 @@ export default function MushafPage() {
           cursor: pointer;
           border-radius: 8px;
           transition:
-            background 0.12s ease,
-            box-shadow 0.12s ease,
+            background 0.12s
+              ease,
+            box-shadow 0.12s
+              ease,
             filter 0.12s ease;
         }
 
         .samee3-text-ayah.samee3-pressed-ayah {
-          background: transparent !important;
+          background:
+            transparent !important;
           box-shadow:
             inset 0 -0.34em 0
               rgba(
@@ -5994,7 +7307,8 @@ export default function MushafPage() {
         }
 
         .samee3-text-ayah.samee3-playing-ayah {
-          background: transparent !important;
+          background:
+            transparent !important;
           box-shadow:
             inset 0 -0.36em 0
               rgba(
@@ -6015,7 +7329,8 @@ export default function MushafPage() {
         .samee3-page-art
           .ayahPolygon.samee3-pressed-ayah {
           fill: #0e99d4 !important;
-          fill-opacity: 0.1 !important;
+          fill-opacity:
+            0.10 !important;
           stroke: none !important;
           filter:
             drop-shadow(
@@ -6032,7 +7347,8 @@ export default function MushafPage() {
         .samee3-page-art
           .ayahPolygon.samee3-playing-ayah {
           fill: #c7934f !important;
-          fill-opacity: 0.14 !important;
+          fill-opacity:
+            0.14 !important;
           stroke: none !important;
           filter:
             drop-shadow(
@@ -6057,7 +7373,7 @@ export default function MushafPage() {
                   14,
                   153,
                   212,
-                  0.2
+                  0.20
                 )
             );
         }
@@ -6080,27 +7396,34 @@ export default function MushafPage() {
 
         .samee3-ayah-number {
           display: inline-block;
-          margin: 0 5px;
+          margin:
+            0 5px;
           color: #b78945;
           font-family:
             'Amiri',
             serif;
-          font-size: 0.72em;
+          font-size:
+            0.72em;
         }
 
         .samee3-top-controls {
           position: absolute;
           z-index: 70;
-          top: max(
-            10px,
-            env(
-              safe-area-inset-top
-            )
-          );
+          top:
+            max(
+              10px,
+              env(
+                safe-area-inset-top
+              )
+            );
           left: 50%;
-          transform: translateX(-50%)
-            translateY(0);
-          width: min(94vw, 900px);
+          transform:
+            translateX(-50%);
+          width:
+            min(
+              94vw,
+              900px
+            );
           padding: 10px;
           border-radius: 24px;
           background:
@@ -6126,9 +7449,8 @@ export default function MushafPage() {
                 33,
                 0.17
               );
-          backdrop-filter: blur(
-            16px
-          );
+          backdrop-filter:
+            blur(16px);
           animation:
             samee3-top-in
             0.24s ease both;
@@ -6139,7 +7461,9 @@ export default function MushafPage() {
             opacity: 0;
             transform:
               translateX(-50%)
-              translateY(-12px);
+              translateY(
+                -12px
+              );
           }
 
           to {
@@ -6162,20 +7486,24 @@ export default function MushafPage() {
           display: flex;
           align-items: center;
           gap: 9px;
-          padding: 0 13px;
+          padding:
+            0 13px;
           border-radius: 16px;
           border:
-            1px solid #e4d8c1;
+            1px solid
+            #e4d8c1;
           background: #fff;
           color: #0e99d4;
         }
 
-        .samee3-search-box input {
+        .samee3-search-box
+          input {
           flex: 1;
           min-width: 0;
           border: 0;
           outline: 0;
-          background: transparent;
+          background:
+            transparent;
           font-size: 14px;
           font-weight: 800;
           color: #273447;
@@ -6192,7 +7520,8 @@ export default function MushafPage() {
           align-items: center;
           justify-content: center;
           border: 0;
-          background: transparent;
+          background:
+            transparent;
           color: #7b8797;
         }
 
@@ -6229,8 +7558,7 @@ export default function MushafPage() {
         }
 
         /*
-         * لوحة الخيارات الآن ترتفع من المنتصف،
-         * وتترك مساحة واضحة تحت رقم الصفحة.
+         * الخيارات تظهر فوق زر المنتصف.
          */
         .samee3-bottom-shell {
           position: absolute;
@@ -6239,18 +7567,21 @@ export default function MushafPage() {
           bottom:
             calc(
               max(
-                14px,
+                4px,
                 env(
                   safe-area-inset-bottom
                 )
-              ) + 92px
+              ) + 62px
             );
           transform:
-            translateX(-50%)
-            translateY(18px)
-            scale(0.97);
-          transform-origin: bottom center;
-          width: min(96vw, 1040px);
+            translateX(-50%);
+          transform-origin:
+            bottom center;
+          width:
+            min(
+              96vw,
+              1040px
+            );
           padding: 10px;
           border-radius: 26px;
           background:
@@ -6258,7 +7589,7 @@ export default function MushafPage() {
               255,
               253,
               248,
-              0.96
+              0.97
             );
           border:
             1px solid
@@ -6274,11 +7605,10 @@ export default function MushafPage() {
                 35,
                 73,
                 86,
-                0.2
+                0.20
               );
-          backdrop-filter: blur(
-            17px
-          );
+          backdrop-filter:
+            blur(17px);
           animation:
             samee3-bottom-in
             0.26s
@@ -6297,9 +7627,11 @@ export default function MushafPage() {
             transform:
               translateX(-50%)
               translateY(
-                30px
+                25px
               )
-              scale(0.95);
+              scale(
+                0.96
+              );
           }
 
           to {
@@ -6312,7 +7644,8 @@ export default function MushafPage() {
         }
 
         /*
-         * زر الثلاث خطوط في المنتصف.
+         * زر الثلاث خطوط:
+         * تحت رقم الصفحة وبمنتصف الشاشة.
          */
         .samee3-reader-toggle {
           position: absolute;
@@ -6321,16 +7654,16 @@ export default function MushafPage() {
           bottom:
             calc(
               max(
-                12px,
+                3px,
                 env(
                   safe-area-inset-bottom
                 )
-              ) + 17px
+              ) + 3px
             );
           transform:
             translateX(-50%);
-          width: 54px;
-          height: 54px;
+          width: 52px;
+          height: 52px;
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -6348,20 +7681,19 @@ export default function MushafPage() {
               255,
               253,
               248,
-              0.97
+              0.98
             );
           color: #0e99d4;
           box-shadow:
-            0 10px 28px
+            0 8px 24px
               rgba(
                 35,
                 73,
                 86,
                 0.17
               );
-          backdrop-filter: blur(
-            15px
-          );
+          backdrop-filter:
+            blur(15px);
           transition:
             transform 0.24s ease,
             box-shadow 0.24s ease,
@@ -6380,7 +7712,7 @@ export default function MushafPage() {
                 35,
                 73,
                 86,
-                0.2
+                0.20
               );
         }
 
@@ -6406,7 +7738,10 @@ export default function MushafPage() {
         .samee3-audio-toolbar {
           display: grid;
           grid-template-columns:
-            1.1fr 1fr 1fr 1fr;
+            1.1fr
+            1fr
+            1fr
+            1fr;
           gap: 8px;
         }
 
@@ -6447,7 +7782,8 @@ export default function MushafPage() {
             10px;
           border-radius: 15px;
           border:
-            1px solid #e3d9c7;
+            1px solid
+            #e3d9c7;
           background: #fff;
         }
 
@@ -6463,7 +7799,8 @@ export default function MushafPage() {
           width: 100%;
           border: 0;
           outline: 0;
-          background: transparent;
+          background:
+            transparent;
           color: #263347;
           font-size: 11px;
           font-weight: 900;
@@ -6494,22 +7831,28 @@ export default function MushafPage() {
           margin-top: 8px;
           padding-top: 8px;
           border-top:
-            1px solid #ece4d7;
+            1px solid
+            #ece4d7;
           display: grid;
           grid-template-columns:
-            repeat(4, 1fr);
+            repeat(
+              4,
+              1fr
+            );
         }
 
         .samee3-bottom-nav
           button {
           border: 0;
-          background: transparent;
+          background:
+            transparent;
           color: #91a3b8;
           display: flex;
           flex-direction: column;
           align-items: center;
           gap: 3px;
-          padding: 3px 2px;
+          padding:
+            3px 2px;
           font-weight: 900;
           font-size: 9px;
         }
@@ -6532,28 +7875,34 @@ export default function MushafPage() {
               31,
               35,
               38,
-              0.2
+              0.20
             );
-          backdrop-filter: blur(
-            4px
-          );
+          backdrop-filter:
+            blur(4px);
         }
 
         .samee3-ayah-sheet {
-          width: min(
-            96vw,
-            620px
-          );
-          max-height: min(
-            78dvh,
-            720px
-          );
+          width:
+            min(
+              96vw,
+              620px
+            );
+          max-height:
+            min(
+              78dvh,
+              720px
+            );
           overflow: auto;
           border-radius:
-            28px 28px 20px 20px;
-          background: #fffdf8;
+            28px
+            28px
+            20px
+            20px;
+          background:
+            #fffdf8;
           border:
-            1px solid #e7dac4;
+            1px solid
+            #e7dac4;
           box-shadow:
             0 24px 80px
               rgba(
@@ -6599,7 +7948,8 @@ export default function MushafPage() {
           height: 34px;
           border: 0;
           border-radius: 50%;
-          background: #f2eee7;
+          background:
+            #f2eee7;
           color: #718096;
           display: flex;
           align-items: center;
@@ -6608,18 +7958,22 @@ export default function MushafPage() {
 
         .samee3-ayah-preview {
           margin-top: 14px;
-          padding: 18px 16px;
+          padding:
+            18px 16px;
           border-radius: 20px;
-          background: #fbf7ee;
+          background:
+            #fbf7ee;
           border:
-            1px solid #eee3d0;
+            1px solid
+            #eee3d0;
           color: #243042;
           font-family:
             'Amiri Quran',
             'Amiri',
             serif;
           font-size: 24px;
-          line-height: 2.05;
+          line-height:
+            2.05;
           text-align: right;
         }
 
@@ -6627,7 +7981,10 @@ export default function MushafPage() {
           margin-top: 14px;
           display: grid;
           grid-template-columns:
-            repeat(3, 1fr);
+            repeat(
+              3,
+              1fr
+            );
           gap: 8px;
         }
 
@@ -6635,7 +7992,8 @@ export default function MushafPage() {
           button {
           min-height: 62px;
           border:
-            1px solid #e8dfd0;
+            1px solid
+            #e8dfd0;
           background: #fff;
           color: #314154;
           border-radius: 17px;
@@ -6650,14 +8008,17 @@ export default function MushafPage() {
 
         .samee3-ayah-actions-grid
           button:hover {
-          border-color: #b9ddea;
+          border-color:
+            #b9ddea;
           color: #0e87b8;
         }
 
         .samee3-ayah-actions-grid
           button.saved {
-          background: #effaf7;
-          border-color: #b8e2d1;
+          background:
+            #effaf7;
+          border-color:
+            #b8e2d1;
           color: #127457;
         }
 
@@ -6665,9 +8026,11 @@ export default function MushafPage() {
           margin-top: 14px;
           padding: 14px;
           border-radius: 18px;
-          background: #f2fafc;
+          background:
+            #f2fafc;
           border:
-            1px solid #cfe8ef;
+            1px solid
+            #cfe8ef;
           color: #4c5968;
           font-size: 12px;
           line-height: 2;
@@ -6676,7 +8039,8 @@ export default function MushafPage() {
         .samee3-tafsir-box
           p {
           margin-top: 8px;
-          white-space: pre-wrap;
+          white-space:
+            pre-wrap;
         }
 
         .samee3-image-preview-overlay {
@@ -6694,20 +8058,21 @@ export default function MushafPage() {
               39,
               0.46
             );
-          backdrop-filter: blur(
-            8px
-          );
+          backdrop-filter:
+            blur(8px);
         }
 
         .samee3-image-preview-sheet {
-          width: min(
-            94vw,
-            620px
-          );
+          width:
+            min(
+              94vw,
+              620px
+            );
           max-height: 94dvh;
           overflow: auto;
           border-radius: 28px;
-          background: #fffdf8;
+          background:
+            #fffdf8;
           border:
             1px solid
             rgba(
@@ -6722,7 +8087,7 @@ export default function MushafPage() {
                 22,
                 35,
                 40,
-                0.3
+                0.30
               );
           padding: 14px;
         }
@@ -6766,7 +8131,8 @@ export default function MushafPage() {
           height: 36px;
           border: 0;
           border-radius: 50%;
-          background: #f2eee7;
+          background:
+            #f2eee7;
           color: #5d6b75;
           display: flex;
           align-items: center;
@@ -6786,7 +8152,8 @@ export default function MushafPage() {
               #eef8f8
             );
           border:
-            1px solid #e8decc;
+            1px solid
+            #e8decc;
           overflow: hidden;
         }
 
@@ -6847,9 +8214,12 @@ export default function MushafPage() {
           display: flex;
           align-items: center;
           gap: 7px;
-          padding: 10px 14px;
-          border-radius: 999px;
-          background: #173d45;
+          padding:
+            10px 14px;
+          border-radius:
+            999px;
+          background:
+            #173d45;
           color: #fff;
           font-size: 11px;
           font-weight: 900;
@@ -6866,7 +8236,8 @@ export default function MushafPage() {
         @media (max-width: 767px) {
           .samee3-page-meta {
             height: 44px;
-            padding: 5px 10px 0;
+            padding:
+              5px 10px 0;
           }
 
           .samee3-page-meta
@@ -6894,13 +8265,15 @@ export default function MushafPage() {
           }
 
           .samee3-page-art {
-            inset: 84px 2px 42px;
+            inset:
+              84px 2px 42px;
           }
 
           .samee3-top-controls {
-            width: calc(
-              100% - 20px
-            );
+            width:
+              calc(
+                100% - 20px
+              );
           }
 
           .samee3-audio-toolbar {
@@ -6909,23 +8282,27 @@ export default function MushafPage() {
           }
 
           .samee3-bottom-shell {
-            width: calc(
-              100% - 14px
-            );
+            width:
+              calc(
+                100% - 14px
+              );
             bottom:
               calc(
                 max(
-                  12px,
+                  4px,
                   env(
                     safe-area-inset-bottom
                   )
-                ) + 88px
+                ) + 62px
               );
           }
 
           .samee3-ayah-actions-grid {
             grid-template-columns:
-              repeat(2, 1fr);
+              repeat(
+                2,
+                1fr
+              );
           }
 
           .samee3-ayah-preview {
@@ -6933,9 +8310,10 @@ export default function MushafPage() {
           }
 
           .samee3-image-preview-sheet {
-            width: calc(
-              100vw - 20px
-            );
+            width:
+              calc(
+                100vw - 20px
+              );
             max-height: 94dvh;
             padding: 10px;
           }
@@ -6949,11 +8327,11 @@ export default function MushafPage() {
             bottom:
               calc(
                 max(
-                  12px,
+                  3px,
                   env(
                     safe-area-inset-bottom
                   )
-                ) + 72px
+                ) + 60px
               );
           }
 
@@ -6961,11 +8339,11 @@ export default function MushafPage() {
             bottom:
               calc(
                 max(
-                  12px,
+                  3px,
                   env(
                     safe-area-inset-bottom
                   )
-                ) + 16px
+                ) + 3px
               );
           }
         }
@@ -6977,16 +8355,15 @@ export default function MushafPage() {
           }
 
           .samee3-bottom-shell {
-            max-width: min(
-              1040px,
-              78vw
-            );
+            max-width:
+              min(
+                1040px,
+                78vw
+              );
           }
         }
 
-        @media (
-          prefers-reduced-motion: reduce
-        ) {
+        @media (prefers-reduced-motion: reduce) {
           .samee3-spread,
           .samee3-reader-toggle,
           .samee3-bottom-shell,
@@ -7004,7 +8381,10 @@ type MushafPageSheetProps = {
   page: number
   data: PageData | null
   html: string
-  side: 'left' | 'right' | 'single'
+  side:
+    | 'left'
+    | 'right'
+    | 'single'
   meta: {
     surah: string
     juz: number
@@ -7104,11 +8484,6 @@ function MushafPageSheet({
           __html: html,
         }}
       />
-
-      {/*
-       * يوجد عنصر footer الحقيقي في المستوى الأعلى حتى يكون رقم الصفحة
-       * واحدًا وواضحًا في منتصف الشاشة السفلي.
-       */}
     </section>
   )
 }
@@ -7130,38 +8505,46 @@ function fitArabicLines(
   maxLines: number,
 ): ArabicTextLayout {
   const context =
-    canvas.getContext('2d')
+    canvas.getContext(
+      '2d',
+    )
 
   if (!context) {
     return {
       fontSize:
         minFontSize,
-      lineHeight: Math.round(
-        minFontSize *
-          1.65,
-      ),
+      lineHeight:
+        Math.round(
+          minFontSize *
+            1.65,
+        ),
       lines: [text],
       fontFamily,
     }
   }
 
   const clean =
-    text.replace(
-      /\s+/g,
-      ' ',
-    ).trim() || '—'
+    text
+      .replace(
+        /\s+/g,
+        ' ',
+      )
+      .trim() || '—'
 
   for (
     let size =
       maxFontSize;
-    size >= minFontSize;
+    size >=
+    minFontSize;
     size -= 2
   ) {
     context.font =
       `${size}px ${fontFamily}`
 
     const words =
-      clean.split(' ')
+      clean.split(
+        ' ',
+      )
 
     const lines: string[] =
       []
@@ -7183,15 +8566,21 @@ function fitArabicLines(
           maxWidth ||
         !line
       ) {
-        line = candidate
+        line =
+          candidate
       } else {
-        lines.push(line)
+        lines.push(
+          line,
+        )
+
         line = word
       }
     }
 
     if (line) {
-      lines.push(line)
+      lines.push(
+        line,
+      )
     }
 
     if (
@@ -7238,13 +8627,19 @@ function fitArabicLines(
       line =
         candidate
     } else {
-      lines.push(line)
-      line = word
+      lines.push(
+        line,
+      )
+
+      line =
+        word
     }
   }
 
   if (line) {
-    lines.push(line)
+    lines.push(
+      line,
+    )
   }
 
   return {
