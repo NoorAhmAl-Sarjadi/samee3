@@ -85,10 +85,13 @@ type LocalReciter = {
 
 type TurnDirection = 'next' | 'prev' | null
 
-type SearchTarget = {
+type SearchResult = {
+  id: string
+  text: string
   page: number
-  surah?: number
-  ayah?: number
+  surah: number
+  surahName: string
+  ayah: number
 }
 
 type AyahTiming = {
@@ -170,6 +173,16 @@ const RIWAYA_NAMES: Record<Riwaya, string> = {
 }
 
 const RIWAYA_REMOTE_IDS: Record<Riwaya, number> = {
+  hafs: 1,
+  bazzi: 5,
+  douri: 6,
+  qalun: 7,
+  shubah: 9,
+  sousi: 10,
+  warsh: 4,
+}
+
+const RIWAYA_MUSHAF_IDS: Record<Riwaya, number> = {
   hafs: 1,
   bazzi: 5,
   douri: 6,
@@ -914,6 +927,8 @@ export default function MushafPage() {
   const [searchInput, setSearchInput] = useState('')
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchMessage, setSearchMessage] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [showSearchResults, setShowSearchResults] = useState(false)
 
   const [pageData, setPageData] = useState<PageData | null>(null)
   const [rightPageData, setRightPageData] = useState<PageData | null>(null)
@@ -1381,35 +1396,15 @@ export default function MushafPage() {
   const mainDisplayedSvg = useMemo(() => {
     if (PRINTED_RIWAYAT.has(riwaya)) return svg
     const displayData = isDesktop ? rightPageData : pageData
-    if (!displayData?.ayahs?.length) return ''
-
-    const lines = displayData.ayahs.map((ayah) => {
-      const safe = String(ayah.text || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-      return `<span class="samee3-text-ayah" data-ayah="${ayah.number}" data-ayah-number="${ayah.numberInSurah}" data-surah="${ayah.surah?.number || 0}">${safe} <span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span></span> `
-    }).join('')
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1400" preserveAspectRatio="xMidYMid meet" width="100%" height="100%"><foreignObject x="55" y="45" width="890" height="1310"><div xmlns="http://www.w3.org/1999/xhtml" class="samee3-text-page">${lines}</div></foreignObject></svg>`
-  }, [isDesktop, pageData, rightPageData, riwaya, selectedAyah, svg])
+    return buildTextMushafSvg(displayData)
+  }, [isDesktop, pageData, rightPageData, riwaya, svg])
 
   const leftDisplayedSvg = useMemo(() => {
     if (!isDesktop || !leftPageData) return ''
     if (PRINTED_RIWAYAT.has(riwaya)) return leftSvg
+    return buildTextMushafSvg(leftPageData)
+  }, [isDesktop, leftPageData, leftSvg, riwaya])
 
-    const lines = leftPageData.ayahs.map((ayah) => {
-      const safe = String(ayah.text || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-      return `<span class="samee3-text-ayah" data-ayah="${ayah.number}" data-ayah-number="${ayah.numberInSurah}" data-surah="${ayah.surah?.number || 0}">${safe} <span class="samee3-ayah-number">﴿${ayah.numberInSurah}﴾</span></span> `
-    }).join('')
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1400" preserveAspectRatio="xMidYMid meet" width="100%" height="100%"><foreignObject x="55" y="45" width="890" height="1310"><div xmlns="http://www.w3.org/1999/xhtml" class="samee3-text-page">${lines}</div></foreignObject></svg>`
-  }, [isDesktop, leftPageData, leftSvg, riwaya, selectedAyah])
 
   const resolveSelectedAyahFromElement = useCallback((element: Element, sourceData: PageData | null) => {
     const sourceAyahs = sourceData?.ayahs || []
@@ -1850,62 +1845,60 @@ export default function MushafPage() {
     router.push(`/mushaf?${params.toString()}`)
   }, [pageNumber, router, searchParams])
 
-  const handleRiwayaSelect = async (
-    value: Riwaya,
-  ) => {
-    if (value === riwaya) {
-      return
-    }
+  const handleRiwayaSelect = async (value: Riwaya) => {
+    if (value === riwaya) return
 
     const audio = audioRef.current
+    const wasPlaying = !!audio && !audio.paused && !!audio.src
+    const preservedTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0
+    const visibleAyahs = [pageData, rightPageData, leftPageData]
+      .filter(Boolean)
+      .flatMap((source) => (source as PageData).ayahs)
+    const currentSurah =
+      audioSurahRef.current ||
+      visibleAyahs.find((ayah) => ayah.number === playingAyahNumber)?.surah?.number ||
+      selectedAyah?.surah?.number ||
+      requestedSurah ||
+      currentSurahNumber ||
+      0
+    const currentLocalAyah =
+      visibleAyahs.find((ayah) => ayah.number === playingAyahNumber)?.numberInSurah ||
+      selectedAyah?.numberInSurah ||
+      undefined
 
     audio?.pause()
-
     setIsPlaying(false)
     setPlayingAyahNumber(null)
     setRepeatAyahNumber(null)
     setAudioError('')
-
-    /*
-     * نحافظ على لوحة الخيارات مفتوحة.
-     */
     setShowChrome(true)
 
-    /*
-     * نحمل قراء الرواية الجديدة أولًا.
-     */
     const loaded = await fetchReciters(value)
-
     if (!loaded.length) {
       setSelectedReciterId(0)
-
-      triggerToast(
-        `لا يوجد قراء متاحون للرواية ${RIWAYA_NAMES[value]} حاليًا.`,
-      )
-
+      triggerToast(`لا يوجد قراء متاحون للرواية ${RIWAYA_NAMES[value]} حاليًا.`)
       return
     }
 
-    /*
-     * نفس القارئ إن كان متوفرًا في الرواية الجديدة،
-     * وإلا أول قارئ متاح.
-     */
-    const preferred =
-      loaded.find(
-        (item) =>
-          item.apiId === selectedReciterId,
-      ) ||
-      loaded[0] ||
-      null
-
+    const preferred = loaded.find((item) => item.apiId === selectedReciterId) || loaded[0] || null
     setReciters(loaded)
-    setSelectedReciterId(
-      preferred?.apiId || 0,
-    )
+    setSelectedReciterId(preferred?.apiId || 0)
+    updateRouteAudioSelection(value, preferred)
 
-    updateRouteAudioSelection(
-      value,
-      preferred,
+    if (currentSurah && preferred?.surahIds.includes(Number(currentSurah)) && (wasPlaying || preservedTime > 0 || !!currentLocalAyah)) {
+      await loadAudioForSurah(
+        Number(currentSurah),
+        wasPlaying,
+        currentLocalAyah,
+        preferred,
+        preservedTime,
+      )
+    }
+
+    triggerToast(
+      wasPlaying
+        ? `تم تبديل الرواية إلى ${RIWAYA_NAMES[value]} والاستمرار من نفس الموضع.`
+        : `تم اختيار ${RIWAYA_NAMES[value]}`,
     )
   }
 
@@ -1958,7 +1951,7 @@ export default function MushafPage() {
         wasPlaying,
         activeLocalAyah,
         item,
-        activeLocalAyah ? undefined : preservedTime,
+        preservedTime,
       )
     }
 
@@ -1984,80 +1977,107 @@ export default function MushafPage() {
     updateRouteAudioSelection(riwaya, selectedReciter, id)
   }
 
-  const parseSearchTarget = useCallback(async (term: string): Promise<SearchTarget | null> => {
-    const normalized = normalizeArabic(term)
-    const pageOnly = normalized.match(/^(?:صفحه\s*)?(\d{1,3})$/)
-    if (pageOnly) {
-      const page = Number(pageOnly[1])
-      if (page >= 1 && page <= 604) return { page }
-    }
-
-    const directAyah = normalized.match(/(?:سوره\s*)?(\d{1,3})\s*[:/]\s*(\d{1,3})/)
-    if (directAyah) {
-      const surah = Number(directAyah[1])
-      const ayah = Number(directAyah[2])
-      if (surah >= 1 && surah <= 114 && ayah > 0) {
-        try {
-          const response = await fetch(`https://api.alquran.cloud/v1/ayah/${surah}:${ayah}/quran-uthmani`, { cache: 'no-store' })
-          const payload = await response.json()
-          if (response.ok && payload?.data?.page) {
-            return { page: clampPage(Number(payload.data.page)), surah, ayah }
-          }
-        } catch {
-          // fallback below
-        }
-      }
-    }
-
-    const surahMatch = SURAH_LIST.find((item) => {
-      const name = normalizeArabic(item.name)
-      return name === normalized || name.includes(normalized) || normalized.includes(name)
-    })
-    if (surahMatch) return { page: surahMatch.page, surah: surahMatch.id }
-
-    if (normalized.length < 2) return null
-
-    try {
-      const response = await fetch(`https://api.alquran.cloud/v1/search/${encodeURIComponent(term)}/all/quran-uthmani`, { cache: 'no-store' })
-      const payload = await response.json()
-      const match = Array.isArray(payload?.data?.matches) ? payload.data.matches[0] : null
-      if (match?.page) {
-        return {
-          page: clampPage(Number(match.page)),
-          surah: Number(match?.surah?.number) || undefined,
-          ayah: Number(match?.numberInSurah) || undefined,
-        }
-      }
-    } catch {
-      return null
-    }
-
-    return null
-  }, [])
 
   const executeSearch = async () => {
     const term = searchInput.trim()
     if (!term || searchLoading) return
+
     setSearchLoading(true)
     setSearchMessage('')
+    setSearchResults([])
+
     try {
-      const target = await parseSearchTarget(term)
-      if (!target) {
-        setSearchMessage('لم يتم العثور على النتيجة المطلوبة.')
+      const normalizedTerm = term.replace(/[ًٌٍَُِّْـ]/g, '').trim()
+      const response = await fetch(
+        `https://api.alquran.cloud/v1/search/${encodeURIComponent(normalizedTerm)}/all/quran-uthmani`,
+        { cache: 'no-store', headers: { Accept: 'application/json' } },
+      )
+      const payload = await response.json().catch(() => null)
+
+      if (!response.ok || payload?.code !== 200) throw new Error('Search request failed')
+
+      const matches = Array.isArray(payload?.data?.matches) ? payload.data.matches : []
+      const mapped: SearchResult[] = matches
+        .map((match: any, index: number) => ({
+          id: `${match?.surah?.number || 0}:${match?.numberInSurah || 0}:${index}`,
+          text: String(match?.text || '').trim(),
+          page: clampPage(Number(match?.page || 1)),
+          surah: Number(match?.surah?.number || 0),
+          surahName: String(match?.surah?.name || 'سورة غير معروفة'),
+          ayah: Number(match?.numberInSurah || 0),
+        }))
+        .filter((item: SearchResult) => item.text && item.surah > 0 && item.ayah > 0)
+        .slice(0, 80)
+
+      if (!mapped.length) {
+        setSearchMessage('لا توجد آيات مطابقة لما كتبته.')
+        setShowSearchResults(true)
         return
       }
-      navigateTo(target.page, {
-        surah: target.surah,
-        ayah: target.ayah && target.surah ? `${target.surah}:${target.ayah}` : undefined,
-        clearJuz: true,
-      }, target.page >= pageNumber ? 'next' : 'prev')
+
+      setSearchResults(mapped)
+      setShowSearchResults(true)
+      setSearchMessage(`تم العثور على ${arabicNumber(mapped.length)} آية مطابقة.`)
     } catch (error) {
       console.error(error)
-      setSearchMessage('حدث خطأ أثناء البحث.')
+      setSearchMessage('تعذر البحث في الآيات الآن. حاول مرة أخرى.')
+      setShowSearchResults(true)
     } finally {
       setSearchLoading(false)
     }
   }
+
+  const openSearchResult = useCallback(async (result: SearchResult) => {
+    setSearchLoading(true)
+    try {
+      let exactPage = result.page
+
+      // صفحة الآية تختلف أحيانًا بين الروايات؛ نعيد حلّها داخل المصحف
+      // المختار قبل فتح النتيجة حتى لا نصل إلى صفحة حفص مثلًا أثناء قراءة ورش.
+      try {
+        const mushafId = RIWAYA_MUSHAF_IDS[riwaya]
+        const response = await fetch(
+          `https://api.quranpedia.net/v1/mushafs/${mushafId}/${result.surah}`,
+          { cache: 'force-cache' },
+        )
+        if (response.ok) {
+          const payload = await response.json()
+          const ayahs = Array.isArray(payload)
+            ? payload
+            : Array.isArray(payload?.ayahs)
+              ? payload.ayahs
+              : []
+          const found = ayahs.find((item: any) => Number(item?.number) === result.ayah)
+          if (Number(found?.page_number) > 0) exactPage = clampPage(Number(found.page_number))
+        }
+      } catch {
+        // نستخدم صفحة نتيجة البحث كخطة احتياطية.
+      }
+
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('page', String(exactPage))
+      params.set('surah', String(result.surah))
+      params.set('ayah', `${result.surah}:${result.ayah}`)
+      params.set('autoplay', '1')
+      params.delete('juz')
+      params.delete('juzStart')
+      params.delete('juzEnd')
+
+      if (selectedReciter) {
+        params.set('reciterId', String(selectedReciter.apiId))
+        params.set('reciterName', selectedReciter.label)
+        if (selectedReciter.moshafId != null) params.set('moshafId', String(selectedReciter.moshafId))
+      }
+      params.set('riwaya', riwaya)
+
+      setShowSearchResults(false)
+      setSearchResults([])
+      setSearchMessage('')
+      router.push(`/mushaf?${params.toString()}`)
+    } finally {
+      setSearchLoading(false)
+    }
+  }, [riwaya, router, searchParams, selectedReciter])
 
   const loadAyahTimings = useCallback(async (surahNumber: number, readId: number) => {
     if (!surahNumber || !readId) {
@@ -2365,8 +2385,7 @@ export default function MushafPage() {
 
       const targetStart =
         findTimingStart(timings, targetAyahNumber) ??
-        fallbackStartSeconds ??
-        0
+        (Number.isFinite(Number(fallbackStartSeconds)) ? Number(fallbackStartSeconds) : 0)
 
       audio.pause()
       audio.src = finalUrl
@@ -3554,6 +3573,37 @@ export default function MushafPage() {
               {searchMessage ? <div className="samee3-search-message">{searchMessage}</div> : null}
             </div>
 
+            {showSearchResults ? (
+              <div className="samee3-search-results-overlay" onClick={(event) => event.stopPropagation()}>
+                <div className="samee3-search-results-sheet">
+                  <div className="samee3-search-results-head">
+                    <div>
+                      <span>نتائج البحث في القرآن الكريم</span>
+                      <strong>{searchInput.trim() || 'بحث'}</strong>
+                    </div>
+                    <button type="button" onClick={() => setShowSearchResults(false)} aria-label="إغلاق نتائج البحث"><X size={20} /></button>
+                  </div>
+                  {searchResults.length ? (
+                    <div className="samee3-search-results-list">
+                      {searchResults.map((result) => (
+                        <button key={result.id} type="button" className="samee3-search-result" onClick={() => openSearchResult(result)}>
+                          <div className="samee3-search-result-meta">
+                            <span>سورة {result.surahName}</span>
+                            <span>الآية {arabicNumber(result.ayah)}</span>
+                            <span>صفحة {arabicNumber(result.page)}</span>
+                          </div>
+                          <p>{result.text}</p>
+                          <ChevronLeft size={17} />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="samee3-search-empty">{searchMessage || 'لا توجد نتائج.'}</div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
             <div className="samee3-bottom-shell" onClick={(event) => event.stopPropagation()}>
               <div className="samee3-audio-toolbar">
                 <button type="button" onClick={() => void toggleAudio()} disabled={audioLoading} className="samee3-play-button">
@@ -3743,7 +3793,7 @@ export default function MushafPage() {
 
       <style jsx global>{`
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
-        .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; }
+        .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
         .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; perspective:1800px; background:#f5f0e4; touch-action:pan-y; }
         .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .52s cubic-bezier(.22,.72,.18,1), filter .52s ease; will-change:transform, filter; transform-origin:center center; }
         .samee3-spread.is-desktop { padding:18px 18px 24px; }
@@ -3800,7 +3850,10 @@ export default function MushafPage() {
           box-shadow:0 2px 7px rgba(85,62,27,.08);
           backdrop-filter:blur(7px);
         }
-        .samee3-text-page { width:100%; height:100%; box-sizing:border-box; overflow:hidden; padding:20px 26px; direction:rtl; background:#fcfbf7; color:#1c2736; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(25px,2.25vw,39px); line-height:2.24; text-align:justify; }
+        .samee3-text-page { width:100%; height:100%; box-sizing:border-box; overflow:hidden; padding:24px 28px 18px; direction:rtl; background:#fffdf7; color:#171b20; font-family:'Amiri Quran','Amiri',serif; display:flex; flex-direction:column; justify-content:space-evenly; gap:0; }
+        .samee3-text-line { flex:1 1 0; min-height:0; display:flex; align-items:center; justify-content:center; direction:rtl; text-align:center; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(22px,2.05vw,36px); line-height:1.15; white-space:nowrap; letter-spacing:0; }
+        .samee3-text-line-svg { font-family:'Amiri Quran','Amiri',serif; font-size:36px; fill:#15191e; }
+        .samee3-text-line-svg .samee3-ayah-number { fill:#b78945; }
         .samee3-text-ayah { display:inline; cursor:pointer; border-radius:8px; transition:background .12s ease, box-shadow .12s ease, filter .12s ease; }
         .samee3-text-ayah.samee3-pressed-ayah {
           background:transparent !important;
@@ -3835,12 +3888,28 @@ export default function MushafPage() {
         .samee3-top-controls { position:absolute; z-index:70; top:max(10px,env(safe-area-inset-top)); left:50%; transform:translateX(-50%); width:min(94vw,900px); padding:10px; border-radius:24px; background:rgba(255,253,248,.93); border:1px solid rgba(198,177,142,.55); box-shadow:0 14px 40px rgba(75,58,33,.17); backdrop-filter:blur(16px); }
         .samee3-search-row { display:flex; gap:8px; align-items:center; }
         .samee3-search-box { flex:1; height:46px; display:flex; align-items:center; gap:9px; padding:0 13px; border-radius:16px; border:1px solid #e4d8c1; background:#fff; color:#0e99d4; }
-        .samee3-search-box input { flex:1; min-width:0; border:0; outline:0; background:transparent; font-size:14px; font-weight:800; color:#273447; }
+        .samee3-search-box input { flex:1; min-width:0; border:0; outline:0; background:transparent; font-size:16px; font-weight:800; color:#273447; }
         .samee3-search-box input::placeholder { color:#a8a1a0; }
         .samee3-search-box button { display:flex; align-items:center; justify-content:center; border:0; background:transparent; color:#7b8797; }
         .samee3-search-submit { width:46px; height:46px; border:0; border-radius:16px; background:#0e99d4; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(14,153,212,.22); }
         .samee3-search-submit:disabled { opacity:.65; }
         .samee3-search-message { margin-top:7px; text-align:center; font-size:11px; font-weight:800; color:#8b5f28; }
+        .samee3-search-results-overlay { position:absolute; z-index:78; inset:0; padding:88px 12px 116px; display:flex; align-items:flex-start; justify-content:center; pointer-events:auto; background:rgba(245,240,228,.30); backdrop-filter:blur(5px); }
+        .samee3-search-results-sheet { width:min(94vw,860px); max-height:calc(100dvh - 150px); overflow:hidden; border:1px solid rgba(177,126,59,.35); border-radius:26px; background:rgba(255,253,248,.98); box-shadow:0 24px 70px rgba(64,49,30,.20); }
+        .samee3-search-results-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; border-bottom:1px solid #eee3d1; background:rgba(255,253,248,.97); }
+        .samee3-search-results-head div { display:flex; flex-direction:column; gap:3px; min-width:0; }
+        .samee3-search-results-head span { color:#a06b2e; font-size:11px; font-weight:900; }
+        .samee3-search-results-head strong { color:#172235; font-size:18px; font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .samee3-search-results-head button { width:38px; height:38px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; border:1px solid #e4d8c1; border-radius:50%; background:#fff; color:#667485; }
+        .samee3-search-results-list { max-height:calc(100dvh - 215px); overflow:auto; padding:10px; }
+        .samee3-search-result { position:relative; width:100%; display:block; text-align:right; padding:14px 16px 14px 40px; margin-bottom:8px; border:1px solid #eee4d3; border-radius:18px; background:#fffefa; color:#1d2a38; cursor:pointer; }
+        .samee3-search-result:hover { background:#fbf5e8; border-color:#d7bb8d; }
+        .samee3-search-result:disabled { opacity:.58; }
+        .samee3-search-result > svg { position:absolute; left:13px; top:50%; transform:translateY(-50%); color:#a46d2d; }
+        .samee3-search-result-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:7px; color:#a06b2e; font-size:11px; font-weight:900; }
+        .samee3-search-result-meta span { padding:4px 8px; border-radius:999px; background:#faf3e6; border:1px solid #eee0c8; }
+        .samee3-search-result p { margin:0; color:#182330; font-family:'Amiri Quran','Amiri',serif; font-size:20px; line-height:1.9; }
+        .samee3-search-empty { padding:50px 20px; text-align:center; color:#8b5f28; font-size:14px; font-weight:900; }
 
         .samee3-bottom-shell {
           position:absolute;
@@ -3967,6 +4036,12 @@ export default function MushafPage() {
             bottom:calc(max(3px,env(safe-area-inset-bottom)) + 58px);
           }
           .samee3-picker-menu { max-height:min(44dvh,330px); }
+          .samee3-search-results-overlay { padding:72px 8px 110px; }
+          .samee3-search-results-sheet { width:calc(100vw - 16px); max-height:calc(100dvh - 125px); border-radius:22px; }
+          .samee3-search-results-list { max-height:calc(100dvh - 190px); padding:8px; }
+          .samee3-search-result p { font-size:18px; line-height:1.85; }
+          .samee3-text-line { font-size:clamp(18px,5vw,27px); }
+          .samee3-text-line-svg { font-size:33px; }
           .samee3-page-footer { left:12px; bottom:calc(max(2px,env(safe-area-inset-bottom)) + 7px); }
           .samee3-ayah-actions-grid { grid-template-columns:repeat(2,1fr); }
           .samee3-ayah-preview { font-size:21px; }
@@ -3992,6 +4067,72 @@ type MushafPageSheetProps = {
   onAyahClick: (event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => void
   onAyahPointerDown: (event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => void
   onAyahPointerUp: () => void
+}
+
+function buildTextMushafSvg(data: PageData | null) {
+  if (!data?.ayahs?.length) return ''
+
+  const escapeXml = (value: string) => String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+
+  const chunks: Array<{ ayah: Ayah; text: string }> = []
+
+  for (const ayah of data.ayahs) {
+    const clean = String(ayah.text || '').replace(/\s+/g, ' ').trim()
+    if (!clean) continue
+
+    const words = clean.split(' ')
+    let current = ''
+    const maxChars = 54
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word
+      if (candidate.length <= maxChars || !current) {
+        current = candidate
+      } else {
+        chunks.push({ ayah, text: current })
+        current = word
+      }
+    }
+    if (current) chunks.push({ ayah, text: current })
+    chunks.push({ ayah, text: ` ﴿${ayah.numberInSurah}﴾ ` })
+  }
+
+  const lines: Array<Array<{ ayah: Ayah; text: string }>> = []
+  let line: Array<{ ayah: Ayah; text: string }> = []
+  let charCount = 0
+  const totalChars = chunks.reduce((sum, item) => sum + item.text.length, 0)
+  const targetChars = Math.max(42, Math.ceil(totalChars / 14))
+
+  for (const chunk of chunks) {
+    const size = chunk.text.length
+    if (line.length && charCount + size > targetChars) {
+      lines.push(line)
+      line = []
+      charCount = 0
+    }
+    line.push(chunk)
+    charCount += size
+  }
+  if (line.length) lines.push(line)
+
+  const lineCount = Math.max(1, lines.length)
+  const normalizedLines = lines
+
+  const lineMarkup = normalizedLines.map((items, index) => {
+    const content = items.map((item) => {
+      const ayah = item.ayah
+      return `<tspan class="samee3-text-ayah" data-ayah="${ayah.number}" data-ayah-number="${ayah.numberInSurah}" data-surah="${ayah.surah?.number || 0}">${escapeXml(item.text)}</tspan>`
+    }).join('')
+    const y = lineCount === 1 ? 675 : 68 + index * (1210 / (lineCount - 1))
+    const fontSize = lineCount <= 13 ? 42 : lineCount <= 15 ? 39 : lineCount <= 17 ? 35 : 31
+    return `<text x="500" y="${Math.min(1290, y)}" class="samee3-text-line-svg" font-size="${fontSize}" text-anchor="middle" direction="rtl" unicode-bidi="plaintext">${content}</text>`
+  }).join('')
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1350" preserveAspectRatio="xMidYMid meet" width="100%" height="100%"><rect x="0" y="0" width="1000" height="1350" fill="#fffdf7"/><rect x="18" y="18" width="964" height="1314" rx="5" fill="none" stroke="#e7d9bd" stroke-width="2"/><g>${lineMarkup}</g></svg>`
 }
 
 function MushafPageSheet({ page, data, html, side, meta, onAyahClick, onAyahPointerDown, onAyahPointerUp }: MushafPageSheetProps) {
