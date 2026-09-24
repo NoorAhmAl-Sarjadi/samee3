@@ -3749,12 +3749,12 @@ export default function MushafPage() {
         .samee3-spread.is-desktop { padding:18px 18px 24px; }
         .samee3-spread.is-mobile { padding:0; }
         .samee3-spread.is-turning.next {
-          transform:translateX(-34px) rotateY(-15deg) rotateZ(-.35deg) scale(.985);
-          filter:drop-shadow(-24px 10px 26px rgba(64,49,30,.18));
+          transform:translateX(-7px) rotateY(-8deg);
+          filter:drop-shadow(-14px 8px 20px rgba(64,49,30,.14));
         }
         .samee3-spread.is-turning.prev {
-          transform:translateX(34px) rotateY(15deg) rotateZ(.35deg) scale(.985);
-          filter:drop-shadow(24px 10px 26px rgba(64,49,30,.18));
+          transform:translateX(7px) rotateY(8deg);
+          filter:drop-shadow(14px 8px 20px rgba(64,49,30,.14));
         }
         .samee3-spread.is-turning::after {
           content:"";
@@ -3784,11 +3784,11 @@ export default function MushafPage() {
         .samee3-page-art svg { user-select:none; }
         .samee3-page-footer {
           position:absolute;
-          left:50%;
+          left:14px;
           bottom:calc(max(2px,env(safe-area-inset-bottom)) + 8px);
           z-index:88;
           height:26px;
-          transform:translateX(-50%);
+          transform:none;
           display:flex;
           align-items:center;
           justify-content:center;
@@ -3976,7 +3976,7 @@ export default function MushafPage() {
             bottom:calc(max(3px,env(safe-area-inset-bottom)) + 58px);
           }
           .samee3-picker-menu { max-height:min(44dvh,330px); }
-          .samee3-page-footer { bottom:calc(max(2px,env(safe-area-inset-bottom)) + 7px); }
+          .samee3-page-footer { left:12px; bottom:calc(max(2px,env(safe-area-inset-bottom)) + 7px); }
           .samee3-ayah-actions-grid { grid-template-columns:repeat(2,1fr); }
           .samee3-ayah-preview { font-size:21px; }
           .samee3-image-preview-sheet { width:calc(100vw - 20px); max-height:94dvh; padding:10px; }
