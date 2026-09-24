@@ -1393,13 +1393,22 @@ export default function MushafPage() {
   }, [highlightSearchedAyah, svg, leftSvg, selectedAyah, playingAyahNumber])
 
   const mainDisplayedSvg = useMemo(() => {
+    // السوسي والبزي لا نعرض لهما الـSVG النصي القديم الذي كان يحتوي
+    // على إطار داخلي وعنوان مكرر وتوزيعًا ضيقًا للنص. نرسمهما داخل
+    // نفس مساحة طبقة الـSVG الخاصة بالمصحف، وبنفس مقاس صفحة القراءة.
+    if ((riwaya === 'sousi' || riwaya === 'bazzi') && pageData?.ayahs?.length) {
+      return buildTextMushafSvg(pageData, riwaya)
+    }
     return svg
-  }, [svg])
+  }, [pageData, riwaya, svg])
 
   const leftDisplayedSvg = useMemo(() => {
     if (!isDesktop || !leftPageData) return ''
+    if ((riwaya === 'sousi' || riwaya === 'bazzi') && leftPageData.ayahs?.length) {
+      return buildTextMushafSvg(leftPageData, riwaya)
+    }
     return leftSvg
-  }, [isDesktop, leftPageData, leftSvg])
+  }, [isDesktop, leftPageData, leftSvg, riwaya])
 
 
   const resolveSelectedAyahFromElement = useCallback((element: Element, sourceData: PageData | null) => {
@@ -4065,70 +4074,117 @@ type MushafPageSheetProps = {
   onAyahPointerUp: () => void
 }
 
-function buildTextMushafSvg(data: PageData | null) {
+function buildTextMushafSvg(data: PageData | null, riwaya: 'sousi' | 'bazzi') {
   if (!data?.ayahs?.length) return ''
 
   const escapeXml = (value: string) => String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/\"/g, '&quot;')
+    .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;')
 
-  const chunks: Array<{ ayah: Ayah; text: string }> = []
+  const fontFamily = riwaya === 'sousi' ? 'soosi9' : 'bazzi7'
+  const fontUrl = riwaya === 'sousi'
+    ? 'https://cdn.jsdelivr.net/gh/thetruetruth/quran-data-kfgqpc@main/soosi/font/soosi.9.woff2'
+    : 'https://cdn.jsdelivr.net/gh/thetruetruth/quran-data-kfgqpc@main/bazzi/font/bazzi.7.woff2'
 
+  type Chunk = { ayah: Ayah; text: string; isNumber?: boolean }
+
+  const cleanText = (value: string) => String(value || '').replace(/\s+/g, ' ').trim()
+
+  // نجهز النص في وحدات صغيرة ثم نوزعه على 15 سطرًا تقريبًا،
+  // حتى يظل شكل الصفحة قريبًا من صفحة المصحف بدل تجميع النص في المنتصف.
+  const sourceWords: Array<{ ayah: Ayah; word: string }> = []
   for (const ayah of data.ayahs) {
-    const clean = String(ayah.text || '').replace(/\s+/g, ' ').trim()
+    const clean = cleanText(ayah.text)
     if (!clean) continue
+    for (const word of clean.split(' ')) {
+      if (word) sourceWords.push({ ayah, word })
+    }
+  }
 
-    const words = clean.split(' ')
-    let current = ''
-    const maxChars = 54
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word
-      if (candidate.length <= maxChars || !current) {
-        current = candidate
-      } else {
-        chunks.push({ ayah, text: current })
-        current = word
+  const totalCharacters = sourceWords.reduce((sum, item) => sum + item.word.length + 1, 0)
+  let maxChars = Math.max(38, Math.ceil(totalCharacters / 15) + 5)
+  let lines: Chunk[][] = []
+
+  const makeLines = (limit: number) => {
+    const result: Chunk[][] = []
+    let line: Chunk[] = []
+    let length = 0
+
+    const pushLine = () => {
+      if (line.length) result.push(line)
+      line = []
+      length = 0
+    }
+
+    for (const item of sourceWords) {
+      const nextLength = length + item.word.length + (line.length ? 1 : 0)
+      if (line.length && nextLength > limit) pushLine()
+      line.push({ ayah: item.ayah, text: item.word })
+      length += item.word.length + (line.length > 1 ? 1 : 0)
+    }
+
+    pushLine()
+
+    // رقم الآية يوضع في نهاية السطر الأقرب لنهاية الآية.
+    for (const marker of data.ayahs) {
+      const markerText = `۝ ${marker.numberInSurah}`
+      let targetIndex = -1
+      for (let i = result.length - 1; i >= 0; i -= 1) {
+        if (result[i].some((item) => item.ayah.number === marker.number)) {
+          targetIndex = i
+          break
+        }
+      }
+      if (targetIndex >= 0) {
+        result[targetIndex].push({ ayah: marker, text: markerText, isNumber: true })
       }
     }
-    if (current) chunks.push({ ayah, text: current })
-    chunks.push({ ayah, text: ` ﴿${ayah.numberInSurah}﴾ ` })
+
+    return result
   }
 
-  const lines: Array<Array<{ ayah: Ayah; text: string }>> = []
-  let line: Array<{ ayah: Ayah; text: string }> = []
-  let charCount = 0
-  const totalChars = chunks.reduce((sum, item) => sum + item.text.length, 0)
-  const targetChars = Math.max(42, Math.ceil(totalChars / 14))
-
-  for (const chunk of chunks) {
-    const size = chunk.text.length
-    if (line.length && charCount + size > targetChars) {
-      lines.push(line)
-      line = []
-      charCount = 0
-    }
-    line.push(chunk)
-    charCount += size
+  for (let guard = 0; guard < 12; guard += 1) {
+    lines = makeLines(maxChars)
+    if (lines.length <= 15) break
+    maxChars += 4
   }
-  if (line.length) lines.push(line)
 
-  const lineCount = Math.max(1, lines.length)
-  const normalizedLines = lines
+  const lineCount = Math.max(1, Math.min(15, lines.length))
+  if (lines.length > 15) {
+    lines = lines.slice(0, 15)
+  }
 
-  const lineMarkup = normalizedLines.map((items, index) => {
+  const fontSize = lineCount <= 12 ? 49 : lineCount <= 14 ? 46 : 43
+  const topY = 78
+  const bottomY = 1320
+  const lineHeight = lineCount <= 1 ? 0 : (bottomY - topY) / (lineCount - 1)
+
+  const lineMarkup = lines.map((items, index) => {
+    // كل كلمة تحمل بيانات الآية، لذلك يبقى النقر والمزامنة يعملان حتى
+    // عندما تنقسم الآية على أكثر من سطر.
     const content = items.map((item) => {
-      const ayah = item.ayah
-      return `<tspan class="samee3-text-ayah" data-ayah="${ayah.number}" data-ayah-number="${ayah.numberInSurah}" data-surah="${ayah.surah?.number || 0}">${escapeXml(item.text)}</tspan>`
+      const attrs = `class="samee3-text-ayah${item.isNumber ? ' samee3-ayah-number-svg' : ''}" data-ayah="${item.ayah.number}" data-ayah-number="${item.ayah.numberInSurah}" data-surah="${item.ayah.surah?.number || 0}"` 
+      return `<tspan ${attrs}>${escapeXml(item.text)} </tspan>`
     }).join('')
-    const y = lineCount === 1 ? 675 : 68 + index * (1210 / (lineCount - 1))
-    const fontSize = lineCount <= 13 ? 42 : lineCount <= 15 ? 39 : lineCount <= 17 ? 35 : 31
-    return `<text x="500" y="${Math.min(1290, y)}" class="samee3-text-line-svg" font-size="${fontSize}" text-anchor="middle" direction="rtl" unicode-bidi="plaintext">${content}</text>`
+
+    const y = lineCount === 1 ? 700 : topY + index * lineHeight
+    return `<text x="500" y="${y.toFixed(1)}" class="samee3-riwaya-line" font-size="${fontSize}" text-anchor="middle" direction="rtl" unicode-bidi="plaintext">${content}</text>`
   }).join('')
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1350" preserveAspectRatio="xMidYMid meet" width="100%" height="100%"><rect x="0" y="0" width="1000" height="1350" fill="#fffdf7"/><rect x="18" y="18" width="964" height="1314" rx="5" fill="none" stroke="#e7d9bd" stroke-width="2"/><g>${lineMarkup}</g></svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1400" preserveAspectRatio="xMidYMid meet" width="100%" height="100%">
+    <defs>
+      <style>
+        @font-face { font-family:'${fontFamily}'; src:url('${fontUrl}') format('woff2'); font-display:swap; }
+        .samee3-riwaya-line { font-family:'${fontFamily}','Amiri Quran','Amiri',serif; fill:#15191e; font-weight:400; }
+        .samee3-text-ayah { cursor:pointer; }
+        .samee3-ayah-number-svg { fill:#a97935; font-size:${Math.max(30, fontSize - 8)}px; }
+      </style>
+    </defs>
+    ${lineMarkup}
+  </svg>`
 }
 
 function MushafPageSheet({ page, data, html, side, meta, onAyahClick, onAyahPointerDown, onAyahPointerUp }: MushafPageSheetProps) {
