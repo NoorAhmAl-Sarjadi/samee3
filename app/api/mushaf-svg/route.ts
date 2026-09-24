@@ -105,146 +105,174 @@ function buildTextMushafSvg(
   ayahs: unknown[],
   fontFile: string | null,
 ) {
-  const fontFamily =
+  const fallbackFontFile =
     riwaya === 'sousi'
-      ? 'KFGQPC Sousi Uthmanic Script'
-      : 'KFGQPC Bazzi Uthmanic Script'
+      ? 'https://cdn.jsdelivr.net/gh/thetruetruth/quran-data-kfgqpc@main/soosi/font/soosi.9.woff2'
+      : 'https://cdn.jsdelivr.net/gh/thetruetruth/quran-data-kfgqpc@main/bazzi/font/bazzi.7.woff2'
 
-  const safeFontFile = fontFile?.trim() || ''
+  const fontFamily = riwaya === 'sousi' ? 'soosi9' : 'bazzi7'
+  const safeFontFile = fontFile?.trim() || fallbackFontFile
 
-  const lines: Array<{
+  type Token = {
     text: string
     surah: string
     ayah: string
-  }> = []
+    isEnd: boolean
+  }
 
-  // صفحة المصحف على الهاتف/سطح المكتب تحافظ على مظهر 15 سطرًا تقريبًا.
-  // نكسر النص على حدود الكلمات، ولا نقطع الكلمة نفسها.
-  const MAX_CHARS_PER_LINE = 46
+  const tokens: Token[] = []
 
   for (const item of ayahs) {
     const text = getAyahText(item)
     if (!text) continue
 
+    const surah = getSurahNumber(item)
+    const ayah = getAyahNumber(item)
     const words = text.split(/\s+/).filter(Boolean)
-    let current = ''
 
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word
-      if (current && candidate.length > MAX_CHARS_PER_LINE) {
-        lines.push({
-          text: current,
-          surah: getSurahNumber(item),
-          ayah: getAyahNumber(item),
-        })
-        current = word
-      } else {
-        current = candidate
-      }
-    }
-
-    if (current) {
-      lines.push({
-        text: current,
-        surah: getSurahNumber(item),
-        ayah: getAyahNumber(item),
+    words.forEach((word, index) => {
+      tokens.push({
+        text: word,
+        surah,
+        ayah,
+        isEnd: index === words.length - 1,
       })
-    }
+    })
   }
 
-  const visibleLines = lines
-  const usableHeight = 1070
-  const lineHeight = Math.max(42, Math.min(78, usableHeight / Math.max(visibleLines.length, 1)))
-  const fontSize = Math.max(27, Math.min(46, lineHeight * 0.68))
-  const startY = 165
+  // الصفحة المصحفية المرئية للسوسي والبزي تكون 15 سطرًا مثل صفحات
+  // المصحف المطبوعة، مع الحفاظ على النص الحقيقي للرواية وعدم استبداله.
+  const targetLines = 15
+  const totalChars = tokens.reduce((sum, token) => sum + token.text.length + 1, 0)
+  const targetCharsPerLine = Math.max(24, Math.ceil(totalChars / targetLines))
 
-  const textNodes = visibleLines
-    .map((line, index) => {
-      const y = startY + index * lineHeight
-      const label =
-        line.surah && line.ayah
-          ? `${line.surah}:${line.ayah}`
-          : ''
+  type Line = { tokens: Token[]; chars: number }
+  const lines: Line[] = []
+  let current: Line = { tokens: [], chars: 0 }
 
-      return `
-        <g data-ayah="${escapeXml(label)}" data-surah="${escapeXml(line.surah)}" data-ayah-number="${escapeXml(line.ayah)}">
-          <text
-            x="500"
-            y="${y}"
-            text-anchor="middle"
-            direction="rtl"
-            unicode-bidi="plaintext"
-            class="samee3-quran-line"
-          >${escapeXml(line.text)}</text>
-        </g>`
-    })
-    .join('')
+  for (const token of tokens) {
+    const nextChars = current.chars + token.text.length + (current.tokens.length ? 1 : 0)
 
-  const fontStyle = safeFontFile
-    ? `
-      @font-face {
-        font-family: '${fontFamily}';
-        src: url('${escapeXml(safeFontFile)}') format('truetype');
-        font-display: swap;
+    if (current.tokens.length && nextChars > targetCharsPerLine && lines.length < targetLines - 1) {
+      lines.push(current)
+      current = { tokens: [], chars: 0 }
+    }
+
+    current.tokens.push(token)
+    current.chars += token.text.length + (current.tokens.length > 1 ? 1 : 0)
+  }
+
+  if (current.tokens.length) lines.push(current)
+
+  while (lines.length > targetLines) {
+    let mergeIndex = 0
+    let smallest = Number.POSITIVE_INFINITY
+
+    for (let i = 0; i < lines.length - 1; i += 1) {
+      const combined = lines[i].chars + lines[i + 1].chars
+      if (combined < smallest) {
+        smallest = combined
+        mergeIndex = i
       }
-    `
-    : ''
+    }
+
+    const mergedTokens = [
+      ...lines[mergeIndex].tokens,
+      ...lines[mergeIndex + 1].tokens,
+    ]
+    const chars = mergedTokens.reduce(
+      (sum, token, index) => sum + token.text.length + (index ? 1 : 0),
+      0,
+    )
+
+    lines.splice(mergeIndex, 2, { tokens: mergedTokens, chars })
+  }
+
+  // لو حصل تكديس بسبب اختلاف أطوال الآيات، نعيد توزيع السطور الأخيرة
+  // بحيث تظل الصفحة هادئة ومتوازنة بدل أن تصغر الكتابة فجأة.
+  while (lines.length < targetLines) {
+    const largestIndex = lines.reduce(
+      (best, line, index, arr) => line.chars > arr[best].chars ? index : best,
+      0,
+    )
+    const largest = lines[largestIndex]
+    if (largest.tokens.length < 3) break
+
+    const splitAt = Math.ceil(largest.tokens.length / 2)
+    const firstTokens = largest.tokens.slice(0, splitAt)
+    const secondTokens = largest.tokens.slice(splitAt)
+    const calcChars = (items: Token[]) => items.reduce((sum, token, i) => sum + token.text.length + (i ? 1 : 0), 0)
+
+    lines.splice(
+      largestIndex,
+      1,
+      { tokens: firstTokens, chars: calcChars(firstTokens) },
+      { tokens: secondTokens, chars: calcChars(secondTokens) },
+    )
+  }
+
+  const viewWidth = 382.68
+  const viewHeight = 547.09
+  const textTop = 92
+  const textBottom = 505
+  const lineHeight = (textBottom - textTop) / Math.max(targetLines - 1, 1)
+  const fontSize = 18.8
+
+  const textNodes = lines.slice(0, targetLines).map((line, index) => {
+    const y = textTop + index * lineHeight
+    const content = line.tokens.map((token, tokenIndex) => {
+      const marker = token.isEnd
+        ? ` <tspan class="samee3-ayah-marker">۝${escapeXml(token.ayah)}</tspan>`
+        : ''
+      const key = `${token.surah}:${token.ayah}`
+      return `<tspan class="samee3-ayah" data-ayah="${escapeXml(key)}" data-surah="${escapeXml(token.surah)}" data-ayah-number="${escapeXml(token.ayah)}">${escapeXml(token.text)}${marker}</tspan>${tokenIndex < line.tokens.length - 1 ? ' ' : ''}`
+    }).join('')
+
+    return `<text x="${viewWidth / 2}" y="${y.toFixed(2)}" text-anchor="middle" direction="rtl" unicode-bidi="plaintext" class="samee3-quran-line">${content}</text>`
+  }).join('')
+
+  const normalizedFontFile = safeFontFile.toLowerCase()
+  const fontFormat = normalizedFontFile.includes('.woff2')
+    ? 'woff2'
+    : normalizedFontFile.includes('.woff')
+      ? 'woff'
+      : normalizedFontFile.includes('.otf')
+        ? 'opentype'
+        : 'truetype'
+
+  const fontStyle = `
+    @font-face {
+      font-family: '${fontFamily}';
+      src: url('${escapeXml(safeFontFile)}') format('${fontFormat}');
+      font-display: swap;
+    }
+  `
 
   return `
 <svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 1000 1414"
+     viewBox="0 0 ${viewWidth} ${viewHeight}"
      preserveAspectRatio="xMidYMid meet"
      role="img"
-     aria-label="صفحة المصحف ${escapeXml(page)} — ${escapeXml(riwaya)}">
+     aria-label="صفحة المصحف ${escapeXml(page)}">
   <style>
     ${fontStyle}
-    .samee3-page {
-      fill: #fcfbf8;
-      stroke: #c9b47a;
-      stroke-width: 4;
-    }
-    .samee3-inner {
-      fill: none;
-      stroke: #dfcf9e;
-      stroke-width: 2;
-    }
     .samee3-quran-line {
       font-family: '${fontFamily}', 'Amiri Quran', 'Amiri', serif;
       font-size: ${fontSize}px;
       font-weight: 400;
-      fill: #18202a;
+      fill: #171717;
       letter-spacing: 0;
+      word-spacing: 0;
     }
-    .samee3-page-title {
-      font-family: 'Aref Ruqaa', 'Amiri', serif;
-      font-size: 30px;
-      font-weight: 700;
-      fill: #8b6227;
-    }
-    .samee3-page-number {
-      font-family: 'Amiri', serif;
-      font-size: 24px;
-      font-weight: 700;
-      fill: #8b6227;
+    .samee3-ayah { cursor:pointer; }
+    .samee3-ayah-marker {
+      font-family: '${fontFamily}', 'Amiri Quran', 'Amiri', serif;
+      font-size: 0.62em;
+      fill: #9a753e;
     }
   </style>
-
-  <rect class="samee3-page" x="10" y="10" width="980" height="1394" rx="18"/>
-  <rect class="samee3-inner" x="28" y="28" width="944" height="1358" rx="12"/>
-
-  <path d="M90 105 H910" stroke="#d8c48f" stroke-width="2"/>
-  <text x="500" y="88" text-anchor="middle" class="samee3-page-title">
-    ${riwaya === 'sousi' ? 'السوسي عن أبي عمرو' : 'البزي عن ابن كثير'}
-  </text>
-
-  <g>
-    ${textNodes}
-  </g>
-
-  <path d="M90 1300 H910" stroke="#d8c48f" stroke-width="2"/>
-  <text x="500" y="1345" text-anchor="middle" class="samee3-page-number">
-    ${escapeXml(page.toLocaleString('ar-EG'))}
-  </text>
+  <rect x="0" y="0" width="${viewWidth}" height="${viewHeight}" fill="#fffdf7"/>
+  <g id="samee3-quran-content">${textNodes}</g>
 </svg>`.trim()
 }
 
