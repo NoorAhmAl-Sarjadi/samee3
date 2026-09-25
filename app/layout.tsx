@@ -2,6 +2,7 @@ import './globals.css'
 import type { Metadata, Viewport } from 'next'
 import { AuthProvider } from '@/context/AuthContext'
 import BottomNav from '@/components/BottomNav'
+import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 
 export const metadata: Metadata = {
   title: {
@@ -55,7 +56,10 @@ export default function RootLayout({
     <html lang="ar" dir="rtl">
       <body className="min-h-screen bg-[var(--bg-main)] text-[var(--text-main)] antialiased">
         <AuthProvider>
+          <ServiceWorkerRegistration />
+
           <main className="min-h-screen">{children}</main>
+
           <BottomNav />
         </AuthProvider>
       </body>
