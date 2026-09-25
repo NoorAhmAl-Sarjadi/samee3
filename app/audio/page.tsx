@@ -911,13 +911,15 @@ export default function AudioPage() {
   )
 
   useEffect(() => {
-    const currentAudio = audioRef.current
-    if (!currentAudio || !player) return
+    if (!player) return
 
     const currentPlayer = player
     let disposed = false
 
     async function prepare() {
+      const currentAudio = audioRef.current
+      if (!currentAudio) return
+
       try {
         let source = currentPlayer.audioUrl
         const offlineSource = await loadOfflineAudioUrl(currentPlayer)
