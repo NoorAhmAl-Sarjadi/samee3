@@ -911,8 +911,8 @@ export default function AudioPage() {
   )
 
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio || !player) return
+    const currentAudio = audioRef.current
+    if (!currentAudio || !player) return
 
     const currentPlayer = player
     let disposed = false
@@ -925,16 +925,16 @@ export default function AudioPage() {
 
         if (disposed) return
 
-        audio.src = source
-        audio.playbackRate = playbackRate
-        audio.volume = isMuted ? 0 : volume
-        audio.load()
+        currentAudio.src = source
+        currentAudio.playbackRate = playbackRate
+        currentAudio.volume = isMuted ? 0 : volume
+        currentAudio.load()
 
         const playNow = async () => {
           if (!pendingPlayRef.current || disposed) return
           pendingPlayRef.current = false
           try {
-            await audio.play()
+            await currentAudio.play()
           } catch (err) {
             console.error('Audio play failed:', err)
             setIsPlaying(false)
@@ -942,10 +942,10 @@ export default function AudioPage() {
           }
         }
 
-        if (audio.readyState >= 3) {
+        if (currentAudio.readyState >= 3) {
           await playNow()
         } else {
-          audio.addEventListener('canplay', playNow, { once: true })
+          currentAudio.addEventListener('canplay', playNow, { once: true })
         }
       } catch (err) {
         console.error('Player prepare error:', err)
