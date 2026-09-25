@@ -914,12 +914,13 @@ export default function AudioPage() {
     const audio = audioRef.current
     if (!audio || !player) return
 
+    const currentPlayer = player
     let disposed = false
 
     async function prepare() {
       try {
-        let source = player.audioUrl
-        const offlineSource = await loadOfflineAudioUrl(player)
+        let source = currentPlayer.audioUrl
+        const offlineSource = await loadOfflineAudioUrl(currentPlayer)
         if (offlineSource) source = offlineSource
 
         if (disposed) return
