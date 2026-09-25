@@ -529,7 +529,6 @@ function buildRealImageMushafSvg(
     width="${viewWidth}"
     height="${viewHeight}"
     preserveAspectRatio="xMidYMid meet"
-    crossorigin="anonymous"
   />
 
   <g
