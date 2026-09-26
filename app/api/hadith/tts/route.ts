@@ -132,11 +132,11 @@ async function readAzureError(response: Response) {
 
 export async function POST(request: Request) {
   try {
-    const speechKey = process.env.AZURE_SPEECH_KEY
-    const speechRegion = process.env.AZURE_SPEECH_REGION
-    const speechEndpoint = process.env.AZURE_SPEECH_ENDPOINT
+    const speechKey = process.env.AZURE_SPEECH_KEY?.trim()
+    const speechRegion = process.env.AZURE_SPEECH_REGION?.trim()
+    const speechEndpoint = process.env.AZURE_SPEECH_ENDPOINT?.trim()
 
-    if (isPlaceholder(speechKey)) {
+    if (!speechKey || isPlaceholder(speechKey)) {
       return NextResponse.json(
         {
           error:
@@ -218,7 +218,7 @@ export async function POST(request: Request) {
       response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Ocp-Apim-Subscription-Key': speechKey.trim(),
+          'Ocp-Apim-Subscription-Key': speechKey,
           'Content-Type': 'application/ssml+xml',
           Accept: 'audio/mpeg',
           'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mono-mp3',
