@@ -1469,13 +1469,46 @@ export default function MushafPage() {
     }
   }, [ayahFromUrl, leftPageData, pageData, rightPageData])
 
+  useEffect(() => {
+    const sources = [pageData, rightPageData, leftPageData].filter(Boolean) as PageData[]
+    const allAyahs = sources.flatMap((source) => source.ayahs)
+
+    if (ayahFromUrl) {
+      const parsed = parseQuranReference(ayahFromUrl)
+      if (parsed) {
+        const match = allAyahs.find(
+          (item) =>
+            Number(item.surah?.number) === Number(parsed.surah) &&
+            Number(item.numberInSurah) === Number(parsed.ayah),
+        )
+        if (match) setPlayingAyahNumber(match.number)
+      }
+      return
+    }
+
+    // فتح السورة من الفهرس بدون آية محددة يعني بدء التلاوة من أول آية،
+    // ولا نسمح للـHighlight القديم بالبقاء أثناء تحميل الصوت الجديد.
+    if (autoplayRequested && requestedSurah) {
+      setPlayingAyahNumber(null)
+    }
+  }, [ayahFromUrl, autoplayRequested, leftPageData, pageData, requestedSurah, rightPageData])
+
   const highlightSearchedAyah = useCallback(() => {
-    const nodes = document.querySelectorAll(
-      '.samee3-page-art .ayahPolygon, .samee3-page-art .samee3-text-ayah, .samee3-page-art .samee3-ayah',
+    const artContainers = Array.from(
+      document.querySelectorAll<HTMLElement>('.samee3-page-art'),
+    )
+
+    const nodes = artContainers.flatMap((art) =>
+      Array.from(
+        art.querySelectorAll<SVGElement>(
+          '.ayahPolygon, .samee3-text-ayah, .samee3-ayah, [data-ayah], [data-ayah-number]',
+        ),
+      ),
     )
 
     const visibleSources = [pageData, rightPageData, leftPageData].filter(Boolean) as PageData[]
     const persistentAudio = readPersistentAudioState()
+
     const fallbackPlayingAyahNumber =
       playingAyahNumber !== null
         ? playingAyahNumber
@@ -1493,12 +1526,9 @@ export default function MushafPage() {
       fallbackPlayingAyahNumber !== null
         ? visibleSources
             .flatMap((source) => source.ayahs)
-            .find((item) => item.number === fallbackPlayingAyahNumber) || null
+            .find((item) => Number(item.number) === Number(fallbackPlayingAyahNumber)) || null
         : null
 
-    // نحذف طبقات التظليل الرسومية التي أنشأناها في الدورة السابقة.
-    // هذا مهم خصوصًا لروايات النص التي تكون الآيات فيها داخل <tspan>،
-    // لأن background التقليدي لا يعمل على عناصر SVG النصية.
     document.querySelectorAll('.samee3-live-ayah-highlight').forEach((element) => element.remove())
 
     nodes.forEach((node) => {
@@ -1514,8 +1544,6 @@ export default function MushafPage() {
           0,
       )
 
-      // بعض ملفات المصحف تضع رقم الآية العام داخل data-ayah أو ayah،
-      // بينما ملفات أخرى تضع رقمها داخل السورة. نقرأ النوعين حتى لا يختفي التظليل.
       const nodeGlobalAyah = Number(
         node.getAttribute('data-ayah') || node.getAttribute('ayah') || 0,
       )
@@ -1539,7 +1567,6 @@ export default function MushafPage() {
       }
 
       const playingMatch = matchesAyah(visiblePlayingAyah)
-
       const pressedMatch =
         pressedAyahNumber !== null &&
         !!selectedAyah &&
@@ -1549,37 +1576,26 @@ export default function MushafPage() {
       if (playingMatch) node.classList.add('samee3-playing-ayah')
       if (pressedMatch) node.classList.add('samee3-pressed-ayah')
 
-      // طبقة Highlight حقيقية فوق الصفحة للـSVG النصي (tspan)
-      // حتى يظهر التظليل بشكل واضح وناعم مثل تطبيقات المصاحف الاحترافية.
-      if (playingMatch) {
-        const svgElement = node as SVGElement & { getBBox?: () => DOMRect | { x:number; y:number; width:number; height:number } }
-        const tagName = svgElement.tagName?.toLowerCase() || ''
+      if (!playingMatch) return
 
-        if (tagName === 'tspan' && typeof svgElement.getBBox === 'function') {
-          try {
-            const box = svgElement.getBBox()
-            const ownerSvg = svgElement.ownerSVGElement
-            const parentText = svgElement.closest('text')
+      // تظليل HTML مستقل فوق مساحة الصفحة. هذا أكثر ثباتًا مع <tspan>
+      // ومع SVG القادم من مصادر مختلفة، ويظهر خلف النص بدل تغطيته.
+      const art = node.closest('.samee3-page-art') as HTMLElement | null
+      if (!art) return
 
-            if (ownerSvg && parentText && box.width > 0 && box.height > 0) {
-              const ns = 'http://www.w3.org/2000/svg'
-              const glow = document.createElementNS(ns, 'rect')
-              glow.setAttribute('class', 'samee3-live-ayah-highlight')
-              glow.setAttribute('x', String(box.x - 9))
-              glow.setAttribute('y', String(box.y - Math.max(5, box.height * 0.20)))
-              glow.setAttribute('width', String(box.width + 18))
-              glow.setAttribute('height', String(box.height + Math.max(10, box.height * 0.40)))
-              glow.setAttribute('rx', String(Math.min(14, Math.max(6, box.height * 0.18))))
-              glow.setAttribute('ry', String(Math.min(14, Math.max(6, box.height * 0.18))))
-              glow.setAttribute('pointer-events', 'none')
-              parentText.parentNode?.insertBefore(glow, parentText)
-            }
-          } catch {
-            // بعض متصفحات Safari قد لا تعطي getBBox قبل اكتمال الرسم؛
-            // في هذه الحالة نعتمد على CSS الخاص بالعنصر نفسه.
-          }
-        }
-      }
+      const rect = node.getBoundingClientRect()
+      const artRect = art.getBoundingClientRect()
+      if (!rect.width || !rect.height || !artRect.width || !artRect.height) return
+
+      const highlight = document.createElement('span')
+      highlight.className = 'samee3-live-ayah-highlight'
+      highlight.setAttribute('aria-hidden', 'true')
+      highlight.style.left = `${Math.max(0, rect.left - artRect.left - 7)}px`
+      highlight.style.top = `${Math.max(0, rect.top - artRect.top - Math.max(3, rect.height * 0.18))}px`
+      highlight.style.width = `${Math.min(artRect.width, rect.width + 14)}px`
+      highlight.style.height = `${rect.height + Math.max(6, rect.height * 0.36)}px`
+      highlight.style.setProperty('--samee3-highlight-scale', '1')
+      art.prepend(highlight)
     })
   }, [leftPageData, pageData, playingAyahNumber, pressedAyahNumber, rightPageData, selectedAyah])
 
@@ -2633,8 +2649,13 @@ export default function MushafPage() {
         activeReciter?.apiId || reciterApiId,
       )
 
+      const fallbackFirstAyah = timings.find((item) => Number(item.ayah) > 0)?.ayah
+      const effectiveTargetAyah =
+        targetAyahNumber ||
+        (shouldPlay && Number(fallbackFirstAyah) > 0 ? Number(fallbackFirstAyah) : undefined)
+
       const targetStart =
-        findTimingStart(timings, targetAyahNumber) ??
+        findTimingStart(timings, effectiveTargetAyah) ??
         (Number.isFinite(Number(fallbackStartSeconds)) ? Number(fallbackStartSeconds) : 0)
 
       audio.pause()
@@ -2698,7 +2719,7 @@ export default function MushafPage() {
       }
 
       setPlayingAyahNumber(
-        targetAyahNumber
+        effectiveTargetAyah
           ? (
               [pageData, rightPageData, leftPageData]
                 .filter(Boolean)
@@ -2706,7 +2727,7 @@ export default function MushafPage() {
                 .find(
                   (item) =>
                     Number(item.surah?.number) === surahNumber &&
-                    Number(item.numberInSurah) === targetAyahNumber,
+                    Number(item.numberInSurah) === Number(effectiveTargetAyah),
                 )?.number ?? null
             )
           : null,
@@ -2715,7 +2736,7 @@ export default function MushafPage() {
       writePersistentAudioState({
         networkUrl,
         surah: surahNumber,
-        ayah: targetAyahNumber ? Number(targetAyahNumber) : null,
+        ayah: effectiveTargetAyah ? Number(effectiveTargetAyah) : null,
         currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : targetStart,
         playing: shouldPlay,
         riwaya,
@@ -3441,6 +3462,11 @@ export default function MushafPage() {
       }
     }
 
+    const samePlayingAudio =
+      audio.__samee3NetworkUrl === saved.networkUrl &&
+      !audio.paused &&
+      !!audio.currentSrc
+
     audio.__samee3NetworkUrl = saved.networkUrl
     audio.__samee3Surah = saved.surah
     audio.__samee3Riwaya = saved.riwaya
@@ -3453,15 +3479,61 @@ export default function MushafPage() {
       audio.src = saved.networkUrl
       audio.load()
     }
-    const restorePosition = () => { try { if (saved.currentTime > 0) audio.currentTime = saved.currentTime } catch {} }
+
+    // إذا كانت نفس التلاوة ما زالت تعمل أثناء وجود المستخدم خارج المصحف،
+    // فالصوت الحالي هو المصدر الحقيقي للموضع ولا نرجعه للخلف إلى آخر قيمة محفوظة.
+    const restorePosition = () => {
+      try {
+        if (!samePlayingAudio && saved.currentTime > 0) audio.currentTime = saved.currentTime
+      } catch {}
+    }
     if (audio.readyState >= 1) restorePosition()
-    else audio.addEventListener('loadedmetadata', restorePosition, { once: true })
+    else if (!samePlayingAudio) audio.addEventListener('loadedmetadata', restorePosition, { once: true })
 
     setAudioDisplayUrl(saved.networkUrl)
     setSelectedReciterId((current) => current || saved.reciterId)
+
+    // عند استعادة تلاوة محفوظة من مكان آخر في التطبيق، نحمل توقيتات الآيات
+    // أيضًا حتى يعود الـHighlight مع نفس الآية، وليس الصوت وحده.
+    void loadAyahTimings(saved.surah, saved.reciterId).then((timings) => {
+      const restoredAyah = samePlayingAudio
+        ? timings.find((item) => {
+            const start = Number(item.start_time || 0) / 1000
+            const nextIndex = timings.indexOf(item) + 1
+            const nextStart =
+              nextIndex < timings.length
+                ? Number(timings[nextIndex].start_time || 0) / 1000
+                : Number.POSITIVE_INFINITY
+            return Number.isFinite(start) && Number(audio.currentTime) >= start && Number(audio.currentTime) < nextStart
+          })?.ayah || saved.ayah || null
+        : saved.ayah
+          ? Number(saved.ayah)
+          : timings.find((item) => {
+              const start = Number(item.start_time || 0) / 1000
+              const nextIndex = timings.indexOf(item) + 1
+              const nextStart =
+                nextIndex < timings.length
+                  ? Number(timings[nextIndex].start_time || 0) / 1000
+                  : Number.POSITIVE_INFINITY
+              return Number.isFinite(start) && Number(audio.currentTime) >= start && Number(audio.currentTime) < nextStart
+            })?.ayah || null
+
+      if (restoredAyah) {
+        const visible = [pageData, rightPageData, leftPageData]
+          .filter(Boolean)
+          .flatMap((source) => (source as PageData).ayahs)
+        const match = visible.find(
+          (item) =>
+            Number(item.surah?.number) === Number(saved.surah) &&
+            Number(item.numberInSurah) === Number(restoredAyah),
+        )
+        if (match) setPlayingAyahNumber(match.number)
+      }
+    }).catch(() => {})
+
     setIsPlaying(!audio.paused)
     if (saved.playing && audio.paused) void audio.play().catch(() => {})
-  }, [router, searchParams])
+  }, [leftPageData, loadAyahTimings, pageData, rightPageData, router, searchParams])
 
   useEffect(() => {
     const saved = readPersistentAudioState()
@@ -4250,8 +4322,6 @@ export default function MushafPage() {
         .samee3-surah-frame::before { content:""; position:absolute; inset:0; border:1.4px solid rgba(177,126,59,.9); border-radius:8px; background:linear-gradient(180deg, rgba(255,251,240,.92), rgba(245,232,205,.70)); box-shadow:inset 0 0 0 3px rgba(255,255,255,.48); }
         .samee3-surah-frame .ornament { position:relative; z-index:2; color:#a86e2e; font-size:18px; line-height:1; }
         .samee3-surah-frame strong { position:relative; z-index:2; min-width:180px; padding:0 18px; text-align:center; color:#392b1e; font-family:'Aref Ruqaa','Amiri',serif; font-size:22px; font-weight:700; }
-        .samee3-page-art { position:absolute; inset:94px 7px 88px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
-        .samee3-page-art > svg { width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
         .samee3-page-art svg { user-select:none; }
         .samee3-page-footer {
           position:absolute;
@@ -4284,14 +4354,37 @@ export default function MushafPage() {
         .samee3-text-line { flex:1 1 0; min-height:0; display:flex; align-items:center; justify-content:center; direction:rtl; text-align:center; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(22px,2.05vw,36px); line-height:1.15; white-space:nowrap; letter-spacing:0; }
         .samee3-text-line-svg { font-family:'Amiri Quran','Amiri',serif; font-size:36px; fill:#15191e; }
         .samee3-text-line-svg .samee3-ayah-number { fill:#b78945; }
+        .samee3-page-art { position:absolute; inset:94px 7px 88px; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; }
+        .samee3-page-art > svg { position:relative; z-index:2; width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
         .samee3-live-ayah-highlight {
-          fill:#c7934f !important;
-          fill-opacity:.16 !important;
-          stroke:#c7934f !important;
-          stroke-opacity:.24 !important;
-          stroke-width:2.2px !important;
-          filter:drop-shadow(0 3px 7px rgba(157,101,32,.26));
+          position:absolute;
+          z-index:1;
+          display:block;
           pointer-events:none !important;
+          border-radius:999px;
+          background:
+            linear-gradient(180deg, rgba(255,247,228,.34) 0%, rgba(199,147,79,.10) 18%, rgba(199,147,79,.21) 52%, rgba(199,147,79,.10) 82%, rgba(255,247,228,.24) 100%);
+          border:1px solid rgba(199,147,79,.24);
+          box-shadow:
+            0 3px 10px rgba(157,101,32,.16),
+            inset 0 1px 0 rgba(255,255,255,.42),
+            inset 0 -2px 0 rgba(157,101,32,.11);
+          filter:saturate(.93);
+          opacity:.96;
+          transform:translateZ(0);
+          animation:samee3AyahHighlightPulse 1.8s ease-in-out infinite;
+        }
+        .samee3-live-ayah-highlight::after {
+          content:"";
+          position:absolute;
+          inset:1px 13% 1px;
+          border-radius:inherit;
+          background:linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent);
+          opacity:.9;
+        }
+        @keyframes samee3AyahHighlightPulse {
+          0%,100% { opacity:.78; transform:translateZ(0) scale(.995); }
+          50% { opacity:1; transform:translateZ(0) scale(1.008); }
         }
         .samee3-text-ayah { display:inline; cursor:pointer; border-radius:8px; transition:background .12s ease, box-shadow .12s ease, filter .12s ease, color .12s ease; }
         .samee3-text-ayah.samee3-pressed-ayah {
@@ -4299,9 +4392,9 @@ export default function MushafPage() {
           box-shadow:inset 0 -0.34em 0 rgba(14,153,212,.16), 0 3px 7px rgba(14,153,212,.13) !important;
         }
         .samee3-text-ayah.samee3-playing-ayah {
-          background:rgba(199,147,79,.16) !important;
-          box-shadow:inset 0 -0.38em 0 rgba(199,147,79,.26), 0 3px 10px rgba(160,105,36,.20) !important;
-          filter:drop-shadow(0 1px 3px rgba(160,105,36,.22));
+          background:linear-gradient(180deg, rgba(255,247,228,.18), rgba(199,147,79,.14), rgba(199,147,79,.20)) !important;
+          box-shadow:inset 0 -0.32em 0 rgba(199,147,79,.22), 0 2px 8px rgba(160,105,36,.14), inset 0 1px 0 rgba(255,255,255,.24) !important;
+          filter:drop-shadow(0 1px 3px rgba(160,105,36,.17));
         }
         .samee3-page-art .ayahPolygon.samee3-pressed-ayah {
           fill:#0e99d4 !important;
