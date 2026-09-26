@@ -43,6 +43,7 @@ type Hadith = {
   idInBook?: number
   chapterId?: number
   bookId?: number
+  /** Optional exact human-recording URL supplied by the API. */
   arabic?: string
   audioUrl?: string
   english?: {
@@ -230,18 +231,13 @@ function extractHadiths(payload: unknown): Hadith[] {
       idInBook: Number(hadith.idInBook ?? hadith.number ?? hadith.id ?? 0),
       chapterId: Number(hadith.chapterId ?? hadith.chapter_id ?? 0),
       bookId: Number(hadith.bookId ?? hadith.book_id ?? 0),
-      audioUrl:
-        hadith.audioUrl ||
-        hadith.audio_url ||
-        hadith.audio ||
-        hadith.audio?.url ||
-        '',
       arabic: hadith.arabic || hadith.arab || hadith.text_ar || hadith.text || '',
       audioUrl:
-        hadith.audioUrl ||
-        hadith.audio_url ||
-        hadith.audio?.url ||
-        hadith.audio?.src ||
+        (typeof hadith.audioUrl === 'string' ? hadith.audioUrl : '') ||
+        (typeof hadith.audio_url === 'string' ? hadith.audio_url : '') ||
+        (typeof hadith.audio?.url === 'string' ? hadith.audio.url : '') ||
+        (typeof hadith.audio?.src === 'string' ? hadith.audio.src : '') ||
+        (typeof hadith.audio === 'string' ? hadith.audio : '') ||
         '',
       english: {
         narrator: hadith.english?.narrator || hadith.narrator || '',
@@ -297,6 +293,7 @@ export default function HadithPage() {
   const [designUrl, setDesignUrl] = useState<string | null>(null)
   const [designLoading, setDesignLoading] = useState(false)
   const [resumeState, setResumeState] = useState<ResumeState | null>(null)
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioObjectUrlRef = useRef<string | null>(null)
@@ -439,6 +436,7 @@ export default function HadithPage() {
       setError('')
       setHadiths([])
       setSelectedHadith(null)
+      setIsDetailsOpen(false)
 
       try {
         const payload = await fetchJson(
@@ -466,6 +464,8 @@ export default function HadithPage() {
             setSelectedHadith(savedHadith)
           }
         }
+
+        setSelectedHadith((current) => current || nextHadiths[0])
       } catch (err) {
         console.error('Hadith chapter error:', err)
         setError('تعذر تحميل أحاديث الباب حاليًا.')
@@ -533,11 +533,46 @@ export default function HadithPage() {
     [chapters, selectedChapterId]
   )
 
+  const stopHadithAudio = useCallback(() => {
+    const audio = audioRef.current
+    if (audio) {
+      audio.pause()
+      audio.currentTime = 0
+      audio.onended = null
+      audio.onerror = null
+      audio.ontimeupdate = null
+    }
+
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current)
+      audioObjectUrlRef.current = null
+    }
+
+    audioRef.current = null
+    setIsReadingAudio(false)
+    setAudioLoading(false)
+    setAudioSourceLabel('')
+  }, [])
+
+  const currentDisplayHadith = useMemo(() => {
+    if (!filteredHadiths.length) return null
+
+    if (selectedHadith) {
+      const selectedNumber = selectedHadith.idInBook || selectedHadith.id
+      const selectedMatch = filteredHadiths.find(
+        (hadith) => (hadith.idInBook || hadith.id) === selectedNumber
+      )
+      if (selectedMatch) return selectedMatch
+    }
+
+    return filteredHadiths[0] || null
+  }, [filteredHadiths, selectedHadith])
+
   const currentHadithIndex = useMemo(() => {
-    if (!selectedHadith) return -1
-    const number = selectedHadith.idInBook || selectedHadith.id
+    if (!currentDisplayHadith) return -1
+    const number = currentDisplayHadith.idInBook || currentDisplayHadith.id
     return hadiths.findIndex((hadith) => (hadith.idInBook || hadith.id) === number)
-  }, [hadiths, selectedHadith])
+  }, [currentDisplayHadith, hadiths])
 
   const openHadith = useCallback(
     (hadith: Hadith) => {
@@ -571,6 +606,7 @@ export default function HadithPage() {
 
   const selectChapter = (chapterId: string | number) => {
     stopHadithAudio()
+    setIsDetailsOpen(false)
     setSelectedChapterId(chapterId)
     setHadithSearch('')
   }
@@ -631,27 +667,6 @@ export default function HadithPage() {
     selectedBook && selectedHadith
       ? favoriteIds.includes(getFavoriteKey(selectedBook, selectedHadith))
       : false
-
-  const stopHadithAudio = useCallback(() => {
-    const audio = audioRef.current
-    if (audio) {
-      audio.pause()
-      audio.currentTime = 0
-      audio.onended = null
-      audio.onerror = null
-      audio.ontimeupdate = null
-    }
-
-    if (audioObjectUrlRef.current) {
-      URL.revokeObjectURL(audioObjectUrlRef.current)
-      audioObjectUrlRef.current = null
-    }
-
-    audioRef.current = null
-    setIsReadingAudio(false)
-    setAudioLoading(false)
-    setAudioSourceLabel('')
-  }, [])
 
   const playAudioUrl = useCallback(
     async (
@@ -1064,6 +1079,7 @@ export default function HadithPage() {
     setChapterSearch('')
     setHadithSearch('')
     setError('')
+    setIsDetailsOpen(false)
   }
 
   const resumeBook = useMemo(() => {
@@ -1342,78 +1358,99 @@ export default function HadithPage() {
                   <div className="mt-4 bg-red-50 border border-red-100 text-red-700 rounded-2xl p-5 text-center font-bold text-sm">
                     {error}
                   </div>
-                ) : filteredHadiths.length === 0 ? (
+                ) : !currentDisplayHadith ? (
                   <div className="mt-4 bg-white rounded-3xl border border-dashed border-gray-300 py-14 text-center text-gray-400 font-bold">
-                    لا توجد نتائج مطابقة
+                    لا توجد أحاديث مطابقة للبحث
                   </div>
                 ) : (
-                  <div className="mt-4 space-y-4">
-                    {filteredHadiths.map((hadith) => {
-                      const number = hadith.idInBook || hadith.id
-                      const isFavorite = selectedBook
-                        ? favoriteIds.includes(getFavoriteKey(selectedBook, hadith))
-                        : false
+                  <article className="mt-4 bg-white rounded-[2rem] border border-mushaf-border/30 shadow-md p-5 sm:p-7">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+                      <div className="flex items-center gap-2">
+                        <span className="bg-mushaf-paper text-mushaf-gold px-3 py-1.5 rounded-full text-xs font-black">
+                          حديث {arabicDigits(currentDisplayHadith.idInBook || currentDisplayHadith.id)}
+                        </span>
+                        <span className="text-[11px] text-gray-400 font-bold">
+                          {arabicDigits(currentHadithIndex + 1)} من {arabicDigits(hadiths.length)}
+                        </span>
+                      </div>
 
-                      return (
-                        <article
-                          key={`${selectedBook.id}-${number}`}
-                          className="bg-white rounded-3xl border border-mushaf-border/30 shadow-sm p-5 sm:p-6 hover:border-mushaf-gold/50 transition"
-                        >
-                          <div className="flex items-center justify-between gap-3 mb-5">
-                            <span className="bg-mushaf-paper text-mushaf-gold px-3 py-1.5 rounded-full text-xs font-black">
-                              حديث {arabicDigits(number)}
-                            </span>
+                      {currentDisplayHadith.english?.narrator && (
+                        <p className="text-xs text-gray-500 font-bold">
+                          الراوي: {currentDisplayHadith.english.narrator}
+                        </p>
+                      )}
+                    </div>
 
-                            <div className="flex items-center gap-2">
-                              {isFavorite && (
-                                <span className="w-9 h-9 rounded-xl bg-mushaf-gold/10 text-mushaf-gold flex items-center justify-center" title="محفوظ">
-                                  <Bookmark size={16} fill="currentColor" />
-                                </span>
-                              )}
-                              <button
-                                onClick={() => openHadith(hadith)}
-                                className="text-mushaf-teal bg-mushaf-teal/5 hover:bg-mushaf-teal/10 rounded-xl px-3 py-2 text-xs font-bold"
-                              >
-                                عرض كامل
-                              </button>
-                            </div>
-                          </div>
+                    <div className="rounded-[1.75rem] bg-mushaf-paper border border-mushaf-gold/20 p-5 sm:p-8">
+                      <p className="font-uthmani text-2xl sm:text-3xl leading-[2.25] text-mushaf-dark text-justify" dir="rtl">
+                        {currentDisplayHadith.arabic || 'لم يتوفر النص العربي لهذا الحديث.'}
+                      </p>
+                    </div>
 
-                          <p className="font-uthmani text-2xl leading-[2.1] text-mushaf-dark text-justify" dir="rtl">
-                            {hadith.arabic || 'لم يتوفر النص العربي لهذا الحديث.'}
-                          </p>
+                    {currentDisplayHadith.english?.text && (
+                      <details className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                        <summary className="cursor-pointer font-bold text-sm text-mushaf-dark">الترجمة الإنجليزية</summary>
+                        <p className="mt-3 text-sm text-gray-600 leading-7" dir="ltr">
+                          {currentDisplayHadith.english.text}
+                        </p>
+                      </details>
+                    )}
 
-                          {hadith.english?.narrator && (
-                            <p className="mt-4 text-xs text-gray-500 font-bold">
-                              الراوي: {hadith.english.narrator}
-                            </p>
-                          )}
+                    <div className="mt-6 flex flex-wrap gap-2">
+                      <button
+                        onClick={() => goToHadith(-1)}
+                        disabled={currentHadithIndex <= 0}
+                        className="flex-1 min-w-[120px] rounded-xl bg-mushaf-paper text-mushaf-teal py-3 font-bold text-sm disabled:opacity-40"
+                      >
+                        <ChevronRight size={17} className="inline-block align-middle ml-1" />
+                        السابق
+                      </button>
 
-                          <div className="mt-5 pt-4 border-t border-gray-100 flex flex-wrap gap-2">
-                            <button
-                              onClick={() => openHadith(hadith)}
-                              className="px-4 py-2.5 rounded-xl bg-mushaf-teal text-white text-xs font-bold"
-                            >
-                              تفاصيل الحديث
-                            </button>
-                            <button
-                              onClick={async () => {
-                                if (!selectedBook) return
-                                try {
-                                  await navigator.clipboard.writeText(getShareText(selectedBook, hadith))
-                                } catch (copyError) {
-                                  console.error(copyError)
-                                }
-                              }}
-                              className="px-4 py-2.5 rounded-xl bg-mushaf-paper text-mushaf-teal text-xs font-bold"
-                            >
-                              نسخ
-                            </button>
-                          </div>
-                        </article>
-                      )
-                    })}
-                  </div>
+                      <button
+                        onClick={() => goToHadith(1)}
+                        disabled={currentHadithIndex < 0 || currentHadithIndex >= hadiths.length - 1}
+                        className="flex-1 min-w-[120px] rounded-xl bg-mushaf-paper text-mushaf-teal py-3 font-bold text-sm disabled:opacity-40"
+                      >
+                        التالي
+                        <ChevronLeft size={17} className="inline-block align-middle mr-1" />
+                      </button>
+
+                      <button
+                        onClick={() => setIsDetailsOpen(true)}
+                        className="flex-1 min-w-[130px] rounded-xl bg-mushaf-teal text-white py-3 font-bold text-sm"
+                      >
+                        تفاصيل الحديث
+                      </button>
+
+                      <button
+                        onClick={speakHadith}
+                        className={`flex-1 min-w-[140px] rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 ${
+                          isReadingAudio
+                            ? 'bg-red-50 text-red-600 border border-red-100'
+                            : 'bg-mushaf-teal text-white'
+                        }`}
+                      >
+                        {isReadingAudio ? <PauseIcon /> : <VolumeIcon />}
+                        {isReadingAudio ? 'إيقاف القراءة' : 'قراءة صوتية'}
+                      </button>
+
+                      <button
+                        onClick={copyHadith}
+                        className="flex-1 min-w-[100px] bg-mushaf-paper text-mushaf-teal rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2"
+                      >
+                        {copied ? <Check size={17} /> : <Copy size={17} />}
+                        {copied ? 'تم النسخ' : 'نسخ'}
+                      </button>
+
+                      <button
+                        onClick={shareHadith}
+                        className="flex-1 min-w-[100px] bg-mushaf-paper text-mushaf-teal rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2"
+                      >
+                        <Share2 size={17} />
+                        مشاركة
+                      </button>
+                    </div>
+                  </article>
                 )}
               </section>
             </div>
@@ -1421,12 +1458,12 @@ export default function HadithPage() {
         )}
       </main>
 
-      {selectedHadith && selectedBook && (
+      {selectedHadith && selectedBook && isDetailsOpen && (
         <div
           className="fixed inset-0 z-[100] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => {
             stopHadithAudio()
-            setSelectedHadith(null)
+            setIsDetailsOpen(false)
           }}
         >
           <div
@@ -1447,7 +1484,7 @@ export default function HadithPage() {
               <button
                 onClick={() => {
                   stopHadithAudio()
-                  setSelectedHadith(null)
+                  setIsDetailsOpen(false)
                 }}
                 className="w-10 h-10 rounded-full bg-gray-50 text-gray-500 flex items-center justify-center hover:bg-red-50 hover:text-red-500"
                 aria-label="إغلاق"
