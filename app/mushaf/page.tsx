@@ -3497,7 +3497,7 @@ export default function MushafPage() {
 
     // عند استعادة تلاوة محفوظة من مكان آخر في التطبيق، نحمل توقيتات الآيات
     // أيضًا حتى يعود الـHighlight مع نفس الآية، وليس الصوت وحده.
-    void loadAyahTimings(saved.surah, saved.reciterId).then((timings) => {
+    void loadAyahTimings(saved.surah, saved.reciterId).then((timings: AyahTiming[]) => {
       const restoredAyah = samePlayingAudio
         ? timings.find((item) => {
             const start = Number(item.start_time || 0) / 1000
