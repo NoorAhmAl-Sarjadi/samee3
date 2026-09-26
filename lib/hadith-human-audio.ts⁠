@@ -1,0 +1,44 @@
+‏export type HumanHadithAudio = {
+‏  url: string
+‏  label: string
+‏  startSeconds: number
+‏  endSeconds: number
+‏  sourceUrl?: string
+‏  licenseUrl?: string
+‏  downloadable?: boolean
+}
+
+/**
+ * فهرس الأحاديث الصوتية (Audio Mapping).
+ * المفتاح (Key) يجب أن يكون بصيغة: bookId:hadithNumber
+ * لا يتم وضع أي حديث هنا إلا بعد التحقق الدقيق من بداية ونهاية الصوت (startSeconds, endSeconds).
+ */
+‏export const HUMAN_HADITH_AUDIO: Record<string, HumanHadithAudio> = {
+  // مثال تطبيقي (لغرض التوضيح فقط، يجب استبداله بالتوقيتات والرابط الفعلي المعتمد من قبلك):
+‏  "bukhari:1": {
+‏    url: "https://ia800900.us.archive.org/15/items/Sahih-Al-Bukhari/01.mp3",
+‏    startSeconds: 15, // بداية الحديث الأول
+‏    endSeconds: 125,  // نهاية الحديث الأول
+‏    label: "تسجيل بشري - المكتبة الصوتية",
+‏    sourceUrl: "https://archive.org/details/Sahih-Al-Bukhari",
+‏    downloadable: true
+  },
+‏  "bukhari:2": {
+‏    url: "https://ia800900.us.archive.org/15/items/Sahih-Al-Bukhari/01.mp3",
+‏    startSeconds: 126,
+‏    endSeconds: 198,
+‏    label: "تسجيل بشري - المكتبة الصوتية",
+‏    sourceUrl: "https://archive.org/details/Sahih-Al-Bukhari",
+‏    downloadable: true
+  }
+}
+
+/**
+ * دالة استرجاع بيانات الصوت البشري للحديث
+ * تعيد بيانات الصوت إذا كان متوفراً، أو null إذا لم يكن متوفراً (بدون أخطاء).
+ */
+‏export function getHumanHadithAudio(bookId: string, hadithId: number | string): HumanHadithAudio | null {
+‏  if (!bookId || !hadithId) return null
+‏  const key = `${bookId}:${hadithId}`
+‏  return HUMAN_HADITH_AUDIO[key] || null
+}
