@@ -1,23 +1,23 @@
 export type HumanHadithAudio = {
+  /** Direct HTTPS URL to an exact recording of this hadith. */
   url: string
+  /** Label shown in the player. */
   label?: string
+  /** Optional segment start in seconds if the file contains multiple items. */
   startSeconds?: number
+  /** Optional segment end in seconds if the file contains multiple items. */
   endSeconds?: number
+  /** Optional source/license page for internal auditing. */
   sourceUrl?: string
 }
 
 /**
- * Exact human recordings for individual hadiths.
+ * Exact human recordings only.
  *
- * Key format:
- * `${bookId}:${hadithNumber}`
- *
- * Example:
- * "bukhari:1"
- *
- * Do not add audio URLs here unless the recording is verified
- * to correspond exactly to the requested hadith and is legally
- * reusable/embeddable.
+ * IMPORTANT:
+ * - Do not put a whole-book/chapter MP3 here unless exact timestamps are known.
+ * - Do not add a public URL unless redistribution/embedding is permitted.
+ * - Key format: "bookId:hadithNumber".
  */
 export const HUMAN_HADITH_AUDIO: Record<string, HumanHadithAudio> = {}
 
@@ -30,6 +30,5 @@ export function getHumanHadithAudio(
   hadithNumber: number,
 ): HumanHadithAudio | null {
   const key = `${bookId}:${hadithNumber}`
-
   return HUMAN_HADITH_AUDIO[key] || null
 }
