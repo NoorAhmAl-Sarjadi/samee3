@@ -41,7 +41,8 @@ export async function GET(_request: Request, { params }: RouteContext) {
     const body = await response.text()
 
     const contentType =
-      response.headers.get('content-type') || 'application/json; charset=utf-8'
+      response.headers.get('content-type') ||
+      'application/json; charset=utf-8'
 
     return new NextResponse(body, {
       status: response.status,
