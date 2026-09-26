@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { getHumanHadithAudio } from '@/lib/hadith-human-audio'
 import {
   ArrowRight,
   BookOpen,
@@ -43,6 +44,7 @@ type Hadith = {
   chapterId?: number
   bookId?: number
   arabic?: string
+  audioUrl?: string
   english?: {
     narrator?: string
     text?: string
@@ -229,6 +231,12 @@ function extractHadiths(payload: unknown): Hadith[] {
       chapterId: Number(hadith.chapterId ?? hadith.chapter_id ?? 0),
       bookId: Number(hadith.bookId ?? hadith.book_id ?? 0),
       arabic: hadith.arabic || hadith.arab || hadith.text_ar || hadith.text || '',
+      audioUrl:
+        hadith.audioUrl ||
+        hadith.audio_url ||
+        hadith.audio?.url ||
+        hadith.audio?.src ||
+        '',
       english: {
         narrator: hadith.english?.narrator || hadith.narrator || '',
         text: hadith.english?.text || hadith.text_en || '',
@@ -275,12 +283,17 @@ export default function HadithPage() {
   const [copied, setCopied] = useState(false)
   const [favoriteIds, setFavoriteIds] = useState<string[]>([])
   const [isReadingAudio, setIsReadingAudio] = useState(false)
+  const [audioLoading, setAudioLoading] = useState(false)
+  const [audioError, setAudioError] = useState('')
   const [audioRate, setAudioRate] = useState(1)
+  const [ttsVoice, setTtsVoice] = useState('ar-SA-HamedNeural')
+  const [audioSourceLabel, setAudioSourceLabel] = useState('')
   const [designUrl, setDesignUrl] = useState<string | null>(null)
   const [designLoading, setDesignLoading] = useState(false)
   const [resumeState, setResumeState] = useState<ResumeState | null>(null)
 
-  const audioUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioObjectUrlRef = useRef<string | null>(null)
 
   const fetchJson = useCallback(async (url: string) => {
     const response = await fetch(url, {
@@ -524,6 +537,7 @@ export default function HadithPage() {
     (hadith: Hadith) => {
       if (!selectedBook || selectedChapterId === null) return
       const key = getFavoriteKey(selectedBook, hadith)
+      stopHadithAudio()
       setSelectedHadith(hadith)
 
       const nextResume: ResumeState = {
@@ -540,7 +554,7 @@ export default function HadithPage() {
         setFavoriteIds((current) => current)
       }
     },
-    [favoriteIds, selectedBook, selectedChapterId]
+    [favoriteIds, selectedBook, selectedChapterId, stopHadithAudio]
   )
 
   const selectBook = (book: HadithBook) => {
@@ -612,59 +626,200 @@ export default function HadithPage() {
       ? favoriteIds.includes(getFavoriteKey(selectedBook, selectedHadith))
       : false
 
-  const stopHadithAudio = () => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel()
+  const stopHadithAudio = useCallback(() => {
+    const audio = audioRef.current
+    if (audio) {
+      audio.pause()
+      audio.currentTime = 0
+      audio.onended = null
+      audio.onerror = null
+      audio.ontimeupdate = null
     }
-    audioUtteranceRef.current = null
+
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current)
+      audioObjectUrlRef.current = null
+    }
+
+    audioRef.current = null
     setIsReadingAudio(false)
-  }
+    setAudioLoading(false)
+    setAudioSourceLabel('')
+  }, [])
 
-  const speakHadith = () => {
-    if (
-      !selectedHadith?.arabic ||
-      typeof window === 'undefined' ||
-      !('speechSynthesis' in window)
-    ) {
-      return
+  const playAudioUrl = useCallback(
+    async (
+      url: string,
+      sourceLabel: string,
+      startSeconds = 0,
+      endSeconds?: number,
+    ) => {
+      if (!url || !/^https?:\/\//i.test(url)) {
+        throw new Error('مصدر الصوت غير صالح.')
+      }
+
+      stopHadithAudio()
+
+      const audio = new Audio(url)
+      audio.preload = 'auto'
+      audioRef.current = audio
+      setAudioSourceLabel(sourceLabel)
+
+      const normalizedStart = Number.isFinite(startSeconds) ? Math.max(0, startSeconds) : 0
+      const normalizedEnd =
+        Number.isFinite(endSeconds) && Number(endSeconds) > normalizedStart
+          ? Number(endSeconds)
+          : undefined
+
+      audio.onloadedmetadata = () => {
+        if (normalizedStart > 0) {
+          try {
+            audio.currentTime = normalizedStart
+          } catch {
+            // بعض المتصفحات لا تسمح بتحديد الموضع قبل اكتمال التحميل.
+          }
+        }
+      }
+
+      audio.ontimeupdate = () => {
+        if (normalizedEnd !== undefined && audio.currentTime >= normalizedEnd) {
+          audio.pause()
+          setIsReadingAudio(false)
+          audio.ontimeupdate = null
+        }
+      }
+
+      audio.onended = () => {
+        setIsReadingAudio(false)
+        setAudioSourceLabel('')
+        audioRef.current = null
+      }
+
+      audio.onerror = () => {
+        setIsReadingAudio(false)
+        setAudioSourceLabel('')
+        audioRef.current = null
+        throw new Error('تعذر تشغيل التسجيل الصوتي.')
+      }
+
+      await audio.play()
+      setIsReadingAudio(true)
+    },
+    [stopHadithAudio],
+  )
+
+  const synthesizeHadithWithAi = useCallback(async () => {
+    if (!selectedHadith?.arabic) return
+
+    const response = await fetch('/api/hadith/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'audio/mpeg',
+      },
+      body: JSON.stringify({
+        text: selectedHadith.arabic,
+        voice: ttsVoice,
+        rate: audioRate,
+      }),
+    })
+
+    if (!response.ok) {
+      let message = 'تعذر إنشاء الصوت الذكي حاليًا.'
+      try {
+        const payload = await response.json()
+        message = payload?.error || message
+      } catch {
+        // الاستجابة قد تكون نصًا أو فارغة.
+      }
+      throw new Error(message)
     }
 
-    if (isReadingAudio) {
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    audioObjectUrlRef.current = objectUrl
+
+    const audio = new Audio(objectUrl)
+    audio.preload = 'auto'
+    audioRef.current = audio
+    setAudioSourceLabel('صوت ذكي Neural')
+
+    audio.onended = () => {
+      setIsReadingAudio(false)
+      setAudioSourceLabel('')
+      audioRef.current = null
+      if (audioObjectUrlRef.current) {
+        URL.revokeObjectURL(audioObjectUrlRef.current)
+        audioObjectUrlRef.current = null
+      }
+    }
+
+    audio.onerror = () => {
+      setIsReadingAudio(false)
+      setAudioSourceLabel('')
+      audioRef.current = null
+      setAudioError('تعذر تشغيل الصوت الذكي على هذا الجهاز.')
+      if (audioObjectUrlRef.current) {
+        URL.revokeObjectURL(audioObjectUrlRef.current)
+        audioObjectUrlRef.current = null
+      }
+    }
+
+    await audio.play()
+    setIsReadingAudio(true)
+  }, [audioRate, selectedHadith, ttsVoice])
+
+  const speakHadith = useCallback(async () => {
+    if (!selectedBook || !selectedHadith?.arabic || typeof window === 'undefined') return
+
+    if (isReadingAudio || audioLoading) {
       stopHadithAudio()
       return
     }
 
-    window.speechSynthesis.cancel()
+    stopHadithAudio()
+    setAudioError('')
+    setAudioLoading(true)
 
-    const utterance = new SpeechSynthesisUtterance(selectedHadith.arabic)
-    utterance.lang = 'ar-SA'
-    utterance.rate = audioRate
-    utterance.pitch = 1
-    utterance.volume = 1
+    const hadithNumber = selectedHadith.idInBook || selectedHadith.id
+    const manifestAudio = getHumanHadithAudio(selectedBook.id, hadithNumber)
+    const apiAudioUrl = selectedHadith.audioUrl?.trim() || ''
+    const humanAudio = manifestAudio || (apiAudioUrl ? { url: apiAudioUrl, label: 'تسجيل بشري من مصدر البيانات' } : null)
 
-    utterance.onstart = () => {
-      setIsReadingAudio(true)
-    }
-    utterance.onend = () => {
-      audioUtteranceRef.current = null
+    try {
+      if (humanAudio?.url) {
+        try {
+          await playAudioUrl(
+            humanAudio.url,
+            humanAudio.label || 'صوت بشري',
+            humanAudio.startSeconds || 0,
+            humanAudio.endSeconds,
+          )
+          return
+        } catch (humanError) {
+          console.warn('Human hadith audio failed, falling back to AI:', humanError)
+          stopHadithAudio()
+        }
+      }
+
+      await synthesizeHadithWithAi()
+    } catch (error) {
+      console.error('Hadith audio error:', error)
       setIsReadingAudio(false)
+      setAudioSourceLabel('')
+      setAudioError(
+        error instanceof Error ? error.message : 'تعذر إنشاء القراءة الصوتية حاليًا.',
+      )
+    } finally {
+      setAudioLoading(false)
     }
-    utterance.onerror = () => {
-      audioUtteranceRef.current = null
-      setIsReadingAudio(false)
-    }
-
-    audioUtteranceRef.current = utterance
-    window.speechSynthesis.speak(utterance)
-  }
+  }, [audioLoading, isReadingAudio, playAudioUrl, selectedBook, selectedHadith, stopHadithAudio, synthesizeHadithWithAi])
 
   useEffect(() => {
     return () => {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel()
-      }
+      stopHadithAudio()
     }
-  }, [])
+  }, [stopHadithAudio])
 
   const designHadithAsImage = async () => {
     if (!selectedBook || !selectedHadith?.arabic) return
@@ -672,96 +827,218 @@ export default function HadithPage() {
     setDesignLoading(true)
 
     try {
+      const width = 1080
+      const lineHeight = 84
+      const cardY = 335
+      const textTopPadding = 125
+      const textBottomPadding = 140
       const canvas = document.createElement('canvas')
+
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('Canvas unavailable')
 
-      const width = 1080
-      const padding = 90
-      const maxTextWidth = width - padding * 2
-      const text = selectedHadith.arabic.replace(/\s+/g, ' ').trim()
+      if (document.fonts?.load) {
+        await Promise.allSettled([
+          document.fonts.load('600 64px "Amiri Quran"'),
+          document.fonts.load('700 40px "Aref Ruqaa"'),
+          document.fonts.load('600 26px "Tajawal"'),
+        ])
+      }
+
+      const roundRect = (
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        r: number,
+      ) => {
+        const radius = Math.min(r, w / 2, h / 2)
+        ctx.beginPath()
+        ctx.moveTo(x + radius, y)
+        ctx.arcTo(x + w, y, x + w, y + h, radius)
+        ctx.arcTo(x + w, y + h, x, y + h, radius)
+        ctx.arcTo(x, y + h, x, y, radius)
+        ctx.arcTo(x, y, x + w, y, radius)
+        ctx.closePath()
+      }
+
+      const cleanText = selectedHadith.arabic.replace(/\s+/g, ' ').trim()
+      const horizontalPadding = 112
+      const textMaxWidth = width - horizontalPadding * 2
+
+      const measure = document.createElement('canvas')
+      const measureCtx = measure.getContext('2d')
+      if (!measureCtx) throw new Error('Canvas unavailable')
+      measureCtx.direction = 'rtl'
+      measureCtx.textAlign = 'center'
+      measureCtx.font = '600 54px "Amiri Quran", "Amiri", serif'
+
+      const words = cleanText.split(' ')
+      const lines: string[] = []
+      let currentLine = ''
+
+      for (const word of words) {
+        const candidate = currentLine ? `${currentLine} ${word}` : word
+        if (measureCtx.measureText(candidate).width <= textMaxWidth) {
+          currentLine = candidate
+        } else {
+          if (currentLine) lines.push(currentLine)
+          currentLine = word
+        }
+      }
+      if (currentLine) lines.push(currentLine)
+
+      const displayedLines = lines
+      const cardH = Math.max(760, textTopPadding + displayedLines.length * lineHeight + textBottomPadding)
+      const height = Math.max(1350, cardY + cardH + 260)
+      canvas.height = height
+
+      const hadithNumber = selectedHadith.idInBook || selectedHadith.id
+
+      // خلفية عاجية فاخرة.
+      const background = ctx.createLinearGradient(0, 0, width, height)
+      background.addColorStop(0, '#FCFAF4')
+      background.addColorStop(0.55, '#F5F0E5')
+      background.addColorStop(1, '#EDE4D3')
+      ctx.fillStyle = background
+      ctx.fillRect(0, 0, width, height)
+
+      // زخرفة إسلامية هندسية شديدة الخفة.
+      ctx.save()
+      ctx.globalAlpha = 0.045
+      ctx.strokeStyle = '#174C50'
+      ctx.lineWidth = 2
+      for (let x = -80; x < width + 80; x += 120) {
+        for (let y = 20; y < height + 80; y += 120) {
+          ctx.beginPath()
+          ctx.moveTo(x + 60, y)
+          ctx.lineTo(x + 120, y + 60)
+          ctx.lineTo(x + 60, y + 120)
+          ctx.lineTo(x, y + 60)
+          ctx.closePath()
+          ctx.stroke()
+        }
+      }
+      ctx.restore()
+
+      // لوحة علوية داكنة مع حافة ذهبية دقيقة.
+      const headerGradient = ctx.createLinearGradient(0, 0, width, 260)
+      headerGradient.addColorStop(0, '#123D42')
+      headerGradient.addColorStop(1, '#1D6267')
+      ctx.fillStyle = headerGradient
+      ctx.fillRect(0, 0, width, 270)
+
+      ctx.fillStyle = 'rgba(236,201,128,0.18)'
+      ctx.beginPath()
+      ctx.arc(120, 80, 150, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.strokeStyle = '#C4A15D'
+      ctx.lineWidth = 3
+      ctx.strokeRect(34, 34, width - 68, height - 68)
+      ctx.strokeStyle = 'rgba(23,76,80,0.25)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(50, 50, width - 100, height - 100)
 
       ctx.direction = 'rtl'
       ctx.textAlign = 'center'
-      ctx.font = 'bold 52px serif'
-
-      const words = text.split(' ')
-      const lines: string[] = []
-      let current = ''
-
-      for (const word of words) {
-        const test = current ? `${current} ${word}` : word
-        if (ctx.measureText(test).width <= maxTextWidth) {
-          current = test
-        } else {
-          if (current) lines.push(current)
-          current = word
-        }
-      }
-      if (current) lines.push(current)
-
-      const lineHeight = 88
-      const height = Math.max(900, 260 + lines.length * lineHeight + 220)
-      canvas.width = width
-      canvas.height = height
-
-      const bg = ctx.createLinearGradient(0, 0, width, height)
-      bg.addColorStop(0, '#0D383E')
-      bg.addColorStop(0.55, '#175E67')
-      bg.addColorStop(1, '#102F33')
-      ctx.fillStyle = bg
-      ctx.fillRect(0, 0, width, height)
-
-      const glow = ctx.createRadialGradient(150, 130, 10, 150, 130, 330)
-      glow.addColorStop(0, 'rgba(217,119,6,0.24)')
-      glow.addColorStop(1, 'rgba(217,119,6,0)')
-      ctx.fillStyle = glow
-      ctx.fillRect(0, 0, width, height)
-
-      ctx.strokeStyle = 'rgba(217,119,6,0.55)'
-      ctx.lineWidth = 3
-      ctx.strokeRect(38, 38, width - 76, height - 76)
-
-      ctx.fillStyle = '#D97706'
-      ctx.font = 'bold 34px Arial'
-      ctx.fillText('مصحف سَميع', width / 2, 95)
-
-      ctx.fillStyle = 'rgba(255,255,255,0.82)'
-      ctx.font = 'bold 25px Arial'
-      ctx.fillText(selectedBook.name_ar, width / 2, 145)
+      ctx.fillStyle = '#E9CE92'
+      ctx.font = '700 38px "Aref Ruqaa", "Amiri", serif'
+      ctx.fillText('مصحف سَميع', width / 2, 92)
 
       ctx.fillStyle = '#FFFFFF'
-      ctx.font = 'bold 52px serif'
-      const startY = 245
-      lines.forEach((line, index) => {
-        ctx.fillText(line, width / 2, startY + index * lineHeight)
-      })
+      ctx.font = '600 26px "Tajawal", Arial, sans-serif'
+      ctx.fillText(selectedBook.name_ar, width / 2, 144)
 
-      const dividerY = startY + lines.length * lineHeight + 40
-      ctx.strokeStyle = 'rgba(255,255,255,0.18)'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(padding, dividerY)
-      ctx.lineTo(width - padding, dividerY)
-      ctx.stroke()
+      ctx.fillStyle = 'rgba(255,255,255,0.82)'
+      ctx.font = '500 20px "Tajawal", Arial, sans-serif'
+      ctx.fillText('مكتبة الأحاديث', width / 2, 184)
 
-      ctx.fillStyle = '#D97706'
-      ctx.font = 'bold 25px Arial'
+      // شارة رقم الحديث.
+      const badgeW = 250
+      const badgeH = 62
+      const badgeX = (width - badgeW) / 2
+      const badgeY = 235
+      roundRect(badgeX, badgeY, badgeW, badgeH, 31)
+      ctx.fillStyle = '#C4A15D'
+      ctx.fill()
+      ctx.fillStyle = '#173B3E'
+      ctx.font = '700 24px "Tajawal", Arial, sans-serif'
       ctx.fillText(
-        `حديث ${selectedHadith.idInBook || selectedHadith.id}`,
+        `حديث ${arabicDigits(hadithNumber)}`,
         width / 2,
-        dividerY + 55
+        badgeY + 40,
       )
 
-      ctx.fillStyle = 'rgba(255,255,255,0.65)'
-      ctx.font = '20px Arial'
-      ctx.fillText('تصميم حديث بواسطة مصحف سَميع', width / 2, dividerY + 100)
+      // بطاقة النص الرئيسية.
+      const cardX = 70
+      const cardW = width - 140
+      ctx.save()
+      ctx.shadowColor = 'rgba(24,55,57,0.12)'
+      ctx.shadowBlur = 28
+      ctx.shadowOffsetY = 12
+      roundRect(cardX, cardY, cardW, cardH, 34)
+      ctx.fillStyle = 'rgba(255,255,255,0.74)'
+      ctx.fill()
+      ctx.restore()
 
-      const url = canvas.toDataURL('image/png')
+      ctx.strokeStyle = 'rgba(196,161,93,0.35)'
+      ctx.lineWidth = 2
+      roundRect(cardX, cardY, cardW, cardH, 34)
+      ctx.stroke()
+
+      ctx.fillStyle = '#B9914D'
+      ctx.beginPath()
+      ctx.arc(width / 2, cardY + 50, 8, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = '#1C3437'
+      ctx.font = '600 54px "Amiri Quran", "Amiri", serif'
+      ctx.direction = 'rtl'
+      ctx.textAlign = 'center'
+
+      const textBlockHeight = displayedLines.length * lineHeight
+      let textY = cardY + 125 + Math.max(0, (cardH - 160 - textBlockHeight) / 2)
+
+      displayedLines.forEach((line) => {
+        ctx.fillText(line, width / 2, textY)
+        textY += lineHeight
+      })
+
+      const dividerY = cardY + cardH - 78
+      const divider = ctx.createLinearGradient(200, 0, width - 200, 0)
+      divider.addColorStop(0, 'rgba(185,145,77,0)')
+      divider.addColorStop(0.5, '#B9914D')
+      divider.addColorStop(1, 'rgba(185,145,77,0)')
+      ctx.strokeStyle = divider
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(190, dividerY)
+      ctx.lineTo(width - 190, dividerY)
+      ctx.stroke()
+
+      // الراوي يظهر إن كان متوفرًا بدون ازدحام التصميم.
+      if (selectedHadith.english?.narrator) {
+        ctx.fillStyle = '#6D685C'
+        ctx.font = '600 19px "Tajawal", Arial, sans-serif'
+        ctx.fillText(`الراوي: ${selectedHadith.english.narrator}`, width / 2, dividerY + 42)
+      }
+
+      // تذييل هادئ.
+      ctx.fillStyle = '#174C50'
+      ctx.font = '700 21px "Tajawal", Arial, sans-serif'
+      const footerY = height - 125
+      ctx.fillText('مصحف سَميع', width / 2, footerY)
+
+      ctx.fillStyle = '#8B806C'
+      ctx.font = '500 16px "Tajawal", Arial, sans-serif'
+      ctx.fillText('حديث • قراءة • حفظ • مشاركة', width / 2, footerY + 34)
+
+      const url = canvas.toDataURL('image/png', 1)
       setDesignUrl(url)
 
       const link = document.createElement('a')
-      link.download = `samee3-hadith-${selectedBook.id}-${selectedHadith.idInBook || selectedHadith.id}.png`
+      link.download = `samee3-hadith-${selectedBook.id}-${hadithNumber}.png`
       link.href = url
       link.click()
     } catch (error) {
@@ -1213,6 +1490,23 @@ export default function HadithPage() {
             </div>
 
             <div className="border-t border-gray-100 p-4">
+              {audioError && (
+                <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold leading-6 text-amber-800">
+                  {audioError}
+                </div>
+              )}
+
+              <p className="mb-3 text-center text-[11px] text-gray-400">
+                التسجيل البشري يُستخدم فقط عند وجود ملف مرتبط بهذا الحديث تحديدًا، وإلا يتم الانتقال تلقائيًا إلى الصوت الذكي.
+              </p>
+
+              {audioSourceLabel && (
+                <div className="mb-3 flex items-center justify-center gap-2 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs font-bold text-emerald-800">
+                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  {audioSourceLabel}
+                </div>
+              )}
+
               <div className="flex items-center gap-2 mb-3">
                 <button
                   disabled={currentHadithIndex <= 0}
@@ -1235,19 +1529,39 @@ export default function HadithPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={speakHadith}
-                  className={`flex-1 min-w-[150px] rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 ${
+                  disabled={audioLoading}
+                  className={`flex-1 min-w-[170px] rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 ${
                     isReadingAudio
                       ? 'bg-red-50 text-red-600 border border-red-100'
                       : 'bg-mushaf-teal text-white'
-                  }`}
+                  } disabled:opacity-60`}
                 >
-                  {isReadingAudio ? <PauseIcon /> : <VolumeIcon />}
-                  {isReadingAudio ? 'إيقاف القراءة' : 'قراءة صوتية'}
+                  {audioLoading ? <Loader2 size={18} className="animate-spin" /> : isReadingAudio ? <PauseIcon /> : <VolumeIcon />}
+                  {audioLoading ? 'جاري تجهيز الصوت...' : isReadingAudio ? 'إيقاف الاستماع' : 'استماع للحديث'}
                 </button>
 
                 <select
+                  value={ttsVoice}
+                  onChange={(event) => {
+                    stopHadithAudio()
+                    setTtsVoice(event.target.value)
+                  }}
+                  className="rounded-xl bg-mushaf-paper border border-mushaf-border/30 px-3 py-3 text-xs font-bold text-mushaf-teal outline-none"
+                  aria-label="صوت القراءة الذكية عند عدم توفر التسجيل البشري"
+                  title="يُستخدم فقط عند عدم توفر تسجيل بشري دقيق لهذا الحديث"
+                >
+                  <option value="ar-SA-HamedNeural">حامد — العربية السعودية</option>
+                  <option value="ar-EG-ShakirNeural">شاكر — العربية المصرية</option>
+                  <option value="ar-OM-AbdullahNeural">عبدالله — العربية العُمانية</option>
+                  <option value="ar-AE-HamdanNeural">حمدان — العربية الإماراتية</option>
+                </select>
+
+                <select
                   value={audioRate}
-                  onChange={(event) => setAudioRate(Number(event.target.value))}
+                  onChange={(event) => {
+                    stopHadithAudio()
+                    setAudioRate(Number(event.target.value))
+                  }}
                   className="rounded-xl bg-mushaf-paper border border-mushaf-border/30 px-3 py-3 text-xs font-bold text-mushaf-teal outline-none"
                   aria-label="سرعة القراءة الصوتية"
                 >
@@ -1291,7 +1605,7 @@ export default function HadithPage() {
                   className="flex-1 min-w-[150px] bg-mushaf-paper text-mushaf-teal rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {designLoading ? <Loader2 size={18} className="animate-spin" /> : <ImageIcon size={18} />}
-                  {designLoading ? 'جاري التصميم...' : 'تصميم كصورة'}
+                  {designLoading ? 'جاري تجهيز التصميم...' : 'تصميم الحديث كصورة'}
                 </button>
 
                 <button
@@ -1332,7 +1646,7 @@ export default function HadithPage() {
                 <X size={19} />
               </button>
             </div>
-            <img src={designUrl} alt="تصميم الحديث" className="w-full h-auto rounded-2xl block mt-2" />
+            <img src={designUrl} alt="تصميم الحديث" className="w-full max-h-[78vh] object-contain rounded-2xl block mt-2 bg-mushaf-paper" />
           </div>
         </div>
       )}
