@@ -1,4 +1,3 @@
-
 'use client'
 
 import {
@@ -3402,7 +3401,11 @@ export default function MushafPage() {
   useEffect(() => {
     const saved = readPersistentAudioState()
     if (!saved || !pageData?.ayahs?.length) return
-    if (Number(audioRef.current?.__samee3Surah || 0) !== Number(saved.surah)) return
+
+    // audioRef يحمل HTMLAudioElement افتراضيًا، لذلك نستخدم النوع الموسع
+    // الذي يحتوي على بيانات المصحف المحفوظة على عنصر الصوت نفسه.
+    const audio = audioRef.current as Samee3AudioElement | null
+    if (Number(audio?.__samee3Surah || 0) !== Number(saved.surah)) return
     if (!saved.ayah) return
 
     const matchingAyah = [pageData, rightPageData, leftPageData]
