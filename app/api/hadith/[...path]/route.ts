@@ -5,21 +5,22 @@ export const revalidate = 0
 
 const UPSTREAM_BASE = 'https://alfurqan.online/api/v1/hadith'
 
-type RouteContext = {
-  params: {
-    path?: string[]
-  }
+type RouteParams = {
+  path?: string[]
 }
 
-export async function GET(_request: Request, { params }: RouteContext) {
+type RouteContext = {
+  params: RouteParams | Promise<RouteParams>
+}
+
+export async function GET(_request: Request, context: RouteContext) {
   try {
+    const params = await Promise.resolve(context.params)
     const segments = params.path ?? []
 
     if (!segments.length) {
       return NextResponse.json(
-        {
-          error: 'Hadith API path is missing',
-        },
+        { error: 'Hadith API path is missing' },
         { status: 400 }
       )
     }
@@ -39,7 +40,6 @@ export async function GET(_request: Request, { params }: RouteContext) {
     })
 
     const body = await response.text()
-
     const contentType =
       response.headers.get('content-type') ||
       'application/json; charset=utf-8'
@@ -55,9 +55,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
     console.error('Hadith proxy error:', error)
 
     return NextResponse.json(
-      {
-        error: 'تعذر الاتصال بمصدر الأحاديث حاليًا.',
-      },
+      { error: 'تعذر الاتصال بمصدر الأحاديث حاليًا.' },
       { status: 502 }
     )
   }
