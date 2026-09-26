@@ -43,6 +43,8 @@ type Hadith = {
   idInBook?: number
   chapterId?: number
   bookId?: number
+  /** Optional exact human-recording URL supplied by the API. */
+  audioUrl?: string
   arabic?: string
   audioUrl?: string
   english?: {
@@ -230,6 +232,12 @@ function extractHadiths(payload: unknown): Hadith[] {
       idInBook: Number(hadith.idInBook ?? hadith.number ?? hadith.id ?? 0),
       chapterId: Number(hadith.chapterId ?? hadith.chapter_id ?? 0),
       bookId: Number(hadith.bookId ?? hadith.book_id ?? 0),
+      audioUrl:
+        hadith.audioUrl ||
+        hadith.audio_url ||
+        hadith.audio ||
+        hadith.audio?.url ||
+        '',
       arabic: hadith.arabic || hadith.arab || hadith.text_ar || hadith.text || '',
       audioUrl:
         hadith.audioUrl ||
