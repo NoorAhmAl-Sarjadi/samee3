@@ -1,3 +1,4 @@
+
 'use client'
 
 import {
@@ -1474,12 +1475,31 @@ export default function MushafPage() {
     )
 
     const visibleSources = [pageData, rightPageData, leftPageData].filter(Boolean) as PageData[]
-    const visiblePlayingAyah =
+    const persistentAudio = readPersistentAudioState()
+    const fallbackPlayingAyahNumber =
       playingAyahNumber !== null
+        ? playingAyahNumber
+        : persistentAudio?.ayah
+          ? visibleSources
+              .flatMap((source) => source.ayahs)
+              .find(
+                (item) =>
+                  Number(item.surah?.number) === Number(persistentAudio.surah) &&
+                  Number(item.numberInSurah) === Number(persistentAudio.ayah),
+              )?.number ?? null
+          : null
+
+    const visiblePlayingAyah =
+      fallbackPlayingAyahNumber !== null
         ? visibleSources
             .flatMap((source) => source.ayahs)
-            .find((item) => item.number === playingAyahNumber) || null
+            .find((item) => item.number === fallbackPlayingAyahNumber) || null
         : null
+
+    // نحذف طبقات التظليل الرسومية التي أنشأناها في الدورة السابقة.
+    // هذا مهم خصوصًا لروايات النص التي تكون الآيات فيها داخل <tspan>،
+    // لأن background التقليدي لا يعمل على عناصر SVG النصية.
+    document.querySelectorAll('.samee3-live-ayah-highlight').forEach((element) => element.remove())
 
     nodes.forEach((node) => {
       node.classList.remove('samee3-pressed-ayah', 'samee3-playing-ayah')
@@ -1494,27 +1514,72 @@ export default function MushafPage() {
           0,
       )
 
-      const nodeAyah = Number(
-        node.getAttribute('ayah') ||
-          node.getAttribute('data-ayah-number') ||
-          node.getAttribute('data-ayah') ||
+      // بعض ملفات المصحف تضع رقم الآية العام داخل data-ayah أو ayah،
+      // بينما ملفات أخرى تضع رقمها داخل السورة. نقرأ النوعين حتى لا يختفي التظليل.
+      const nodeGlobalAyah = Number(
+        node.getAttribute('data-ayah') || node.getAttribute('ayah') || 0,
+      )
+      const nodeLocalAyah = Number(
+        node.getAttribute('data-ayah-number') ||
+          node.getAttribute('data-local-ayah') ||
+          (nodeGlobalAyah ? 0 : node.getAttribute('ayah')) ||
           0,
       )
 
-      const playingMatch =
-        !!visiblePlayingAyah &&
-        nodeSurah === Number(visiblePlayingAyah.surah?.number) &&
-        nodeAyah === Number(visiblePlayingAyah.numberInSurah)
+      const matchesAyah = (item: Ayah | null | undefined) => {
+        if (!item) return false
+        const itemSurah = Number(item.surah?.number || 0)
+        const itemGlobal = Number(item.number || 0)
+        const itemLocal = Number(item.numberInSurah || 0)
+        const surahMatches = !nodeSurah || nodeSurah === itemSurah
+        return surahMatches && (
+          (nodeGlobalAyah > 0 && nodeGlobalAyah === itemGlobal) ||
+          (nodeLocalAyah > 0 && nodeLocalAyah === itemLocal)
+        )
+      }
+
+      const playingMatch = matchesAyah(visiblePlayingAyah)
 
       const pressedMatch =
         pressedAyahNumber !== null &&
         !!selectedAyah &&
-        nodeSurah === Number(selectedAyah.surah?.number) &&
-        nodeAyah === Number(selectedAyah.numberInSurah) &&
-        nodeAyah === pressedAyahNumber
+        Number(selectedAyah.numberInSurah) === Number(pressedAyahNumber) &&
+        matchesAyah(selectedAyah)
 
       if (playingMatch) node.classList.add('samee3-playing-ayah')
       if (pressedMatch) node.classList.add('samee3-pressed-ayah')
+
+      // طبقة Highlight حقيقية فوق الصفحة للـSVG النصي (tspan)
+      // حتى يظهر التظليل بشكل واضح وناعم مثل تطبيقات المصاحف الاحترافية.
+      if (playingMatch) {
+        const svgElement = node as SVGElement & { getBBox?: () => DOMRect | { x:number; y:number; width:number; height:number } }
+        const tagName = svgElement.tagName?.toLowerCase() || ''
+
+        if (tagName === 'tspan' && typeof svgElement.getBBox === 'function') {
+          try {
+            const box = svgElement.getBBox()
+            const ownerSvg = svgElement.ownerSVGElement
+            const parentText = svgElement.closest('text')
+
+            if (ownerSvg && parentText && box.width > 0 && box.height > 0) {
+              const ns = 'http://www.w3.org/2000/svg'
+              const glow = document.createElementNS(ns, 'rect')
+              glow.setAttribute('class', 'samee3-live-ayah-highlight')
+              glow.setAttribute('x', String(box.x - 9))
+              glow.setAttribute('y', String(box.y - Math.max(5, box.height * 0.20)))
+              glow.setAttribute('width', String(box.width + 18))
+              glow.setAttribute('height', String(box.height + Math.max(10, box.height * 0.40)))
+              glow.setAttribute('rx', String(Math.min(14, Math.max(6, box.height * 0.18))))
+              glow.setAttribute('ry', String(Math.min(14, Math.max(6, box.height * 0.18))))
+              glow.setAttribute('pointer-events', 'none')
+              parentText.parentNode?.insertBefore(glow, parentText)
+            }
+          } catch {
+            // بعض متصفحات Safari قد لا تعطي getBBox قبل اكتمال الرسم؛
+            // في هذه الحالة نعتمد على CSS الخاص بالعنصر نفسه.
+          }
+        }
+      }
     })
   }, [leftPageData, pageData, playingAyahNumber, pressedAyahNumber, rightPageData, selectedAyah])
 
@@ -4219,14 +4284,24 @@ export default function MushafPage() {
         .samee3-text-line { flex:1 1 0; min-height:0; display:flex; align-items:center; justify-content:center; direction:rtl; text-align:center; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(22px,2.05vw,36px); line-height:1.15; white-space:nowrap; letter-spacing:0; }
         .samee3-text-line-svg { font-family:'Amiri Quran','Amiri',serif; font-size:36px; fill:#15191e; }
         .samee3-text-line-svg .samee3-ayah-number { fill:#b78945; }
-        .samee3-text-ayah { display:inline; cursor:pointer; border-radius:8px; transition:background .12s ease, box-shadow .12s ease, filter .12s ease; }
+        .samee3-live-ayah-highlight {
+          fill:#c7934f !important;
+          fill-opacity:.16 !important;
+          stroke:#c7934f !important;
+          stroke-opacity:.24 !important;
+          stroke-width:2.2px !important;
+          filter:drop-shadow(0 3px 7px rgba(157,101,32,.26));
+          pointer-events:none !important;
+        }
+        .samee3-text-ayah { display:inline; cursor:pointer; border-radius:8px; transition:background .12s ease, box-shadow .12s ease, filter .12s ease, color .12s ease; }
         .samee3-text-ayah.samee3-pressed-ayah {
           background:transparent !important;
           box-shadow:inset 0 -0.34em 0 rgba(14,153,212,.16), 0 3px 7px rgba(14,153,212,.13) !important;
         }
         .samee3-text-ayah.samee3-playing-ayah {
-          background:transparent !important;
-          box-shadow:inset 0 -0.36em 0 rgba(199,147,79,.18), 0 3px 8px rgba(160,105,36,.12) !important;
+          background:rgba(199,147,79,.16) !important;
+          box-shadow:inset 0 -0.38em 0 rgba(199,147,79,.26), 0 3px 10px rgba(160,105,36,.20) !important;
+          filter:drop-shadow(0 1px 3px rgba(160,105,36,.22));
         }
         .samee3-page-art .ayahPolygon.samee3-pressed-ayah {
           fill:#0e99d4 !important;
@@ -4234,19 +4309,35 @@ export default function MushafPage() {
           stroke:none !important;
           filter:drop-shadow(0 2px 4px rgba(14,153,212,.28));
         }
-        .samee3-page-art .ayahPolygon.samee3-playing-ayah {
+        .samee3-page-art .ayahPolygon.samee3-playing-ayah,
+        .samee3-page-art .samee3-ayah.samee3-playing-ayah {
           fill:#c7934f !important;
-          fill-opacity:.14 !important;
-          stroke:none !important;
-          filter:drop-shadow(0 2px 4px rgba(157,101,32,.22));
+          fill-opacity:.20 !important;
+          stroke:#c7934f !important;
+          stroke-opacity:.26 !important;
+          stroke-width:2px !important;
+          filter:drop-shadow(0 2px 7px rgba(157,101,32,.28));
+        }
+        .samee3-page-art [data-ayah].samee3-playing-ayah,
+        .samee3-page-art [data-ayah-number].samee3-playing-ayah {
+          fill:#c7934f !important;
+          fill-opacity:.20 !important;
+          stroke:#c7934f !important;
+          stroke-opacity:.22 !important;
+          filter:drop-shadow(0 2px 7px rgba(157,101,32,.24));
+        }
+        .samee3-page-art .ayahPolygon.samee3-playing-ayah * {
+          stroke:#c7934f !important;
+          stroke-opacity:.10 !important;
+          filter:drop-shadow(0 1px 4px rgba(157,101,32,.20));
+        }
+        .samee3-page-art .samee3-ayah.samee3-playing-ayah + *,
+        .samee3-page-art .samee3-ayah.samee3-playing-ayah * {
+          pointer-events:none;
         }
         .samee3-page-art .ayahPolygon.samee3-pressed-ayah * {
           stroke:none !important;
           filter:drop-shadow(0 2px 4px rgba(14,153,212,.20));
-        }
-        .samee3-page-art .ayahPolygon.samee3-playing-ayah * {
-          stroke:none !important;
-          filter:drop-shadow(0 2px 4px rgba(157,101,32,.16));
         }
         .samee3-ayah-number { display:inline-block; margin:0 5px; color:#b78945; font-family:'Amiri',serif; font-size:.72em; }
 
