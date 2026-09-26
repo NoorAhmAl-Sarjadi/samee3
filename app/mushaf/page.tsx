@@ -2644,12 +2644,14 @@ export default function MushafPage() {
       audio.__samee3MoshafId = activeReciter?.moshafId ?? null
       audio.__samee3Page = pageNumber
 
-      const timings = await loadAyahTimings(
+      const timings: AyahTiming[] = await loadAyahTimings(
         surahNumber,
         activeReciter?.apiId || reciterApiId,
       )
 
-      const fallbackFirstAyah = timings.find((item) => Number(item.ayah) > 0)?.ayah
+      const fallbackFirstAyah = timings.find(
+        (item: AyahTiming) => Number(item.ayah) > 0,
+      )?.ayah
       const effectiveTargetAyah =
         targetAyahNumber ||
         (shouldPlay && Number(fallbackFirstAyah) > 0 ? Number(fallbackFirstAyah) : undefined)
