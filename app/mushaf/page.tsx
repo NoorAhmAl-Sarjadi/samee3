@@ -803,6 +803,109 @@ function clampPage(page: number) {
   return Math.min(604, Math.max(1, Math.floor(page)))
 }
 
+
+type PersistentAudioState = {
+  networkUrl: string
+  surah: number
+  ayah: number | null
+  currentTime: number
+  playing: boolean
+  riwaya: Riwaya
+  reciterId: number
+  reciterName: string
+  moshafId: number | null
+  page: number
+  updatedAt: number
+}
+
+type Samee3AudioElement = HTMLAudioElement & {
+  __samee3NetworkUrl?: string
+  __samee3Surah?: number
+  __samee3Riwaya?: Riwaya
+  __samee3ReciterId?: number
+  __samee3ReciterName?: string
+  __samee3MoshafId?: number | null
+  __samee3Page?: number
+  __samee3LastPersist?: number
+}
+
+const SAMEE3_AUDIO_STORAGE_KEY = 'samee3_persistent_audio_v2'
+
+function readPersistentAudioState(): PersistentAudioState | null {
+  try {
+    const raw = localStorage.getItem(SAMEE3_AUDIO_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PersistentAudioState>
+    if (!parsed.networkUrl || !Number.isFinite(Number(parsed.surah))) return null
+    return {
+      networkUrl: String(parsed.networkUrl),
+      surah: Number(parsed.surah),
+      ayah: Number.isFinite(Number(parsed.ayah)) && Number(parsed.ayah) > 0 ? Number(parsed.ayah) : null,
+      currentTime: Number.isFinite(Number(parsed.currentTime)) ? Math.max(0, Number(parsed.currentTime)) : 0,
+      playing: parsed.playing === true,
+      riwaya: isRiwaya(parsed.riwaya == null ? null : String(parsed.riwaya)) ? String(parsed.riwaya) as Riwaya : 'hafs',
+      reciterId: Number(parsed.reciterId || 0),
+      reciterName: String(parsed.reciterName || ''),
+      moshafId: Number.isFinite(Number(parsed.moshafId)) && Number(parsed.moshafId) > 0 ? Number(parsed.moshafId) : null,
+      page: clampPage(Number(parsed.page || 1)),
+      updatedAt: Number(parsed.updatedAt || Date.now()),
+    }
+  } catch { return null }
+}
+
+function writePersistentAudioState(state: PersistentAudioState) {
+  try {
+    localStorage.setItem(
+      SAMEE3_AUDIO_STORAGE_KEY,
+      JSON.stringify({ ...state, updatedAt: Date.now() }),
+    )
+  } catch {}
+}
+
+type PersistentReadingState = {
+  page: number
+  surah: number | null
+  ayah: number | null
+  riwaya: Riwaya
+  reciterId: number
+  reciterName: string
+  moshafId: number | null
+  updatedAt: number
+}
+
+const SAMEE3_READING_STORAGE_KEY = 'samee3_persistent_reading_v2'
+
+function readPersistentReadingState(): PersistentReadingState | null {
+  try {
+    const raw = localStorage.getItem(SAMEE3_READING_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PersistentReadingState>
+    return {
+      page: clampPage(Number(parsed.page || 1)),
+      surah: Number.isFinite(Number(parsed.surah)) && Number(parsed.surah) > 0 ? Number(parsed.surah) : null,
+      ayah: Number.isFinite(Number(parsed.ayah)) && Number(parsed.ayah) > 0 ? Number(parsed.ayah) : null,
+      riwaya: isRiwaya(parsed.riwaya == null ? null : String(parsed.riwaya))
+        ? String(parsed.riwaya) as Riwaya
+        : 'hafs',
+      reciterId: Number(parsed.reciterId || 0),
+      reciterName: String(parsed.reciterName || ''),
+      moshafId: Number.isFinite(Number(parsed.moshafId)) && Number(parsed.moshafId) > 0 ? Number(parsed.moshafId) : null,
+      updatedAt: Number(parsed.updatedAt || Date.now()),
+    }
+  } catch {
+    return null
+  }
+}
+
+function writePersistentReadingState(state: PersistentReadingState) {
+  try {
+    localStorage.setItem(
+      SAMEE3_READING_STORAGE_KEY,
+      JSON.stringify({ ...state, updatedAt: Date.now() }),
+    )
+  } catch {}
+}
+
 function parseSurahList(value?: string) {
   if (!value) return []
   return value
@@ -982,12 +1085,16 @@ export default function MushafPage() {
   const [turning, setTurning] = useState(false)
   const [openPicker, setOpenPicker] = useState<'riwaya' | 'reciter' | 'surah' | null>(null)
   const pageTurnAudioContextRef = useRef<AudioContext | null>(null)
+  const audioRestoreAttemptedRef = useRef(false)
+  const readingRestoreAttemptedRef = useRef(false)
 
   const pageMemoryCacheRef = useRef(new Map<string, PageData>())
   const svgMemoryCacheRef = useRef(new Map<string, string>())
 
-  const desktopRightPage = isDesktop && pageNumber % 2 === 0 ? pageNumber - 1 : pageNumber
-  const desktopLeftPage = isDesktop ? Math.min(604, desktopRightPage + 1) : null
+  // على الكمبيوتر وشاشات العرض نستخدم صفحة واحدة كبيرة، مع الحفاظ على منطق
+  // الشاشة الواسعة دون إجبار القارئ على فتح صفحتين متجاورتين.
+  const desktopRightPage = pageNumber
+  const desktopLeftPage = null
 
   const currentSurahNumber = pageData?.ayahs?.[0]?.surah?.number || requestedSurah || undefined
   const currentSurahName = getSurahName(currentSurahNumber, pageData)
@@ -1024,6 +1131,59 @@ export default function MushafPage() {
     media.addEventListener?.('change', update)
     return () => media.removeEventListener?.('change', update)
   }, [])
+
+  const persistReadingPosition = useCallback((pageOverride?: number) => {
+    const audio = audioRef.current as Samee3AudioElement | null
+    const savedAudio = readPersistentAudioState()
+    const page = clampPage(Number(pageOverride || pageNumber))
+    const visibleAyahs = [pageData, rightPageData, leftPageData]
+      .filter(Boolean)
+      .flatMap((source) => (source as PageData).ayahs)
+
+    const activeAyah =
+      (audio && audio.__samee3Surah && playingAyahNumber !== null
+        ? visibleAyahs.find(
+            (ayah) =>
+              Number(ayah.number) === Number(playingAyahNumber) &&
+              Number(ayah.surah?.number) === Number(audio.__samee3Surah),
+          )?.numberInSurah
+        : undefined) ??
+      selectedAyah?.numberInSurah ??
+      savedAudio?.ayah ??
+      null
+
+    const activeSurah =
+      Number(audio?.__samee3Surah || 0) ||
+      selectedAyah?.surah?.number ||
+      requestedSurah ||
+      currentSurahNumber ||
+      savedAudio?.surah ||
+      null
+
+    writePersistentReadingState({
+      page,
+      surah: activeSurah ? Number(activeSurah) : null,
+      ayah: activeAyah ? Number(activeAyah) : null,
+      riwaya: audio?.__samee3Riwaya || riwaya,
+      reciterId: Number(audio?.__samee3ReciterId || selectedReciterId || savedAudio?.reciterId || 0),
+      reciterName: audio?.__samee3ReciterName || reciterName || savedAudio?.reciterName || '',
+      moshafId: audio?.__samee3MoshafId ?? savedAudio?.moshafId ?? (requestedMoshafId > 0 ? requestedMoshafId : null),
+      updatedAt: Date.now(),
+    })
+  }, [
+    currentSurahNumber,
+    leftPageData,
+    pageData,
+    pageNumber,
+    playingAyahNumber,
+    reciterName,
+    requestedMoshafId,
+    requestedSurah,
+    rightPageData,
+    riwaya,
+    selectedAyah,
+    selectedReciterId,
+  ])
 
   const fetchPageData = useCallback(async (page: number) => {
     const safePage = clampPage(page)
@@ -1248,13 +1408,8 @@ export default function MushafPage() {
           fetchPageData(pageNumber),
         ]
 
-        if (isDesktop && rightPage !== pageNumber) {
-          dataPromises.push(fetchPageData(rightPage))
-        }
-
-        if (isDesktop && leftPage && leftPage !== pageNumber && leftPage !== rightPage) {
-          dataPromises.push(fetchPageData(leftPage))
-        }
+        // الصفحة الحالية فقط مطلوبة على الكمبيوتر أيضًا؛ لا نحمّل صفحة ثانية.
+        // هذا يقلل الطلبات ويمنع اختلاف ترتيب الصفحات على شاشة العرض.
 
         const dataResults = await Promise.all(dataPromises)
         if (cancelled) return
@@ -1263,17 +1418,8 @@ export default function MushafPage() {
         setPageData(mainData)
 
         if (isDesktop) {
-          let dataIndex = 1
-          const rightData = rightPage === pageNumber
-            ? mainData
-            : dataResults[dataIndex++] || mainData
-
-          const leftData = leftPage && leftPage !== rightPage
-            ? dataResults[dataIndex++] || null
-            : null
-
-          setRightPageData(rightData)
-          setLeftPageData(leftData)
+          setRightPageData(mainData)
+          setLeftPageData(null)
         } else {
           setRightPageData(mainData)
           setLeftPageData(null)
@@ -1282,27 +1428,13 @@ export default function MushafPage() {
         // نفس طبقة SVG تُستخدم لكل الروايات.
         // للسوسي والبزي يأتي SVG من نص الرواية الحقيقي + الخط الخاص بها،
         // بينما الخمس الأخرى تأتي من صفحات المصحف المطبوعة الأصلية.
-        const svgPromises: Array<Promise<string>> = []
-        if (isDesktop) {
-          if (rightPage === pageNumber) svgPromises.push(fetchSvg(pageNumber))
-          else svgPromises.push(fetchSvg(rightPage))
-          if (leftPage && leftPage !== rightPage) {
-            svgPromises.push(fetchSvg(leftPage))
-          }
-        } else {
-          svgPromises.push(fetchSvg(pageNumber))
-        }
+        const svgPromises: Array<Promise<string>> = [fetchSvg(pageNumber)]
 
         const svgResults = await Promise.all(svgPromises)
         if (cancelled) return
 
-        if (isDesktop) {
-          setSvg(svgResults[0] || '')
-          setLeftSvg(svgResults[1] || '')
-        } else {
-          setSvg(svgResults[0] || '')
-          setLeftSvg('')
-        }
+        setSvg(svgResults[0] || '')
+        setLeftSvg('')
       } catch (loadError) {
         console.error(loadError)
         if (!cancelled) {
@@ -1539,6 +1671,29 @@ export default function MushafPage() {
     if (navigatingRef.current) return
     if (nextPage === pageNumber && !extra?.ayah && !extra?.surah) return
 
+    // احفظ آخر موضع للصوت قبل تغيير الصفحة. عنصر Audio نفسه لا يتم إيقافه،
+    // لذلك تبقى التلاوة مستمرة حتى أثناء تغيير مسار المصحف.
+    const audio = audioRef.current as Samee3AudioElement | null
+    if (audio?.__samee3NetworkUrl && audio.__samee3Surah) {
+      const previous = readPersistentAudioState()
+      writePersistentAudioState({
+        networkUrl: audio.__samee3NetworkUrl,
+        surah: Number(audio.__samee3Surah),
+        ayah: previous?.ayah ?? null,
+        currentTime: Number.isFinite(audio.currentTime)
+          ? Math.max(0, audio.currentTime)
+          : previous?.currentTime ?? 0,
+        playing: !audio.paused,
+        riwaya: audio.__samee3Riwaya || previous?.riwaya || 'hafs',
+        reciterId: Number(audio.__samee3ReciterId || previous?.reciterId || 0),
+        reciterName: audio.__samee3ReciterName || previous?.reciterName || '',
+        moshafId: audio.__samee3MoshafId ?? previous?.moshafId ?? null,
+        page: pageNumber,
+        updatedAt: Date.now(),
+      })
+      audio.__samee3Page = pageNumber
+    }
+
     navigatingRef.current = true
     setTurnDirection(direction)
     setTurning(true)
@@ -1633,7 +1788,7 @@ export default function MushafPage() {
         return
       }
 
-      const step = isDesktop ? 2 : 1
+      const step = 1
       const basePage = isDesktop
         ? desktopRightPage
         : pageNumber
@@ -1680,8 +1835,8 @@ export default function MushafPage() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowRight') navigateTo(pageNumber - (isDesktop ? 2 : 1), undefined, 'prev')
-      if (event.key === 'ArrowLeft') navigateTo(pageNumber + (isDesktop ? 2 : 1), undefined, 'next')
+      if (event.key === 'ArrowRight') navigateTo(pageNumber - 1, undefined, 'prev')
+      if (event.key === 'ArrowLeft') navigateTo(pageNumber + 1, undefined, 'next')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -1830,6 +1985,24 @@ export default function MushafPage() {
   }, [reciters, requestedMoshafId, selectedReciterId])
 
   const updateRouteAudioSelection = useCallback((nextRiwaya: Riwaya, nextReciter?: LocalReciter | null, nextSurah?: number) => {
+    const audio = audioRef.current as Samee3AudioElement | null
+    if (audio?.__samee3NetworkUrl && audio.__samee3Surah) {
+      const previous = readPersistentAudioState()
+      writePersistentAudioState({
+        networkUrl: audio.__samee3NetworkUrl,
+        surah: Number(audio.__samee3Surah),
+        ayah: previous?.ayah ?? null,
+        currentTime: Number.isFinite(audio.currentTime) ? Math.max(0, audio.currentTime) : previous?.currentTime ?? 0,
+        playing: !audio.paused,
+        riwaya: nextRiwaya || audio.__samee3Riwaya || previous?.riwaya || 'hafs',
+        reciterId: Number(nextReciter?.apiId || audio.__samee3ReciterId || previous?.reciterId || 0),
+        reciterName: nextReciter?.label || audio.__samee3ReciterName || previous?.reciterName || '',
+        moshafId: nextReciter?.moshafId ?? audio.__samee3MoshafId ?? previous?.moshafId ?? null,
+        page: clampPage(Number(audio.__samee3Page || pageNumber)),
+        updatedAt: Date.now(),
+      })
+    }
+
     const params = new URLSearchParams(searchParams.toString())
     params.set('riwaya', nextRiwaya)
     params.set('autoplay', '0')
@@ -2380,8 +2553,16 @@ export default function MushafPage() {
         // نستخدم المصدر الشبكي.
       }
 
-      const audio = audioRef.current
+      const audio = audioRef.current as Samee3AudioElement | null
       if (!audio) return
+
+      audio.__samee3NetworkUrl = networkUrl
+      audio.__samee3Surah = surahNumber
+      audio.__samee3Riwaya = riwaya
+      audio.__samee3ReciterId = activeReciter?.apiId || reciterApiId
+      audio.__samee3ReciterName = activeReciter?.label || reciterName
+      audio.__samee3MoshafId = activeReciter?.moshafId ?? null
+      audio.__samee3Page = pageNumber
 
       const timings = await loadAyahTimings(
         surahNumber,
@@ -2467,6 +2648,20 @@ export default function MushafPage() {
           : null,
       )
 
+      writePersistentAudioState({
+        networkUrl,
+        surah: surahNumber,
+        ayah: targetAyahNumber ? Number(targetAyahNumber) : null,
+        currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : targetStart,
+        playing: shouldPlay,
+        riwaya,
+        reciterId: activeReciter?.apiId || reciterApiId,
+        reciterName: activeReciter?.label || reciterName,
+        moshafId: activeReciter?.moshafId ?? null,
+        page: pageNumber,
+        updatedAt: Date.now(),
+      })
+
       if (shouldPlay) {
         await audio.play()
       }
@@ -2543,20 +2738,65 @@ export default function MushafPage() {
   }, [])
 
   useEffect(() => {
-    const audio = new Audio()
+    const win = window as Window & { __samee3PersistentAudio?: Samee3AudioElement }
+    const audio = (win.__samee3PersistentAudio || new Audio()) as Samee3AudioElement
+    win.__samee3PersistentAudio = audio
     audioRef.current = audio
     audio.preload = 'auto'
 
     const getRuntime = () =>
       audioRuntimeRef.current
 
-    const onPlay = () => {
-      setIsPlaying(true)
+    const persistFromAudio = (playing: boolean) => {
+      const networkUrl =
+        audio.__samee3NetworkUrl ||
+        (audio.src && !audio.src.startsWith('blob:') ? audio.src : '')
+
+      if (!networkUrl || !audio.__samee3Surah) return
+
+      const previous = readPersistentAudioState()
+      const currentTime = Number.isFinite(audio.currentTime)
+        ? Math.max(0, audio.currentTime)
+        : previous?.currentTime ?? 0
+
+      // استخرج الآية الحالية من التوقيت نفسه حتى لا نحفظ آية قديمة
+      // عند إيقاف الصوت أو إغلاق الصفحة أثناء التلاوة.
+      let activeAyah = previous?.ayah ?? null
+      const timings = ayahTimingsRef.current
+      if (timings.length) {
+        for (let index = 0; index < timings.length; index += 1) {
+          const current = timings[index]
+          const start = Number(current.start_time || 0) / 1000
+          const nextStart =
+            index < timings.length - 1
+              ? Number(timings[index + 1].start_time || 0) / 1000
+              : Number.POSITIVE_INFINITY
+
+          if (currentTime >= start && currentTime < nextStart) {
+            const localAyah = Number(current.ayah || 0)
+            if (localAyah > 0) activeAyah = localAyah
+            break
+          }
+        }
+      }
+
+      writePersistentAudioState({
+        networkUrl,
+        surah: Number(audio.__samee3Surah),
+        ayah: activeAyah,
+        currentTime,
+        playing,
+        riwaya: audio.__samee3Riwaya || previous?.riwaya || 'hafs',
+        reciterId: Number(audio.__samee3ReciterId || previous?.reciterId || 0),
+        reciterName: audio.__samee3ReciterName || previous?.reciterName || '',
+        moshafId: audio.__samee3MoshafId ?? previous?.moshafId ?? null,
+        page: clampPage(Number(audio.__samee3Page || previous?.page || pageNumber)),
+        updatedAt: Date.now(),
+      })
     }
 
-    const onPause = () => {
-      setIsPlaying(false)
-    }
+    const onPlay = () => { setIsPlaying(true); persistFromAudio(true) }
+    const onPause = () => { setIsPlaying(false); persistFromAudio(false) }
 
     const onJuzEnd = () => {
       const runtime = getRuntime()
@@ -2610,6 +2850,7 @@ export default function MushafPage() {
 
     const onEnded = () => {
       const runtime = getRuntime()
+      persistFromAudio(false)
 
       if (!runtime) {
         setIsPlaying(false)
@@ -2695,8 +2936,12 @@ export default function MushafPage() {
 
     const onTimeUpdate = () => {
       const runtime = getRuntime()
-
       if (!runtime) return
+      const now = Date.now()
+      if (now - Number(audio.__samee3LastPersist || 0) >= 1000) {
+        audio.__samee3LastPersist = now
+        persistFromAudio(!audio.paused)
+      }
 
       runtime.updatePlayingAyahFromTime(
         audio.currentTime,
@@ -3009,14 +3254,22 @@ export default function MushafPage() {
       onError,
     )
 
+    const persistOnDocumentExit = () => {
+      persistFromAudio(!audio.paused)
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        persistFromAudio(!audio.paused)
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('pagehide', persistOnDocumentExit)
+    window.addEventListener('beforeunload', persistOnDocumentExit)
+
     return () => {
-      audio.pause()
-      audio.src = ''
-
-      audioRef.current = null
-      audioSurahRef.current =
-        null
-
+      persistFromAudio(!audio.paused)
       audio.removeEventListener(
         'play',
         onPlay,
@@ -3047,6 +3300,10 @@ export default function MushafPage() {
         onError,
       )
 
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('pagehide', persistOnDocumentExit)
+      window.removeEventListener('beforeunload', persistOnDocumentExit)
+
       if (
         audioObjectUrlRef.current
       ) {
@@ -3060,6 +3317,122 @@ export default function MushafPage() {
     }
   }, [])
 
+
+  useEffect(() => {
+    if (readingRestoreAttemptedRef.current) return
+    readingRestoreAttemptedRef.current = true
+
+    const savedReading = readPersistentReadingState()
+    const savedAudio = readPersistentAudioState()
+    if (!savedReading && !savedAudio) return
+
+    // الصوت له الأولوية لأنه يحتوي على وقت التشغيل الدقيق.
+    if (savedAudio) return
+
+    const shouldRestoreRoute = searchParams.get('autoplay') !== '1'
+    if (!shouldRestoreRoute || !savedReading) return
+
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('page', String(savedReading.page))
+    params.set('riwaya', savedReading.riwaya)
+    if (savedReading.reciterId) params.set('reciterId', String(savedReading.reciterId))
+    if (savedReading.reciterName) params.set('reciterName', savedReading.reciterName)
+    if (savedReading.moshafId) params.set('moshafId', String(savedReading.moshafId))
+    if (savedReading.surah) params.set('surah', String(savedReading.surah))
+    if (savedReading.ayah && savedReading.surah) params.set('ayah', `${savedReading.surah}:${savedReading.ayah}`)
+    else params.delete('ayah')
+    params.set('autoplay', '0')
+
+    const target = `/mushaf?${params.toString()}`
+    const current = `/mushaf?${searchParams.toString()}`
+    if (target !== current) router.replace(target)
+  }, [router, searchParams])
+
+  useEffect(() => {
+    const audio = audioRef.current as Samee3AudioElement | null
+    if (!audio || audioRestoreAttemptedRef.current) return
+    audioRestoreAttemptedRef.current = true
+    const saved = readPersistentAudioState()
+    if (!saved) return
+
+    // عند العودة إلى المصحف نعود دائمًا لآخر موضع محفوظ، حتى لو كان رابط
+    // العودة نفسه يحتوي على page/surah من القسم الذي غادره المستخدم.
+    // الاستثناء الوحيد هو autoplay=1، لأنه أمر صريح بفتح موضع جديد وتشغيله.
+    const explicitNewPlayback = searchParams.get('autoplay') === '1'
+    if (!explicitNewPlayback) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('page', String(saved.page))
+      params.set('riwaya', saved.riwaya)
+      if (saved.reciterId) params.set('reciterId', String(saved.reciterId))
+      if (saved.reciterName) params.set('reciterName', saved.reciterName)
+      if (saved.moshafId) params.set('moshafId', String(saved.moshafId))
+      params.set('surah', String(saved.surah))
+      if (saved.ayah) params.set('ayah', `${saved.surah}:${saved.ayah}`)
+      params.set('autoplay', '0')
+
+      const currentTarget = `/mushaf?${params.toString()}`
+      const currentPath = `/mushaf?${searchParams.toString()}`
+      if (currentPath !== currentTarget) {
+        router.replace(currentTarget)
+      }
+    }
+
+    audio.__samee3NetworkUrl = saved.networkUrl
+    audio.__samee3Surah = saved.surah
+    audio.__samee3Riwaya = saved.riwaya
+    audio.__samee3ReciterId = saved.reciterId
+    audio.__samee3ReciterName = saved.reciterName
+    audio.__samee3MoshafId = saved.moshafId
+    audio.__samee3Page = saved.page
+
+    if (!audio.src || (!audio.src.startsWith('blob:') && audio.src !== saved.networkUrl)) {
+      audio.src = saved.networkUrl
+      audio.load()
+    }
+    const restorePosition = () => { try { if (saved.currentTime > 0) audio.currentTime = saved.currentTime } catch {} }
+    if (audio.readyState >= 1) restorePosition()
+    else audio.addEventListener('loadedmetadata', restorePosition, { once: true })
+
+    setAudioDisplayUrl(saved.networkUrl)
+    setSelectedReciterId((current) => current || saved.reciterId)
+    setIsPlaying(!audio.paused)
+    if (saved.playing && audio.paused) void audio.play().catch(() => {})
+  }, [router, searchParams])
+
+  useEffect(() => {
+    const saved = readPersistentAudioState()
+    if (!saved || !pageData?.ayahs?.length) return
+    if (Number(audioRef.current?.__samee3Surah || 0) !== Number(saved.surah)) return
+    if (!saved.ayah) return
+
+    const matchingAyah = [pageData, rightPageData, leftPageData]
+      .filter(Boolean)
+      .flatMap((source) => (source as PageData).ayahs)
+      .find(
+        (item) =>
+          Number(item.surah?.number) === Number(saved.surah) &&
+          Number(item.numberInSurah) === Number(saved.ayah),
+      )
+
+    if (matchingAyah) {
+      setPlayingAyahNumber(matchingAyah.number)
+    }
+  }, [leftPageData, pageData, rightPageData])
+
+  useEffect(() => {
+    const audio = audioRef.current as Samee3AudioElement | null
+    if (!audio?.__samee3NetworkUrl || !audio.__samee3Surah) return
+    audio.__samee3Page = pageNumber
+    const saved = readPersistentAudioState()
+    if (!saved) return
+    writePersistentAudioState({ ...saved, page: pageNumber, currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : saved.currentTime, playing: !audio.paused, updatedAt: Date.now() })
+    persistReadingPosition(pageNumber)
+  }, [pageNumber, persistReadingPosition])
+
+  useEffect(() => {
+    // حتى بدون تشغيل الصوت، آخر صفحة يقرأها المستخدم تظل محفوظة.
+    persistReadingPosition(pageNumber)
+  }, [pageNumber, persistReadingPosition])
 
   useEffect(() => {
     autoplayConsumedRef.current = false
@@ -3076,6 +3449,9 @@ export default function MushafPage() {
     }
 
     autoplayConsumedRef.current = true
+    const existingAudio = audioRef.current as Samee3AudioElement | null
+    const persisted = readPersistentAudioState()
+    if (existingAudio?.__samee3NetworkUrl && persisted?.networkUrl === existingAudio.__samee3NetworkUrl && !existingAudio.paused) return
     const initialAyah = ayahFromUrl.includes(':')
       ? Number(ayahFromUrl.split(':')[1])
       : undefined
@@ -3514,31 +3890,7 @@ export default function MushafPage() {
         ) : null}
 
         <div className={`samee3-spread ${isDesktop ? 'is-desktop' : 'is-mobile'} ${turning ? `is-turning ${turnDirection}` : ''}`}>
-          {isDesktop ? (
-            <>
-              <MushafPageSheet
-                page={desktopLeftPage || pageNumber + 1}
-                data={leftPageData}
-                html={leftDisplayedSvg}
-                side="left"
-                meta={leftMeta}
-                onAyahClick={handleAyahClick}
-                onAyahPointerDown={handleAyahPointerDown}
-                onAyahPointerUp={handleAyahPointerUp}
-              />
-              <MushafPageSheet
-                page={desktopRightPage}
-                data={rightPageData}
-                html={mainDisplayedSvg}
-                side="right"
-                meta={rightMeta}
-                onAyahClick={handleAyahClick}
-                onAyahPointerDown={handleAyahPointerDown}
-                onAyahPointerUp={handleAyahPointerUp}
-              />
-            </>
-          ) : (
-            <MushafPageSheet
+          <MushafPageSheet
               page={pageNumber}
               data={pageData}
               html={mainDisplayedSvg}
@@ -3548,7 +3900,6 @@ export default function MushafPage() {
               onAyahPointerDown={handleAyahPointerDown}
               onAyahPointerUp={handleAyahPointerUp}
             />
-          )}
         </div>
 
 {showChrome ? (
@@ -3801,7 +4152,7 @@ export default function MushafPage() {
         .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
         .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; perspective:1800px; background:#f5f0e4; touch-action:pan-y; }
         .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .52s cubic-bezier(.22,.72,.18,1), filter .52s ease; will-change:transform, filter; transform-origin:center center; }
-        .samee3-spread.is-desktop { padding:18px 18px 24px; }
+        .samee3-spread.is-desktop { padding:8px 14px 14px; }
         .samee3-spread.is-mobile { padding:0; }
         /* تقليب هادئ ونظيف بدون خط/شريط ظل في منتصف الصفحة */
         .samee3-spread.is-turning.next {
@@ -3813,7 +4164,13 @@ export default function MushafPage() {
           filter:drop-shadow(7px 5px 14px rgba(64,49,30,.075));
         }
         .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 10px 42px rgba(83,63,34,.11); isolation:isolate; }
-        .is-desktop .samee3-page-sheet { height:min(calc(100dvh - 42px), 920px); max-width:calc(50vw - 32px); }
+        .is-desktop .samee3-page-sheet {
+          height:min(calc(100dvh - 24px), 1020px);
+          width:auto;
+          max-width:min(calc(100vw - 28px), 760px);
+          aspect-ratio:1239/1754;
+          margin-inline:auto;
+        }
         .is-mobile .samee3-page-sheet { width:100%; height:100%; max-height:100%; border-left:0; border-right:0; box-shadow:none; }
         .samee3-page-sheet.left { order:1; }
         .samee3-page-sheet.right { order:2; }
