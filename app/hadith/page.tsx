@@ -297,6 +297,7 @@ export default function HadithPage() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioObjectUrlRef = useRef<string | null>(null)
+  const ttsAbortControllerRef = useRef<AbortController | null>(null)
 
   const fetchJson = useCallback(async (url: string) => {
     const response = await fetch(url, {
@@ -534,13 +535,29 @@ export default function HadithPage() {
   )
 
   const stopHadithAudio = useCallback(() => {
+    if (ttsAbortControllerRef.current) {
+      ttsAbortControllerRef.current.abort()
+      ttsAbortControllerRef.current = null
+    }
+
     const audio = audioRef.current
+
     if (audio) {
       audio.pause()
-      audio.currentTime = 0
+
+      try {
+        audio.currentTime = 0
+      } catch {
+        // بعض مصادر الصوت لا تسمح بتغيير currentTime أثناء التحميل.
+      }
+
+      audio.onloadedmetadata = null
+      audio.oncanplay = null
       audio.onended = null
       audio.onerror = null
       audio.ontimeupdate = null
+      audio.src = ''
+      audio.load()
     }
 
     if (audioObjectUrlRef.current) {
@@ -681,12 +698,15 @@ export default function HadithPage() {
 
       stopHadithAudio()
 
-      const audio = new Audio(url)
+      const audio = new Audio()
       audio.preload = 'auto'
+      audio.src = url
       audioRef.current = audio
       setAudioSourceLabel(sourceLabel)
 
-      const normalizedStart = Number.isFinite(startSeconds) ? Math.max(0, startSeconds) : 0
+      const normalizedStart =
+        Number.isFinite(startSeconds) ? Math.max(0, Number(startSeconds)) : 0
+
       const normalizedEnd =
         Number.isFinite(endSeconds) && Number(endSeconds) > normalizedStart
           ? Number(endSeconds)
@@ -697,67 +717,199 @@ export default function HadithPage() {
           try {
             audio.currentTime = normalizedStart
           } catch {
-            // بعض المتصفحات لا تسمح بتحديد الموضع قبل اكتمال التحميل.
+            // بعض المتصفحات لا تسمح بتغيير الموضع قبل اكتمال التحميل.
           }
         }
       }
 
       audio.ontimeupdate = () => {
-        if (normalizedEnd !== undefined && audio.currentTime >= normalizedEnd) {
+        if (
+          normalizedEnd !== undefined &&
+          audio.currentTime >= normalizedEnd &&
+          !audio.paused
+        ) {
           audio.pause()
+
+          try {
+            audio.currentTime = normalizedStart
+          } catch {}
+
           setIsReadingAudio(false)
-          audio.ontimeupdate = null
+          setAudioSourceLabel('')
+
+          if (audioRef.current === audio) {
+            audioRef.current = null
+          }
         }
       }
 
       audio.onended = () => {
         setIsReadingAudio(false)
         setAudioSourceLabel('')
-        audioRef.current = null
+
+        if (audioRef.current === audio) {
+          audioRef.current = null
+        }
       }
 
-      audio.onerror = () => {
-        setIsReadingAudio(false)
-        setAudioSourceLabel('')
-        audioRef.current = null
-        throw new Error('تعذر تشغيل التسجيل الصوتي.')
-      }
+      try {
+        await new Promise<void>((resolve, reject) => {
+          let settled = false
 
-      await audio.play()
-      setIsReadingAudio(true)
+          const resolveOnce = () => {
+            if (settled) return
+            settled = true
+
+            audio.onerror = () => {
+              setIsReadingAudio(false)
+              setAudioSourceLabel('')
+
+              if (audioRef.current === audio) {
+                audioRef.current = null
+              }
+            }
+
+            resolve()
+          }
+
+          const rejectOnce = (error: Error) => {
+            if (settled) return
+            settled = true
+
+            audio.onerror = null
+            audio.onloadedmetadata = null
+
+            if (audioRef.current === audio) {
+              audio.pause()
+              audioRef.current = null
+            }
+
+            setIsReadingAudio(false)
+            setAudioSourceLabel('')
+            reject(error)
+          }
+
+          audio.onerror = () => {
+            rejectOnce(
+              new Error('تعذر تحميل التسجيل الصوتي، وسيتم استخدام الصوت الذكي.'),
+            )
+          }
+
+          let playPromise: Promise<void>
+
+          try {
+            playPromise = audio.play()
+          } catch {
+            rejectOnce(new Error('تعذر تشغيل التسجيل الصوتي.'))
+            return
+          }
+
+          Promise.resolve(playPromise).then(resolveOnce).catch(() => {
+            rejectOnce(new Error('تعذر تشغيل التسجيل الصوتي.'))
+          })
+        })
+
+        setIsReadingAudio(true)
+      } catch (error) {
+        if (audioRef.current === audio) {
+          audio.pause()
+
+          try {
+            audio.currentTime = 0
+          } catch {}
+
+          audioRef.current = null
+        }
+
+        throw error instanceof Error
+          ? error
+          : new Error('تعذر تشغيل التسجيل الصوتي.')
+      }
     },
     [stopHadithAudio],
   )
 
   const synthesizeHadithWithAi = useCallback(async () => {
-    if (!selectedHadith?.arabic) return
+    if (!selectedHadith?.arabic) {
+      throw new Error('نص الحديث غير متوفر للقراءة الصوتية.')
+    }
 
-    const response = await fetch('/api/hadith/tts', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'audio/mpeg',
-      },
-      body: JSON.stringify({
-        text: selectedHadith.arabic,
-        voice: ttsVoice,
-        rate: audioRate,
-      }),
-    })
+    if (ttsAbortControllerRef.current) {
+      ttsAbortControllerRef.current.abort()
+    }
+
+    const controller = new AbortController()
+    ttsAbortControllerRef.current = controller
+
+    let response: Response
+
+    try {
+      response = await fetch('/api/hadith/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
+        },
+        body: JSON.stringify({
+          text: selectedHadith.arabic,
+          voice: ttsVoice,
+          rate: audioRate,
+        }),
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error
+      }
+
+      throw new Error('تعذر الاتصال بخدمة القراءة الذكية.')
+    } finally {
+      if (ttsAbortControllerRef.current === controller) {
+        ttsAbortControllerRef.current = null
+      }
+    }
 
     if (!response.ok) {
       let message = 'تعذر إنشاء الصوت الذكي حاليًا.'
+
       try {
         const payload = await response.json()
-        message = payload?.error || message
+        if (typeof payload?.error === 'string' && payload.error.trim()) {
+          message = payload.error.trim()
+        }
       } catch {
-        // الاستجابة قد تكون نصًا أو فارغة.
+        try {
+          const fallbackText = await response.text()
+          if (fallbackText.trim()) {
+            message = fallbackText.trim()
+          }
+        } catch {
+          // لا توجد استجابة نصية مفيدة.
+        }
       }
+
       throw new Error(message)
     }
 
+    const contentType = response.headers.get('content-type') || ''
+
+    if (!contentType.toLowerCase().includes('audio/')) {
+      throw new Error('خدمة القراءة الذكية أعادت استجابة غير صوتية.')
+    }
+
     const blob = await response.blob()
+
+    if (!blob.size) {
+      throw new Error('خدمة القراءة الذكية أعادت ملفًا صوتيًا فارغًا.')
+    }
+
     const objectUrl = URL.createObjectURL(blob)
+
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current)
+    }
+
     audioObjectUrlRef.current = objectUrl
 
     const audio = new Audio(objectUrl)
@@ -765,35 +917,65 @@ export default function HadithPage() {
     audioRef.current = audio
     setAudioSourceLabel('صوت ذكي Neural')
 
+    const revokeObjectUrl = () => {
+      if (audioObjectUrlRef.current === objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+        audioObjectUrlRef.current = null
+      }
+    }
+
     audio.onended = () => {
       setIsReadingAudio(false)
       setAudioSourceLabel('')
-      audioRef.current = null
-      if (audioObjectUrlRef.current) {
-        URL.revokeObjectURL(audioObjectUrlRef.current)
-        audioObjectUrlRef.current = null
+
+      if (audioRef.current === audio) {
+        audioRef.current = null
       }
+
+      revokeObjectUrl()
     }
 
     audio.onerror = () => {
       setIsReadingAudio(false)
       setAudioSourceLabel('')
-      audioRef.current = null
       setAudioError('تعذر تشغيل الصوت الذكي على هذا الجهاز.')
-      if (audioObjectUrlRef.current) {
-        URL.revokeObjectURL(audioObjectUrlRef.current)
-        audioObjectUrlRef.current = null
+
+      if (audioRef.current === audio) {
+        audioRef.current = null
       }
+
+      revokeObjectUrl()
     }
 
-    await audio.play()
-    setIsReadingAudio(true)
+    try {
+      await audio.play()
+      setIsReadingAudio(true)
+    } catch (error) {
+      audio.pause()
+
+      if (audioRef.current === audio) {
+        audioRef.current = null
+      }
+
+      revokeObjectUrl()
+
+      throw error instanceof Error
+        ? new Error('تعذر تشغيل الصوت الذكي على هذا الجهاز.')
+        : new Error('تعذر تشغيل الصوت الذكي على هذا الجهاز.')
+    }
   }, [audioRate, selectedHadith, ttsVoice])
 
   const speakHadith = useCallback(async () => {
-    if (!selectedBook || !selectedHadith?.arabic || typeof window === 'undefined') return
+    if (!selectedBook || !selectedHadith?.arabic || typeof window === 'undefined') {
+      return
+    }
 
-    if (isReadingAudio || audioLoading) {
+    if (isReadingAudio) {
+      stopHadithAudio()
+      return
+    }
+
+    if (audioLoading) {
       stopHadithAudio()
       return
     }
@@ -805,7 +987,15 @@ export default function HadithPage() {
     const hadithNumber = selectedHadith.idInBook || selectedHadith.id
     const manifestAudio = getHumanHadithAudio(selectedBook.id, hadithNumber)
     const apiAudioUrl = selectedHadith.audioUrl?.trim() || ''
-    const humanAudio = manifestAudio || (apiAudioUrl ? { url: apiAudioUrl, label: 'تسجيل بشري من مصدر البيانات' } : null)
+
+    const humanAudio =
+      manifestAudio ||
+      (apiAudioUrl
+        ? {
+            url: apiAudioUrl,
+            label: 'تسجيل بشري من مصدر البيانات',
+          }
+        : null)
 
     try {
       if (humanAudio?.url) {
@@ -818,23 +1008,42 @@ export default function HadithPage() {
           )
           return
         } catch (humanError) {
-          console.warn('Human hadith audio failed, falling back to AI:', humanError)
+          console.warn(
+            'Human hadith audio failed, falling back to AI:',
+            humanError,
+          )
           stopHadithAudio()
         }
       }
 
       await synthesizeHadithWithAi()
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return
+      }
+
       console.error('Hadith audio error:', error)
+
       setIsReadingAudio(false)
       setAudioSourceLabel('')
+
       setAudioError(
-        error instanceof Error ? error.message : 'تعذر إنشاء القراءة الصوتية حاليًا.',
+        error instanceof Error
+          ? error.message
+          : 'تعذر إنشاء القراءة الصوتية حاليًا.',
       )
     } finally {
       setAudioLoading(false)
     }
-  }, [audioLoading, isReadingAudio, playAudioUrl, selectedBook, selectedHadith, stopHadithAudio, synthesizeHadithWithAi])
+  }, [
+    audioLoading,
+    isReadingAudio,
+    playAudioUrl,
+    selectedBook,
+    selectedHadith,
+    stopHadithAudio,
+    synthesizeHadithWithAi,
+  ])
 
   useEffect(() => {
     return () => {
@@ -1579,8 +1788,18 @@ export default function HadithPage() {
                       : 'bg-mushaf-teal text-white'
                   } disabled:opacity-60`}
                 >
-                  {audioLoading ? <Loader2 size={18} className="animate-spin" /> : isReadingAudio ? <PauseIcon /> : <VolumeIcon />}
-                  {audioLoading ? 'جاري تجهيز الصوت...' : isReadingAudio ? 'إيقاف الاستماع' : 'استماع للحديث'}
+                  {audioLoading ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : isReadingAudio ? (
+                    <PauseIcon />
+                  ) : (
+                    <VolumeIcon />
+                  )}
+                  {audioLoading
+                    ? 'جاري تجهيز الصوت...'
+                    : isReadingAudio
+                      ? 'إيقاف الاستماع'
+                      : 'استماع للحديث'}
                 </button>
 
                 <select
