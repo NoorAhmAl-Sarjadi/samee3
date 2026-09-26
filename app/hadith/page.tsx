@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-// تم استخدام المسار المباشر لتجاوز مشكلة الكاش في الـ Build
+// تم تصحيح المسار المباشر لضمان قراءة الملف
 import { getHumanHadithAudio, HumanHadithAudio } from '../../lib/hadith-human-audio'
 import {
   ArrowRight,
