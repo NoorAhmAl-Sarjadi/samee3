@@ -43,8 +43,6 @@ type Hadith = {
   idInBook?: number
   chapterId?: number
   bookId?: number
-  /** Optional exact human-recording URL supplied by the API. */
-  audioUrl?: string
   arabic?: string
   audioUrl?: string
   english?: {
