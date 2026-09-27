@@ -402,7 +402,7 @@ export default function HadithPage() {
         .replace(/[أإآ]/g, "ا")
         .replace(/ة/g, "ه")
         .replace(/ى/g, "ي")
-        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .replace(/[^A-Za-z0-9\u0600-\u06FF]+/g, " ")
         .trim()
 
     const chapterName = normalize(currentChapter.name_ar || "")
@@ -662,7 +662,7 @@ export default function HadithPage() {
         .replace(/[أإآ]/g, "ا")
         .replace(/ة/g, "ه")
         .replace(/ى/g, "ي")
-        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .replace(/[^A-Za-z0-9\u0600-\u06FF]+/g, " ")
         .trim()
 
     const chapterName = normalize(chapter.name_ar)
