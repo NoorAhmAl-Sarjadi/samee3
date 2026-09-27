@@ -586,7 +586,16 @@ export default function HadithPage() {
     return {
       kind: "hadith",
       label: `${book.name_ar} — حديث ${arabicDigits(getHadithNumber(hadith))}`,
-      tracks: [{ ...track, id: track.id || `${book.id}:hadith:${getHadithNumber(hadith)}`, title: track.title || `حديث ${arabicDigits(getHadithNumber(hadith))}` }],
+      tracks: [{
+        id: `${book.id}:hadith:${getHadithNumber(hadith)}`,
+        title: `حديث ${arabicDigits(getHadithNumber(hadith))}`,
+        url: track.url,
+        label: track.label || "تسجيل بشري",
+        sourceUrl: track.sourceUrl,
+        startSeconds: track.startSeconds,
+        endSeconds: track.endSeconds,
+        isIntroduction: false,
+      }],
     }
   }, [])
 
