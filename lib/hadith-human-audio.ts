@@ -1,143 +1,155 @@
-export type HumanHadithAudio = {
-  url: string
-  label?: string
-  startSeconds?: number
-  endSeconds?: number
-  sourceUrl?: string
-}
-
-export type HumanAudioTrack = HumanHadithAudio & {
+export type HumanAudioTrack = {
   id: string
   title: string
+  url: string
+  label?: string
+  sourceUrl?: string
+  startSeconds?: number
+  endSeconds?: number
+  isIntroduction?: boolean
 }
+
+export type HumanAudioOrganization = 'sections' | 'chapters' | 'stream'
 
 export type HumanAudioCollection = {
   kind: 'book' | 'chapter'
+  organization: HumanAudioOrganization
   label: string
-  sourceUrl?: string
+  sourceUrl: string
   tracks: HumanAudioTrack[]
 }
 
-function numberedTracks(options: {
-  baseUrl: string
-  count: number
-  start?: number
-  digits?: number
-  titlePrefix: string
-  sourceUrl: string
-  idPrefix: string
-}): HumanAudioTrack[] {
-  const start = options.start ?? 1
-  const digits = options.digits ?? 2
-
-  return Array.from({ length: options.count }, (_, index) => {
-    const number = start + index
-    const padded = String(number).padStart(digits, '0')
-
-    return {
-      id: `${options.idPrefix}:${number}`,
-      title: `${options.titlePrefix} ${number}`,
-      url: `${options.baseUrl}${padded}.mp3`,
-      label: 'تسجيل بشري مجاني من المصدر',
-      sourceUrl: options.sourceUrl,
-    }
-  })
-}
-
 /**
- * تسجيلات بشرية مرتبطة مباشرة بحديث محدد.
- * هذه القائمة لا تستخدم إلا عندما يكون لدينا ربط زمني موثق بين الحديث والمقطع.
+ * التسجيلات البشرية للأحاديث الفردية.
+ * لا نضع هنا أي مقطع من كتاب كامل إلا إذا كان هناك ربط زمني موثق بالحديث نفسه.
+ * حاليًا لا توجد تسجيلات فردية موثقة في المشروع، لذلك لن يظهر زر صوت بجانب الحديث.
  */
-export const HUMAN_HADITH_AUDIO: Record<string, HumanHadithAudio> = {
-  'bukhari:1': {
-    url: 'https://ia801308.us.archive.org/3/items/Sahih-Al-Bukhari-Audio/01.mp3',
-    startSeconds: 15,
-    endSeconds: 125,
-    label: 'تسجيل بشري - صحيح البخاري - حديث ١',
-    sourceUrl: 'https://archive.org/details/Sahih-Al-Bukhari-Audio',
-  },
-  'bukhari:2': {
-    url: 'https://ia801308.us.archive.org/3/items/Sahih-Al-Bukhari-Audio/01.mp3',
-    startSeconds: 126,
-    endSeconds: 198,
-    label: 'تسجيل بشري - صحيح البخاري - حديث ٢',
-    sourceUrl: 'https://archive.org/details/Sahih-Al-Bukhari-Audio',
-  },
-}
+export const HUMAN_HADITH_AUDIO: Record<string, HumanAudioTrack> = {}
 
 /**
- * قراءات على مستوى الكتاب/المادة الصوتية.
- * نستخدمها عندما يكون المصدر منشورًا كقائمة ملفات تغطي الكتاب، لا كملفات منفصلة لكل حديث.
- * الروابط هنا تشير إلى الملفات الأصلية للمصدر ولا يتم استضافتها داخل الموقع.
+ * تسجيلات الكتب التسعة على مستوى المصدر الصوتي نفسه.
+ * هذه ليست تسجيلات مُفترضة لكل حديث؛ هي المقاطع التي ينشرها المصدر على مستوى الكتاب.
+ * يتم تشغيلها من واجهة الكتاب/المصدر فقط.
  */
 export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
+  bukhari: {
+    kind: 'book',
+    organization: 'sections',
+    label: 'صحيح البخاري — المقاطع الصوتية المنشورة',
+    sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/',
+    tracks: [
+      { id: 'bukhari:01', title: 'المقطع ١ — الأحاديث ١–٣٠', url: 'https://server03.quran-uni.com:7049', label: 'تسجيل بشري — صحيح البخاري', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'bukhari:02', title: 'المقطع ٢ — الأحاديث ٣١–٥٨', url: 'https://server03.quran-uni.com:7054', label: 'تسجيل بشري — صحيح البخاري', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'bukhari:03', title: 'المقطع ٣ — الأحاديث ٥٩–٦٢', url: 'https://server03.quran-uni.com:7055', label: 'تسجيل بشري — صحيح البخاري', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'bukhari:04', title: 'المقطع ٤ — الأحاديث ٦٣–٩٤', url: 'https://server03.quran-uni.com:7056', label: 'تسجيل بشري — صحيح البخاري', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
+  },
   muslim: {
     kind: 'book',
-    label: 'قراءة صوتية لصحيح مسلم',
+    organization: 'sections',
+    label: 'صحيح مسلم — المقدمة والمقاطع الصوتية',
     sourceUrl: 'https://islamhouse.com/ar/audios/412882/',
-    tracks: numberedTracks({
-      baseUrl: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Moslem_Reading/ar_Moslem_Reading_',
-      count: 55,
-      digits: 2,
-      titlePrefix: 'ملف صحيح مسلم',
-      sourceUrl: 'https://islamhouse.com/ar/audios/412882/',
-      idPrefix: 'muslim',
-    }),
+    tracks: [
+      { id: 'muslim:intro', title: 'المقدمة', url: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Moslem_Reading/ar_Moslem_Reading_01.mp3', label: 'تسجيل بشري — المقدمة', sourceUrl: 'https://islamhouse.com/ar/audios/412882/', isIntroduction: true },
+      { id: 'muslim:01', title: 'المقطع ١ — الأحاديث ١–١٥', url: 'https://server03.quran-uni.com:7063', label: 'تسجيل بشري — صحيح مسلم', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'muslim:02', title: 'المقطع ٢ — الأحاديث ١٦–٣٤', url: 'https://server03.quran-uni.com:7064', label: 'تسجيل بشري — صحيح مسلم', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'muslim:03', title: 'المقطع ٣ — الأحاديث ٣٥–٥٥', url: 'https://server03.quran-uni.com:7065', label: 'تسجيل بشري — صحيح مسلم', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
   },
-  tirmidhi: {
+  abudawud: {
     kind: 'book',
-    label: 'قراءة صوتية لسنن الترمذي',
-    sourceUrl: 'https://islamhouse.com/ar/audios/426239/',
-    tracks: numberedTracks({
-      baseUrl: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Sonan_Termethe_A_B/ar_Sonan_Termethe_A_B_',
-      count: 63,
-      digits: 2,
-      titlePrefix: 'ملف سنن الترمذي',
-      sourceUrl: 'https://islamhouse.com/ar/audios/426239/',
-      idPrefix: 'tirmidhi',
-    }),
+    organization: 'sections',
+    label: 'سنن أبي داود — المقاطع الصوتية المنشورة',
+    sourceUrl: 'https://islamhouse.com/ar/audios/419008/',
+    tracks: [
+      { id: 'abudawud:01', title: 'المقطع ١ — الأحاديث ١–٩', url: 'https://server03.quran-uni.com:7156', label: 'تسجيل بشري — سنن أبي داود', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'abudawud:02', title: 'المقطع ٢ — الأحاديث ١٠–٢٣', url: 'https://server03.quran-uni.com:7157', label: 'تسجيل بشري — سنن أبي داود', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'abudawud:03', title: 'المقطع ٣ — الأحاديث ٢٤–٤٢', url: 'https://server03.quran-uni.com:7158', label: 'تسجيل بشري — سنن أبي داود', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
   },
   nasai: {
     kind: 'book',
-    label: 'قراءة صوتية لسنن النسائي',
+    organization: 'sections',
+    label: 'سنن النسائي — المقاطع الصوتية المنشورة',
     sourceUrl: 'https://islamhouse.com/ar/audios/427350/',
-    tracks: numberedTracks({
-      baseUrl: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Sonan_Nasa2ee_A_B/ar_Sonan_Nasa2ee_A_B_',
-      count: 50,
-      digits: 2,
-      titlePrefix: 'ملف سنن النسائي',
-      sourceUrl: 'https://islamhouse.com/ar/audios/427350/',
-      idPrefix: 'nasai',
-    }),
+    tracks: [
+      { id: 'nasai:01', title: 'المقطع ١ — الأحاديث ١–١٨', url: 'https://server03.quran-uni.com:7163', label: 'تسجيل بشري — سنن النسائي', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'nasai:02', title: 'المقطع ٢ — الأحاديث ١٩–٣٦', url: 'https://server03.quran-uni.com:7164', label: 'تسجيل بشري — سنن النسائي', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'nasai:03', title: 'المقطع ٣ — الأحاديث ٤٠–٥١', url: 'https://server03.quran-uni.com:7165', label: 'تسجيل بشري — سنن النسائي', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
   },
-  riyad_assalihin: {
+  tirmidhi: {
     kind: 'book',
-    label: 'قراءة صوتية لرياض الصالحين',
-    sourceUrl: 'https://islamhouse.com/ar/audios/206354/',
-    tracks: numberedTracks({
-      baseUrl: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Riad_Assal7een_Reeding/ar_Riad_Assal7een_Reeding_',
-      count: 108,
-      start: 0,
-      digits: 3,
-      titlePrefix: 'ملف رياض الصالحين',
-      sourceUrl: 'https://islamhouse.com/ar/audios/206354/',
-      idPrefix: 'riyad_assalihin',
-    }),
+    organization: 'sections',
+    label: 'سنن الترمذي — المقاطع الصوتية المنشورة',
+    sourceUrl: 'https://islamhouse.com/ar/audios/426239/',
+    tracks: [
+      { id: 'tirmidhi:01', title: 'المقطع ١ — الأحاديث ١–٣١', url: 'https://server03.quran-uni.com:7069', label: 'تسجيل بشري — سنن الترمذي', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'tirmidhi:02', title: 'المقطع ٢ — الأحاديث ٣٢–٦٣', url: 'https://server03.quran-uni.com:7070', label: 'تسجيل بشري — سنن الترمذي', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
+  },
+  ibnmajah: {
+    kind: 'book',
+    organization: 'sections',
+    label: 'سنن ابن ماجه — المقدمة والمقاطع الصوتية',
+    sourceUrl: 'https://islamhouse.com/ar/audios/426318/',
+    tracks: [
+      { id: 'ibnmajah:intro', title: 'مقدمة سنن ابن ماجه', url: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Sonan_Ibn_Majah_A_B/ar_Sonan_Ibn_Majah_A_B_01.mp3', label: 'تسجيل بشري — المقدمة', sourceUrl: 'https://islamhouse.com/ar/audios/426318/', isIntroduction: true },
+      { id: 'ibnmajah:01', title: 'المقطع ١ — الأحاديث ١–١٨', url: 'https://server03.quran-uni.com:7161', label: 'تسجيل بشري — سنن ابن ماجه', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ibnmajah:02', title: 'المقطع ٢ — الأحاديث ١٩–٣٦', url: 'https://server03.quran-uni.com:7162', label: 'تسجيل بشري — سنن ابن ماجه', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
+  },
+  malik: {
+    kind: 'book',
+    organization: 'stream',
+    label: 'موطأ مالك — بث صوتي للكتاب',
+    sourceUrl: 'https://islamhouse.com/ar/audios/2805550/',
+    tracks: [
+      { id: 'malik:full', title: 'البث الصوتي للكتاب', url: 'https://server03.quran-uni.com:7160', label: 'تسجيل بشري — موطأ مالك', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
+  },
+  darimi: {
+    kind: 'book',
+    organization: 'stream',
+    label: 'سنن الدارمي — بث صوتي للكتاب',
+    sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/',
+    tracks: [
+      { id: 'darimi:full', title: 'البث الصوتي للكتاب كاملًا', url: 'https://server03.quran-uni.com:7179', label: 'تسجيل بشري — سنن الدارمي', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
+  },
+  ahmed: {
+    kind: 'book',
+    organization: 'sections',
+    label: 'مسند أحمد — المقاطع الصوتية المنشورة',
+    sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/',
+    tracks: [
+      { id: 'ahmed:01', title: 'المقطع ١ — الأحاديث ١–٢٣', url: 'https://server03.quran-uni.com:7167', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:02', title: 'المقطع ٢ — الأحاديث ٢٤–٢٧', url: 'https://server03.quran-uni.com:7168', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:03', title: 'المقطع ٣ — الأحاديث ٢٨–٣١', url: 'https://server03.quran-uni.com:7169', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:04', title: 'المقطع ٤ — الأحاديث ٣٢–٣٥', url: 'https://server03.quran-uni.com:7170', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:05', title: 'المقطع ٥ — الأحاديث ٣٦–٣٩', url: 'https://server03.quran-uni.com:7171', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:06', title: 'المقطع ٦ — الأحاديث ٤٠–٤٣', url: 'https://server03.quran-uni.com:7172', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:07', title: 'المقطع ٧ — الأحاديث ٤٤–٤٦', url: 'https://server03.quran-uni.com:7173', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:08', title: 'المقطع ٨ — الأحاديث ٤٧–٤٩', url: 'https://server03.quran-uni.com:7174', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:09', title: 'المقطع ٩ — الأحاديث ٥٠–٥٤', url: 'https://server03.quran-uni.com:7175', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:10', title: 'المقطع ١٠ — الأحاديث ٥٥–٦٠', url: 'https://server03.quran-uni.com:7176', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:11', title: 'المقطع ١١ — الأحاديث ٦١–٦٦', url: 'https://server03.quran-uni.com:7177', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+      { id: 'ahmed:12', title: 'المقطع ١٢ — الأحاديث ٦٧–٧٣', url: 'https://server03.quran-uni.com:7178', label: 'تسجيل بشري — مسند أحمد', sourceUrl: 'https://quran-uni.com/quran-radio-on-platforms/' },
+    ],
   },
 }
 
 /**
- * ربط على مستوى الباب.
- * أضف هنا فقط الملفات التي تعرف أن محتواها يطابق الباب تحديدًا.
- * المفتاح المفضل: `${bookId}:chapter:${chapterId}`.
+ * لا توجد خرائط موثقة حاليًا لتسجيلات على مستوى أبواب API بعينها.
+ * لذلك لا يظهر زر صوت بجانب أي باب إلا بعد إضافة رابط يطابق الباب فعلًا.
  */
 export const HUMAN_CHAPTER_AUDIO: Record<string, HumanAudioCollection> = {}
 
 export function getHumanHadithAudio(
   bookId: string,
   hadithId: number | string,
-): HumanHadithAudio | null {
-  if (!bookId || !hadithId) return null
+): HumanAudioTrack | null {
+  if (!bookId || hadithId === undefined || hadithId === null) return null
   return HUMAN_HADITH_AUDIO[`${bookId}:${hadithId}`] || null
 }
 
@@ -153,8 +165,8 @@ export function getHumanChapterAudio(
 ): HumanAudioCollection | null {
   if (!bookId || chapterId === undefined || chapterId === null) return null
 
-  const byId = HUMAN_CHAPTER_AUDIO[`${bookId}:chapter:${chapterId}`]
-  if (byId) return byId
+  const exact = HUMAN_CHAPTER_AUDIO[`${bookId}:chapter:${chapterId}`]
+  if (exact) return exact
 
   const normalizedName = String(chapterName || '').trim().toLowerCase()
   if (!normalizedName) return null
