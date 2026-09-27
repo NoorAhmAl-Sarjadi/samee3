@@ -302,6 +302,8 @@ export default function HadithPage() {
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState('')
   const [audioRate, setAudioRate] = useState(1)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [displayDuration, setDisplayDuration] = useState(0)
   const [audioSourceLabel, setAudioSourceLabel] = useState('')
   const [audioTarget, setAudioTarget] = useState<AudioTarget | null>(null)
   const [audioTrackIndex, setAudioTrackIndex] = useState(0)
@@ -567,6 +569,8 @@ export default function HadithPage() {
     setIsReadingAudio(false)
     setAudioLoading(false)
     setAudioSourceLabel('')
+    setCurrentTime(0)
+    setDisplayDuration(0)
   }, [])
 
   const clearCurrentAudioElement = useCallback(() => {
@@ -1689,6 +1693,21 @@ export default function HadithPage() {
                       · {arabicDigits(audioTrackIndex + 1)} / {arabicDigits(audioTarget.tracks.length)}
                     </span>
                   ) : null}
+                </div>
+              )}
+
+              {audioTarget && displayDuration > 0 && (
+                <div className="mb-4 rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 text-[11px] font-bold text-slate-500 mb-2">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(displayDuration)}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-mushaf-teal to-mushaf-gold transition-[width] duration-100"
+                      style={{ width: `${Math.min(100, Math.max(0, (currentTime / displayDuration) * 100))}%` }}
+                    />
+                  </div>
                 </div>
               )}
 
