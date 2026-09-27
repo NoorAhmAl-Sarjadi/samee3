@@ -1,11 +1,14 @@
-export type HumanAudioTrack = {
-  id: string
-  title: string
+export type HumanHadithAudio = {
   url: string
   label?: string
   sourceUrl?: string
   startSeconds?: number
   endSeconds?: number
+}
+
+export type HumanAudioTrack = HumanHadithAudio & {
+  id: string
+  title: string
   isIntroduction?: boolean
 }
 
@@ -24,7 +27,7 @@ export type HumanAudioCollection = {
  * لا نضع هنا أي مقطع من كتاب كامل إلا إذا كان هناك ربط زمني موثق بالحديث نفسه.
  * حاليًا لا توجد تسجيلات فردية موثقة في المشروع، لذلك لن يظهر زر صوت بجانب الحديث.
  */
-export const HUMAN_HADITH_AUDIO: Record<string, HumanAudioTrack> = {}
+export const HUMAN_HADITH_AUDIO: Record<string, HumanHadithAudio> = {}
 
 /**
  * تسجيلات الكتب التسعة على مستوى المصدر الصوتي نفسه.
@@ -148,7 +151,7 @@ export const HUMAN_CHAPTER_AUDIO: Record<string, HumanAudioCollection> = {}
 export function getHumanHadithAudio(
   bookId: string,
   hadithId: number | string,
-): HumanAudioTrack | null {
+): HumanHadithAudio | null {
   if (!bookId || hadithId === undefined || hadithId === null) return null
   return HUMAN_HADITH_AUDIO[`${bookId}:${hadithId}`] || null
 }
