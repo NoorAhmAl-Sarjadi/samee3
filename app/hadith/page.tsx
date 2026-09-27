@@ -291,6 +291,10 @@ export default function HadithPage() {
     audioRef.current = null
   }, [])
 
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = audioRate
+  }, [audioRate])
+
   const stopHadithAudio = useCallback(() => {
     clearAudioElement()
     audioQueueRef.current = []
@@ -603,9 +607,12 @@ export default function HadithPage() {
     if (!track.url || !/^https?:\/\//i.test(track.url)) throw new Error("رابط التسجيل الصوتي غير صالح.")
 
     clearAudioElement()
-    const audio = new Audio(track.url)
-    audio.preload = "metadata"
+    const audio = new Audio()
+    audio.preload = "auto"
+    audio.autoplay = false
     audio.playbackRate = audioRate
+    audio.volume = 1
+    audio.src = track.url
     audioQueueRef.current = audioQueueRef.current.length ? audioQueueRef.current : [track]
     audioTrackIndexRef.current = index
     audioRef.current = audio
@@ -659,6 +666,7 @@ export default function HadithPage() {
       setAudioError("تعذر تشغيل التسجيل البشري من المصدر الحالي. يمكنك فتح صفحة المصدر للتحقق من الملف.")
     }
 
+    audio.load()
     await audio.play()
     setAudioLoading(false)
     setIsReadingAudio(true)
@@ -730,6 +738,30 @@ export default function HadithPage() {
     const next = Math.max(0, (audio.currentTime || 0) + seconds)
     try { audio.currentTime = next } catch { /* noop */ }
   }, [])
+
+  const toggleMiniAudioPlayback = useCallback(async () => {
+    const audio = audioRef.current
+
+    if (!audio) {
+      if (audioTarget) await playAudioTarget(audioTarget, audioTrackIndex)
+      return
+    }
+
+    if (isReadingAudio) {
+      audio.pause()
+      setIsReadingAudio(false)
+      return
+    }
+
+    try {
+      await audio.play()
+      setIsReadingAudio(true)
+      setAudioError("")
+    } catch (error) {
+      console.error("Resume hadith audio error:", error)
+      setAudioError("تعذر استئناف التسجيل. اضغط تشغيل مرة أخرى.")
+    }
+  }, [audioTarget, audioTrackIndex, isReadingAudio, playAudioTarget])
 
   const previousAudioTrack = useCallback(() => {
     const next = audioTrackIndexRef.current - 1
@@ -1213,37 +1245,45 @@ export default function HadithPage() {
       </main>
 
       {audioTarget && (
-        <div className="fixed inset-x-0 bottom-0 z-[80] border-t border-white/10 bg-[#112E32]/95 p-3 text-white shadow-2xl backdrop-blur-xl">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-black">{audioTarget.tracks[audioTrackIndex]?.title || audioTarget.label}</p>
-              <p className="mt-1 truncate text-[10px] text-white/50">{audioSourceLabel || audioTarget.collection?.label || "تسجيل بشري"}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => previousAudioTrack()} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10" title="المقطع السابق"><SkipBack size={16} /></button>
-              <button onClick={() => {
-                const audio = audioRef.current
-                if (!audio) return
-                if (isReadingAudio) { audio.pause(); setIsReadingAudio(false) }
-                else { void audio.play().then(() => setIsReadingAudio(true)).catch(() => setAudioError("تعذر استئناف التشغيل.")) }
-              }} className="flex h-12 w-12 items-center justify-center rounded-full bg-[#C6A15A] text-[#163C40]" title={isReadingAudio ? "إيقاف" : "تشغيل"}>
-                {isReadingAudio ? <Pause size={20} /> : <Play size={20} fill="currentColor" />}
+        <div className="pointer-events-none fixed bottom-4 left-4 z-[95] w-[calc(100vw-2rem)] max-w-[370px] sm:bottom-5 sm:left-5">
+          <div className="pointer-events-auto overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#112E32]/97 text-white shadow-2xl ring-1 ring-black/10 backdrop-blur-xl">
+            <div className="flex items-center gap-2 px-3 py-2.5">
+              <button
+                onClick={() => void toggleMiniAudioPlayback()}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#C6A15A] text-[#163C40] transition hover:scale-105"
+                title={isReadingAudio ? "إيقاف الصوت" : "تشغيل الصوت"}
+                aria-label={isReadingAudio ? "إيقاف الصوت" : "تشغيل الصوت"}
+              >
+                {isReadingAudio ? <Pause size={17} /> : <Play size={17} fill="currentColor" />}
               </button>
-              <button onClick={() => nextAudioTrack()} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10" title="المقطع التالي"><SkipForward size={16} /></button>
+
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-black">{audioTarget.tracks[audioTrackIndex]?.title || audioTarget.label}</p>
+                <p className="mt-0.5 truncate text-[10px] text-white/50">{audioSourceLabel || audioTarget.collection?.label || "تسجيل بشري"}</p>
+              </div>
+
+              {audioTarget.tracks.length > 1 ? (
+                <>
+                  <button onClick={previousAudioTrack} className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 sm:flex" title="المقطع السابق" aria-label="المقطع السابق"><SkipBack size={14} /></button>
+                  <button onClick={nextAudioTrack} className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 sm:flex" title="المقطع التالي" aria-label="المقطع التالي"><SkipForward size={14} /></button>
+                </>
+              ) : null}
+
+              <button onClick={stopHadithAudio} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 hover:text-white" title="إغلاق المشغل" aria-label="إغلاق المشغل"><X size={15} /></button>
             </div>
-            <div className="flex min-w-[220px] items-center gap-2">
-              <span className="font-mono text-[10px] text-white/60">{formatTime(currentTime)}</span>
-              <input type="range" min={0} max={Math.max(displayDuration, 1)} step={0.1} value={Math.min(currentTime, Math.max(displayDuration, 1))} onChange={(e: any) => seekAudio(Number(e.target.value))} className="w-full accent-[#C6A15A]" />
-              <span className="font-mono text-[10px] text-white/60">{displayDuration ? formatTime(displayDuration) : "--:--"}</span>
+
+            <div className="px-3 pb-2.5">
+              <div className="h-1 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-[#C6A15A]"
+                  style={{ width: displayDuration > 0 ? `${Math.min(100, (currentTime / displayDuration) * 100)}%` : "0%" }}
+                />
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[9px] font-medium text-white/45">
+                <span>{formatTime(currentTime)}</span>
+                <span>{displayDuration ? formatTime(displayDuration) : "--:--"}</span>
+              </div>
             </div>
-            <select value={audioRate} onChange={(e: any) => setAudioRate(Number(e.target.value))} className="rounded-xl border border-white/10 bg-white/5 px-2 py-2 text-xs font-bold text-white outline-none">
-              <option value={0.75}>٠٫٧٥×</option>
-              <option value={1}>١×</option>
-              <option value={1.15}>١٫١٥×</option>
-              <option value={1.25}>١٫٢٥×</option>
-              <option value={1.5}>١٫٥×</option>
-            </select>
-            <button onClick={stopHadithAudio} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10" title="إغلاق المشغل"><X size={18} /></button>
           </div>
         </div>
       )}
