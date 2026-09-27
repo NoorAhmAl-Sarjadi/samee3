@@ -12,8 +12,14 @@ export type HumanAudioTrack = HumanHadithAudio & {
   isIntroduction?: boolean
 }
 
+export type HumanAudioOrganization =
+  | 'attachments'
+  | 'books'
+  | 'chapters'
+
 export type HumanAudioCollection = {
   kind: 'book' | 'chapter'
+  organization: HumanAudioOrganization
   label: string
   sourceUrl?: string
   tracks: HumanAudioTrack[]
@@ -72,6 +78,7 @@ export const HUMAN_HADITH_AUDIO: Record<string, HumanHadithAudio> = {
 export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
   muslim: {
     kind: 'book',
+    organization: 'attachments',
     label: 'قراءة صوتية لصحيح مسلم',
     sourceUrl: 'https://islamhouse.com/ar/audios/412882/',
     tracks: numberedTracks({
@@ -87,6 +94,7 @@ export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
 
   tirmidhi: {
     kind: 'book',
+    organization: 'attachments',
     label: 'قراءة صوتية لسنن الترمذي',
     sourceUrl: 'https://islamhouse.com/ar/audios/426239/',
     tracks: numberedTracks({
@@ -102,6 +110,7 @@ export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
 
   nasai: {
     kind: 'book',
+    organization: 'attachments',
     label: 'قراءة صوتية لسنن النسائي',
     sourceUrl: 'https://islamhouse.com/ar/audios/427350/',
     tracks: numberedTracks({
@@ -117,6 +126,7 @@ export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
 
   riyad_assalihin: {
     kind: 'book',
+    organization: 'attachments',
     label: 'قراءة صوتية لرياض الصالحين',
     sourceUrl: 'https://islamhouse.com/ar/audios/206354/',
     tracks: numberedTracks({
