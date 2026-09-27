@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { getHumanHadithAudio, HumanHadithAudio } from '@/lib/hadith-human-audio'
+// تم استخدام المسار المباشر لحل مشكلة الـ Build نهائياً
+import { getHumanHadithAudio, HumanHadithAudio } from '../../lib/hadith-human-audio'
 import {
   ArrowRight,
   BookOpen,
