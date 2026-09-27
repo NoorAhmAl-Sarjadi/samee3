@@ -101,3 +101,5 @@ export function getHumanChapterAudio(
   if (!bookId || chapterId === undefined || chapterId === null) return null
   return HUMAN_CHAPTER_AUDIO[`${bookId}:chapter:${chapterId}`] || null
 }
+
+export const getHumanBookAudioSource = getHumanAudioSource
