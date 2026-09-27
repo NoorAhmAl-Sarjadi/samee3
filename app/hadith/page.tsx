@@ -18,12 +18,10 @@ import {
   Play,
   Search,
   Share2,
-  SkipBack,
-  SkipForward,
   X,
 } from "lucide-react"
 import {
-  getHumanBookAudio,
+  getHumanAudioSource,
   getHumanChapterAudio,
   getHumanHadithAudio,
   type HumanAudioCollection,
@@ -82,6 +80,11 @@ const API_BASE = "/api/hadith"
 const REMOTE_DOCS_URL = "https://alfurqan.online/docs"
 const FAVORITES_KEY = "samee3_hadith_favorites"
 const RESUME_KEY = "samee3_hadith_resume"
+const AUDIO_PROXY_PATH = "/api/audio-proxy"
+
+function getAudioProxyUrl(sourceUrl: string) {
+  return `${AUDIO_PROXY_PATH}?url=${encodeURIComponent(sourceUrl)}`
+}
 
 const FALLBACK_BOOKS: HadithBook[] = [
   { id: "bukhari", name_ar: "صحيح البخاري", name_en: "Sahih al-Bukhari", category: "الكتب التسعة" },
@@ -244,12 +247,10 @@ export default function HadithPage() {
   const [isReadingAudio, setIsReadingAudio] = useState(false)
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState("")
-  const [audioRate, setAudioRate] = useState(1)
+  const [audioCatalog, setAudioCatalog] = useState<HumanAudioCollection | null>(null)
+  const [audioCatalogLoading, setAudioCatalogLoading] = useState(false)
   const [audioTarget, setAudioTarget] = useState<AudioTarget | null>(null)
   const [audioTrackIndex, setAudioTrackIndex] = useState(0)
-  const [audioSourceLabel, setAudioSourceLabel] = useState("")
-  const [currentTime, setCurrentTime] = useState(0)
-  const [displayDuration, setDisplayDuration] = useState(0)
 
   const [designUrl, setDesignUrl] = useState<string | null>(null)
   const [designLoading, setDesignLoading] = useState(false)
@@ -278,6 +279,41 @@ export default function HadithPage() {
     return payload
   }, [])
 
+  const fetchAudioCatalog = useCallback(async (bookId: string) => {
+    setAudioCatalogLoading(true)
+
+    try {
+      const response = await fetch(`/api/hadith-audio?book=${encodeURIComponent(bookId)}`, {
+        method: "GET",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      })
+
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`)
+
+      const tracks = Array.isArray(payload?.tracks) ? payload.tracks : []
+      const collection: HumanAudioCollection | null = tracks.length
+        ? {
+            kind: "book",
+            organization: payload.organization || "attachments",
+            label: payload.label || getHumanAudioSource(bookId)?.label || "التسجيلات الصوتية",
+            sourceUrl: payload.sourceUrl || getHumanAudioSource(bookId)?.sourceUrl || "",
+            tracks,
+          }
+        : null
+
+      setAudioCatalog(collection)
+      return collection
+    } catch (error) {
+      console.error("Hadith audio catalog error:", error)
+      setAudioCatalog(null)
+      return null
+    } finally {
+      setAudioCatalogLoading(false)
+    }
+  }, [])
+
   const clearAudioElement = useCallback(() => {
     const audio = audioRef.current
     if (audio) {
@@ -291,9 +327,6 @@ export default function HadithPage() {
     audioRef.current = null
   }, [])
 
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.playbackRate = audioRate
-  }, [audioRate])
 
   const stopHadithAudio = useCallback(() => {
     clearAudioElement()
@@ -303,9 +336,6 @@ export default function HadithPage() {
     setAudioTarget(null)
     setIsReadingAudio(false)
     setAudioLoading(false)
-    setAudioSourceLabel("")
-    setCurrentTime(0)
-    setDisplayDuration(0)
   }, [clearAudioElement])
 
   const currentChapter = useMemo(
@@ -356,15 +386,44 @@ export default function HadithPage() {
     return filteredHadiths.findIndex((hadith) => getHadithNumber(hadith) === getHadithNumber(visibleHadith))
   }, [filteredHadiths, visibleHadith])
 
-  const bookAudio = useMemo(
-    () => (selectedBook ? getHumanBookAudio(selectedBook.id) : null),
-    [selectedBook],
-  )
+  const bookAudio = audioCatalog
 
-  const chapterAudio = useMemo(
-    () => (selectedBook && currentChapter ? getHumanChapterAudio(selectedBook.id, currentChapter.id, currentChapter.name_ar) : null),
-    [currentChapter, selectedBook],
-  )
+  const chapterAudio = useMemo(() => {
+    if (!selectedBook || !currentChapter) return null
+
+    const exact = getHumanChapterAudio(selectedBook.id, currentChapter.id, currentChapter.name_ar)
+    if (exact?.tracks.length) return exact
+    if (!audioCatalog?.tracks.length) return null
+
+    const normalize = (value: string) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[ًٌٍَُِّْـ]/g, "")
+        .replace(/[أإآ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim()
+
+    const chapterName = normalize(currentChapter.name_ar || "")
+    if (!chapterName) return null
+
+    const match = audioCatalog.tracks.find((track) => {
+      const title = normalize(track.title)
+      if (!title) return false
+      return title === chapterName || title.includes(chapterName) || chapterName.includes(title)
+    })
+
+    return match
+      ? {
+          kind: "chapter",
+          organization: audioCatalog.organization,
+          label: match.title,
+          sourceUrl: match.sourceUrl || audioCatalog.sourceUrl,
+          tracks: [match],
+        } satisfies HumanAudioCollection
+      : null
+  }, [audioCatalog, currentChapter, selectedBook])
 
   const hadithAudio = useMemo(
     () => (selectedBook && visibleHadith ? getHumanHadithAudio(selectedBook.id, getHadithNumber(visibleHadith)) : null),
@@ -492,6 +551,15 @@ export default function HadithPage() {
     if (selectedBook && selectedChapterId !== null) void loadChapterHadiths(selectedBook, selectedChapterId)
   }, [loadChapterHadiths, selectedBook, selectedChapterId])
 
+  useEffect(() => {
+    if (!selectedBook) {
+      setAudioCatalog(null)
+      return
+    }
+
+    void fetchAudioCatalog(selectedBook.id)
+  }, [fetchAudioCatalog, selectedBook])
+
   const selectBook = useCallback((book: HadithBook) => {
     stopHadithAudio()
     setSelectedBook(book)
@@ -571,17 +639,50 @@ export default function HadithPage() {
   }, [favoriteIds, selectedBook, visibleHadith])
 
   const getBookTarget = useCallback((book: HadithBook): AudioTarget | null => {
-    const collection = getHumanBookAudio(book.id)
+    if (!selectedBook || book.id !== selectedBook.id) return null
+    const collection = audioCatalog
     if (!collection?.tracks.length) return null
     return { kind: "book", label: book.name_ar, collection, tracks: collection.tracks }
-  }, [])
+  }, [audioCatalog, selectedBook])
 
   const getChapterTarget = useCallback((book: HadithBook, chapter: HadithChapter | null): AudioTarget | null => {
-    if (!chapter) return null
-    const collection = getHumanChapterAudio(book.id, chapter.id, chapter.name_ar)
-    if (!collection?.tracks.length) return null
-    return { kind: "chapter", label: `${book.name_ar} — ${chapter.name_ar || "الباب"}`, collection, tracks: collection.tracks }
-  }, [])
+    if (!chapter || !selectedBook || selectedBook.id !== book.id) return null
+
+    const exact = getHumanChapterAudio(book.id, chapter.id, chapter.name_ar)
+    if (exact?.tracks.length) {
+      return { kind: "chapter", label: `${book.name_ar} — ${chapter.name_ar || "الباب"}`, collection: exact, tracks: exact.tracks }
+    }
+
+    if (!audioCatalog?.tracks.length || !chapter.name_ar) return null
+
+    const normalize = (value: string) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[ًٌٍَُِّْـ]/g, "")
+        .replace(/[أإآ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim()
+
+    const chapterName = normalize(chapter.name_ar)
+    const match = audioCatalog.tracks.find((track) => {
+      const title = normalize(track.title)
+      return !!title && (title === chapterName || title.includes(chapterName) || chapterName.includes(title))
+    })
+
+    if (!match) return null
+
+    const collection: HumanAudioCollection = {
+      kind: "chapter",
+      organization: audioCatalog.organization,
+      label: match.title,
+      sourceUrl: match.sourceUrl || audioCatalog.sourceUrl,
+      tracks: [match],
+    }
+
+    return { kind: "chapter", label: `${book.name_ar} — ${chapter.name_ar}`, collection, tracks: [match] }
+  }, [audioCatalog, selectedBook])
 
   const getHadithTarget = useCallback((book: HadithBook, hadith: Hadith | null): AudioTarget | null => {
     if (!hadith) return null
@@ -610,21 +711,16 @@ export default function HadithPage() {
     const audio = new Audio()
     audio.preload = "auto"
     audio.autoplay = false
-    audio.playbackRate = audioRate
     audio.volume = 1
-    audio.src = track.url
+    audio.src = getAudioProxyUrl(track.url)
     audioQueueRef.current = audioQueueRef.current.length ? audioQueueRef.current : [track]
     audioTrackIndexRef.current = index
     audioRef.current = audio
     setAudioTrackIndex(index)
-    setAudioSourceLabel(track.label || "تسجيل بشري")
     setAudioLoading(true)
     setAudioError("")
-    setCurrentTime(0)
-    setDisplayDuration(0)
 
     audio.onloadedmetadata = () => {
-      setDisplayDuration(Number.isFinite(audio.duration) ? audio.duration : 0)
       if (track.startSeconds !== undefined && track.startSeconds > 0) {
         try { audio.currentTime = track.startSeconds } catch { /* noop */ }
       }
@@ -633,7 +729,6 @@ export default function HadithPage() {
     audio.ontimeupdate = () => {
       const start = Math.max(0, Number(track.startSeconds || 0))
       const end = track.endSeconds !== undefined && Number(track.endSeconds) > start ? Number(track.endSeconds) : undefined
-      setCurrentTime(Math.max(0, audio.currentTime - start))
       if (end !== undefined && audio.currentTime >= end) {
         audio.pause()
         const nextIndex = index + 1
@@ -641,7 +736,6 @@ export default function HadithPage() {
         else {
           setIsReadingAudio(false)
           setAudioLoading(false)
-          setAudioSourceLabel("")
           audioRef.current = null
         }
       }
@@ -653,16 +747,14 @@ export default function HadithPage() {
       else {
         setIsReadingAudio(false)
         setAudioLoading(false)
-        setAudioSourceLabel("")
-        audioRef.current = null
+            audioRef.current = null
       }
     }
 
     audio.onerror = () => {
       setIsReadingAudio(false)
       setAudioLoading(false)
-      setAudioSourceLabel("")
-      audioRef.current = null
+        audioRef.current = null
       setAudioError("تعذر تشغيل التسجيل البشري من المصدر الحالي. يمكنك فتح صفحة المصدر للتحقق من الملف.")
     }
 
@@ -670,7 +762,7 @@ export default function HadithPage() {
     await audio.play()
     setAudioLoading(false)
     setIsReadingAudio(true)
-  }, [audioRate, clearAudioElement])
+  }, [clearAudioElement])
 
   const playAudioTarget = useCallback(async (target: AudioTarget, startIndex = 0) => {
     const safeIndex = Math.min(Math.max(startIndex, 0), target.tracks.length - 1)
@@ -721,24 +813,6 @@ export default function HadithPage() {
     if (target) void playAudioTarget(target, index)
   }, [getChapterTarget, playAudioTarget])
 
-  const seekAudio = useCallback((value: number) => {
-    const audio = audioRef.current
-    if (!audio) return
-    const track = audioQueueRef.current[audioTrackIndexRef.current]
-    const start = Math.max(0, Number(track?.startSeconds || 0))
-    try {
-      audio.currentTime = start + value
-      setCurrentTime(value)
-    } catch { /* noop */ }
-  }, [])
-
-  const skipAudio = useCallback((seconds: number) => {
-    const audio = audioRef.current
-    if (!audio) return
-    const next = Math.max(0, (audio.currentTime || 0) + seconds)
-    try { audio.currentTime = next } catch { /* noop */ }
-  }, [])
-
   const toggleMiniAudioPlayback = useCallback(async () => {
     const audio = audioRef.current
 
@@ -759,63 +833,72 @@ export default function HadithPage() {
       setAudioError("")
     } catch (error) {
       console.error("Resume hadith audio error:", error)
-      setAudioError("تعذر استئناف التسجيل. اضغط تشغيل مرة أخرى.")
+      setAudioError("تعذر استئناف التسجيل. اضغط زر الصوت مرة أخرى.")
     }
   }, [audioTarget, audioTrackIndex, isReadingAudio, playAudioTarget])
 
-  const previousAudioTrack = useCallback(() => {
-    const next = audioTrackIndexRef.current - 1
-    if (next < 0 || !audioQueueRef.current.length) return
-    const target = audioTarget
-    if (target) void playAudioTarget(target, next)
-  }, [audioTarget, playAudioTarget])
 
-  const nextAudioTrack = useCallback(() => {
-    const next = audioTrackIndexRef.current + 1
-    if (next >= audioQueueRef.current.length) return
-    const target = audioTarget
-    if (target) void playAudioTarget(target, next)
-  }, [audioTarget, playAudioTarget])
+
+
 
   const designHadithAsImage = useCallback(async () => {
     if (!selectedBook || !visibleHadith?.arabic) return
     setDesignLoading(true)
 
     try {
-      const width = 1440
-      const outer = 54
-      const headerHeight = 310
-      const footerHeight = 190
-      const cardX = 90
-      const cardY = headerHeight + 60
-      const cardWidth = width - cardX * 2
-      const lineHeight = 92
-      const textMaxWidth = cardWidth - 170
+      await document.fonts?.ready
+
+      const width = 1800
+      const frame = 42
+      const side = 130
+      const headerHeight = 390
+      const cardY = headerHeight + 70
+      const cardWidth = width - side * 2
+      const textWidth = cardWidth - 240
       const cleanText = visibleHadith.arabic.replace(/\s+/g, " ").trim()
+      const narrator = visibleHadith.english?.narrator?.trim() || ""
+      const author = selectedBook.author_ar?.trim() || ""
+      const chapterName = currentChapter?.name_ar?.trim() || ""
 
       const measureCanvas = document.createElement("canvas")
       const measureCtx = measureCanvas.getContext("2d")
       if (!measureCtx) throw new Error("Canvas unavailable")
       measureCtx.direction = "rtl"
       measureCtx.textAlign = "center"
-      measureCtx.font = '600 58px "Amiri Quran", "Amiri", serif'
 
       const words = cleanText.split(" ")
-      const lines: string[] = []
-      let line = ""
-      for (const word of words) {
-        const candidate = line ? `${line} ${word}` : word
-        if (measureCtx.measureText(candidate).width <= textMaxWidth) line = candidate
-        else {
-          if (line) lines.push(line)
-          line = word
-        }
-      }
-      if (line) lines.push(line)
+      let fontSize = 72
+      let lineHeight = 112
+      let lines: string[] = []
 
-      const narratorLine = visibleHadith.english?.narrator ? 52 : 0
-      const textBlockHeight = Math.max(lineHeight, lines.length * lineHeight)
-      const cardHeight = Math.max(760, textBlockHeight + 300 + narratorLine)
+      const wrap = (size: number) => {
+        measureCtx.font = `600 ${size}px "Amiri Quran", "Amiri", serif`
+        const next: string[] = []
+        let line = ""
+        for (const word of words) {
+          const candidate = line ? `${line} ${word}` : word
+          if (!line || measureCtx.measureText(candidate).width <= textWidth) line = candidate
+          else {
+            next.push(line)
+            line = word
+          }
+        }
+        if (line) next.push(line)
+        return next
+      }
+
+      while (fontSize >= 44) {
+        lines = wrap(fontSize)
+        lineHeight = Math.round(fontSize * 1.56)
+        if (lines.length <= 16) break
+        fontSize -= 2
+      }
+
+      const infoSpace = narrator || author || chapterName ? 220 : 160
+      const cardTopPadding = 175
+      const cardBottomPadding = infoSpace
+      const cardHeight = Math.max(860, cardTopPadding + lines.length * lineHeight + cardBottomPadding)
+      const footerHeight = 230
       const height = cardY + cardHeight + footerHeight
 
       const canvas = document.createElement("canvas")
@@ -825,25 +908,37 @@ export default function HadithPage() {
       if (!ctx) throw new Error("Canvas unavailable")
       ctx.direction = "rtl"
       ctx.textAlign = "center"
+      ctx.textBaseline = "alphabetic"
+
+      const roundedRect = (x: number, y: number, w: number, h: number, radius: number) => {
+        const r = Math.min(radius, w / 2, h / 2)
+        ctx.beginPath()
+        ctx.moveTo(x + r, y)
+        ctx.arcTo(x + w, y, x + w, y + h, r)
+        ctx.arcTo(x + w, y + h, x, y + h, r)
+        ctx.arcTo(x, y + h, x, y, r)
+        ctx.arcTo(x, y, x + w, y, r)
+        ctx.closePath()
+      }
 
       const bg = ctx.createLinearGradient(0, 0, width, height)
-      bg.addColorStop(0, "#F8F4EA")
-      bg.addColorStop(0.52, "#FFFDF8")
-      bg.addColorStop(1, "#EEE6D5")
+      bg.addColorStop(0, "#F7F0E2")
+      bg.addColorStop(0.48, "#FFFDF8")
+      bg.addColorStop(1, "#E8DDC7")
       ctx.fillStyle = bg
       ctx.fillRect(0, 0, width, height)
 
       ctx.save()
-      ctx.globalAlpha = 0.055
-      ctx.strokeStyle = "#16616A"
+      ctx.globalAlpha = 0.03
+      ctx.strokeStyle = "#174D53"
       ctx.lineWidth = 2
-      for (let x = -120; x < width + 160; x += 140) {
-        for (let y = -40; y < height + 160; y += 140) {
+      for (let x = -180; x < width + 180; x += 150) {
+        for (let y = -120; y < height + 120; y += 150) {
           ctx.beginPath()
-          ctx.moveTo(x + 70, y)
-          ctx.lineTo(x + 140, y + 70)
-          ctx.lineTo(x + 70, y + 140)
-          ctx.lineTo(x, y + 70)
+          ctx.moveTo(x + 75, y)
+          ctx.lineTo(x + 150, y + 75)
+          ctx.lineTo(x + 75, y + 150)
+          ctx.lineTo(x, y + 75)
           ctx.closePath()
           ctx.stroke()
         }
@@ -851,107 +946,120 @@ export default function HadithPage() {
       ctx.restore()
 
       const header = ctx.createLinearGradient(0, 0, width, headerHeight)
-      header.addColorStop(0, "#0F474E")
-      header.addColorStop(1, "#1F6870")
+      header.addColorStop(0, "#0B383E")
+      header.addColorStop(0.55, "#15535B")
+      header.addColorStop(1, "#1E6870")
       ctx.fillStyle = header
       ctx.fillRect(0, 0, width, headerHeight)
 
-      ctx.strokeStyle = "#C6A15A"
-      ctx.lineWidth = 4
-      ctx.strokeRect(outer, outer, width - outer * 2, height - outer * 2)
-      ctx.lineWidth = 1
-      ctx.strokeStyle = "rgba(198,161,90,0.45)"
-      ctx.strokeRect(outer + 16, outer + 16, width - (outer + 16) * 2, height - (outer + 16) * 2)
-
-      ctx.fillStyle = "#E9D39A"
-      ctx.font = '700 46px "Aref Ruqaa", "Amiri", serif'
-      ctx.fillText("مصحف سَميع", width / 2, 92)
-
-      ctx.fillStyle = "#FFFFFF"
-      ctx.font = '700 34px "Tajawal", Arial, sans-serif'
-      ctx.fillText(selectedBook.name_ar, width / 2, 145)
-
-      ctx.fillStyle = "rgba(255,255,255,0.8)"
-      ctx.font = '500 22px "Tajawal", Arial, sans-serif'
-      ctx.fillText(currentChapter?.name_ar || "مكتبة الأحاديث", width / 2, 190)
-
-      const badgeWidth = 300
-      const badgeHeight = 62
-      const badgeX = (width - badgeWidth) / 2
-      const badgeY = 225
-      const radius = 31
+      ctx.fillStyle = "rgba(214,183,110,0.15)"
       ctx.beginPath()
-      ctx.moveTo(badgeX + radius, badgeY)
-      ctx.arcTo(badgeX + badgeWidth, badgeY, badgeX + badgeWidth, badgeY + badgeHeight, radius)
-      ctx.arcTo(badgeX + badgeWidth, badgeY + badgeHeight, badgeX, badgeY + badgeHeight, radius)
-      ctx.arcTo(badgeX, badgeY + badgeHeight, badgeX, badgeY, radius)
-      ctx.arcTo(badgeX, badgeY, badgeX + badgeWidth, badgeY, radius)
-      ctx.closePath()
-      ctx.fillStyle = "#C6A15A"
+      ctx.arc(145, 90, 185, 0, Math.PI * 2)
       ctx.fill()
-      ctx.fillStyle = "#173B3F"
-      ctx.font = '700 24px "Tajawal", Arial, sans-serif'
-      ctx.fillText(`حديث ${arabicDigits(getHadithNumber(visibleHadith))}`, width / 2, badgeY + 40)
-
-      ctx.save()
-      ctx.shadowColor = "rgba(20,55,59,0.16)"
-      ctx.shadowBlur = 34
-      ctx.shadowOffsetY = 14
       ctx.beginPath()
-      ctx.roundRect(cardX, cardY, cardWidth, cardHeight, 38)
-      ctx.fillStyle = "rgba(255,255,255,0.88)"
+      ctx.arc(width - 125, 315, 120, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.strokeStyle = "#D6B76C"
+      ctx.lineWidth = 5
+      ctx.strokeRect(frame, frame, width - frame * 2, height - frame * 2)
+      ctx.strokeStyle = "rgba(214,183,108,0.4)"
+      ctx.lineWidth = 1.5
+      ctx.strokeRect(frame + 22, frame + 22, width - (frame + 22) * 2, height - (frame + 22) * 2)
+
+      ctx.fillStyle = "#EBD399"
+      ctx.font = '700 62px "Aref Ruqaa", "Amiri", serif'
+      ctx.fillText("مصحف سَميع", width / 2, 112)
+      ctx.fillStyle = "#FFFFFF"
+      ctx.font = '800 38px "Tajawal", Arial, sans-serif'
+      ctx.fillText("حديث نبوي", width / 2, 177)
+      ctx.fillStyle = "rgba(255,255,255,0.8)"
+      ctx.font = '600 27px "Tajawal", Arial, sans-serif'
+      ctx.fillText(selectedBook.name_ar, width / 2, 226)
+
+      if (chapterName) {
+        ctx.fillStyle = "rgba(255,255,255,0.62)"
+        ctx.font = '500 23px "Tajawal", Arial, sans-serif'
+        ctx.fillText(chapterName, width / 2, 266)
+      }
+
+      const badgeW = 370
+      const badgeH = 78
+      const badgeY = headerHeight - 98
+      roundedRect((width - badgeW) / 2, badgeY, badgeW, badgeH, 39)
+      ctx.fillStyle = "#D6B76C"
+      ctx.fill()
+      ctx.fillStyle = "#173B40"
+      ctx.font = '800 27px "Tajawal", Arial, sans-serif'
+      ctx.fillText(`حديث ${arabicDigits(getHadithNumber(visibleHadith))}`, width / 2, badgeY + 50)
+
+      const cardX = side
+      ctx.save()
+      ctx.shadowColor = "rgba(20,54,58,0.16)"
+      ctx.shadowBlur = 48
+      ctx.shadowOffsetY = 22
+      roundedRect(cardX, cardY, cardWidth, cardHeight, 46)
+      ctx.fillStyle = "rgba(255,255,255,0.96)"
       ctx.fill()
       ctx.restore()
 
-      ctx.beginPath()
-      ctx.roundRect(cardX, cardY, cardWidth, cardHeight, 38)
-      ctx.strokeStyle = "rgba(198,161,90,0.42)"
-      ctx.lineWidth = 2
+      roundedRect(cardX, cardY, cardWidth, cardHeight, 46)
+      ctx.strokeStyle = "rgba(193,151,75,0.42)"
+      ctx.lineWidth = 3
       ctx.stroke()
 
-      ctx.fillStyle = "#B5904C"
+      ctx.fillStyle = "rgba(188,146,75,0.16)"
+      ctx.font = '800 180px Georgia, serif'
+      ctx.fillText("“", cardX + 150, cardY + 200)
+      ctx.fillText("”", cardX + cardWidth - 145, cardY + cardHeight - 150)
+
+      ctx.fillStyle = "#B9904C"
       ctx.beginPath()
-      ctx.arc(width / 2, cardY + 55, 8, 0, Math.PI * 2)
+      ctx.arc(width / 2, cardY + 62, 10, 0, Math.PI * 2)
       ctx.fill()
 
-      ctx.fillStyle = "#1F3336"
-      ctx.font = '600 58px "Amiri Quran", "Amiri", serif'
-      let textY = cardY + 150 + Math.max(0, (cardHeight - 230 - textBlockHeight - narratorLine) / 2)
-      for (const currentLine of lines) {
-        ctx.fillText(currentLine, width / 2, textY)
+      ctx.fillStyle = "#26383A"
+      ctx.font = `600 ${fontSize}px "Amiri Quran", "Amiri", serif`
+      const textBlockHeight = lines.length * lineHeight
+      const available = cardHeight - cardTopPadding - cardBottomPadding
+      let textY = cardY + cardTopPadding + Math.max(0, (available - textBlockHeight) / 2) + fontSize
+      for (const line of lines) {
+        ctx.fillText(line, width / 2, textY)
         textY += lineHeight
       }
 
-      if (visibleHadith.english?.narrator) {
-        ctx.fillStyle = "#7A705F"
-        ctx.font = '600 22px "Tajawal", Arial, sans-serif'
-        ctx.fillText(`الراوي: ${visibleHadith.english.narrator}`, width / 2, cardY + cardHeight - 115)
-      }
-
-      const footerY = height - 112
-      const divider = ctx.createLinearGradient(220, 0, width - 220, 0)
-      divider.addColorStop(0, "rgba(181,144,76,0)")
-      divider.addColorStop(0.5, "#B5904C")
-      divider.addColorStop(1, "rgba(181,144,76,0)")
+      const infoY = cardY + cardHeight - cardBottomPadding + 54
+      const divider = ctx.createLinearGradient(320, 0, width - 320, 0)
+      divider.addColorStop(0, "rgba(189,149,80,0)")
+      divider.addColorStop(0.5, "#BE9650")
+      divider.addColorStop(1, "rgba(189,149,80,0)")
       ctx.strokeStyle = divider
       ctx.lineWidth = 2
       ctx.beginPath()
-      ctx.moveTo(220, footerY - 30)
-      ctx.lineTo(width - 220, footerY - 30)
+      ctx.moveTo(320, infoY)
+      ctx.lineTo(width - 320, infoY)
       ctx.stroke()
 
+      if (narrator) {
+        ctx.fillStyle = "#736A5B"
+        ctx.font = '600 24px "Tajawal", Arial, sans-serif'
+        ctx.fillText(`الراوي: ${narrator}`, width / 2, infoY + 55)
+      }
+
+      const footerY = height - 118
       ctx.fillStyle = "#174F56"
-      ctx.font = '700 24px "Tajawal", Arial, sans-serif'
-      ctx.fillText("مصحف سَميع • مكتبة الأحاديث", width / 2, footerY + 10)
-      ctx.fillStyle = "#8B816F"
+      ctx.font = '800 29px "Tajawal", Arial, sans-serif'
+      ctx.fillText("مصحف سَميع", width / 2, footerY)
+      ctx.fillStyle = "#877D6B"
       ctx.font = '500 18px "Tajawal", Arial, sans-serif'
-      ctx.fillText(`${selectedBook.name_ar} — حديث ${arabicDigits(getHadithNumber(visibleHadith))}`, width / 2, footerY + 48)
+      const footerMeta = [author, chapterName, `حديث ${arabicDigits(getHadithNumber(visibleHadith))}`].filter(Boolean).join("  •  ")
+      ctx.fillText(footerMeta || "مكتبة الأحاديث", width / 2, footerY + 40)
 
       const dataUrl = canvas.toDataURL("image/png", 1)
       setDesignUrl(dataUrl)
       setDesignFileName(`samee3-hadith-${selectedBook.id}-${getHadithNumber(visibleHadith)}.png`)
-    } catch (err) {
-      console.error("Hadith design error:", err)
+    } catch (error) {
+      console.error("Hadith design error:", error)
       setAudioError("تعذر إنشاء صورة الحديث على هذا الجهاز.")
     } finally {
       setDesignLoading(false)
@@ -959,6 +1067,28 @@ export default function HadithPage() {
   }, [currentChapter, selectedBook, visibleHadith])
 
   useEffect(() => () => stopHadithAudio(), [stopHadithAudio])
+
+  const downloadHadithImage = useCallback(async () => {
+    if (!designUrl) return
+    try {
+      const response = await fetch(designUrl)
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = objectUrl
+      link.download = designFileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+    } catch (error) {
+      console.error("Hadith image download error:", error)
+      const link = document.createElement("a")
+      link.href = designUrl
+      link.download = designFileName
+      link.click()
+    }
+  }, [designFileName, designUrl])
 
   const closeBook = useCallback(() => {
     stopHadithAudio()
@@ -1048,7 +1178,7 @@ export default function HadithPage() {
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                       {group.books.map((book) => {
-                        const audio = getHumanBookAudio(book.id)
+                        const audioSource = getHumanAudioSource(book.id)
                         return (
                           <article key={book.id} className="rounded-3xl border border-[#185860]/10 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-[#C6A15A]/40 hover:shadow-md">
                             <div className="flex items-start gap-3">
@@ -1062,13 +1192,18 @@ export default function HadithPage() {
                                   </div>
                                 </div>
                               </button>
-                              {audio?.tracks.length ? (
-                                <button onClick={() => playBookAudio(book)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#185860] text-white shadow-sm" title="تشغيل مصدر الكتاب" aria-label={`تشغيل مصدر ${book.name_ar}`}>
+                              {audioSource ? (
+                                <button onClick={async () => {
+                                  const catalog = await fetchAudioCatalog(book.id)
+                                  if (catalog?.tracks.length) {
+                                    await playAudioTarget({ kind: "book", label: book.name_ar, collection: catalog, tracks: catalog.tracks })
+                                  }
+                                }} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#185860] text-white shadow-sm" title="تشغيل مصدر الكتاب" aria-label={`تشغيل مصدر ${book.name_ar}`}>
                                   <Play size={18} fill="currentColor" />
                                 </button>
                               ) : null}
                             </div>
-                            {audio?.tracks.length ? <p className="mt-4 text-[11px] font-bold text-emerald-700">يتوفر مصدر صوتي بشري • {arabicDigits(audio.tracks.length)} مقطع/مقاطع</p> : <p className="mt-4 text-[11px] text-slate-400">لا يوجد مصدر صوتي بشري مضاف لهذا الكتاب حاليًا</p>}
+                            {audioSource ? <p className="mt-4 text-[11px] font-bold text-emerald-700">تسجيل بشري من المصدر الأصلي</p> : <p className="mt-4 text-[11px] text-slate-400">لا يوجد مصدر صوتي بشري موثق لهذا الكتاب حاليًا</p>}
                           </article>
                         )
                       })}
@@ -1085,7 +1220,7 @@ export default function HadithPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button onClick={closeBook} className="inline-flex items-center gap-2 rounded-xl bg-[#F7F3E9] px-3 py-2 text-sm font-black text-[#185860]"><ArrowRight size={18} /> كل الكتب</button>
                   {bookAudio?.tracks.length ? (
-                    <button onClick={() => playBookAudio(selectedBook)} className="inline-flex items-center gap-2 rounded-xl bg-[#185860] px-3 py-2 text-xs font-black text-white"><Play size={15} fill="currentColor" /> تشغيل المصدر الصوتي</button>
+                    <button onClick={() => playBookAudio(selectedBook)} className="flex h-10 w-10 items-center justify-center rounded-full bg-[#185860] text-white shadow-sm transition hover:scale-105" title="تشغيل المصدر الصوتي" aria-label="تشغيل المصدر الصوتي"><Play size={16} fill="currentColor" /></button>
                   ) : null}
                   {bookAudio?.sourceUrl ? (
                     <a href={bookAudio.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600"><ExternalLink size={15} /> المصدر</a>
@@ -1171,7 +1306,7 @@ export default function HadithPage() {
                       <h3 className="mt-1 text-lg font-black text-[#183F43]">{currentChapter?.name_ar || "—"}</h3>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      {chapterAudio?.tracks.length ? <button onClick={() => currentChapter && playChapterAudio(selectedBook, currentChapter)} className="inline-flex items-center gap-2 rounded-xl bg-[#185860] px-3 py-2 text-xs font-black text-white"><Play size={14} fill="currentColor" /> تشغيل الباب</button> : null}
+                      {chapterAudio?.tracks.length ? <button onClick={() => currentChapter && playChapterAudio(selectedBook, currentChapter)} className="flex h-10 w-10 items-center justify-center rounded-full bg-[#185860] text-white shadow-sm transition hover:scale-105" title="تشغيل صوت الباب" aria-label="تشغيل صوت الباب"><Play size={15} fill="currentColor" /></button> : null}
                       <span className="rounded-xl bg-[#F7F3E9] px-3 py-2 text-xs font-bold text-[#185860]">حديث {currentHadithIndex >= 0 ? arabicDigits(currentHadithIndex + 1) : "—"} من {arabicDigits(filteredHadiths.length)}</span>
                     </div>
                   </div>
@@ -1215,15 +1350,9 @@ export default function HadithPage() {
                       </div>
 
                       <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                        {hadithAudio ? (
-                          <button onClick={() => void toggleMainAudio()} disabled={audioLoading} className={`inline-flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-black disabled:opacity-50 ${isReadingAudio ? "bg-red-50 text-red-600" : "bg-[#185860] text-white"}`}>
+                        {hadithAudio || chapterAudio ? (
+                          <button onClick={() => void toggleMainAudio()} disabled={audioLoading} className={`flex h-11 w-11 items-center justify-center rounded-full shadow-sm disabled:opacity-50 ${isReadingAudio ? "bg-red-50 text-red-600 ring-1 ring-red-100" : "bg-[#185860] text-white"}`} title={isReadingAudio ? "إيقاف الصوت" : hadithAudio ? "استماع للحديث" : "استماع للباب"} aria-label={isReadingAudio ? "إيقاف الصوت" : hadithAudio ? "استماع للحديث" : "استماع للباب"}>
                             {audioLoading ? <Loader2 size={18} className="animate-spin" /> : isReadingAudio ? <Pause size={18} /> : <Play size={18} fill="currentColor" />}
-                            {isReadingAudio ? "إيقاف صوت الحديث" : "استماع للحديث"}
-                          </button>
-                        ) : chapterAudio ? (
-                          <button onClick={() => void toggleMainAudio()} disabled={audioLoading} className={`inline-flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-black disabled:opacity-50 ${isReadingAudio ? "bg-red-50 text-red-600" : "bg-[#185860] text-white"}`}>
-                            {audioLoading ? <Loader2 size={18} className="animate-spin" /> : isReadingAudio ? <Pause size={18} /> : <Play size={18} fill="currentColor" />}
-                            {isReadingAudio ? "إيقاف صوت الباب" : "استماع للباب"}
                           </button>
                         ) : null}
                         <button onClick={() => void copyHadith()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#F7F3E9] py-3 text-sm font-black text-[#185860]">{copied ? <Check size={18} /> : <Copy size={18} />}{copied ? "تم النسخ" : "نسخ"}</button>
@@ -1245,56 +1374,25 @@ export default function HadithPage() {
       </main>
 
       {audioTarget && (
-        <div className="pointer-events-none fixed bottom-4 left-4 z-[95] w-[calc(100vw-2rem)] max-w-[370px] sm:bottom-5 sm:left-5">
-          <div className="pointer-events-auto overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#112E32]/97 text-white shadow-2xl ring-1 ring-black/10 backdrop-blur-xl">
-            <div className="flex items-center gap-2 px-3 py-2.5">
-              <button
-                onClick={() => void toggleMiniAudioPlayback()}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#C6A15A] text-[#163C40] transition hover:scale-105"
-                title={isReadingAudio ? "إيقاف الصوت" : "تشغيل الصوت"}
-                aria-label={isReadingAudio ? "إيقاف الصوت" : "تشغيل الصوت"}
-              >
-                {isReadingAudio ? <Pause size={17} /> : <Play size={17} fill="currentColor" />}
-              </button>
-
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-black">{audioTarget.tracks[audioTrackIndex]?.title || audioTarget.label}</p>
-                <p className="mt-0.5 truncate text-[10px] text-white/50">{audioSourceLabel || audioTarget.collection?.label || "تسجيل بشري"}</p>
-              </div>
-
-              {audioTarget.tracks.length > 1 ? (
-                <>
-                  <button onClick={previousAudioTrack} className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 sm:flex" title="المقطع السابق" aria-label="المقطع السابق"><SkipBack size={14} /></button>
-                  <button onClick={nextAudioTrack} className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 sm:flex" title="المقطع التالي" aria-label="المقطع التالي"><SkipForward size={14} /></button>
-                </>
-              ) : null}
-
-              <button onClick={stopHadithAudio} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 hover:text-white" title="إغلاق المشغل" aria-label="إغلاق المشغل"><X size={15} /></button>
-            </div>
-
-            <div className="px-3 pb-2.5">
-              <div className="h-1 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-[#C6A15A]"
-                  style={{ width: displayDuration > 0 ? `${Math.min(100, (currentTime / displayDuration) * 100)}%` : "0%" }}
-                />
-              </div>
-              <div className="mt-1 flex items-center justify-between text-[9px] font-medium text-white/45">
-                <span>{formatTime(currentTime)}</span>
-                <span>{displayDuration ? formatTime(displayDuration) : "--:--"}</span>
-              </div>
-            </div>
-          </div>
+        <div className="fixed bottom-5 left-5 z-[95] sm:bottom-6 sm:left-6">
+          <button
+            onClick={() => void toggleMiniAudioPlayback()}
+            disabled={audioLoading}
+            aria-label={isReadingAudio ? "إيقاف الصوت" : "تشغيل الصوت"}
+            title={isReadingAudio ? "إيقاف الصوت" : "تشغيل الصوت"}
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-[#123F45] text-white shadow-[0_12px_30px_rgba(18,63,69,0.26)] transition hover:scale-105 hover:bg-[#174F56] active:scale-95 disabled:opacity-65"
+          >
+            {audioLoading ? <Loader2 size={20} className="animate-spin" /> : isReadingAudio ? <Pause size={20} /> : <Play size={20} fill="currentColor" />}
+          </button>
         </div>
       )}
-
       {designUrl && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm" onClick={() => setDesignUrl(null)}>
           <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] bg-[#F7F3E9] shadow-2xl" onClick={(e: any) => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white p-4">
               <div><p className="font-black text-[#183F43]">صورة الحديث</p><p className="mt-1 text-xs text-slate-400">الصورة كاملة وبجودة عالية ويمكن تحميلها مباشرة.</p></div>
               <div className="flex items-center gap-2">
-                <a href={designUrl} download={designFileName} className="inline-flex items-center gap-2 rounded-xl bg-[#185860] px-4 py-3 text-xs font-black text-white"><Download size={16} /> تحميل الصورة</a>
+                <button onClick={() => void downloadHadithImage()} className="inline-flex items-center gap-2 rounded-xl bg-[#185860] px-4 py-3 text-xs font-black text-white"><Download size={16} /> تحميل الصورة</button>
                 <button onClick={() => setDesignUrl(null)} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500"><X size={18} /></button>
               </div>
             </div>
