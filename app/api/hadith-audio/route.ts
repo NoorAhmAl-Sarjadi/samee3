@@ -1,192 +1,132 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { HUMAN_AUDIO_SOURCES } from '@/lib/hadith-human-audio'
 
-type Track = {
-  id: string
-  title: string
-  url: string
-  label: string
-  sourceUrl: string
-  isIntroduction?: boolean
-}
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
-function cleanText(value: string) {
-  return value
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&#39;/gi, "'")
-    .replace(/&#x27;/gi, "'")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#34;/gi, '"')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+/**
+ * مصادر الصوت المسموح بها داخل البروكسي.
+ * لا يسمح المسار بتمرير روابط عشوائية لتقليل مخاطر SSRF.
+ */
+const ALLOWED_HOSTS = new Set([
+  'd1.islamhouse.com',
+  'archive.org',
+  'www.archive.org',
+  'server03.quran-uni.com',
+])
 
-function decodeHtml(value: string) {
-  return value
-    .replace(/&amp;/gi, '&')
-    .replace(/&#x27;/gi, "'")
-    .replace(/&#39;/gi, "'")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#34;/gi, '"')
-    .replace(/&nbsp;/gi, ' ')
-}
-
-function resolveUrl(value: string, baseUrl: string) {
-  const decoded = decodeHtml(value.trim())
-  if (!decoded) return ''
+function isAllowedAudioUrl(value: string) {
   try {
-    return new URL(decoded, baseUrl).toString()
-  } catch {
-    return ''
-  }
-}
+    const url = new URL(value)
 
-function normalize(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[ًٌٍَُِّْـ]/g, '')
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/ى/g, 'ي')
-    .replace(/[^A-Za-z0-9\u0600-\u06FF]+/g, ' ')
-    .trim()
-}
+    if (url.protocol !== 'https:') return false
 
-function extensionIsAudio(url: string) {
-  try {
-    const pathname = new URL(url).pathname
-    return /\.(mp3|m4a|aac|ogg|oga|wav|webm)$/i.test(pathname)
+    return (
+      ALLOWED_HOSTS.has(url.hostname) ||
+      /^ia\d+\.us\.archive\.org$/i.test(url.hostname)
+    )
   } catch {
     return false
   }
 }
 
-function inferOrganization(titles: string[]): 'attachments' | 'books' | 'chapters' {
-  const normalized = titles.map(normalize)
-  if (normalized.some((x) => x.startsWith('كتاب ') || x.startsWith('مقدمه ') || x.startsWith('المقدمه ') || x.startsWith('ابواب '))) {
-    return 'books'
-  }
-  if (normalized.some((x) => x.includes('باب '))) return 'chapters'
-  return 'attachments'
+function copyHeader(source: Headers, target: Headers, name: string) {
+  const value = source.get(name)
+  if (value) target.set(name, value)
 }
 
-function fallbackTitle(url: string, index: number) {
-  try {
-    const parsed = new URL(url)
-    const filename = decodeURIComponent(parsed.pathname.split('/').pop() || '')
-    return filename.replace(/\.(mp3|m4a|aac|ogg|oga|wav|webm)$/i, '').replace(/[_-]+/g, ' ') || `تسجيل ${index + 1}`
-  } catch {
-    return `تسجيل ${index + 1}`
-  }
-}
-
-function pushTrack(tracks: Track[], seen: Set<string>, url: string, title: string, sourceUrl: string) {
-  if (!url || !extensionIsAudio(url) || seen.has(url)) return
-
-  const cleanTitle = cleanText(title) || fallbackTitle(url, tracks.length)
-  seen.add(url)
-  tracks.push({
-    id: `source:${tracks.length + 1}`,
-    title: cleanTitle,
-    url,
-    label: 'تسجيل بشري من المصدر الأصلي',
-    sourceUrl,
-    isIntroduction: /مقدم/i.test(cleanTitle),
-  })
-}
-
-function parseAudioSources(html: string, sourceUrl: string): Track[] {
-  const tracks: Track[] = []
-  const seen = new Set<string>()
-
-  // روابط MP3/M4A وغيرها داخل <a href="...">.
-  const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
-  let anchorMatch: RegExpExecArray | null
-  while ((anchorMatch = anchorRe.exec(html)) !== null) {
-    const url = resolveUrl(anchorMatch[1], sourceUrl)
-    if (!extensionIsAudio(url)) continue
-    pushTrack(tracks, seen, url, anchorMatch[2], sourceUrl)
-  }
-
-  // مصادر الصوت داخل <audio src>, <source src>, والخصائص المؤجلة مثل data-src.
-  const mediaRe = /<(?:audio|source)\b[^>]*?(?:src|data-src|data-audio|data-url)=["']([^"']+)["'][^>]*>/gi
-  let mediaMatch: RegExpExecArray | null
-  while ((mediaMatch = mediaRe.exec(html)) !== null) {
-    const url = resolveUrl(mediaMatch[1], sourceUrl)
-    if (!extensionIsAudio(url)) continue
-
-    const index = mediaMatch.index || 0
-    const before = html.slice(Math.max(0, index - 900), index)
-    const after = html.slice(index, Math.min(html.length, index + 900))
-    const nearby = `${before} ${after}`
-    const textMatch = nearby.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<span[^>]*>([\s\S]*?)<\/span>|<p[^>]*>([\s\S]*?)<\/p>/i)
-    const title = textMatch ? (textMatch[1] || textMatch[2] || textMatch[3] || '') : ''
-    pushTrack(tracks, seen, url, title, sourceUrl)
-  }
-
-  return tracks
-}
-
-export async function GET(request: NextRequest) {
-  const bookId = request.nextUrl.searchParams.get('book') || ''
-  const source = HUMAN_AUDIO_SOURCES[bookId]
+async function handleAudio(request: NextRequest) {
+  const source = request.nextUrl.searchParams.get('url')?.trim() || ''
 
   if (!source) {
     return NextResponse.json(
-      { tracks: [], error: 'لا يوجد مصدر صوتي موثق لهذا الكتاب.' },
-      { status: 404 },
+      { error: 'رابط الصوت مطلوب.' },
+      { status: 400 },
     )
   }
 
+  if (!isAllowedAudioUrl(source)) {
+    return NextResponse.json(
+      { error: 'مصدر الصوت غير مسموح به داخل البروكسي.' },
+      { status: 400 },
+    )
+  }
+
+  const sourceUrl = new URL(source)
+  const upstreamHeaders = new Headers({
+    Accept: 'audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/webm,audio/*;q=0.9,*/*;q=0.5',
+    'Accept-Encoding': 'identity',
+    'User-Agent': 'SAMEE3/1.0 audio proxy',
+  })
+
+  if (sourceUrl.hostname.endsWith('islamhouse.com')) {
+    upstreamHeaders.set('Referer', 'https://islamhouse.com/')
+    upstreamHeaders.set('Origin', 'https://islamhouse.com')
+  }
+
+  const range = request.headers.get('range')
+  if (range) upstreamHeaders.set('Range', range)
+
   try {
-    const response = await fetch(source.sourceUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; SAMEE3/1.0; +https://samee3.vercel.app)',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'ar,en;q=0.8',
-      },
-      cache: 'no-store',
+    const upstream = await fetch(sourceUrl, {
+      method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+      headers: upstreamHeaders,
       redirect: 'follow',
+      cache: 'no-store',
     })
 
-    const html = await response.text()
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-
-    const tracks = parseAudioSources(html, source.sourceUrl)
-    const organization = inferOrganization(tracks.map((item) => item.title))
-
-    return NextResponse.json(
-      {
-        bookId,
-        label: source.label,
-        sourceUrl: source.sourceUrl,
-        kind: 'book',
-        organization,
-        tracks,
-      },
-      {
-        headers: {
-          'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=604800',
+    if (!upstream.ok && upstream.status !== 206) {
+      return NextResponse.json(
+        {
+          error: 'تعذر جلب الملف الصوتي من المصدر.',
+          status: upstream.status,
         },
-      },
-    )
+        { status: upstream.status >= 400 ? upstream.status : 502 },
+      )
+    }
+
+    const responseHeaders = new Headers()
+    copyHeader(upstream.headers, responseHeaders, 'Content-Type')
+    copyHeader(upstream.headers, responseHeaders, 'Content-Length')
+    copyHeader(upstream.headers, responseHeaders, 'Content-Range')
+    copyHeader(upstream.headers, responseHeaders, 'Accept-Ranges')
+    copyHeader(upstream.headers, responseHeaders, 'Content-Disposition')
+    copyHeader(upstream.headers, responseHeaders, 'ETag')
+    copyHeader(upstream.headers, responseHeaders, 'Last-Modified')
+
+    if (!responseHeaders.has('Content-Type')) {
+      responseHeaders.set('Content-Type', 'audio/mpeg')
+    }
+
+    responseHeaders.set('Cache-Control', 'public, max-age=3600, s-maxage=3600')
+    responseHeaders.set('Access-Control-Allow-Origin', '*')
+    responseHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin')
+
+    if (request.method === 'HEAD') {
+      return new NextResponse(null, {
+        status: upstream.status,
+        headers: responseHeaders,
+      })
+    }
+
+    return new NextResponse(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    })
   } catch (error) {
-    console.error('Hadith audio catalog error:', error)
+    console.error('SAMEE3 audio proxy error:', error)
+
     return NextResponse.json(
-      {
-        bookId,
-        label: source.label,
-        sourceUrl: source.sourceUrl,
-        kind: 'book',
-        organization: 'attachments',
-        tracks: [],
-        error: 'تعذر تحميل فهرس التسجيلات من المصدر الآن.',
-      },
+      { error: 'حدث خطأ أثناء الاتصال بمصدر الصوت.' },
       { status: 502 },
     )
   }
+}
+
+export async function GET(request: NextRequest) {
+  return handleAudio(request)
+}
+
+export async function HEAD(request: NextRequest) {
+  return handleAudio(request)
 }
