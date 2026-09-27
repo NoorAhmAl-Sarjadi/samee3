@@ -1,328 +1,167 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { HUMAN_BOOK_AUDIO } from '@/lib/hadith-human-audio'
+export type HumanHadithAudio = {
+  url: string
+  label?: string
+  startSeconds?: number
+  endSeconds?: number
+  sourceUrl?: string
+}
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
-
-type Track = {
+export type HumanAudioTrack = HumanHadithAudio & {
   id: string
   title: string
-  url: string
+}
+
+export type HumanAudioCollection = {
+  kind: 'book' | 'chapter'
   label: string
+  sourceUrl?: string
+  tracks: HumanAudioTrack[]
+}
+
+function numberedTracks(options: {
+  baseUrl: string
+  count: number
+  start?: number
+  digits?: number
+  titlePrefix: string
   sourceUrl: string
-  isIntroduction?: boolean
-}
+  idPrefix: string
+}): HumanAudioTrack[] {
+  const start = options.start ?? 1
+  const digits = options.digits ?? 2
 
-function cleanText(value: string) {
-  return value
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&#39;/gi, "'")
-    .replace(/&#x27;/gi, "'")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#34;/gi, '"')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+  return Array.from({ length: options.count }, (_, index) => {
+    const number = start + index
+    const padded = String(number).padStart(digits, '0')
 
-function decodeHtml(value: string) {
-  return value
-    .replace(/&amp;/gi, '&')
-    .replace(/&#x27;/gi, "'")
-    .replace(/&#39;/gi, "'")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#34;/gi, '"')
-    .replace(/&nbsp;/gi, ' ')
-}
-
-function resolveUrl(value: string, baseUrl: string) {
-  const decoded = decodeHtml(value.trim())
-  if (!decoded) return ''
-
-  try {
-    return new URL(decoded, baseUrl).toString()
-  } catch {
-    return ''
-  }
-}
-
-function normalize(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[ًٌٍَُِّْـ]/g, '')
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/ى/g, 'ي')
-    .replace(/[^A-Za-z0-9\u0600-\u06FF]+/g, ' ')
-    .trim()
-}
-
-function extensionIsAudio(url: string) {
-  try {
-    const pathname = new URL(url).pathname
-    return /\.(mp3|m4a|aac|ogg|oga|wav|webm)$/i.test(pathname)
-  } catch {
-    return false
-  }
-}
-
-function inferOrganization(
-  titles: string[],
-): 'attachments' | 'books' | 'chapters' {
-  const normalized = titles.map(normalize)
-
-  if (
-    normalized.some(
-      (title) =>
-        title.startsWith('كتاب ') ||
-        title.startsWith('مقدمه ') ||
-        title.startsWith('المقدمه ') ||
-        title.startsWith('ابواب '),
-    )
-  ) {
-    return 'books'
-  }
-
-  if (normalized.some((title) => title.includes('باب '))) {
-    return 'chapters'
-  }
-
-  return 'attachments'
-}
-
-function fallbackTitle(url: string, index: number) {
-  try {
-    const parsed = new URL(url)
-    const filename = decodeURIComponent(
-      parsed.pathname.split('/').pop() || '',
-    )
-
-    return (
-      filename
-        .replace(/\.(mp3|m4a|aac|ogg|oga|wav|webm)$/i, '')
-        .replace(/[_-]+/g, ' ')
-        .trim() || `تسجيل ${index + 1}`
-    )
-  } catch {
-    return `تسجيل ${index + 1}`
-  }
-}
-
-function pushTrack(
-  tracks: Track[],
-  seen: Set<string>,
-  url: string,
-  title: string,
-  sourceUrl: string,
-  label = 'تسجيل بشري من المصدر الأصلي',
-) {
-  if (!url || !extensionIsAudio(url) || seen.has(url)) return
-
-  const cleanTitle = cleanText(title) || fallbackTitle(url, tracks.length)
-
-  seen.add(url)
-  tracks.push({
-    id: `source:${tracks.length + 1}`,
-    title: cleanTitle,
-    url,
-    label,
-    sourceUrl,
-    isIntroduction: /مقدم|مقدمة|مقدمه|intro/i.test(cleanTitle),
+    return {
+      id: `${options.idPrefix}:${number}`,
+      title: `${options.titlePrefix} ${number}`,
+      url: `${options.baseUrl}${padded}.mp3`,
+      label: 'تسجيل بشري مجاني من المصدر',
+      sourceUrl: options.sourceUrl,
+    }
   })
 }
 
-function tracksFromLocalManifest(source: {
-  label: string
-  sourceUrl?: string
-  tracks: Array<{
-    id: string
-    title: string
-    url: string
-    label?: string
-    sourceUrl?: string
-  }>
-}) {
-  const tracks: Track[] = []
-  const seen = new Set<string>()
-
-  for (const item of source.tracks || []) {
-    const url = item.url?.trim() || ''
-    if (!url || !extensionIsAudio(url)) continue
-
-    pushTrack(
-      tracks,
-      seen,
-      url,
-      item.title,
-      item.sourceUrl || source.sourceUrl || '',
-      item.label || 'تسجيل بشري مجاني من المصدر',
-    )
-  }
-
-  return tracks
+export const HUMAN_HADITH_AUDIO: Record<string, HumanHadithAudio> = {
+  'bukhari:1': {
+    url: 'https://ia801308.us.archive.org/3/items/Sahih-Al-Bukhari-Audio/01.mp3',
+    startSeconds: 15,
+    endSeconds: 125,
+    label: 'تسجيل بشري - صحيح البخاري - حديث ١',
+    sourceUrl: 'https://archive.org/details/Sahih-Al-Bukhari-Audio',
+  },
+  'bukhari:2': {
+    url: 'https://ia801308.us.archive.org/3/items/Sahih-Al-Bukhari-Audio/01.mp3',
+    startSeconds: 126,
+    endSeconds: 198,
+    label: 'تسجيل بشري - صحيح البخاري - حديث ٢',
+    sourceUrl: 'https://archive.org/details/Sahih-Al-Bukhari-Audio',
+  },
 }
 
-function parseAudioSources(html: string, sourceUrl: string): Track[] {
-  const tracks: Track[] = []
-  const seen = new Set<string>()
-
-  const anchorRe =
-    /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
-
-  let anchorMatch: RegExpExecArray | null
-
-  while ((anchorMatch = anchorRe.exec(html)) !== null) {
-    const url = resolveUrl(anchorMatch[1], sourceUrl)
-    if (!extensionIsAudio(url)) continue
-    pushTrack(tracks, seen, url, anchorMatch[2], sourceUrl)
-  }
-
-  const mediaRe =
-    /<(?:audio|source)\b[^>]*?(?:src|data-src|data-audio|data-url)=["']([^"']+)["'][^>]*>/gi
-
-  let mediaMatch: RegExpExecArray | null
-
-  while ((mediaMatch = mediaRe.exec(html)) !== null) {
-    const url = resolveUrl(mediaMatch[1], sourceUrl)
-    if (!extensionIsAudio(url)) continue
-
-    const index = mediaMatch.index || 0
-    const before = html.slice(Math.max(0, index - 900), index)
-    const after = html.slice(index, Math.min(html.length, index + 900))
-    const nearby = `${before} ${after}`
-
-    const textMatch = nearby.match(
-      /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<span[^>]*>([\s\S]*?)<\/span>|<p[^>]*>([\s\S]*?)<\/p>/i,
-    )
-
-    const title = textMatch
-      ? textMatch[1] || textMatch[2] || textMatch[3] || ''
-      : ''
-
-    pushTrack(tracks, seen, url, title, sourceUrl)
-  }
-
-  return tracks
+export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
+  muslim: {
+    kind: 'book',
+    label: 'قراءة صوتية لصحيح مسلم',
+    sourceUrl: 'https://islamhouse.com/ar/audios/412882/',
+    tracks: numberedTracks({
+      baseUrl:
+        'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Moslem_Reading/ar_Moslem_Reading_',
+      count: 55,
+      digits: 2,
+      titlePrefix: 'ملف صحيح مسلم',
+      sourceUrl: 'https://islamhouse.com/ar/audios/412882/',
+      idPrefix: 'muslim',
+    }),
+  },
+  tirmidhi: {
+    kind: 'book',
+    label: 'قراءة صوتية لسنن الترمذي',
+    sourceUrl: 'https://islamhouse.com/ar/audios/426239/',
+    tracks: numberedTracks({
+      baseUrl:
+        'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Sonan_Termethe_A_B/ar_Sonan_Termethe_A_B_',
+      count: 63,
+      digits: 2,
+      titlePrefix: 'ملف سنن الترمذي',
+      sourceUrl: 'https://islamhouse.com/ar/audios/426239/',
+      idPrefix: 'tirmidhi',
+    }),
+  },
+  nasai: {
+    kind: 'book',
+    label: 'قراءة صوتية لسنن النسائي',
+    sourceUrl: 'https://islamhouse.com/ar/audios/427350/',
+    tracks: numberedTracks({
+      baseUrl:
+        'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Sonan_Nasa2ee_A_B/ar_Sonan_Nasa2ee_A_B_',
+      count: 50,
+      digits: 2,
+      titlePrefix: 'ملف سنن النسائي',
+      sourceUrl: 'https://islamhouse.com/ar/audios/427350/',
+      idPrefix: 'nasai',
+    }),
+  },
+  riyad_assalihin: {
+    kind: 'book',
+    label: 'قراءة صوتية لرياض الصالحين',
+    sourceUrl: 'https://islamhouse.com/ar/audios/206354/',
+    tracks: numberedTracks({
+      baseUrl:
+        'https://d1.islamhouse.com/data/ar/ih_sounds/chain/ar_Riad_Assal7een_Reeding/ar_Riad_Assal7een_Reeding_',
+      count: 108,
+      start: 0,
+      digits: 3,
+      titlePrefix: 'ملف رياض الصالحين',
+      sourceUrl: 'https://islamhouse.com/ar/audios/206354/',
+      idPrefix: 'riyad_assalihin',
+    }),
+  },
 }
 
-export async function GET(request: NextRequest) {
-  const bookId = request.nextUrl.searchParams.get('book')?.trim() || ''
+export const HUMAN_CHAPTER_AUDIO: Record<string, HumanAudioCollection> = {}
 
-  if (!bookId) {
-    return NextResponse.json(
-      { tracks: [], error: 'يجب تحديد معرف الكتاب.' },
-      { status: 400 },
-    )
+export function getHumanHadithAudio(
+  bookId: string,
+  hadithId: number | string,
+): HumanHadithAudio | null {
+  if (!bookId || hadithId === undefined || hadithId === null) {
+    return null
   }
 
-  const source = HUMAN_BOOK_AUDIO[bookId]
+  return HUMAN_HADITH_AUDIO[`${bookId}:${hadithId}`] || null
+}
 
-  if (!source) {
-    return NextResponse.json(
-      {
-        bookId,
-        tracks: [],
-        error: 'لا يوجد مصدر صوتي بشري موثق لهذا الكتاب حاليًا.',
-      },
-      { status: 404 },
-    )
+export function getHumanBookAudio(
+  bookId: string,
+): HumanAudioCollection | null {
+  if (!bookId) return null
+
+  return HUMAN_BOOK_AUDIO[bookId] || null
+}
+
+export function getHumanChapterAudio(
+  bookId: string,
+  chapterId: number | string,
+  chapterName?: string,
+): HumanAudioCollection | null {
+  if (!bookId || chapterId === undefined || chapterId === null) {
+    return null
   }
 
-  const sourceUrl = source.sourceUrl || ''
-  const localTracks = tracksFromLocalManifest(source)
+  const byId = HUMAN_CHAPTER_AUDIO[`${bookId}:chapter:${chapterId}`]
 
-  if (localTracks.length > 0) {
-    return NextResponse.json(
-      {
-        bookId,
-        label: source.label,
-        sourceUrl,
-        kind: source.kind,
-        organization: source.kind === 'chapter' ? 'chapters' : 'books',
-        tracks: localTracks,
-      },
-      {
-        headers: {
-          'Cache-Control':
-            'public, s-maxage=86400, stale-while-revalidate=604800',
-        },
-      },
-    )
+  if (byId) {
+    return byId
   }
 
-  if (!sourceUrl) {
-    return NextResponse.json(
-      {
-        bookId,
-        label: source.label,
-        sourceUrl: '',
-        kind: source.kind,
-        organization: 'attachments',
-        tracks: [],
-        error: 'مصدر الصوت لا يحتوي على صفحة مصدر صالحة.',
-      },
-      { status: 404 },
-    )
+  const normalizedName = String(chapterName || '').trim().toLowerCase()
+
+  if (!normalizedName) {
+    return null
   }
 
-  try {
-    const response = await fetch(sourceUrl, {
-      method: 'GET',
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; SAMEE3/1.0; +https://samee3.vercel.app)',
-        Accept:
-          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'ar,en;q=0.8',
-      },
-      cache: 'no-store',
-      redirect: 'follow',
-    })
-
-    const html = await response.text()
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-
-    const tracks = parseAudioSources(html, sourceUrl)
-    const organization = inferOrganization(
-      tracks.map((item) => item.title),
-    )
-
-    return NextResponse.json(
-      {
-        bookId,
-        label: source.label,
-        sourceUrl,
-        kind: source.kind,
-        organization,
-        tracks,
-      },
-      {
-        headers: {
-          'Cache-Control':
-            'public, s-maxage=86400, stale-while-revalidate=604800',
-        },
-      },
-    )
-  } catch (error) {
-    console.error('Hadith audio catalog error:', error)
-
-    return NextResponse.json(
-      {
-        bookId,
-        label: source.label,
-        sourceUrl,
-        kind: source.kind,
-        organization: 'attachments',
-        tracks: [],
-        error: 'تعذر تحميل فهرس التسجيلات من المصدر الآن.',
-      },
-      { status: 502 },
-    )
-  }
+  return HUMAN_CHAPTER_AUDIO[`${bookId}:name:${normalizedName}`] || null
 }
