@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, MouseEvent } from 'react'
 import Link from 'next/link'
 import {
   getHumanBookAudio,
@@ -302,11 +303,11 @@ export default function HadithPage() {
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState('')
   const [audioRate, setAudioRate] = useState(1)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [displayDuration, setDisplayDuration] = useState(0)
   const [audioSourceLabel, setAudioSourceLabel] = useState('')
   const [audioTarget, setAudioTarget] = useState<AudioTarget | null>(null)
   const [audioTrackIndex, setAudioTrackIndex] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [displayDuration, setDisplayDuration] = useState(0)
   const [designUrl, setDesignUrl] = useState<string | null>(null)
   const [designLoading, setDesignLoading] = useState(false)
   const [resumeState, setResumeState] = useState<ResumeState | null>(null)
@@ -542,6 +543,19 @@ export default function HadithPage() {
     )
   }, [hadithSearch, hadiths])
 
+  const currentChapter = useMemo<HadithChapter | null>(
+    () => chapters.find((chapter) => String(chapter.id) === String(selectedChapterId)) || null,
+    [chapters, selectedChapterId]
+  )
+
+  // Position of the currently opened hadith inside the loaded chapter.
+  // Kept as a derived value so Previous/Next always follow the actual loaded list.
+  const currentHadithIndex = useMemo(() => {
+    if (!selectedHadith) return -1
+    const number = selectedHadith.idInBook || selectedHadith.id
+    return hadiths.findIndex((hadith) => (hadith.idInBook || hadith.id) === number)
+  }, [hadiths, selectedHadith])
+
   const audioTrackIndexRef = useRef(0)
   const audioQueueRef = useRef<HumanAudioTrack[]>([])
 
@@ -569,8 +583,6 @@ export default function HadithPage() {
     setIsReadingAudio(false)
     setAudioLoading(false)
     setAudioSourceLabel('')
-    setCurrentTime(0)
-    setDisplayDuration(0)
   }, [])
 
   const clearCurrentAudioElement = useCallback(() => {
@@ -1255,7 +1267,7 @@ export default function HadithPage() {
                 <Search size={20} className="text-mushaf-teal shrink-0" />
                 <input
                   value={bookSearch}
-                  onChange={(event) => setBookSearch(event.target.value)}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setBookSearch(event.target.value)}
                   placeholder="ابحث عن كتاب حديث..."
                   className="w-full outline-none bg-transparent text-sm font-bold text-mushaf-dark placeholder:text-gray-400"
                 />
@@ -1328,7 +1340,7 @@ export default function HadithPage() {
 
                               {getBookAudio(book.id)?.tracks.length ? (
                                 <button
-                                  onClick={(event) => {
+                                  onClick={(event: MouseEvent<HTMLButtonElement>) => {
                                     event.stopPropagation()
                                     void playBookAudio(book)
                                   }}
@@ -1397,7 +1409,7 @@ export default function HadithPage() {
                   <Search size={16} className="text-mushaf-teal shrink-0" />
                   <input
                     value={chapterSearch}
-                    onChange={(event) => setChapterSearch(event.target.value)}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setChapterSearch(event.target.value)}
                     placeholder="ابحث في الأبواب..."
                     className="w-full bg-transparent outline-none text-xs font-bold text-mushaf-dark placeholder:text-gray-400"
                   />
@@ -1448,7 +1460,7 @@ export default function HadithPage() {
 
                             {getHumanChapterAudio(selectedBook.id, chapter.id, chapter.name_ar)?.tracks.length ? (
                               <button
-                                onClick={(event) => {
+                                onClick={(event: MouseEvent<HTMLButtonElement>) => {
                                   event.stopPropagation()
                                   void playChapterAudio(selectedBook, chapter)
                                 }}
@@ -1499,7 +1511,7 @@ export default function HadithPage() {
                     <Search size={19} className="text-mushaf-teal shrink-0" />
                     <input
                       value={hadithSearch}
-                      onChange={(event) => setHadithSearch(event.target.value)}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setHadithSearch(event.target.value)}
                       placeholder="ابحث في أحاديث الباب أو برقم الحديث..."
                       className="w-full outline-none bg-transparent text-sm font-bold text-mushaf-dark placeholder:text-gray-400"
                     />
@@ -1609,7 +1621,7 @@ export default function HadithPage() {
         >
           <div
             className="bg-white w-full max-w-3xl max-h-[90vh] rounded-[2rem] shadow-2xl border border-mushaf-gold/20 flex flex-col overflow-hidden"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
           >
             <div className="p-5 border-b border-gray-100 flex items-center justify-between gap-3">
               <div>
@@ -1696,21 +1708,6 @@ export default function HadithPage() {
                 </div>
               )}
 
-              {audioTarget && displayDuration > 0 && (
-                <div className="mb-4 rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
-                  <div className="flex items-center justify-between gap-3 text-[11px] font-bold text-slate-500 mb-2">
-                    <span>{formatTime(currentTime)}</span>
-                    <span>{formatTime(displayDuration)}</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-mushaf-teal to-mushaf-gold transition-[width] duration-100"
-                      style={{ width: `${Math.min(100, Math.max(0, (currentTime / displayDuration) * 100))}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
               <div className="flex items-center gap-2 mb-3">
                 <button
                   disabled={currentHadithIndex <= 0}
@@ -1754,7 +1751,7 @@ export default function HadithPage() {
 
                 <select
                   value={audioRate}
-                  onChange={(event) => {
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => {
                     stopHadithAudio()
                     setAudioRate(Number(event.target.value))
                   }}
@@ -1827,7 +1824,7 @@ export default function HadithPage() {
         >
           <div
             className="bg-white rounded-[2rem] p-3 shadow-2xl w-full max-w-xl max-h-[92vh] overflow-auto"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-3 px-2 py-2">
               <div>
