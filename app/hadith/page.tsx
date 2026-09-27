@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { getHumanHadithAudio } from '@/lib/hadith-human-audio'
+import {
+  getHumanBookAudio,
+  getHumanChapterAudio,
+  getHumanHadithAudio,
+  type HumanAudioCollection,
+  type HumanAudioTrack,
+} from '@/lib/hadith-human-audio'
 import {
   ArrowRight,
   BookOpen,
@@ -58,6 +64,15 @@ type ResumeState = {
   chapterId: string | number
   hadithId: number
   savedAt: number
+}
+
+type AudioTargetKind = 'book' | 'chapter' | 'hadith'
+
+type AudioTarget = {
+  kind: AudioTargetKind
+  label: string
+  collection?: HumanAudioCollection
+  tracks: HumanAudioTrack[]
 }
 
 const API_BASE = '/api/hadith'
@@ -288,6 +303,8 @@ export default function HadithPage() {
   const [audioError, setAudioError] = useState('')
   const [audioRate, setAudioRate] = useState(1)
   const [audioSourceLabel, setAudioSourceLabel] = useState('')
+  const [audioTarget, setAudioTarget] = useState<AudioTarget | null>(null)
+  const [audioTrackIndex, setAudioTrackIndex] = useState(0)
   const [designUrl, setDesignUrl] = useState<string | null>(null)
   const [designLoading, setDesignLoading] = useState(false)
   const [resumeState, setResumeState] = useState<ResumeState | null>(null)
@@ -522,6 +539,9 @@ export default function HadithPage() {
     )
   }, [hadithSearch, hadiths])
 
+  const audioTrackIndexRef = useRef(0)
+  const audioQueueRef = useRef<HumanAudioTrack[]>([])
+
   const stopHadithAudio = useCallback(() => {
     const audio = audioRef.current
     if (audio) {
@@ -530,6 +550,7 @@ export default function HadithPage() {
       audio.onended = null
       audio.onerror = null
       audio.ontimeupdate = null
+      audio.onloadedmetadata = null
     }
 
     if (audioObjectUrlRef.current) {
@@ -538,220 +559,256 @@ export default function HadithPage() {
     }
 
     audioRef.current = null
+    audioQueueRef.current = []
+    audioTrackIndexRef.current = 0
+    setAudioTrackIndex(0)
+    setAudioTarget(null)
     setIsReadingAudio(false)
     setAudioLoading(false)
     setAudioSourceLabel('')
   }, [])
 
-  const currentChapter = useMemo(
-    () => chapters.find((chapter) => String(chapter.id) === String(selectedChapterId)),
-    [chapters, selectedChapterId]
-  )
+  const clearCurrentAudioElement = useCallback(() => {
+    const audio = audioRef.current
+    if (audio) {
+      audio.pause()
+      audio.onended = null
+      audio.onerror = null
+      audio.ontimeupdate = null
+      audio.onloadedmetadata = null
+    }
 
-  const currentHadithIndex = useMemo(() => {
-    if (!selectedHadith) return -1
-    const number = selectedHadith.idInBook || selectedHadith.id
-    return hadiths.findIndex((hadith) => (hadith.idInBook || hadith.id) === number)
-  }, [hadiths, selectedHadith])
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current)
+      audioObjectUrlRef.current = null
+    }
 
-  const openHadith = useCallback(
-    (hadith: Hadith) => {
-      if (!selectedBook || selectedChapterId === null) return
-      const key = getFavoriteKey(selectedBook, hadith)
-      stopHadithAudio()
-      setSelectedHadith(hadith)
+    audioRef.current = null
+  }, [])
 
-      const nextResume: ResumeState = {
-        bookId: selectedBook.id,
-        chapterId: selectedChapterId,
-        hadithId: hadith.idInBook || hadith.id,
-        savedAt: Date.now(),
-      }
+  const getChapterTarget = useCallback(
+    (book: HadithBook, chapter: HadithChapter | null): AudioTarget | null => {
+      if (!chapter) return null
+      const collection = getHumanChapterAudio(book.id, chapter.id, chapter.name_ar)
+      if (!collection?.tracks.length) return null
 
-      setResumeState(nextResume)
-      localStorage.setItem(RESUME_KEY, JSON.stringify(nextResume))
-
-      if (favoriteIds.includes(key)) {
-        setFavoriteIds((current) => current)
+      return {
+        kind: 'chapter',
+        label: `${book.name_ar} — ${chapter.name_ar || 'الباب'}`,
+        collection,
+        tracks: collection.tracks,
       }
     },
-    [favoriteIds, selectedBook, selectedChapterId, stopHadithAudio]
+    [],
   )
 
-  const selectBook = (book: HadithBook) => {
-    setSelectedBook(book)
-    setBookSearch('')
-    loadBookChapters(book)
-  }
+  const getBookTarget = useCallback((book: HadithBook): AudioTarget | null => {
+    const collection = getHumanBookAudio(book.id)
+    if (!collection?.tracks.length) return null
 
-  const selectChapter = (chapterId: string | number) => {
-    stopHadithAudio()
-    setSelectedChapterId(chapterId)
-    setHadithSearch('')
-  }
-
-  const goToHadith = (direction: -1 | 1) => {
-    if (currentHadithIndex < 0) return
-    const target = hadiths[currentHadithIndex + direction]
-    if (target) openHadith(target)
-  }
-
-  const copyHadith = async () => {
-    if (!selectedBook || !selectedHadith) return
-
-    try {
-      await navigator.clipboard.writeText(getShareText(selectedBook, selectedHadith))
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1800)
-    } catch (err) {
-      console.error('Copy hadith error:', err)
+    return {
+      kind: 'book',
+      label: book.name_ar,
+      collection,
+      tracks: collection.tracks,
     }
-  }
+  }, [])
 
-  const shareHadith = async () => {
-    if (!selectedBook || !selectedHadith) return
+  const getHadithTarget = useCallback(
+    (book: HadithBook, hadith: Hadith): AudioTarget | null => {
+      const audio = getHumanHadithAudio(book.id, hadith.idInBook || hadith.id)
+      if (!audio?.url) return null
 
-    const text = getShareText(selectedBook, selectedHadith)
-
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: selectedBook.name_ar,
-          text,
-        })
-      } else {
-        await navigator.clipboard.writeText(text)
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1800)
-      }
-    } catch (err) {
-      console.error('Share hadith error:', err)
-    }
-  }
-
-  const toggleFavorite = () => {
-    if (!selectedBook || !selectedHadith) return
-
-    const key = getFavoriteKey(selectedBook, selectedHadith)
-    const exists = favoriteIds.includes(key)
-    const next = exists
-      ? favoriteIds.filter((item) => item !== key)
-      : [...favoriteIds, key]
-
-    setFavoriteIds(next)
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify(next))
-  }
-
-  const selectedIsFavorite =
-    selectedBook && selectedHadith
-      ? favoriteIds.includes(getFavoriteKey(selectedBook, selectedHadith))
-      : false
-
-  const playAudioUrl = useCallback(
-    async (
-      url: string,
-      sourceLabel: string,
-      startSeconds = 0,
-      endSeconds?: number,
-    ) => {
-      if (!url || !/^https?:\/\//i.test(url)) {
-        throw new Error('مصدر الصوت غير صالح.')
+      const track: HumanAudioTrack = {
+        id: `${book.id}:hadith:${hadith.idInBook || hadith.id}`,
+        title: `حديث ${arabicDigits(hadith.idInBook || hadith.id)}`,
+        ...audio,
       }
 
-      stopHadithAudio()
+      return {
+        kind: 'hadith',
+        label: `${book.name_ar} — حديث ${arabicDigits(hadith.idInBook || hadith.id)}`,
+        tracks: [track],
+      }
+    },
+    [],
+  )
 
-      const audio = new Audio(url)
-      audio.preload = 'auto'
+  const playQueueTrack = useCallback(
+    async (track: HumanAudioTrack, index: number) => {
+      if (!track.url || !/^https?:\/\//i.test(track.url)) {
+        throw new Error('رابط التسجيل الصوتي غير صالح.')
+      }
+
+      clearCurrentAudioElement()
+
+      const audio = new Audio(track.url)
+      audio.preload = 'metadata'
       audio.playbackRate = audioRate
       audioRef.current = audio
-      setAudioSourceLabel(sourceLabel)
+      audioQueueRef.current = audioQueueRef.current.length ? audioQueueRef.current : [track]
+      audioTrackIndexRef.current = index
+      setAudioTrackIndex(index)
+      setAudioSourceLabel(track.label || 'تسجيل بشري')
+      setAudioError('')
+      setAudioLoading(true)
 
-      const normalizedStart = Number.isFinite(startSeconds) ? Math.max(0, startSeconds) : 0
-      const normalizedEnd =
-        Number.isFinite(endSeconds) && Number(endSeconds) > normalizedStart
-          ? Number(endSeconds)
+      const start = Math.max(0, Number(track.startSeconds || 0))
+      const end =
+        Number.isFinite(track.endSeconds) && Number(track.endSeconds) > start
+          ? Number(track.endSeconds)
           : undefined
 
       audio.onloadedmetadata = () => {
-        if (normalizedStart > 0) {
+        if (end !== undefined) {
+          setDisplayDuration(Math.max(0, end - start))
+        } else {
+          setDisplayDuration(Number.isFinite(audio.duration) ? audio.duration : 0)
+        }
+
+        if (start > 0) {
           try {
-            audio.currentTime = normalizedStart
+            audio.currentTime = start
           } catch {
-            // بعض المتصفحات لا تسمح بتحديد الموضع قبل اكتمال التحميل.
+            // Safari/WebKit قد يؤجل seek إلى ما بعد بدء تحميل الملف.
           }
         }
       }
 
       audio.ontimeupdate = () => {
-        if (normalizedEnd !== undefined && audio.currentTime >= normalizedEnd) {
+        const rawTime = audio.currentTime
+        const relativeTime = end !== undefined ? Math.max(0, rawTime - start) : rawTime
+        setCurrentTime(relativeTime)
+
+        if (end !== undefined && rawTime >= end) {
           audio.pause()
-          setIsReadingAudio(false)
-          audio.ontimeupdate = null
+          audio.currentTime = end
+          const nextIndex = index + 1
+          if (nextIndex < audioQueueRef.current.length) {
+            window.setTimeout(() => {
+              void playQueueTrack(audioQueueRef.current[nextIndex], nextIndex)
+            }, 0)
+          } else {
+            setIsReadingAudio(false)
+            setAudioLoading(false)
+            setAudioSourceLabel('')
+            audioRef.current = null
+          }
         }
       }
 
       audio.onended = () => {
-        setIsReadingAudio(false)
-        setAudioSourceLabel('')
-        audioRef.current = null
+        const nextIndex = index + 1
+        if (nextIndex < audioQueueRef.current.length) {
+          void playQueueTrack(audioQueueRef.current[nextIndex], nextIndex)
+        } else {
+          setIsReadingAudio(false)
+          setAudioLoading(false)
+          setAudioSourceLabel('')
+          audioRef.current = null
+        }
       }
 
       audio.onerror = () => {
         setIsReadingAudio(false)
+        setAudioLoading(false)
         setAudioSourceLabel('')
         audioRef.current = null
-        throw new Error('تعذر تشغيل التسجيل الصوتي.')
+        setAudioError('تعذر تشغيل التسجيل البشري من المصدر الحالي.')
       }
 
       await audio.play()
+      setAudioLoading(false)
       setIsReadingAudio(true)
     },
-    [audioRate, stopHadithAudio],
+    [audioRate, clearCurrentAudioElement],
+  )
+
+  const playAudioTarget = useCallback(
+    async (target: AudioTarget, startIndex = 0) => {
+      if (!target.tracks.length) return
+
+      const safeIndex = Math.min(Math.max(startIndex, 0), target.tracks.length - 1)
+      clearCurrentAudioElement()
+      audioQueueRef.current = target.tracks
+      audioTrackIndexRef.current = safeIndex
+      setAudioTrackIndex(safeIndex)
+      setAudioTarget(target)
+      setAudioError('')
+      setCurrentTime(0)
+      setDisplayDuration(0)
+
+      try {
+        await playQueueTrack(target.tracks[safeIndex], safeIndex)
+      } catch (error) {
+        console.error('Hadith audio playback error:', error)
+        setIsReadingAudio(false)
+        setAudioLoading(false)
+        setAudioSourceLabel('')
+        setAudioError(
+          error instanceof Error ? error.message : 'تعذر تشغيل التسجيل البشري حاليًا.',
+        )
+      }
+    },
+    [clearCurrentAudioElement, playQueueTrack],
+  )
+
+  const getPreferredAudioTarget = useCallback(
+    (book: HadithBook, chapter: HadithChapter | null, hadith: Hadith | null) => {
+      const hadithTarget = hadith ? getHadithTarget(book, hadith) : null
+      if (hadithTarget) return hadithTarget
+
+      const chapterTarget = getChapterTarget(book, chapter)
+      if (chapterTarget) return chapterTarget
+
+      return getBookTarget(book)
+    },
+    [getBookTarget, getChapterTarget, getHadithTarget],
   )
 
   const speakHadith = useCallback(async () => {
-    if (!selectedBook || !selectedHadith?.arabic || typeof window === 'undefined') return
+    if (!selectedBook || !selectedHadith || typeof window === 'undefined') return
 
     if (isReadingAudio || audioLoading) {
       stopHadithAudio()
       return
     }
 
-    stopHadithAudio()
-    setAudioError('')
-    setAudioLoading(true)
-
-    const hadithNumber = selectedHadith.idInBook || selectedHadith.id
-    const manifestAudio = getHumanHadithAudio(selectedBook.id, hadithNumber)
-    const apiAudioUrl = selectedHadith.audioUrl?.trim() || ''
-    const humanAudio =
-      manifestAudio ||
-      (apiAudioUrl ? { url: apiAudioUrl, label: 'تسجيل بشري من مصدر البيانات' } : null)
-
-    try {
-      if (!humanAudio?.url) {
-        setAudioError('لا يتوفر تسجيل صوتي بشري مجاني مرتبط بهذا الحديث حاليًا.')
-        return
-      }
-
-      await playAudioUrl(
-        humanAudio.url,
-        humanAudio.label || 'صوت بشري',
-        humanAudio.startSeconds || 0,
-        humanAudio.endSeconds,
-      )
-    } catch (error) {
-      console.error('Hadith audio error:', error)
-      setIsReadingAudio(false)
-      setAudioSourceLabel('')
-      setAudioError(
-        error instanceof Error ? error.message : 'تعذر تشغيل التسجيل الصوتي حاليًا.',
-      )
-    } finally {
-      setAudioLoading(false)
+    const target = getPreferredAudioTarget(selectedBook, currentChapter, selectedHadith)
+    if (!target) {
+      setAudioError('لا يتوفر تسجيل صوتي بشري مجاني مرتبط بهذا المحتوى حاليًا.')
+      return
     }
-  }, [audioLoading, isReadingAudio, playAudioUrl, selectedBook, selectedHadith, stopHadithAudio])
 
+    await playAudioTarget(target)
+  }, [
+    audioLoading,
+    currentChapter,
+    getPreferredAudioTarget,
+    isReadingAudio,
+    playAudioTarget,
+    selectedBook,
+    selectedHadith,
+    stopHadithAudio,
+  ])
+
+  const playBookAudio = useCallback(
+    async (book: HadithBook) => {
+      const target = getBookTarget(book)
+      if (!target) return
+      await playAudioTarget(target)
+    },
+    [getBookTarget, playAudioTarget],
+  )
+
+  const playChapterAudio = useCallback(
+    async (book: HadithBook, chapter: HadithChapter) => {
+      const target = getChapterTarget(book, chapter)
+      if (!target) return
+      await playAudioTarget(target)
+    },
+    [getChapterTarget, playAudioTarget],
+  )
 
   useEffect(() => {
     return () => {
@@ -1114,11 +1171,15 @@ export default function HadithPage() {
 
                       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {group.books.map((book) => (
-                          <button
+                          <div
                             key={book.id}
-                            onClick={() => selectBook(book)}
                             className="bg-white rounded-3xl p-5 border border-mushaf-border/30 shadow-sm hover:border-mushaf-teal hover:shadow-md transition-all text-right group"
                           >
+                            <div className="flex items-start gap-3">
+                              <button
+                                onClick={() => selectBook(book)}
+                                className="min-w-0 flex-1 text-right"
+                              >
                             <div className="flex items-center gap-4">
                               <div className="w-14 h-14 rounded-2xl bg-mushaf-paper border border-mushaf-gold/30 text-mushaf-gold flex items-center justify-center shrink-0">
                                 <BookOpen size={28} />
@@ -1137,8 +1198,24 @@ export default function HadithPage() {
                               </div>
 
                               <ChevronLeft className="text-mushaf-gold opacity-50 group-hover:opacity-100 transition" size={22} />
+                              </div>
+                              </button>
+
+                              {getBookAudio(book.id)?.tracks.length ? (
+                                <button
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    void playBookAudio(book)
+                                  }}
+                                  className="w-11 h-11 rounded-xl bg-mushaf-teal text-white flex items-center justify-center shrink-0 hover:scale-105 transition"
+                                  title="تشغيل قراءة الكتاب"
+                                  aria-label={`تشغيل قراءة ${book.name_ar}`}
+                                >
+                                  <VolumeIcon />
+                                </button>
+                              ) : null}
                             </div>
-                          </button>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -1151,10 +1228,21 @@ export default function HadithPage() {
           <>
             <section className="bg-white rounded-[2rem] border border-mushaf-border/40 shadow-sm p-5 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <button onClick={closeBook} className="flex items-center gap-2 text-mushaf-teal font-bold text-sm">
-                  <ArrowRight size={18} />
-                  كل الكتب
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={closeBook} className="flex items-center gap-2 text-mushaf-teal font-bold text-sm">
+                    <ArrowRight size={18} />
+                    كل الكتب
+                  </button>
+                  {getBookAudio(selectedBook.id)?.tracks.length ? (
+                    <button
+                      onClick={() => void playBookAudio(selectedBook)}
+                      className="inline-flex items-center gap-2 bg-mushaf-teal text-white rounded-xl px-3 py-2 text-xs font-bold"
+                    >
+                      <VolumeIcon />
+                      تشغيل الكتاب
+                    </button>
+                  ) : null}
+                </div>
 
                 <div className="text-right">
                   <p className="text-xs text-gray-400">الكتاب المحدد</p>
@@ -1202,20 +1290,24 @@ export default function HadithPage() {
                       const active = String(selectedChapterId) === String(chapter.id)
 
                       return (
-                        <button
+                        <div
                           key={String(chapter.id)}
-                          onClick={() => selectChapter(chapter.id)}
-                          className={`w-full text-right p-3 rounded-2xl border transition ${
+                          className={`w-full p-3 rounded-2xl border transition ${
                             active
                               ? 'bg-mushaf-teal text-white border-mushaf-teal shadow-sm'
                               : 'bg-white text-mushaf-dark border-gray-100 hover:border-mushaf-teal/40 hover:bg-mushaf-paper'
                           }`}
                         >
-                          <p className="font-bold text-sm leading-relaxed">
-                            {chapter.name_ar || `الباب ${arabicDigits(chapter.id)}`}
-                          </p>
+                          <div className="flex items-start gap-2">
+                            <button
+                              onClick={() => selectChapter(chapter.id)}
+                              className="min-w-0 flex-1 text-right"
+                            >
+                              <p className="font-bold text-sm leading-relaxed">
+                                {chapter.name_ar || `الباب ${arabicDigits(chapter.id)}`}
+                              </p>
 
-                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                              <div className="flex flex-wrap items-center gap-2 mt-1">
                             {chapter.hadithCount ? (
                               <p className={`text-[10px] ${active ? 'text-white/70' : 'text-gray-400'}`}>
                                 {arabicDigits(chapter.hadithCount)} حديث
@@ -1226,8 +1318,26 @@ export default function HadithPage() {
                                 {arabicDigits(chapter.firstHadith)}–{arabicDigits(chapter.lastHadith)}
                               </p>
                             ) : null}
+                              </div>
+                            </button>
+
+                            {getHumanChapterAudio(selectedBook.id, chapter.id, chapter.name_ar)?.tracks.length ? (
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  void playChapterAudio(selectedBook, chapter)
+                                }}
+                                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                                  active ? 'bg-white/15 text-white' : 'bg-mushaf-paper text-mushaf-teal'
+                                }`}
+                                title="تشغيل تسجيل الباب"
+                                aria-label={`تشغيل ${chapter.name_ar || 'الباب'}`}
+                              >
+                                <VolumeIcon />
+                              </button>
+                            ) : null}
                           </div>
-                        </button>
+                        </div>
                       )
                     })}
                   </div>
@@ -1244,8 +1354,19 @@ export default function HadithPage() {
                       </h3>
                     </div>
 
-                    <div className="bg-mushaf-paper text-mushaf-teal rounded-xl px-3 py-2 text-xs font-bold">
-                      {arabicDigits(filteredHadiths.length)} حديث ظاهر
+                    <div className="flex flex-wrap items-center gap-2">
+                      {getHumanChapterAudio(selectedBook.id, selectedChapterId || 0, currentChapter?.name_ar)?.tracks.length ? (
+                        <button
+                          onClick={() => currentChapter && void playChapterAudio(selectedBook, currentChapter)}
+                          className="inline-flex items-center gap-2 bg-mushaf-teal text-white rounded-xl px-3 py-2 text-xs font-bold"
+                        >
+                          <VolumeIcon />
+                          تشغيل الباب
+                        </button>
+                      ) : null}
+                      <div className="bg-mushaf-paper text-mushaf-teal rounded-xl px-3 py-2 text-xs font-bold">
+                        {arabicDigits(filteredHadiths.length)} حديث ظاهر
+                      </div>
                     </div>
                   </div>
 
@@ -1435,13 +1556,18 @@ export default function HadithPage() {
               )}
 
               <p className="mb-3 text-center text-[11px] text-gray-400">
-                الاستماع متاح فقط عند توفر تسجيل بشري مجاني مرتبط بهذا الحديث تحديدًا.
+                الصوت هنا يعتمد على مستوى التسجيل المتاح: حديث محدد، أو باب، أو الكتاب كاملًا. لا توجد قراءة مولدة بالذكاء الاصطناعي.
               </p>
 
               {audioSourceLabel && (
                 <div className="mb-3 flex items-center justify-center gap-2 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs font-bold text-emerald-800">
                   <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                   {audioSourceLabel}
+                  {audioTarget && audioTarget.tracks.length > 1 ? (
+                    <span className="text-emerald-700/70">
+                      · {arabicDigits(audioTrackIndex + 1)} / {arabicDigits(audioTarget.tracks.length)}
+                    </span>
+                  ) : null}
                 </div>
               )}
 
@@ -1475,7 +1601,15 @@ export default function HadithPage() {
                   } disabled:opacity-60`}
                 >
                   {audioLoading ? <Loader2 size={18} className="animate-spin" /> : isReadingAudio ? <PauseIcon /> : <VolumeIcon />}
-                  {audioLoading ? 'جاري تجهيز الصوت...' : isReadingAudio ? 'إيقاف الاستماع' : 'استماع للحديث'}
+                  {audioLoading
+                    ? 'جاري تجهيز الصوت...'
+                    : isReadingAudio
+                      ? 'إيقاف الاستماع'
+                      : getPreferredAudioTarget(selectedBook, currentChapter, selectedHadith)?.kind === 'chapter'
+                        ? 'استماع للباب'
+                        : getPreferredAudioTarget(selectedBook, currentChapter, selectedHadith)?.kind === 'book'
+                          ? 'استماع للكتاب'
+                          : 'استماع للحديث'}
                 </button>
 
                 <select
