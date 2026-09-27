@@ -388,6 +388,7 @@ export default function HadithPage() {
 
   const loadBookChapters = useCallback(async (book: HadithBook) => {
     setChaptersLoading(true)
+    stopHadithAudio()
     setHadithsLoading(false)
     setError('')
     setBookError('')
@@ -765,6 +766,126 @@ export default function HadithPage() {
     },
     [getBookTarget, getChapterTarget, getHadithTarget],
   )
+
+  const getBookAudio = useCallback((bookId: string) => getHumanBookAudio(bookId), [])
+
+  const openHadith = useCallback(
+    (hadith: Hadith) => {
+      if (!selectedBook || selectedChapterId === null) return
+
+      stopHadithAudio()
+      setSelectedHadith(hadith)
+
+      const nextResume: ResumeState = {
+        bookId: selectedBook.id,
+        chapterId: selectedChapterId,
+        hadithId: hadith.idInBook || hadith.id,
+        savedAt: Date.now(),
+      }
+
+      setResumeState(nextResume)
+      localStorage.setItem(RESUME_KEY, JSON.stringify(nextResume))
+      setAudioError('')
+    },
+    [selectedBook, selectedChapterId, stopHadithAudio],
+  )
+
+  const selectBook = useCallback(
+    (book: HadithBook) => {
+      stopHadithAudio()
+      setSelectedBook(book)
+      setBookSearch('')
+      void loadBookChapters(book)
+    },
+    [loadBookChapters, stopHadithAudio],
+  )
+
+  const selectChapter = useCallback(
+    (chapterId: string | number) => {
+      stopHadithAudio()
+      setSelectedChapterId(chapterId)
+      setHadithSearch('')
+      setAudioError('')
+    },
+    [stopHadithAudio],
+  )
+
+  const goToHadith = useCallback(
+    (direction: -1 | 1) => {
+      if (currentHadithIndex < 0) return
+      const target = hadiths[currentHadithIndex + direction]
+      if (target) openHadith(target)
+    },
+    [currentHadithIndex, hadiths, openHadith],
+  )
+
+  const copyHadith = useCallback(async () => {
+    if (!selectedBook || !selectedHadith) return
+
+    const text = getShareText(selectedBook, selectedHadith)
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        document.execCommand('copy')
+        textarea.remove()
+      }
+
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    } catch (error) {
+      console.error('Copy hadith error:', error)
+      setAudioError('تعذر نسخ نص الحديث على هذا الجهاز.')
+    }
+  }, [selectedBook, selectedHadith])
+
+  const shareHadith = useCallback(async () => {
+    if (!selectedBook || !selectedHadith) return
+
+    const text = getShareText(selectedBook, selectedHadith)
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: selectedBook.name_ar,
+          text,
+      })
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1800)
+      }
+    } catch (error) {
+      if ((error as DOMException)?.name !== 'AbortError') {
+        console.error('Share hadith error:', error)
+      }
+    }
+  }, [selectedBook, selectedHadith])
+
+  const toggleFavorite = useCallback(() => {
+    if (!selectedBook || !selectedHadith) return
+
+    const key = getFavoriteKey(selectedBook, selectedHadith)
+    const next = favoriteIds.includes(key)
+      ? favoriteIds.filter((item) => item !== key)
+      : [...favoriteIds, key]
+
+    setFavoriteIds(next)
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(next))
+  }, [favoriteIds, selectedBook, selectedHadith])
+
+  const selectedIsFavorite =
+    selectedBook && selectedHadith
+      ? favoriteIds.includes(getFavoriteKey(selectedBook, selectedHadith))
+      : false
 
   const speakHadith = useCallback(async () => {
     if (!selectedBook || !selectedHadith || typeof window === 'undefined') return
@@ -1198,7 +1319,7 @@ export default function HadithPage() {
                               </div>
 
                               <ChevronLeft className="text-mushaf-gold opacity-50 group-hover:opacity-100 transition" size={22} />
-                              </div>
+                                </div>
                               </button>
 
                               {getBookAudio(book.id)?.tracks.length ? (
