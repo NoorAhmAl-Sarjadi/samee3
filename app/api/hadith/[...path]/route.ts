@@ -1,113 +1,187 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { HUMAN_AUDIO_SOURCES } from '@/lib/hadith-human-audio'
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
-
-const UPSTREAM_BASE = 'https://alfurqan.online/api/v1/hadith'
-const REQUEST_TIMEOUT_MS = 15_000
-
-type RouteContext = {
-  params: Promise<{
-    path?: string[]
-  }>
+type Track = {
+  id: string
+  title: string
+  url: string
+  label: string
+  sourceUrl: string
+  isIntroduction?: boolean
 }
 
-/**
- * GET /api/hadith/*
- *
- * هذا الملف يعمل كـ Proxy Server-Side بين صفحة الأحاديث
- * ومصدر بيانات الأحاديث الخارجي.
- *
- * أمثلة:
- *   /api/hadith/list
- *   /api/hadith/bukhari
- *   /api/hadith/bukhari/chapter/1
- */
-export async function GET(
-  request: NextRequest,
-  { params }: RouteContext,
-) {
+function cleanText(value: string) {
+  return value
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#34;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function decodeHtml(value: string) {
+  return value
+    .replace(/&amp;/gi, '&')
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#39;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#34;/gi, '"')
+    .replace(/&nbsp;/gi, ' ')
+}
+
+function resolveUrl(value: string, baseUrl: string) {
+  const decoded = decodeHtml(value.trim())
+  if (!decoded) return ''
   try {
-    const resolvedParams = await params
-    const segments = resolvedParams.path ?? []
+    return new URL(decoded, baseUrl).toString()
+  } catch {
+    return ''
+  }
+}
 
-    if (!segments.length) {
-      return NextResponse.json(
-        {
-          error: 'Hadith API path is missing',
-        },
-        { status: 400 },
-      )
-    }
+function normalize(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[ًٌٍَُِّْـ]/g, '')
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+}
 
-    /**
-     * نُشفّر كل جزء من المسار منفصلًا ثم نعيد تركيبه،
-     * حتى لا نسمح بإدخال مسار غير صحيح إلى المصدر الخارجي.
-     */
-    const safePath = segments
-      .filter((segment) => typeof segment === 'string' && segment.trim() !== '')
-      .map((segment) => encodeURIComponent(segment))
-      .join('/')
+function extensionIsAudio(url: string) {
+  try {
+    const pathname = new URL(url).pathname
+    return /\.(mp3|m4a|aac|ogg|oga|wav|webm)$/i.test(pathname)
+  } catch {
+    return false
+  }
+}
 
-    if (!safePath) {
-      return NextResponse.json(
-        {
-          error: 'Hadith API path is invalid',
-        },
-        { status: 400 },
-      )
-    }
+function inferOrganization(titles: string[]): 'attachments' | 'books' | 'chapters' {
+  const normalized = titles.map(normalize)
+  if (normalized.some((x) => x.startsWith('كتاب ') || x.startsWith('مقدمه ') || x.startsWith('المقدمه ') || x.startsWith('ابواب '))) {
+    return 'books'
+  }
+  if (normalized.some((x) => x.includes('باب '))) return 'chapters'
+  return 'attachments'
+}
 
-    const incomingUrl = new URL(request.url)
-    const queryString = incomingUrl.search
+function fallbackTitle(url: string, index: number) {
+  try {
+    const parsed = new URL(url)
+    const filename = decodeURIComponent(parsed.pathname.split('/').pop() || '')
+    return filename.replace(/\.(mp3|m4a|aac|ogg|oga|wav|webm)$/i, '').replace(/[_-]+/g, ' ') || `تسجيل ${index + 1}`
+  } catch {
+    return `تسجيل ${index + 1}`
+  }
+}
 
-    const upstreamUrl = `${UPSTREAM_BASE}/${safePath}${queryString}`
+function pushTrack(tracks: Track[], seen: Set<string>, url: string, title: string, sourceUrl: string) {
+  if (!url || !extensionIsAudio(url) || seen.has(url)) return
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      REQUEST_TIMEOUT_MS,
+  const cleanTitle = cleanText(title) || fallbackTitle(url, tracks.length)
+  seen.add(url)
+  tracks.push({
+    id: `source:${tracks.length + 1}`,
+    title: cleanTitle,
+    url,
+    label: 'تسجيل بشري من المصدر الأصلي',
+    sourceUrl,
+    isIntroduction: /مقدم/i.test(cleanTitle),
+  })
+}
+
+function parseAudioSources(html: string, sourceUrl: string): Track[] {
+  const tracks: Track[] = []
+  const seen = new Set<string>()
+
+  // روابط MP3/M4A وغيرها داخل <a href="...">.
+  const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+  for (const match of html.matchAll(anchorRe)) {
+    const url = resolveUrl(match[1], sourceUrl)
+    if (!extensionIsAudio(url)) continue
+    pushTrack(tracks, seen, url, match[2], sourceUrl)
+  }
+
+  // مصادر الصوت داخل <audio src>, <source src>, والخصائص المؤجلة مثل data-src.
+  const mediaRe = /<(?:audio|source)\b[^>]*?(?:src|data-src|data-audio|data-url)=["']([^"']+)["'][^>]*>/gi
+  for (const match of html.matchAll(mediaRe)) {
+    const url = resolveUrl(match[1], sourceUrl)
+    if (!extensionIsAudio(url)) continue
+
+    const before = html.slice(Math.max(0, (match.index || 0) - 900), match.index || 0)
+    const after = html.slice((match.index || 0), Math.min(html.length, (match.index || 0) + 900))
+    const nearby = `${before} ${after}`
+    const textMatch = nearby.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<span[^>]*>([\s\S]*?)<\/span>|<p[^>]*>([\s\S]*?)<\/p>/i)
+    const title = textMatch ? (textMatch[1] || textMatch[2] || textMatch[3] || '') : ''
+    pushTrack(tracks, seen, url, title, sourceUrl)
+  }
+
+  return tracks
+}
+
+export async function GET(request: NextRequest) {
+  const bookId = request.nextUrl.searchParams.get('book') || ''
+  const source = HUMAN_AUDIO_SOURCES[bookId]
+
+  if (!source) {
+    return NextResponse.json(
+      { tracks: [], error: 'لا يوجد مصدر صوتي موثق لهذا الكتاب.' },
+      { status: 404 },
     )
+  }
 
-    let response: Response
-
-    try {
-      response = await fetch(upstreamUrl, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-        },
-        cache: 'no-store',
-        signal: controller.signal,
-      })
-    } finally {
-      clearTimeout(timeoutId)
-    }
-
-    const body = await response.text()
-
-    const contentType =
-      response.headers.get('content-type') ||
-      'application/json; charset=utf-8'
-
-    return new NextResponse(body, {
-      status: response.status,
+  try {
+    const response = await fetch(source.sourceUrl, {
       headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'User-Agent': 'Mozilla/5.0 (compatible; SAMEE3/1.0; +https://samee3.vercel.app)',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ar,en;q=0.8',
       },
+      cache: 'no-store',
+      redirect: 'follow',
     })
-  } catch (error) {
-    const isTimeout =
-      error instanceof DOMException && error.name === 'AbortError'
 
-    console.error('Hadith proxy error:', error)
+    const html = await response.text()
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const tracks = parseAudioSources(html, source.sourceUrl)
+    const organization = inferOrganization(tracks.map((item) => item.title))
 
     return NextResponse.json(
       {
-        error: isTimeout
-          ? 'انتهت مهلة الاتصال بمصدر الأحاديث.'
-          : 'تعذر الاتصال بمصدر الأحاديث حاليًا.',
+        bookId,
+        label: source.label,
+        sourceUrl: source.sourceUrl,
+        kind: 'book',
+        organization,
+        tracks,
+      },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=604800',
+        },
+      },
+    )
+  } catch (error) {
+    console.error('Hadith audio catalog error:', error)
+    return NextResponse.json(
+      {
+        bookId,
+        label: source.label,
+        sourceUrl: source.sourceUrl,
+        kind: 'book',
+        organization: 'attachments',
+        tracks: [],
+        error: 'تعذر تحميل فهرس التسجيلات من المصدر الآن.',
       },
       { status: 502 },
     )
