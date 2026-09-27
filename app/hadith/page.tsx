@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-// تم استخدام المسار المباشر لحل مشكلة الـ Build نهائياً
-import { getHumanHadithAudio, HumanHadithAudio } from '../../lib/hadith-human-audio'
+import { getHumanHadithAudio, HumanHadithAudio } from '@/lib/hadith-human-audio'
 import {
   ArrowRight,
   BookOpen,
@@ -76,6 +75,11 @@ function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${arabicDigits(m.toString().padStart(2, '0'))}:${arabicDigits(s.toString().padStart(2, '0'))}`
+}
+
+function getBookDisplayCount(book: HadithBook) {
+  if (!book.hadithCount || book.hadithCount < 1) return null
+  return `${arabicDigits(book.hadithCount)} حديث`
 }
 
 function extractBooks(payload: any): HadithBook[] {
