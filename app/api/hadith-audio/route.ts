@@ -52,7 +52,7 @@ function normalize(value: string) {
     .replace(/[أإآ]/g, 'ا')
     .replace(/ة/g, 'ه')
     .replace(/ى/g, 'ي')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/[^A-Za-z0-9\u0600-\u06FF]+/g, ' ')
     .trim()
 }
 
@@ -105,20 +105,23 @@ function parseAudioSources(html: string, sourceUrl: string): Track[] {
 
   // روابط MP3/M4A وغيرها داخل <a href="...">.
   const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
-  for (const match of html.matchAll(anchorRe)) {
-    const url = resolveUrl(match[1], sourceUrl)
+  let anchorMatch: RegExpExecArray | null
+  while ((anchorMatch = anchorRe.exec(html)) !== null) {
+    const url = resolveUrl(anchorMatch[1], sourceUrl)
     if (!extensionIsAudio(url)) continue
-    pushTrack(tracks, seen, url, match[2], sourceUrl)
+    pushTrack(tracks, seen, url, anchorMatch[2], sourceUrl)
   }
 
   // مصادر الصوت داخل <audio src>, <source src>, والخصائص المؤجلة مثل data-src.
   const mediaRe = /<(?:audio|source)\b[^>]*?(?:src|data-src|data-audio|data-url)=["']([^"']+)["'][^>]*>/gi
-  for (const match of html.matchAll(mediaRe)) {
-    const url = resolveUrl(match[1], sourceUrl)
+  let mediaMatch: RegExpExecArray | null
+  while ((mediaMatch = mediaRe.exec(html)) !== null) {
+    const url = resolveUrl(mediaMatch[1], sourceUrl)
     if (!extensionIsAudio(url)) continue
 
-    const before = html.slice(Math.max(0, (match.index || 0) - 900), match.index || 0)
-    const after = html.slice((match.index || 0), Math.min(html.length, (match.index || 0) + 900))
+    const index = mediaMatch.index || 0
+    const before = html.slice(Math.max(0, index - 900), index)
+    const after = html.slice(index, Math.min(html.length, index + 900))
     const nearby = `${before} ${after}`
     const textMatch = nearby.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>|<span[^>]*>([\s\S]*?)<\/span>|<p[^>]*>([\s\S]*?)<\/p>/i)
     const title = textMatch ? (textMatch[1] || textMatch[2] || textMatch[3] || '') : ''
