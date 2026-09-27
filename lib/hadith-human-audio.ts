@@ -9,6 +9,7 @@ export type HumanHadithAudio = {
 export type HumanAudioTrack = HumanHadithAudio & {
   id: string
   title: string
+  isIntroduction?: boolean
 }
 
 export type HumanAudioCollection = {
@@ -40,10 +41,14 @@ function numberedTracks(options: {
       url: `${options.baseUrl}${padded}.mp3`,
       label: 'تسجيل بشري مجاني من المصدر',
       sourceUrl: options.sourceUrl,
+      isIntroduction: false,
     }
   })
 }
 
+/**
+ * تسجيلات بشرية مرتبطة بحديث محدد.
+ */
 export const HUMAN_HADITH_AUDIO: Record<string, HumanHadithAudio> = {
   'bukhari:1': {
     url: 'https://ia801308.us.archive.org/3/items/Sahih-Al-Bukhari-Audio/01.mp3',
@@ -61,6 +66,9 @@ export const HUMAN_HADITH_AUDIO: Record<string, HumanHadithAudio> = {
   },
 }
 
+/**
+ * تسجيلات على مستوى الكتاب.
+ */
 export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
   muslim: {
     kind: 'book',
@@ -76,6 +84,7 @@ export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
       idPrefix: 'muslim',
     }),
   },
+
   tirmidhi: {
     kind: 'book',
     label: 'قراءة صوتية لسنن الترمذي',
@@ -90,6 +99,7 @@ export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
       idPrefix: 'tirmidhi',
     }),
   },
+
   nasai: {
     kind: 'book',
     label: 'قراءة صوتية لسنن النسائي',
@@ -104,6 +114,7 @@ export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
       idPrefix: 'nasai',
     }),
   },
+
   riyad_assalihin: {
     kind: 'book',
     label: 'قراءة صوتية لرياض الصالحين',
@@ -121,8 +132,15 @@ export const HUMAN_BOOK_AUDIO: Record<string, HumanAudioCollection> = {
   },
 }
 
+/**
+ * تسجيلات مرتبطة بأبواب محددة.
+ * تظل فارغة إلى أن يوجد ربط صوتي بشري موثق.
+ */
 export const HUMAN_CHAPTER_AUDIO: Record<string, HumanAudioCollection> = {}
 
+/**
+ * إرجاع التسجيل البشري المطابق لحديث محدد.
+ */
 export function getHumanHadithAudio(
   bookId: string,
   hadithId: number | string,
@@ -134,6 +152,9 @@ export function getHumanHadithAudio(
   return HUMAN_HADITH_AUDIO[`${bookId}:${hadithId}`] || null
 }
 
+/**
+ * إرجاع قائمة التسجيلات البشرية الخاصة بالكتاب.
+ */
 export function getHumanBookAudio(
   bookId: string,
 ): HumanAudioCollection | null {
@@ -142,6 +163,9 @@ export function getHumanBookAudio(
   return HUMAN_BOOK_AUDIO[bookId] || null
 }
 
+/**
+ * إرجاع قائمة التسجيلات البشرية الخاصة بالباب.
+ */
 export function getHumanChapterAudio(
   bookId: string,
   chapterId: number | string,
@@ -163,5 +187,9 @@ export function getHumanChapterAudio(
     return null
   }
 
-  return HUMAN_CHAPTER_AUDIO[`${bookId}:name:${normalizedName}`] || null
+  return (
+    HUMAN_CHAPTER_AUDIO[
+      `${bookId}:name:${normalizedName}`
+    ] || null
+  )
 }
