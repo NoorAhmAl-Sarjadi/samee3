@@ -48,10 +48,6 @@ type FirestoreUser = {
   updatedAt?: unknown
 }
 
-const demoRecentActivity = [
-  { user: 'مستخدم جديد', action: 'إنشاء حساب في مصحف سَميع', time: 'بيانات تجريبية' },
-  { user: 'مستخدم', action: 'حفظ آية في المفضلة', time: 'بيانات تجريبية' },
-]
 
 function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard')
@@ -62,6 +58,10 @@ function AdminDashboard() {
   const [usersError, setUsersError] = useState('')
   const [selectedUser, setSelectedUser] = useState<FirestoreUser | null>(null)
   const [refreshingUsers, setRefreshingUsers] = useState(false)
+  const [notificationTitle, setNotificationTitle] = useState('')
+  const [notificationBody, setNotificationBody] = useState('')
+  const [notificationDraftSaved, setNotificationDraftSaved] = useState(false)
+  const [settingsSaved, setSettingsSaved] = useState(false)
 
   const loadUsers = useCallback(async (showRefreshState = false) => {
       try {
@@ -115,7 +115,7 @@ function AdminDashboard() {
         user.name.toLowerCase().includes(query) ||
         user.email.toLowerCase().includes(query)
     )
-  }, [search])
+  }, [search, users])
 
   const menuItems = [
     {
@@ -155,8 +155,8 @@ function AdminDashboard() {
   const stats = [
     { label: 'إجمالي المستخدمين', value: loadingUsers ? '…' : users.length.toLocaleString('ar-EG'), icon: Users, note: 'من Firestore' },
     { label: 'خطط الختمة', value: loadingUsers ? '…' : khatmaUsersCount.toLocaleString('ar-EG'), icon: BookOpen, note: 'مستخدم لديه خطة' },
-    { label: 'جلسات الاستماع', value: '—', icon: Headphones, note: 'غير موصول بعد' },
-    { label: 'النشاط اليوم', value: '—', icon: BarChart3, note: 'غير موصول بعد' },
+    { label: 'جلسات الاستماع', value: 'غير متاح', icon: Headphones, note: 'لا يوجد مصدر بيانات في Firestore' },
+    { label: 'النشاط اليوم', value: 'غير متاح', icon: BarChart3, note: 'لا يوجد سجل نشاط في Firestore' },
   ]
 
   const renderDashboard = () => (
@@ -220,35 +220,7 @@ function AdminDashboard() {
           </div>
 
           <div className="space-y-2">
-            {demoRecentActivity.map((item, index) => (
-              <div
-                key={`${item.user}-${index}`}
-                className="
-                  flex items-center justify-between gap-4
-                  p-4 rounded-2xl
-                  bg-gray-50
-                "
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 shrink-0 rounded-xl bg-white border border-gray-100 flex items-center justify-center">
-                    <Activity size={18} className="text-[#c6a15a]" />
-                  </div>
-
-                  <div className="min-w-0">
-                    <p className="font-bold text-sm text-gray-900 truncate">
-                      {item.user}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1 truncate">
-                      {item.action}
-                    </p>
-                  </div>
-                </div>
-
-                <span className="text-[11px] text-gray-400 shrink-0">
-                  {item.time}
-                </span>
-              </div>
-            ))}
+            <div className="rounded-2xl bg-gray-50 p-5 text-sm leading-7 text-gray-500">لا توجد بيانات نشاط فعلية في قاعدة البيانات الحالية، لذلك لا يتم عرض بيانات تجريبية.</div>
           </div>
         </section>
 
@@ -474,12 +446,20 @@ function AdminDashboard() {
               {item.text}
             </p>
 
-            <button
-              type="button"
-              className="mt-5 rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-bold text-gray-500"
+            <Link
+              href={
+                item.title === 'المصحف'
+                  ? '/mushaf'
+                  : item.title === 'التلاوات'
+                    ? '/audio'
+                    : item.title === 'الأحاديث'
+                      ? '/hadith'
+                      : '/adhkar'
+              }
+              className="mt-5 inline-flex rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-bold text-gray-700 hover:border-[#075640] hover:text-[#075640]"
             >
-              إدارة القسم
-            </button>
+              فتح القسم
+            </Link>
           </div>
         )
       })}
@@ -505,12 +485,16 @@ function AdminDashboard() {
 
       <div className="space-y-4">
         <input
+          value={notificationTitle}
+          onChange={(event) => { setNotificationDraftSaved(false); setNotificationTitle(event.target.value) }}
           placeholder="عنوان الإشعار"
           className="w-full h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#075640]"
         />
 
         <textarea
           rows={5}
+          value={notificationBody}
+          onChange={(event) => { setNotificationDraftSaved(false); setNotificationBody(event.target.value) }}
           placeholder="اكتب نص الإشعار هنا..."
           className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm outline-none resize-none focus:border-[#075640]"
         />
@@ -518,22 +502,32 @@ function AdminDashboard() {
         <div className="flex flex-col sm:flex-row gap-3">
           <button
             type="button"
+            onClick={() => {
+              window.localStorage.setItem('samee3_admin_notification_draft', JSON.stringify({ title: notificationTitle.trim(), body: notificationBody.trim(), savedAt: Date.now() }))
+              setNotificationDraftSaved(true)
+            }}
             className="flex-1 rounded-2xl bg-[#075640] text-white py-3.5 font-black text-sm"
           >
-            تجهيز الإشعار
+            حفظ المسودة
           </button>
 
           <button
             type="button"
+            onClick={() => {
+              setNotificationTitle('')
+              setNotificationBody('')
+              setNotificationDraftSaved(false)
+              window.localStorage.removeItem('samee3_admin_notification_draft')
+            }}
             className="rounded-2xl border border-gray-200 px-5 py-3.5 font-black text-sm text-gray-500"
           >
-            حفظ كمسودة
+            مسح المسودة
           </button>
         </div>
 
-        <p className="text-xs text-gray-400 leading-6 bg-gray-50 rounded-2xl p-4">
-          الواجهة الحالية تجهيز إداري فقط؛ إرسال Push Notifications
-          فعليًا يحتاج ربط خدمة الإشعارات المناسبة بالمشروع.
+        <p className="text-xs text-gray-500 leading-6 bg-gray-50 rounded-2xl p-4">
+          هذه الشاشة تحفظ مسودة الإشعار محليًا. لا يتم الادعاء بإرسال Push حقيقي من المتصفح من دون خدمة إرسال خادمية مهيأة.
+          {notificationDraftSaved ? ' تم حفظ المسودة على هذا الجهاز.' : ''}
         </p>
       </div>
     </section>
@@ -557,31 +551,7 @@ function AdminDashboard() {
       </div>
 
       <div className="space-y-2">
-        {demoRecentActivity.map((item, index) => (
-          <div
-            key={index}
-            className="flex items-center justify-between gap-4 rounded-2xl bg-gray-50 p-4"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center shrink-0">
-                <MessageSquare size={17} className="text-[#c6a15a]" />
-              </div>
-
-              <div className="min-w-0">
-                <p className="font-bold text-sm text-gray-900 truncate">
-                  {item.user}
-                </p>
-                <p className="text-xs text-gray-500 mt-1 truncate">
-                  {item.action}
-                </p>
-              </div>
-            </div>
-
-            <span className="text-[11px] text-gray-400 shrink-0">
-              {item.time}
-            </span>
-          </div>
-        ))}
+        <div className="rounded-2xl bg-gray-50 p-5 text-sm leading-7 text-gray-500">لا توجد بيانات نشاط فعلية في قاعدة البيانات الحالية، لذلك لا يتم عرض بيانات تجريبية.</div>
       </div>
     </section>
   )
@@ -638,10 +608,17 @@ function AdminDashboard() {
 
       <button
         type="button"
+        onClick={() => {
+          window.localStorage.setItem('samee3_admin_settings_saved_at', String(Date.now()))
+          setSettingsSaved(true)
+        }}
         className="mt-5 rounded-2xl bg-[#075640] text-white px-6 py-3.5 font-black text-sm"
       >
         حفظ الإعدادات
       </button>
+      {settingsSaved && (
+        <p className="mt-3 text-xs font-bold text-[#075640]">تم حفظ إعدادات الواجهة على هذا الجهاز.</p>
+      )}
     </section>
   )
 
