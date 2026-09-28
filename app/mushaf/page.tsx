@@ -61,6 +61,33 @@ type PageData = {
   ayahs: Ayah[]
 }
 
+function readPageDataPayload(value: unknown): PageData {
+  if (!value || typeof value !== 'object') return { ayahs: [] }
+
+  const record = value as Record<string, unknown>
+  const nested = record.data && typeof record.data === 'object'
+    ? (record.data as Record<string, unknown>)
+    : null
+
+  const source = Array.isArray(record.ayahs)
+    ? record.ayahs
+    : nested && Array.isArray(nested.ayahs)
+      ? nested.ayahs
+      : []
+
+  return {
+    ayahs: source.filter((item): item is Ayah => {
+      if (!item || typeof item !== 'object') return false
+      const row = item as Record<string, unknown>
+      return (
+        Number.isFinite(Number(row.number)) &&
+        Number(row.numberInSurah) > 0 &&
+        typeof row.text === 'string'
+      )
+    }).map((item) => item as Ayah),
+  }
+}
+
 type ApiMoshaf = {
   id?: number
   name?: string
@@ -153,6 +180,8 @@ type AudioRuntime = {
     nextSurah?: number,
   ) => void
 }
+
+const MUSHAF_CLIENT_CACHE = 'samee3-mushaf-pages-v3'
 
 const PRINTED_RIWAYAT = new Set<Riwaya>([
   'hafs',
@@ -831,6 +860,23 @@ type Samee3AudioElement = HTMLAudioElement & {
 
 const SAMEE3_AUDIO_STORAGE_KEY = 'samee3_persistent_audio_v2'
 
+type Samee3PersistentWindow = Window & {
+  __samee3PersistentAudio?: Samee3AudioElement
+  __samee3PersistentAudioObjectUrl?: string
+}
+
+function releasePersistentAudioObjectUrl() {
+  if (typeof window === 'undefined') return
+
+  const win = window as Samee3PersistentWindow
+  const value = win.__samee3PersistentAudioObjectUrl
+
+  if (value) {
+    URL.revokeObjectURL(value)
+    delete win.__samee3PersistentAudioObjectUrl
+  }
+}
+
 function readPersistentAudioState(): PersistentAudioState | null {
   try {
     const raw = localStorage.getItem(SAMEE3_AUDIO_STORAGE_KEY)
@@ -1193,54 +1239,62 @@ export default function MushafPage() {
 
     const url = `/api/quran?riwaya=${encodeURIComponent(riwaya)}&page=${safePage}`
 
+    let cachedData: unknown = null
+
     try {
       if ('caches' in window) {
-        const cachedResponse = await caches.match(url)
+        const cache = await caches.open(MUSHAF_CLIENT_CACHE)
+        const cachedResponse = await cache.match(url)
         if (cachedResponse) {
-          const data = await cachedResponse.json()
-          const result = {
-            ayahs: Array.isArray(data?.ayahs)
-              ? data.ayahs
-              : Array.isArray(data?.data?.ayahs)
-                ? data.data.ayahs
-                : [],
-          } as PageData
+          cachedData = await cachedResponse.clone().json()
+        }
+      }
+    } catch {
+      cachedData = null
+    }
+
+    try {
+      const response = await fetch(url, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) throw new Error(`تعذر تحميل بيانات الصفحة ${safePage}`)
+
+      const data = await response.json()
+      const result = readPageDataPayload(data)
+
+      if (!result.ayahs.length) {
+        throw new Error(`لم تصل آيات صالحة للصفحة ${safePage}`)
+      }
+
+      pageMemoryCacheRef.current.set(key, result)
+
+      try {
+        if ('caches' in window) {
+          const cache = await caches.open(MUSHAF_CLIENT_CACHE)
+          await cache.put(url, new Response(JSON.stringify(data), {
+            headers: { 'Content-Type': 'application/json' },
+          }))
+        }
+      } catch {
+        // التخزين المحلي تحسين اختياري ولا يعطل القراءة.
+      }
+
+      return result
+    } catch (networkError) {
+      if (cachedData) {
+        const result = readPageDataPayload(cachedData)
+
+        if (result.ayahs.length) {
           pageMemoryCacheRef.current.set(key, result)
           return result
         }
       }
-    } catch {
-      // ننتقل إلى الشبكة.
+
+      throw networkError instanceof Error
+        ? networkError
+        : new Error(`تعذر تحميل بيانات الصفحة ${safePage}`)
     }
-
-    const response = await fetch(url, {
-      cache: 'force-cache',
-      headers: { Accept: 'application/json' },
-    })
-    if (!response.ok) throw new Error(`تعذر تحميل بيانات الصفحة ${safePage}`)
-    const data = await response.json()
-    const result = {
-      ayahs: Array.isArray(data?.ayahs)
-        ? data.ayahs
-        : Array.isArray(data?.data?.ayahs)
-          ? data.data.ayahs
-          : [],
-    } as PageData
-
-    pageMemoryCacheRef.current.set(key, result)
-
-    try {
-      if ('caches' in window) {
-        const cache = await caches.open('samee3-mushaf-pages-v2')
-        await cache.put(url, new Response(JSON.stringify(data), {
-          headers: { 'Content-Type': 'application/json' },
-        }))
-      }
-    } catch {
-      // لا نوقف القراءة بسبب فشل التخزين المؤقت.
-    }
-
-    return result
   }, [riwaya])
 
   const fetchSvg = useCallback(async (page: number) => {
@@ -1253,43 +1307,49 @@ export default function MushafPage() {
 
     const url = `/api/mushaf-svg?riwaya=${encodeURIComponent(riwaya)}&page=${safePage}`
 
+    let cachedData: any = null
+
     try {
       if ('caches' in window) {
-        const cachedResponse = await caches.match(url)
-        if (cachedResponse) {
-          const data = await cachedResponse.json()
-          if (data?.success && data?.svg) {
-            const value = String(data.svg)
-            svgMemoryCacheRef.current.set(key, value)
-            return value
-          }
+        const cache = await caches.open(MUSHAF_CLIENT_CACHE)
+        const cachedResponse = await cache.match(url)
+        if (cachedResponse) cachedData = await cachedResponse.clone().json()
+      }
+    } catch {
+      cachedData = null
+    }
+
+    try {
+      const response = await fetch(url, { cache: 'no-store' })
+      if (!response.ok) throw new Error(`تعذر تحميل صفحة المصحف ${safePage}`)
+      const data = await response.json()
+      if (!data?.success || !data?.svg) throw new Error(`لم يتم العثور على صفحة المصحف ${safePage}`)
+      const value = String(data.svg)
+      svgMemoryCacheRef.current.set(key, value)
+
+      try {
+        if ('caches' in window) {
+          const cache = await caches.open(MUSHAF_CLIENT_CACHE)
+          await cache.put(url, new Response(JSON.stringify(data), {
+            headers: { 'Content-Type': 'application/json' },
+          }))
         }
+      } catch {
+        // التخزين المحلي تحسين اختياري ولا يعطل القراءة.
       }
-    } catch {
-      // ننتقل إلى الشبكة.
-    }
 
-    const response = await fetch(url, {
-      cache: 'force-cache',
-    })
-    if (!response.ok) throw new Error(`تعذر تحميل صفحة المصحف ${safePage}`)
-    const data = await response.json()
-    if (!data?.success || !data?.svg) throw new Error(`لم يتم العثور على صفحة المصحف ${safePage}`)
-    const value = String(data.svg)
-    svgMemoryCacheRef.current.set(key, value)
-
-    try {
-      if ('caches' in window) {
-        const cache = await caches.open('samee3-mushaf-pages-v2')
-        await cache.put(url, new Response(JSON.stringify(data), {
-          headers: { 'Content-Type': 'application/json' },
-        }))
+      return value
+    } catch (networkError) {
+      if (cachedData?.success && cachedData?.svg) {
+        const value = String(cachedData.svg)
+        svgMemoryCacheRef.current.set(key, value)
+        return value
       }
-    } catch {
-      // لا نوقف القراءة بسبب فشل التخزين المؤقت.
-    }
 
-    return value
+      throw networkError instanceof Error
+        ? networkError
+        : new Error(`تعذر تحميل صفحة المصحف ${safePage}`)
+    }
   }, [riwaya])
 
   const prefetchRiwayaPage = useCallback(async (targetRiwaya: Riwaya, page: number) => {
@@ -1300,24 +1360,21 @@ export default function MushafPage() {
         const existing = await caches.match(pageUrl)
         if (!existing) {
           const response = await fetch(pageUrl, {
-            cache: 'force-cache',
+            cache: 'no-store',
             headers: { Accept: 'application/json' },
           })
           if (response.ok) {
             const data = await response.clone().json()
-            pageMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, {
-              ayahs: Array.isArray(data?.ayahs)
-                ? data.ayahs
-                : Array.isArray(data?.data?.ayahs)
-                  ? data.data.ayahs
-                  : [],
-            })
-            const cache = await caches.open('samee3-mushaf-pages-v2')
+            pageMemoryCacheRef.current.set(
+              `${targetRiwaya}:${safePage}`,
+              readPageDataPayload(data),
+            )
+            const cache = await caches.open(MUSHAF_CLIENT_CACHE)
             await cache.put(pageUrl, response)
           }
         }
       } else {
-        await fetch(pageUrl, { cache: 'force-cache' })
+        await fetch(pageUrl, { cache: 'no-store' })
       }
 
       // نُحمّل SVG لكل الروايات، بما فيها السوسي والبزي، حتى تكون
@@ -1325,13 +1382,13 @@ export default function MushafPage() {
       const svgUrl = `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
       const existingSvg = 'caches' in window ? await caches.match(svgUrl) : null
       if (!existingSvg) {
-        const response = await fetch(svgUrl, { cache: 'force-cache' })
+        const response = await fetch(svgUrl, { cache: 'no-store' })
         if (response.ok) {
           const data = await response.clone().json()
           if (data?.success && data?.svg) {
             svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
             if ('caches' in window) {
-              const cache = await caches.open('samee3-mushaf-pages-v2')
+              const cache = await caches.open(MUSHAF_CLIENT_CACHE)
               await cache.put(svgUrl, response)
             }
           }
@@ -1498,6 +1555,11 @@ export default function MushafPage() {
       document.querySelectorAll<HTMLElement>('.samee3-page-art'),
     )
 
+    const previousHighlights = document.querySelectorAll<HTMLElement>(
+      '.samee3-live-ayah-highlight',
+    )
+    previousHighlights.forEach((element) => element.remove())
+
     const nodes = artContainers.flatMap((art) =>
       Array.from(
         art.querySelectorAll<SVGElement>(
@@ -1529,7 +1591,18 @@ export default function MushafPage() {
             .find((item) => Number(item.number) === Number(fallbackPlayingAyahNumber)) || null
         : null
 
-    document.querySelectorAll('.samee3-live-ayah-highlight').forEach((element) => element.remove())
+    type HighlightRect = {
+      left: number
+      top: number
+      right: number
+      bottom: number
+    }
+
+    const overlayCandidates: Array<{
+      art: HTMLElement
+      rect: HighlightRect
+      key: string
+    }> = []
 
     nodes.forEach((node) => {
       node.classList.remove('samee3-pressed-ayah', 'samee3-playing-ayah')
@@ -1578,30 +1651,69 @@ export default function MushafPage() {
 
       if (!playingMatch) return
 
-      // تظليل HTML مستقل فوق مساحة الصفحة. هذا أكثر ثباتًا مع <tspan>
-      // ومع SVG القادم من مصادر مختلفة، ويظهر خلف النص بدل تغطيته.
-      const art = node.closest('.samee3-page-art') as HTMLElement | null
-      if (!art) return
+      // الصفحات المطبوعة تحتوي على مناطق لمس شفافة داخل SVG؛ تظليلها مباشرة
+      // يحافظ على التطابق التام مع صورة الصفحة. أما روايتي السوسي والبزي
+      // فنعتمد على طبقة HTML فوق الـSVG لأن tspan لا يضمن رسم background
+      // بشكل ثابت في جميع المتصفحات.
+      if (node.classList.contains('samee3-text-ayah')) {
+        const art = node.closest('.samee3-page-art') as HTMLElement | null
+        if (!art) return
 
-      const rect = node.getBoundingClientRect()
-      const artRect = art.getBoundingClientRect()
-      if (!rect.width || !rect.height || !artRect.width || !artRect.height) return
+        const rect = node.getBoundingClientRect()
+        const artRect = art.getBoundingClientRect()
+        if (!rect.width || !rect.height || !artRect.width || !artRect.height) return
 
+        overlayCandidates.push({
+          art,
+          key: `${nodeSurah}:${nodeLocalAyah || nodeGlobalAyah}:${Math.round((rect.top - artRect.top) / 8)}`,
+          rect: {
+            left: Math.max(0, rect.left - artRect.left),
+            top: Math.max(0, rect.top - artRect.top),
+            right: Math.min(artRect.width, rect.right - artRect.left),
+            bottom: Math.min(artRect.height, rect.bottom - artRect.top),
+          },
+        })
+      }
+    })
+
+    // اجمع كلمات الآية الموجودة على السطر نفسه في شريط واحد بدل إنشاء
+    // عشرات الهايلايتات الصغيرة فوق كل كلمة.
+    const grouped = new Map<string, { art: HTMLElement; rect: HighlightRect }>()
+    for (const candidate of overlayCandidates) {
+      const existing = grouped.get(candidate.key)
+      if (!existing) {
+        grouped.set(candidate.key, { art: candidate.art, rect: candidate.rect })
+        continue
+      }
+      existing.rect.left = Math.min(existing.rect.left, candidate.rect.left)
+      existing.rect.top = Math.min(existing.rect.top, candidate.rect.top)
+      existing.rect.right = Math.max(existing.rect.right, candidate.rect.right)
+      existing.rect.bottom = Math.max(existing.rect.bottom, candidate.rect.bottom)
+    }
+
+    grouped.forEach(({ art, rect }) => {
       const highlight = document.createElement('span')
       highlight.className = 'samee3-live-ayah-highlight'
       highlight.setAttribute('aria-hidden', 'true')
-      highlight.style.left = `${Math.max(0, rect.left - artRect.left - 7)}px`
-      highlight.style.top = `${Math.max(0, rect.top - artRect.top - Math.max(3, rect.height * 0.18))}px`
-      highlight.style.width = `${Math.min(artRect.width, rect.width + 14)}px`
-      highlight.style.height = `${rect.height + Math.max(6, rect.height * 0.36)}px`
-      highlight.style.setProperty('--samee3-highlight-scale', '1')
-      art.prepend(highlight)
+      highlight.style.left = `${Math.max(0, rect.left - 5)}px`
+      highlight.style.top = `${Math.max(0, rect.top - Math.max(4, (rect.bottom - rect.top) * 0.20))}px`
+      highlight.style.width = `${Math.min(art.clientWidth, rect.right - rect.left + 10)}px`
+      highlight.style.height = `${Math.min(art.clientHeight, rect.bottom - rect.top + Math.max(8, (rect.bottom - rect.top) * 0.40))}px`
+      art.appendChild(highlight)
     })
   }, [leftPageData, pageData, playingAyahNumber, pressedAyahNumber, rightPageData, selectedAyah])
 
   useEffect(() => {
-    const timer = window.setTimeout(highlightSearchedAyah, 120)
-    return () => window.clearTimeout(timer)
+    const refresh = () => highlightSearchedAyah()
+    const timer = window.setTimeout(refresh, 120)
+    window.addEventListener('resize', refresh, { passive: true })
+    window.addEventListener('orientationchange', refresh, { passive: true })
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('resize', refresh)
+      window.removeEventListener('orientationchange', refresh)
+      document.querySelectorAll('.samee3-live-ayah-highlight').forEach((element) => element.remove())
+    }
   }, [highlightSearchedAyah, svg, leftSvg, selectedAyah, playingAyahNumber])
 
   const mainDisplayedSvg = useMemo(() => {
@@ -2620,13 +2732,16 @@ export default function MushafPage() {
           if (cached) {
             const blob = await cached.blob()
 
-            if (audioObjectUrlRef.current) {
-              URL.revokeObjectURL(audioObjectUrlRef.current)
-            }
+            releasePersistentAudioObjectUrl()
 
             const localUrl = URL.createObjectURL(blob)
+            const win = window as Samee3PersistentWindow
+            win.__samee3PersistentAudioObjectUrl = localUrl
             audioObjectUrlRef.current = localUrl
             finalUrl = localUrl
+          } else {
+            releasePersistentAudioObjectUrl()
+            audioObjectUrlRef.current = null
           }
         }
       } catch {
@@ -2635,6 +2750,11 @@ export default function MushafPage() {
 
       const audio = audioRef.current as Samee3AudioElement | null
       if (!audio) return
+
+      if (finalUrl === networkUrl) {
+        releasePersistentAudioObjectUrl()
+        audioObjectUrlRef.current = null
+      }
 
       audio.__samee3NetworkUrl = networkUrl
       audio.__samee3Surah = surahNumber
@@ -2825,7 +2945,7 @@ export default function MushafPage() {
   }, [])
 
   useEffect(() => {
-    const win = window as Window & { __samee3PersistentAudio?: Samee3AudioElement }
+    const win = window as Samee3PersistentWindow
     const audio = (win.__samee3PersistentAudio || new Audio()) as Samee3AudioElement
     win.__samee3PersistentAudio = audio
     audioRef.current = audio
@@ -3391,16 +3511,8 @@ export default function MushafPage() {
       window.removeEventListener('pagehide', persistOnDocumentExit)
       window.removeEventListener('beforeunload', persistOnDocumentExit)
 
-      if (
-        audioObjectUrlRef.current
-      ) {
-        URL.revokeObjectURL(
-          audioObjectUrlRef.current,
-        )
-
-        audioObjectUrlRef.current =
-          null
-      }
+      // لا نلغي Object URL هنا؛ عنصر الصوت نفسه مشترك بين صفحات التطبيق،
+      // وقد تكون التلاوة مستمرة أثناء مغادرة صفحة المصحف.
     }
   }, [])
 
@@ -4360,21 +4472,23 @@ export default function MushafPage() {
         .samee3-page-art > svg { position:relative; z-index:2; width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
         .samee3-live-ayah-highlight {
           position:absolute;
-          z-index:1;
+          z-index:4;
           display:block;
           pointer-events:none !important;
           border-radius:999px;
+          box-sizing:border-box;
           background:
-            linear-gradient(180deg, rgba(255,247,228,.34) 0%, rgba(199,147,79,.10) 18%, rgba(199,147,79,.21) 52%, rgba(199,147,79,.10) 82%, rgba(255,247,228,.24) 100%);
-          border:1px solid rgba(199,147,79,.24);
+            linear-gradient(180deg, rgba(255,249,229,.16) 0%, rgba(199,147,79,.11) 18%, rgba(199,147,79,.22) 52%, rgba(199,147,79,.11) 82%, rgba(255,249,229,.14) 100%);
+          border:1px solid rgba(199,147,79,.28);
+          mix-blend-mode:multiply;
           box-shadow:
             0 3px 10px rgba(157,101,32,.16),
             inset 0 1px 0 rgba(255,255,255,.42),
             inset 0 -2px 0 rgba(157,101,32,.11);
           filter:saturate(.93);
-          opacity:.96;
+          opacity:.92;
           transform:translateZ(0);
-          animation:samee3AyahHighlightPulse 1.8s ease-in-out infinite;
+          animation:samee3AyahHighlightPulse 2.1s ease-in-out infinite;
         }
         .samee3-live-ayah-highlight::after {
           content:"";
