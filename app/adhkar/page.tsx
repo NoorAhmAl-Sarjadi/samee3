@@ -1,4 +1,5 @@
 'use client'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, Heart, Loader2, Moon, Search, Shield, Sun } from 'lucide-react'
 import Link from 'next/link'
 
