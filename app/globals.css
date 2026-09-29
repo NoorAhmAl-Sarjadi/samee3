@@ -1,0 +1,288 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   Samee3 Quran — Global Styles
+   ========================================================= */
+
+:root {
+  --bg-main: #f4f9fe;
+  --navbar-bg: #ffffff;
+  --royal-blue: #0284c7;
+  --gold-premium: #d97706;
+  --mushaf-paper: #fcfbf8;
+  --mushaf-border: #0ea5e9;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --card-bg: #ffffff;
+  --border-light: #e2e8f0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-main);
+  color: var(--text-main);
+  direction: rtl;
+  font-family:
+    "Tajawal",
+    "Segoe UI",
+    Tahoma,
+    Arial,
+    sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* منع الوميض الأزرق الافتراضي على الهواتف */
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* تحسين التعامل مع العناصر القابلة للنقر */
+button,
+a {
+  touch-action: manipulation;
+}
+
+/* منع خروج الصور من الحاويات */
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+/* تحسين الحقول */
+input,
+textarea,
+select,
+button {
+  font: inherit;
+}
+
+/* إزالة الإطار الافتراضي مع الحفاظ على الوصول عند استخدام لوحة المفاتيح */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--royal-blue);
+  outline-offset: 2px;
+}
+
+/* =========================================================
+   Scrollbar
+   ========================================================= */
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* شريط تمرير أنيق على الأجهزة المكتبية */
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(2, 132, 199, 0.25);
+  border-radius: 999px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(2, 132, 199, 0.45);
+}
+
+/* =========================================================
+   Quran / Mushaf Font
+   ========================================================= */
+
+/*
+ * خط المصحف العثماني.
+ * يستخدم فقط للعناصر التي تطلب هذا الخط صراحةً.
+ */
+@font-face {
+  font-family: "KFGQPC Uthmanic Script HAFS";
+  src:
+    url("https://cdn.jsdelivr.net/npm/quran-font@1.1.2/dist/fonts/hafs.woff2")
+    format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+.mushaf-font {
+  font-family: "KFGQPC Uthmanic Script HAFS", serif;
+}
+
+/* =========================================================
+   Mushaf Surface
+   ========================================================= */
+
+.mushaf-surface {
+  background: var(--mushaf-paper);
+  color: #1c1917;
+}
+
+/*
+ * إطار صفحة المصحف.
+ * مفيد عند عرض الصفحة بالشكل القريب من المصحف الورقي.
+ */
+.mushaf-page-frame {
+  position: relative;
+  background: var(--mushaf-paper);
+  border: 1px solid rgba(14, 165, 233, 0.28);
+  box-shadow:
+    0 10px 30px rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.05);
+}
+
+/* =========================================================
+   Safe Areas — الهواتف الحديثة
+   ========================================================= */
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* =========================================================
+   Floating Navigation / Controls
+   ========================================================= */
+
+.safe-bottom-margin {
+  margin-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* =========================================================
+   Selection
+   ========================================================= */
+
+::selection {
+  background: rgba(2, 132, 199, 0.18);
+  color: var(--text-main);
+}
+
+/* =========================================================
+   Utility Animations
+   ========================================================= */
+
+@keyframes samee3-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes samee3-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes samee3-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.samee3-fade-in {
+  animation: samee3-fade-in 0.25s ease-out both;
+}
+
+.samee3-slide-up {
+  animation: samee3-slide-up 0.3s ease-out both;
+}
+
+.samee3-slide-down {
+  animation: samee3-slide-down 0.3s ease-out both;
+}
+
+/* =========================================================
+   Mobile Optimizations
+   ========================================================= */
+
+@media (max-width: 768px) {
+  html {
+    overflow-x: hidden;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+
+  .mushaf-page-frame {
+    box-shadow:
+      0 6px 18px rgba(15, 23, 42, 0.07),
+      0 1px 4px rgba(15, 23, 42, 0.04);
+  }
+}
+
+/* =========================================================
+   Reduced Motion
+   ========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
