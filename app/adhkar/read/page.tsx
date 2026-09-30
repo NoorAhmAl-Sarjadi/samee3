@@ -282,14 +282,19 @@ function absoluteAudioUrl(value?: string) {
 }
 
 function normalizeCategories(value: unknown): AdhkarCategory[] {
-  const raw =
-    Array.isArray(value)
-      ? value
-      : Array.isArray((value as { data?: unknown })?.data)
-        ? (value as { data: unknown }).data
-        : Array.isArray((value as { adhkar?: unknown })?.adhkar)
-          ? (value as { adhkar: unknown }).adhkar
-          : []
+  let raw: unknown[] = []
+
+  if (Array.isArray(value)) {
+    raw = value
+  } else if (value && typeof value === 'object') {
+    const payload = value as { data?: unknown; adhkar?: unknown }
+
+    if (Array.isArray(payload.data)) {
+      raw = payload.data
+    } else if (Array.isArray(payload.adhkar)) {
+      raw = payload.adhkar
+    }
+  }
 
   return raw
     .filter(
