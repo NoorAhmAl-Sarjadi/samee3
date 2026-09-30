@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  ArrowRight,
   useCallback,
   useEffect,
   useMemo,
