@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type ReactNode,
 } from 'react'
 import Link from 'next/link'
@@ -576,6 +577,7 @@ export default function AudioPage() {
 
   useEffect(() => {
     if (!selectedRiwaya) return
+    const activeRiwaya = selectedRiwaya!
 
     let cancelled = false
 
@@ -586,7 +588,7 @@ export default function AudioPage() {
       try {
         const result = await fetchJson<{ reciters: Reciter[] }>(
           `${MP3QURAN_API}/reciters?language=ar&rewaya=${encodeURIComponent(
-            selectedRiwaya.id
+            activeRiwaya.id
           )}`
         )
 
@@ -785,29 +787,30 @@ export default function AudioPage() {
   )
 
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio || !player) return
+    if (!audioRef.current || !player) return
+    const currentAudio = audioRef.current!
+    const currentPlayer = player!
 
     let disposed = false
 
     async function prepare() {
       try {
-        let source = player.audioUrl
-        const offlineSource = await loadOfflineAudioUrl(player)
+        let source = currentPlayer.audioUrl
+        const offlineSource = await loadOfflineAudioUrl(currentPlayer)
         if (offlineSource) source = offlineSource
 
         if (disposed) return
 
-        audio.src = source
-        audio.playbackRate = playbackRate
-        audio.volume = isMuted ? 0 : volume
-        audio.load()
+        currentAudio.src = source
+        currentAudio.playbackRate = playbackRate
+        currentAudio.volume = isMuted ? 0 : volume
+        currentAudio.load()
 
         const playNow = async () => {
           if (!pendingPlayRef.current || disposed) return
           pendingPlayRef.current = false
           try {
-            await audio.play()
+            await currentAudio.play()
           } catch (err) {
             console.error('Audio play failed:', err)
             setIsPlaying(false)
@@ -815,10 +818,10 @@ export default function AudioPage() {
           }
         }
 
-        if (audio.readyState >= 3) {
+        if (currentAudio.readyState >= 3) {
           await playNow()
         } else {
-          audio.addEventListener('canplay', playNow, { once: true })
+          currentAudio.addEventListener('canplay', playNow, { once: true })
         }
       } catch (err) {
         console.error('Player prepare error:', err)
@@ -1288,7 +1291,12 @@ export default function AudioPage() {
   }
 
   const resetSelection = () => {
-    if (audioRef.current) audioRef.current.pause()
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.removeAttribute('src')
+      audioRef.current.load()
+    }
+    revokeObjectUrl()
 
     setPlayer(null)
     setQueue([])
@@ -1567,7 +1575,7 @@ export default function AudioPage() {
                   max={duration || 0}
                   step={0.1}
                   value={Math.min(progress, duration || 0)}
-                  onChange={(event) => seekTo(Number(event.target.value))}
+                  onChange={(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => seekTo(Number(event.target.value))}
                   disabled={!duration}
                   className="w-full accent-[var(--mushaf-gold,#D97706)]"
                   aria-label="تقدم الملف"
@@ -1586,7 +1594,7 @@ export default function AudioPage() {
                     </p>
                     <select
                       value={playbackRate}
-                      onChange={(event) =>
+                      onChange={(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
                         setPlaybackRate(Number(event.target.value))
                       }
                       className="w-full rounded-xl border border-white/10 bg-transparent px-3 py-2 text-xs font-black text-white outline-none"
@@ -1648,7 +1656,7 @@ export default function AudioPage() {
                         max={1}
                         step={0.01}
                         value={isMuted ? 0 : volume}
-                        onChange={(event) => {
+                        onChange={(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
                           setVolume(Number(event.target.value))
                           setIsMuted(false)
                         }}
@@ -1890,7 +1898,7 @@ export default function AudioPage() {
                         />
                         <input
                           value={riwayaSearch}
-                          onChange={(event) => setRiwayaSearch(event.target.value)}
+                          onChange={(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setRiwayaSearch(event.target.value)}
                           placeholder="ابحث عن رواية..."
                           className="w-full rounded-2xl bg-mushaf-paper py-3 pl-4 pr-11 text-sm font-bold outline-none"
                         />
@@ -1995,7 +2003,7 @@ export default function AudioPage() {
                         />
                         <input
                           value={search}
-                          onChange={(event) => setSearch(event.target.value)}
+                          onChange={(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSearch(event.target.value)}
                           placeholder="ابحث باسم الشيخ..."
                           className="w-full rounded-2xl bg-mushaf-paper py-3 pl-4 pr-11 text-sm font-bold outline-none"
                         />
@@ -2118,7 +2126,7 @@ export default function AudioPage() {
                         />
                         <input
                           value={surahSearch}
-                          onChange={(event) => setSurahSearch(event.target.value)}
+                          onChange={(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSurahSearch(event.target.value)}
                           placeholder="ابحث باسم السورة..."
                           className="w-full rounded-2xl bg-mushaf-paper py-3 pl-4 pr-11 text-sm font-bold outline-none"
                         />
@@ -2405,7 +2413,7 @@ export default function AudioPage() {
                             <span className="rounded-xl bg-mushaf-teal/10 px-3 py-2 text-xs font-black text-mushaf-teal">{arabicDigits(sunnahExtras.length)} مادة</span>
                           </div>
                           <div className="grid gap-3 lg:grid-cols-2">
-                            {sunnahExtras.slice(0, 40).map((item) => (
+                            {sunnahExtras.slice(0, 60).map((item) => (
                               <div key={item.id} className="rounded-3xl border border-mushaf-border/30 bg-white p-4 shadow-sm">
                                 <div className="flex items-center gap-3">
                                   <div className="h-14 w-14 shrink-0"><AudioAvatar size="player" playing={player?.kind === 'library' && player.libraryId === item.id && isPlaying} /></div>
@@ -2431,7 +2439,7 @@ export default function AudioPage() {
                           </div>
                           <div className="relative w-full sm:max-w-sm">
                             <Search size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث في الأحاديث الصوتية..." className="w-full rounded-2xl bg-white py-3 pl-4 pr-11 text-sm font-bold outline-none border border-mushaf-border/30" />
+                            <input value={search} onChange={(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSearch(event.target.value)} placeholder="ابحث في الأحاديث الصوتية..." className="w-full rounded-2xl bg-white py-3 pl-4 pr-11 text-sm font-bold outline-none border border-mushaf-border/30" />
                           </div>
                         </div>
 
@@ -2499,7 +2507,7 @@ export default function AudioPage() {
                         </div>
                         <div className="relative w-full lg:max-w-sm">
                           <Search size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث بعنوان الخطبة..." className="w-full rounded-2xl bg-mushaf-paper py-3 pl-4 pr-11 text-sm font-bold outline-none" />
+                          <input value={search} onChange={(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSearch(event.target.value)} placeholder="ابحث بعنوان الخطبة..." className="w-full rounded-2xl bg-mushaf-paper py-3 pl-4 pr-11 text-sm font-bold outline-none" />
                         </div>
                       </div>
                     </div>
