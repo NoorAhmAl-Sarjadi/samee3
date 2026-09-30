@@ -1,4 +1,5 @@
 'use client'
+
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, Heart, Loader2, Moon, Search, Shield, Sun } from 'lucide-react'
 import Link from 'next/link'
@@ -19,7 +20,9 @@ type AdhkarCategory = {
   array: AdhkarItem[]
 }
 
-const DATA_URL = 'https://raw.githubusercontent.com/rn0x/Adhkar-json/main/adhkar.json'
+// jsDelivr is used instead of raw.githubusercontent.com for a more stable CDN path.
+// The JSON remains compatible with the current application shape.
+const DATA_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json'
 
 function categoryIcon(name: string) {
   if (name.includes('الصباح')) return <Sun size={23} />
@@ -42,6 +45,10 @@ function categoryTone(name: string) {
     return 'bg-violet-50 text-violet-500 group-hover:bg-violet-500'
   }
 
+  if (name.includes('الاستيقاظ')) {
+    return 'bg-emerald-50 text-emerald-500 group-hover:bg-emerald-500'
+  }
+
   return 'bg-mushaf-paper text-mushaf-teal group-hover:bg-mushaf-teal'
 }
 
@@ -49,39 +56,82 @@ function arabicDigits(value: number | string) {
   return String(value).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[Number(d)])
 }
 
+function displayCategoryName(category: AdhkarCategory) {
+  const name = String(category.category || '').trim()
+
+  if (
+    name.includes('الصباح') ||
+    name.includes('المساء') ||
+    name.includes('النوم') ||
+    name.includes('الاستيقاظ')
+  ) {
+    return name
+  }
+
+  return 'أذكار متنوعة'
+}
+
 export default function AdhkarPage() {
   const [categories, setCategories] = useState<AdhkarCategory[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [error, setError] = useState('')
 
   useEffect(() => {
     let ignore = false
 
     const loadCategories = async () => {
-      try {
-        const response = await fetch(DATA_URL, { cache: 'no-store' })
-        if (!response.ok) throw new Error('Failed to load adhkar')
+      setLoading(true)
+      setError('')
 
-        const json = await response.json()
+      try {
+        const response = await fetch(DATA_URL, {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+
+        if (!response.ok) {
+          throw new Error(`Failed to load adhkar: ${response.status}`)
+        }
+
+        const json: unknown = await response.json()
 
         const data: AdhkarCategory[] = Array.isArray(json)
           ? json
-          : Array.isArray(json?.data)
-            ? json.data
-            : Array.isArray(json?.adhkar)
-              ? json.adhkar
+          : Array.isArray((json as { data?: unknown })?.data)
+            ? ((json as { data: AdhkarCategory[] }).data ?? [])
+            : Array.isArray((json as { adhkar?: unknown })?.adhkar)
+              ? ((json as { adhkar: AdhkarCategory[] }).adhkar ?? [])
               : []
 
-        if (!ignore) setCategories(data)
-      } catch (error) {
-        console.error('Adhkar categories error:', error)
-        if (!ignore) setCategories([])
+        const cleaned = data.filter(
+          (category) =>
+            category &&
+            Number.isFinite(Number(category.id)) &&
+            typeof category.category === 'string' &&
+            Array.isArray(category.array)
+        )
+
+        if (!cleaned.length) {
+          throw new Error('Empty adhkar data')
+        }
+
+        if (!ignore) {
+          setCategories(cleaned)
+        }
+      } catch (loadError) {
+        console.error('Adhkar categories error:', loadError)
+
+        if (!ignore) {
+          setCategories([])
+          setError('تعذر تحميل أقسام الأذكار من المصدر الآن.')
+        }
       } finally {
         if (!ignore) setLoading(false)
       }
     }
 
-    loadCategories()
+    void loadCategories()
 
     return () => {
       ignore = true
@@ -89,13 +139,18 @@ export default function AdhkarPage() {
   }, [])
 
   const filteredCategories = useMemo(() => {
-    const normalized = query.trim()
+    const normalized = query.trim().toLowerCase()
 
     if (!normalized) return categories
 
-    return categories.filter((category) =>
-      String(category.category).includes(normalized)
-    )
+    return categories.filter((category) => {
+      const categoryName = String(category.category || '')
+      const displayName = displayCategoryName(category)
+      return (
+        categoryName.toLowerCase().includes(normalized) ||
+        displayName.toLowerCase().includes(normalized)
+      )
+    })
   }, [categories, query])
 
   return (
@@ -106,11 +161,7 @@ export default function AdhkarPage() {
       <div className="w-full max-w-5xl mx-auto">
         <div className="flex items-center gap-3 mb-6 pt-2">
           <div className="w-12 h-12 rounded-2xl bg-white border border-mushaf-border/40 shadow-sm flex items-center justify-center">
-            <Heart
-              size={26}
-              className="text-mushaf-teal"
-              fill="currentColor"
-            />
+            <Heart size={26} className="text-mushaf-teal" fill="currentColor" />
           </div>
 
           <div>
@@ -123,7 +174,6 @@ export default function AdhkarPage() {
           </div>
         </div>
 
-        {/* وردك اليومي */}
         <section className="mb-6">
           <div className="bg-gradient-to-br from-[#175E67] to-[#0D383E] rounded-[2rem] p-6 sm:p-7 shadow-xl text-white relative overflow-hidden border border-mushaf-gold/20">
             <div className="absolute -top-12 -left-12 w-40 h-40 bg-white/5 rounded-full blur-2xl" />
@@ -131,24 +181,19 @@ export default function AdhkarPage() {
 
             <div className="relative z-10 flex items-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/10 flex items-center justify-center">
-                <Heart
-                  size={28}
-                  className="text-mushaf-gold"
-                  fill="currentColor"
-                />
+                <Heart size={28} className="text-mushaf-gold" fill="currentColor" />
               </div>
 
               <div>
                 <h2 className="font-black text-xl">وردك اليومي</h2>
                 <p className="text-white/70 text-sm mt-1">
-                  اضغط على الذكر لتسمع صوته
+                  اختر قسمًا ثم شغّل الورد كاملًا من المشغل الصوتي
                 </p>
               </div>
             </div>
           </div>
         </section>
 
-        {/* اختصارات رئيسية */}
         <section className="mb-7">
           <h2 className="text-lg font-black text-mushaf-dark mb-4">
             الأذكار اليومية
@@ -163,17 +208,13 @@ export default function AdhkarPage() {
                 <div className="w-12 h-12 bg-orange-50 text-orange-500 rounded-2xl flex items-center justify-center group-hover:bg-orange-500 group-hover:text-white transition">
                   <Sun size={24} />
                 </div>
-
                 <div>
                   <span className="font-black text-mushaf-dark text-lg group-hover:text-mushaf-teal transition block">
                     أذكار الصباح
                   </span>
-                  <span className="text-xs text-gray-400">
-                    ورد الصباح
-                  </span>
+                  <span className="text-xs text-gray-400">ورد الصباح</span>
                 </div>
               </div>
-
               <ChevronLeft className="text-mushaf-gold opacity-60 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
             </Link>
 
@@ -185,17 +226,13 @@ export default function AdhkarPage() {
                 <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center group-hover:bg-indigo-500 group-hover:text-white transition">
                   <Moon size={24} />
                 </div>
-
                 <div>
                   <span className="font-black text-mushaf-dark text-lg group-hover:text-mushaf-teal transition block">
                     أذكار المساء
                   </span>
-                  <span className="text-xs text-gray-400">
-                    ورد المساء
-                  </span>
+                  <span className="text-xs text-gray-400">ورد المساء</span>
                 </div>
               </div>
-
               <ChevronLeft className="text-mushaf-gold opacity-60 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
             </Link>
 
@@ -207,17 +244,13 @@ export default function AdhkarPage() {
                 <div className="w-12 h-12 bg-violet-50 text-violet-500 rounded-2xl flex items-center justify-center group-hover:bg-violet-500 group-hover:text-white transition">
                   <Moon size={24} />
                 </div>
-
                 <div>
                   <span className="font-black text-mushaf-dark text-lg group-hover:text-mushaf-teal transition block">
                     أذكار النوم
                   </span>
-                  <span className="text-xs text-gray-400">
-                    ورد النوم
-                  </span>
+                  <span className="text-xs text-gray-400">ورد النوم</span>
                 </div>
               </div>
-
               <ChevronLeft className="text-mushaf-gold opacity-60 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
             </Link>
 
@@ -229,7 +262,6 @@ export default function AdhkarPage() {
                 <div className="w-12 h-12 bg-emerald-50 text-emerald-500 rounded-2xl flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition">
                   <Sun size={24} />
                 </div>
-
                 <div>
                   <span className="font-black text-mushaf-dark text-lg group-hover:text-mushaf-teal transition block">
                     أذكار الاستيقاظ
@@ -239,25 +271,21 @@ export default function AdhkarPage() {
                   </span>
                 </div>
               </div>
-
               <ChevronLeft className="text-mushaf-gold opacity-60 group-hover:opacity-100 group-hover:-translate-x-1 transition" />
             </Link>
           </div>
         </section>
 
-        {/* كل الأذكار */}
         <section>
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-lg font-black text-mushaf-dark">
-                جميع الأذكار
-              </h2>
+              <h2 className="text-lg font-black text-mushaf-dark">أقسام الأذكار</h2>
               <p className="text-xs text-gray-400 mt-1">
-                كل الأقسام الموجودة في مصدر البيانات
+                أذكار الصباح والمساء والنوم، وبقية الأقسام تحت «أذكار متنوعة»
               </p>
             </div>
 
-            <span className="text-xs font-black text-mushaf-teal bg-mushaf-teal/10 px-3 py-2 rounded-xl">
+            <span className="text-xs font-black text-mushaf-teal bg-mushaf-teal/10 px-3 py-2 rounded-xl shrink-0">
               {arabicDigits(filteredCategories.length)} قسم
             </span>
           </div>
@@ -267,7 +295,6 @@ export default function AdhkarPage() {
               size={18}
               className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
             />
-
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -281,15 +308,21 @@ export default function AdhkarPage() {
               <Loader2 size={36} className="animate-spin" />
               <p className="font-bold text-sm">جاري تحميل جميع الأذكار...</p>
             </div>
+          ) : error ? (
+            <div className="bg-white rounded-3xl border border-red-100 p-8 text-center text-red-500 font-bold">
+              {error}
+            </div>
           ) : filteredCategories.length ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {filteredCategories.map((category) => {
                 const tone = categoryTone(category.category)
-                const audioCount = category.array?.filter((item) => item.audio).length ?? 0
+                const audioCount =
+                  category.array?.filter((item) => Boolean(item.audio)).length ?? 0
+                const isSpecial = displayCategoryName(category) !== 'أذكار متنوعة'
 
                 return (
                   <Link
-                    key={category.id}
+                    key={`${category.id}-${category.category}`}
                     href={`/adhkar/read?categoryId=${category.id}`}
                     className="bg-white p-5 rounded-3xl shadow-sm border border-mushaf-border/40 flex items-center justify-between hover:border-mushaf-teal transition group"
                   >
@@ -302,8 +335,14 @@ export default function AdhkarPage() {
 
                       <div className="min-w-0">
                         <span className="font-black text-mushaf-dark text-base group-hover:text-mushaf-teal transition block truncate">
-                          {category.category}
+                          {isSpecial ? category.category : 'أذكار متنوعة'}
                         </span>
+
+                        {!isSpecial && (
+                          <span className="text-[10px] text-mushaf-teal/70 mt-1 block truncate">
+                            {category.category}
+                          </span>
+                        )}
 
                         <span className="text-[11px] text-gray-400 mt-1 block">
                           {arabicDigits(category.array?.length ?? 0)} أذكار
