@@ -8,6 +8,8 @@ import {
   CheckCheck,
   ChevronRight,
   Copy,
+  ExternalLink,
+  Headphones,
   Heart,
   Loader2,
   Pause,
@@ -35,22 +37,149 @@ type AdhkarCategory = {
 }
 
 type AdhkarType = 'morning' | 'evening' | 'sleep' | 'waking'
+type ReaderMode = 'direct' | 'external'
+
+type AdhkarReciter = {
+  id: string
+  name: string
+  sourceName: string
+  mode: ReaderMode
+  description: string
+  coverage: string
+  sourceUrl: string
+  badge: string
+  embedByType?: Partial<Record<AdhkarType, string>>
+}
 
 const DATA_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json'
 const AUDIO_BASE_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main'
 
 /*
- * مصدر rn0x/Adhkar-json الحالي يحتوي على تسجيلات بشرية مقطعة على مستوى الذكر،
- * والـ README يعرّف القراءة الصوتية الحالية بأنها للمحاضر حمد الدريهم.
+ * مكتبة الأصوات الإضافية مبنية على صفحات صوتية منشورة فعلًا.
+ * لا نستخدم أصوات قراء القرآن على أنها أصوات أذكار إلا عندما يوجد لهم
+ * تسجيل أذكار منشور مستقلًا.
  *
- * تم بناء النظام هنا بطريقة قابلة لإضافة قراء آخرين عندما تتوفر ملفات صوتية
- * مقطعة لكل ذكر لنفس المجموعة. لا يتم اختراع روابط أو أسماء تسجيلات غير موجودة.
+ * mode=direct:
+ *   التسجيلات الموجودة في بيانات rn0x/Adhkar-json مرتبطة بالذكر نفسه،
+ *   لذلك يمكن للمشغل الداخلي تشغيل الذكر مباشرة.
+ *
+ * mode=external:
+ *   المصدر لديه تسجيل أذكار حقيقي، لكن المصدر المنشور لا يعطي لنا
+ *   ملفًا مباشرًا مضمونًا مطابقًا لكل عنصر في JSON؛ لذلك نفتح المصدر
+ *   الأصلي بدل اختلاق روابط أو ربط ذكر بملف غير مطابق.
  */
-const DEFAULT_RECITER = {
-  id: 'hamad-al-drehem',
-  name: 'حمد الدريهم',
-  description: 'التسجيل المتوفر مع بيانات حصن المسلم',
-}
+const ADHKAR_RECITERS: AdhkarReciter[] = [
+  {
+    id: 'hamad-al-drehem',
+    name: 'حمد الدريهم',
+    sourceName: 'IslamHouse',
+    mode: 'direct',
+    description: 'حصن المسلم كاملًا مع نسخة مقسمة على أبواب الكتاب.',
+    coverage: 'حصن المسلم كاملًا + تقسيم على الأبواب',
+    sourceUrl: 'https://islamhouse.com/ar/audios/263352/',
+    badge: 'تشغيل مباشر',
+  },
+  {
+    id: 'sulaiman-al-shuhayhi',
+    name: 'سليمان بن محمد الشويهي',
+    sourceName: 'IslamHouse',
+    mode: 'external',
+    description: 'قراءة صوتية كاملة لحصن المسلم، مع نسخة مقسمة على الأبواب.',
+    coverage: 'حصن المسلم كاملًا + تقسيم على الأبواب',
+    sourceUrl: 'https://islamhouse.com/ar/audios/2799103/',
+    badge: 'مكتبة كاملة',
+  },
+  {
+    id: 'mishary-alafasy',
+    name: 'مشاري بن راشد العفاسي',
+    sourceName: 'TVQuran / IslamHouse',
+    mode: 'external',
+    description: 'تسجيلات منشورة لأذكار الصباح والمساء والنوم والاستيقاظ.',
+    coverage: 'الصباح + المساء + النوم + الاستيقاظ',
+    sourceUrl: 'https://www.tvquran.com/ar/scholar/85/profile/%D9%85%D8%B4%D8%A7%D8%B1%D9%8A-%D8%A7%D9%84%D8%B9%D9%81%D8%A7%D8%B3%D9%8A',
+    badge: 'عدة أذكار',
+    embedByType: {
+      morning: 'https://www.tvquran.com/ar/selection/3/embeddable',
+      evening: 'https://www.tvquran.com/ar/selection/4/embeddable',
+      sleep: 'https://www.tvquran.com/ar/selection/11/embeddable',
+      waking: 'https://www.tvquran.com/ar/selection/1/embeddable',
+    },
+  },
+  {
+    id: 'faris-abbad',
+    name: 'فارس عباد',
+    sourceName: 'TVQuran / IslamHouse',
+    mode: 'external',
+    description: 'أذكار الصباح والمساء، إضافة إلى تسجيلات لبعض أبواب حصن المسلم.',
+    coverage: 'الصباح + المساء + بعض أبواب حصن المسلم',
+    sourceUrl: 'https://www.tvquran.com/ar/scholar/64/profile/%D9%81%D8%A7%D8%B1%D8%B3-%D8%B9%D8%A8%D8%A7%D8%AF',
+    badge: 'عدة تسجيلات',
+    embedByType: {
+      morning: 'https://www.tvquran.com/ar/selection/5/embeddable',
+      evening: 'https://www.tvquran.com/ar/selection/6/embeddable',
+    },
+  },
+  {
+    id: 'mohamed-jibril',
+    name: 'محمد جبريل',
+    sourceName: 'TVQuran',
+    mode: 'external',
+    description: 'تسجيلات منشورة لأذكار الصباح والمساء.',
+    coverage: 'الصباح + المساء',
+    sourceUrl: 'https://www.tvquran.com/ar/scholar/76/profile/%D9%85%D8%AD%D9%85%D8%AF-%D8%AC%D8%A8%D8%B1%D9%8A%D9%84',
+    badge: 'الصباح والمساء',
+    embedByType: {
+      morning: 'https://www.tvquran.com/ar/selection/7/embeddable',
+      evening: 'https://www.tvquran.com/ar/selection/8/embeddable',
+    },
+  },
+  {
+    id: 'nasser-alqatami',
+    name: 'ناصر القطامي',
+    sourceName: 'TVQuran',
+    mode: 'external',
+    description: 'تسجيل منشور ضمن قسم أذكار اليوم والليلة.',
+    coverage: 'أذكار اليوم والليلة',
+    sourceUrl: 'https://www.tvquran.com/ar/scholar/90/profile/%D9%86%D8%A7%D8%B5%D8%B1-%D8%A7%D9%84%D9%82%D8%B7%D8%A7%D9%85%D9%8A',
+    badge: 'أذكار اليوم والليلة',
+    embedByType: {
+      morning: 'https://www.tvquran.com/ar/selection/2/embeddable',
+      evening: 'https://www.tvquran.com/ar/selection/2/embeddable',
+    },
+  },
+  {
+    id: 'walid-abu-ziyad',
+    name: 'وليد أبو زياد',
+    sourceName: 'IslamHouse',
+    mode: 'external',
+    description: 'تسجيلات صوتية لبعض أبواب حصن المسلم بصيغة MP3.',
+    coverage: 'بعض أبواب حصن المسلم',
+    sourceUrl: 'https://islamhouse.com/ar/audios/289179/',
+    badge: 'أبواب متعددة',
+  },
+  {
+    id: 'abu-alhasan-alhadramy',
+    name: 'أبو الحسن الحضرمي',
+    sourceName: 'IslamHouse',
+    mode: 'external',
+    description: 'تسجيلات عربية لأذكار الصباح والمساء منشورة ضمن مادة صوتية.',
+    coverage: 'الصباح + المساء',
+    sourceUrl: 'https://islamhouse.com/ar/audios/194307/',
+    badge: 'الصباح والمساء',
+  },
+  {
+    id: 'saad-alghamdi',
+    name: 'سعد الغامدي',
+    sourceName: 'Duaa-MP3',
+    mode: 'external',
+    description: 'مكتبة خارجية تضم عددًا كبيرًا من الأدعية والأذكار بصيغة MP3.',
+    coverage: 'مكتبة أدعية وأذكار متعددة',
+    sourceUrl: 'https://duaa-mp3.blogspot.com/p/blog-page_54.html',
+    badge: 'مكتبة كبيرة',
+  },
+]
+
+const DEFAULT_RECITER = ADHKAR_RECITERS[0]
 
 const typeConfig: Record<AdhkarType, { title: string; categoryNames: string[] }> = {
   morning: {
@@ -149,7 +278,12 @@ function arabicDigits(value: number | string) {
 
 function displayCategoryName(category: AdhkarCategory) {
   const name = String(category.category || '').trim()
-  if (name.includes('الصباح') || name.includes('المساء') || name.includes('النوم') || name.includes('الاستيقاظ')) {
+  if (
+    name.includes('الصباح') ||
+    name.includes('المساء') ||
+    name.includes('النوم') ||
+    name.includes('الاستيقاظ')
+  ) {
     return name
   }
   return 'أذكار متنوعة'
@@ -168,7 +302,10 @@ function buildCounts(items: AdhkarItem[]) {
   return result
 }
 
-function getCategoryFromPayload(json: unknown, config: { categoryNames: string[] }) {
+function getCategoryFromPayload(
+  json: unknown,
+  config: { categoryNames: string[] }
+) {
   const categories: AdhkarCategory[] = Array.isArray(json)
     ? json
     : Array.isArray((json as { data?: unknown })?.data)
@@ -179,6 +316,55 @@ function getCategoryFromPayload(json: unknown, config: { categoryNames: string[]
 
   return categories.find((category) =>
     config.categoryNames.includes(String(category.category).trim())
+  )
+}
+
+function ReaderMiniCard({ reader, selected, onSelect }: {
+  reader: AdhkarReciter
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`text-right rounded-2xl border p-3 transition-all ${
+        selected
+          ? 'border-mushaf-teal bg-mushaf-teal/5 shadow-sm ring-1 ring-mushaf-teal/10'
+          : 'border-mushaf-border/30 bg-white hover:border-mushaf-teal/40 hover:shadow-sm'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+            selected
+              ? 'bg-mushaf-teal text-white'
+              : 'bg-mushaf-paper text-mushaf-teal border border-mushaf-border/20'
+          }`}
+        >
+          <Headphones size={18} />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="font-black text-sm text-mushaf-dark truncate">{reader.name}</p>
+            <span
+              className={`text-[9px] px-2 py-1 rounded-full shrink-0 font-black ${
+                reader.mode === 'direct'
+                  ? 'bg-emerald-50 text-emerald-600'
+                  : 'bg-amber-50 text-amber-700'
+              }`}
+            >
+              {reader.badge}
+            </span>
+          </div>
+
+          <p className="text-[10px] text-gray-400 mt-1 leading-relaxed line-clamp-2">
+            {reader.coverage}
+          </p>
+        </div>
+      </div>
+    </button>
   )
 }
 
@@ -210,6 +396,12 @@ function ReadAdhkarContent() {
   const [reciterId, setReciterId] = useState(DEFAULT_RECITER.id)
   const [pageTitle, setPageTitle] = useState(config.title)
 
+  const selectedReciter =
+    ADHKAR_RECITERS.find((reader) => reader.id === reciterId) ?? DEFAULT_RECITER
+
+  const selectedEmbedUrl = selectedReciter.embedByType?.[type] ?? ''
+  const hasEmbeddedPlayer = selectedReciter.mode === 'external' && Boolean(selectedEmbedUrl)
+
   const activeIndex = useMemo(
     () => items.findIndex((item) => item.id === activeId),
     [items, activeId]
@@ -240,6 +432,8 @@ function ReadAdhkarContent() {
       audioRef.current.onpause = null
       audioRef.current.pause()
       audioRef.current.currentTime = 0
+      audioRef.current.removeAttribute('src')
+      audioRef.current.load()
       audioRef.current = null
     }
 
@@ -261,6 +455,7 @@ function ReadAdhkarContent() {
     async (startIndex: number, firstRepetition = 1) => {
       if (!items.length || startIndex < 0 || startIndex >= items.length) return
 
+      const token = ++playbackTokenRef.current
       autoPlayRef.current = true
       sequenceRef.current = {
         itemIndex: startIndex,
@@ -276,7 +471,7 @@ function ReadAdhkarContent() {
         markCompleted(item)
         const nextIndex = startIndex + 1
 
-        if (nextIndex < items.length) {
+        if (nextIndex < items.length && autoPlayRef.current && token === playbackTokenRef.current) {
           await playSequenceFrom(nextIndex, 1)
         } else {
           autoPlayRef.current = false
@@ -290,6 +485,8 @@ function ReadAdhkarContent() {
       if (audioRef.current) {
         audioRef.current.pause()
         audioRef.current.currentTime = 0
+        audioRef.current.removeAttribute('src')
+        audioRef.current.load()
       }
 
       const audio = new Audio(url)
@@ -298,16 +495,20 @@ function ReadAdhkarContent() {
       audio.playbackRate = rate
       audioRef.current = audio
 
-      audio.onplay = () => setPlaying(true)
+      audio.onplay = () => {
+        if (token === playbackTokenRef.current) setPlaying(true)
+      }
+
       audio.onpause = () => {
-        if (!autoPlayRef.current) setPlaying(false)
+        if (token === playbackTokenRef.current && !autoPlayRef.current) {
+          setPlaying(false)
+        }
       }
 
       audio.onerror = async () => {
-        console.error('Adhkar audio error:', url)
+        if (token !== playbackTokenRef.current) return
 
-        // لا ننتقل إلى قراءة اصطناعية.
-        // إذا تعذر التسجيل، نتعامل معه كنص فقط ونكمل التسلسل.
+        console.error('Adhkar audio error:', url)
         markCompleted(item)
 
         const nextIndex = startIndex + 1
@@ -321,6 +522,8 @@ function ReadAdhkarContent() {
       }
 
       audio.onended = async () => {
+        if (token !== playbackTokenRef.current) return
+
         const total = Math.max(1, Number(item.count) || 1)
         const repetition = sequenceRef.current?.repetition ?? 1
 
@@ -342,6 +545,9 @@ function ReadAdhkarContent() {
           } catch (error) {
             console.error('Adhkar repeat playback error:', error)
             markCompleted(item)
+            autoPlayRef.current = false
+            sequenceRef.current = null
+            setPlaying(false)
           }
 
           return
@@ -365,16 +571,27 @@ function ReadAdhkarContent() {
         await audio.play()
       } catch (error) {
         console.error('Adhkar playback blocked:', error)
-        autoPlayRef.current = false
-        sequenceRef.current = null
-        setPlaying(false)
+        if (token === playbackTokenRef.current) {
+          autoPlayRef.current = false
+          sequenceRef.current = null
+          setPlaying(false)
+        }
       }
     },
     [items, markCompleted, muted, rate]
   )
 
+  const openSelectedReciter = useCallback(() => {
+    window.open(selectedReciter.sourceUrl, '_blank', 'noopener,noreferrer')
+  }, [selectedReciter.sourceUrl])
+
   const startAll = useCallback(() => {
     if (!items.length) return
+
+    if (selectedReciter.mode === 'external') {
+      if (!hasEmbeddedPlayer) openSelectedReciter()
+      return
+    }
 
     const firstIncompleteIndex = items.findIndex(
       (item) => !completedIds.includes(item.id) && Number(item.count) > 0
@@ -387,11 +604,18 @@ function ReadAdhkarContent() {
       setCounts(buildCounts(items))
     }
 
-    playSequenceFrom(startIndex, 1)
-  }, [completedIds, items, playSequenceFrom])
+    void playSequenceFrom(startIndex, 1)
+  }, [completedIds, hasEmbeddedPlayer, items, openSelectedReciter, playSequenceFrom, selectedReciter.mode])
 
   const playItem = useCallback(
     (item: AdhkarItem) => {
+      setActiveId(item.id)
+
+      if (selectedReciter.mode === 'external') {
+        openSelectedReciter()
+        return
+      }
+
       const index = items.findIndex((candidate) => candidate.id === item.id)
       if (index < 0) return
 
@@ -402,12 +626,17 @@ function ReadAdhkarContent() {
         [item.id]: Math.max(1, Number(item.count) || 1),
       }))
 
-      playSequenceFrom(index, 1)
+      void playSequenceFrom(index, 1)
     },
-    [items, playSequenceFrom, stopAudio]
+    [hasEmbeddedPlayer, items, openSelectedReciter, playSequenceFrom, selectedReciter.mode, stopAudio]
   )
 
   const pauseResume = useCallback(() => {
+    if (selectedReciter.mode === 'external') {
+      if (!hasEmbeddedPlayer) openSelectedReciter()
+      return
+    }
+
     if (!audioRef.current) {
       if (selectedItem) playItem(selectedItem)
       return
@@ -424,7 +653,7 @@ function ReadAdhkarContent() {
     audioRef.current.play().catch((error) => {
       console.error('Resume playback error:', error)
     })
-  }, [playItem, playing, selectedItem])
+  }, [hasEmbeddedPlayer, openSelectedReciter, playItem, playing, selectedItem, selectedReciter.mode])
 
   useEffect(() => {
     let ignore = false
@@ -438,14 +667,13 @@ function ReadAdhkarContent() {
         const response = await fetch(DATA_URL, { cache: 'no-store' })
         if (!response.ok) throw new Error('Failed to fetch adhkar')
 
-        const json = await response.json()
-
+        const json: unknown = await response.json()
         const categories: AdhkarCategory[] = Array.isArray(json)
           ? json
-          : Array.isArray(json?.data)
-            ? json.data
-            : Array.isArray(json?.adhkar)
-              ? json.adhkar
+          : Array.isArray((json as { data?: unknown })?.data)
+            ? (json as { data: AdhkarCategory[] }).data
+            : Array.isArray((json as { adhkar?: unknown })?.adhkar)
+              ? (json as { adhkar: AdhkarCategory[] }).adhkar
               : []
 
         const wanted = requestedCategoryId
@@ -462,9 +690,7 @@ function ReadAdhkarContent() {
           setCompletedIds([])
           setActiveId(null)
           setPageTitle(
-            requestedCategoryId
-              ? displayCategoryName(wanted)
-              : config.title
+            requestedCategoryId ? displayCategoryName(wanted) : config.title
           )
         }
       } catch (error) {
@@ -474,7 +700,7 @@ function ReadAdhkarContent() {
 
         if (!ignore) {
           setDataError(
-            'تعذر تحميل البيانات الخارجية الآن، تم تشغيل النسخة الاحتياطية. التسجيلات الخارجية لا تتوفر في النسخة الاحتياطية.'
+            'تعذر تحميل البيانات الخارجية الآن، تم تشغيل النسخة الاحتياطية. التسجيل المباشر يعتمد على توفر بيانات الصوت الخارجية.'
           )
           setItems(fallback.array)
           setCounts(buildCounts(fallback.array))
@@ -487,7 +713,7 @@ function ReadAdhkarContent() {
       }
     }
 
-    loadData()
+    void loadData()
 
     return () => {
       ignore = true
@@ -582,7 +808,9 @@ function ReadAdhkarContent() {
   }
 
   const isSequencePlaying =
-    playing && Boolean(audioRef.current) && autoPlayRef.current
+    playing && Boolean(audioRef.current) && autoPlayRef.current && selectedReciter.mode === 'direct'
+
+  const showDirectAudio = selectedReciter.mode === 'direct'
 
   return (
     <div className="min-h-screen bg-mushaf-paper flex flex-col pb-32" dir="rtl">
@@ -598,7 +826,7 @@ function ReadAdhkarContent() {
 
           <div className="text-center min-w-0">
             <h1 className="font-black text-mushaf-dark text-lg truncate">
-              {config.title}
+              {pageTitle}
             </h1>
             <p className="text-[11px] text-gray-500 mt-0.5">
               حصن المسلم من أذكار الكتاب والسنة
@@ -643,7 +871,7 @@ function ReadAdhkarContent() {
             <div className="min-w-0">
               <h2 className="font-black text-xl">وردك اليومي</h2>
               <p className="text-white/70 text-sm mt-1">
-                اضغط على الذكر لتسمع صوته
+                اختر من مكتبة أصوات الأذكار المتاحة، واستمع للنص المربوط مباشرة عندما يتوفر تسجيل مطابق للذكر.
               </p>
             </div>
           </div>
@@ -655,45 +883,114 @@ function ReadAdhkarContent() {
           )}
         </section>
 
-        {/* اختيار القارئ + المشغل الرئيسي في أعلى المحتوى */}
+        <section className="mt-4 bg-white rounded-[2rem] p-4 sm:p-5 shadow-sm border border-mushaf-border/40">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="font-black text-mushaf-dark text-base">مكتبة قراء الأذكار</h2>
+              <p className="text-xs text-gray-400 mt-1">
+                {arabicDigits(ADHKAR_RECITERS.length)} أصوات/مصادر أذكار تم التحقق من وجود تسجيلات لها
+              </p>
+            </div>
+
+            <a
+              href={selectedReciter.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-mushaf-paper text-mushaf-teal border border-mushaf-border/30 font-black text-[11px] shrink-0"
+            >
+              المصدر
+              <ExternalLink size={14} />
+            </a>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {ADHKAR_RECITERS.map((reader) => (
+              <ReaderMiniCard
+                key={reader.id}
+                reader={reader}
+                selected={reader.id === selectedReciter.id}
+                onSelect={() => {
+                  stopAudio()
+                  setReciterId(reader.id)
+                }}
+              />
+            ))}
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-3 text-[11px] leading-relaxed text-amber-900/80">
+            <strong>مهم:</strong> ليس كل مصدر خارجي يوفر ملفًا منفصلًا لكل ذكر داخل التطبيق. عند اختيار مصدر خارجي سيُفتح التسجيل الأصلي من الجهة الناشرة بدل ربط ذكر بملف غير مطابق.
+          </div>
+        </section>
+
+        {hasEmbeddedPlayer && (
+          <section className="mt-4 bg-white rounded-[2rem] p-4 sm:p-5 shadow-sm border border-mushaf-border/40">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h2 className="font-black text-mushaf-dark text-base">مشغل {selectedReciter.name}</h2>
+                <p className="text-xs text-gray-400 mt-1">تسجيل منشور للنوع الحالي من الذكر.</p>
+              </div>
+              <a
+                href={selectedReciter.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-mushaf-paper text-mushaf-teal border border-mushaf-border/30 font-black text-[11px]"
+              >
+                المصدر
+                <ExternalLink size={14} />
+              </a>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-mushaf-border/20 bg-black/5">
+              <iframe
+                src={selectedEmbedUrl}
+                title={`تسجيل أذكار ${selectedReciter.name}`}
+                className="w-full h-[280px] border-0"
+                loading="lazy"
+                allow="autoplay; encrypted-media; picture-in-picture"
+              />
+            </div>
+            <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">المشغل مقدم من الجهة الناشرة، وقد يكون التسجيل وردًا صوتيًا مستقلًا وليس ملفًا منفصلًا لكل ذكر.</p>
+          </section>
+        )}
+
         <section className="mt-4 bg-white rounded-[2rem] p-4 sm:p-5 shadow-sm border border-mushaf-border/40">
           <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
             <div className="flex-1">
               <label className="text-xs text-gray-500 font-black block mb-2">
-                اختر القارئ
+                القارئ المحدد
               </label>
 
-              <div className="relative">
-                <Volume2
-                  size={18}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-mushaf-teal pointer-events-none"
-                />
+              <div className="rounded-2xl bg-mushaf-paper border border-mushaf-border/30 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-mushaf-teal text-white flex items-center justify-center shrink-0">
+                    <Headphones size={18} />
+                  </div>
 
-                <select
-                  value={reciterId}
-                  onChange={(event) => {
-                    setReciterId(event.target.value)
-                    stopAudio()
-                  }}
-                  className="w-full appearance-none bg-mushaf-paper border border-mushaf-border/40 rounded-2xl pr-11 pl-4 py-3 text-sm font-black text-mushaf-dark outline-none focus:ring-2 focus:ring-mushaf-teal/15"
-                  aria-label="اختيار القارئ"
-                >
-                  <option value={DEFAULT_RECITER.id}>
-                    {DEFAULT_RECITER.name}
-                  </option>
-                </select>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-black text-sm text-mushaf-dark">{selectedReciter.name}</p>
+                    <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
+                      {selectedReciter.sourceName} — {selectedReciter.coverage}
+                    </p>
+                  </div>
+
+                  <span
+                    className={`text-[10px] rounded-full px-2.5 py-1 font-black shrink-0 ${
+                      selectedReciter.mode === 'direct'
+                        ? 'bg-emerald-50 text-emerald-600'
+                        : 'bg-amber-50 text-amber-700'
+                    }`}
+                  >
+                    {selectedReciter.mode === 'direct' ? 'تشغيل داخل الصفحة' : hasEmbeddedPlayer ? 'مشغل داخل الصفحة' : 'فتح المصدر'}
+                  </span>
+                </div>
               </div>
 
-              <p className="text-[10px] text-gray-400 mt-2">
-                {DEFAULT_RECITER.description} — لا يتم عرض أي قارئ غير موثّق له تسجيلات أذكار فعلية.
+              <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
+                {selectedReciter.description}
               </p>
             </div>
 
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 font-black">
-                السرعة
-              </label>
-
+              <label className="text-xs text-gray-500 font-black">السرعة</label>
               <select
                 value={rate}
                 onChange={(event) => setRate(Number(event.target.value))}
@@ -715,19 +1012,23 @@ function ReadAdhkarContent() {
 
               <div className="min-w-0 flex-1">
                 <p className="text-mushaf-gold text-xs font-black mb-1">
-                  {selectedItem ? 'يتم تشغيل الذكر' : 'مشغل الورد اليومي'}
+                  {selectedItem
+                    ? selectedReciter.mode === 'direct'
+                      ? `تشغيل مباشر — ${selectedReciter.name}`
+                      : `مكتبة خارجية — ${selectedReciter.name}`
+                    : `مشغل ${selectedReciter.name}`}
                 </p>
 
                 <p className="text-sm font-bold line-clamp-2 leading-relaxed">
                   {selectedItem
                     ? selectedItem.text
-                    : 'شغّل الورد ليتم تشغيل الأذكار بالترتيب حتى النهاية'}
+                    : 'شغّل الورد ليبدأ من أول ذكر غير مكتمل، أو افتح مكتبة القارئ المحدد.'}
                 </p>
 
-                {selectedItem && selectedItem.audio && (
+                {selectedItem && showDirectAudio && (
                   <p className="text-[10px] text-white/55 mt-2">
-                    التكرار {arabicDigits(currentRepetition)} من{' '}
-                    {arabicDigits(selectedItem.count)}
+                    التكرار {arabicDigits(currentRepetition)} من {arabicDigits(selectedItem.count)}
+                    {' — المتبقي '}{arabicDigits(currentRemaining)}
                   </p>
                 )}
               </div>
@@ -735,24 +1036,38 @@ function ReadAdhkarContent() {
               <button
                 type="button"
                 onClick={
-                  isSequencePlaying
-                    ? pauseResume
-                    : selectedItem
+                  selectedReciter.mode === 'external'
+                    ? hasEmbeddedPlayer
+                      ? () => undefined
+                      : openSelectedReciter
+                    : isSequencePlaying
                       ? pauseResume
-                      : startAll
+                      : selectedItem
+                        ? pauseResume
+                        : startAll
                 }
                 disabled={!items.length}
                 className="w-12 h-12 rounded-2xl bg-mushaf-gold text-white flex items-center justify-center shadow-md disabled:opacity-50 shrink-0"
-                aria-label={isSequencePlaying ? 'إيقاف مؤقت' : 'تشغيل الورد'}
+                aria-label={
+                  selectedReciter.mode === 'external'
+                    ? hasEmbeddedPlayer
+                      ? 'المشغل المضمّن بالأعلى'
+                      : 'فتح تسجيل القارئ'
+                    : isSequencePlaying
+                      ? 'إيقاف مؤقت'
+                      : 'تشغيل الورد'
+                }
               >
-                {isSequencePlaying ? (
+                {selectedReciter.mode === 'external' ? (
+                  <ExternalLink size={21} />
+                ) : isSequencePlaying ? (
                   <Pause size={21} fill="currentColor" />
                 ) : (
                   <Play size={21} fill="currentColor" />
                 )}
               </button>
 
-              {selectedItem && (
+              {selectedItem && selectedReciter.mode === 'direct' && (
                 <button
                   type="button"
                   onClick={stopAudio}
@@ -772,8 +1087,16 @@ function ReadAdhkarContent() {
                 className="flex-1 bg-white text-mushaf-teal rounded-2xl py-3 font-black text-sm disabled:opacity-50"
               >
                 <span className="inline-flex items-center justify-center gap-2">
-                  <Play size={17} fill="currentColor" />
-                  تشغيل الورد كاملًا
+                  {selectedReciter.mode === 'external' ? (
+                    <ExternalLink size={17} />
+                  ) : (
+                    <Play size={17} fill="currentColor" />
+                  )}
+                  {selectedReciter.mode === 'external'
+                    ? hasEmbeddedPlayer
+                      ? 'المشغل بالأعلى'
+                      : 'فتح تسجيل القارئ'
+                    : 'تشغيل الورد كاملًا'}
                 </span>
               </button>
 
@@ -803,7 +1126,7 @@ function ReadAdhkarContent() {
               const completed = completedIds.includes(item.id) || remaining === 0
               const isActive = activeId === item.id
               const isFavorite = favoriteIds.includes(item.id)
-              const hasAudio = Boolean(item.audio)
+              const hasDirectAudio = Boolean(item.audio) && selectedReciter.mode === 'direct'
 
               return (
                 <article
@@ -839,9 +1162,13 @@ function ReadAdhkarContent() {
                     </div>
 
                     <div className="flex items-center gap-1">
-                      {hasAudio ? (
+                      {hasDirectAudio ? (
                         <span className="text-[10px] bg-mushaf-teal/10 text-mushaf-teal rounded-full px-2.5 py-1 font-black">
-                          صوت
+                          صوت مباشر
+                        </span>
+                      ) : selectedReciter.mode === 'external' ? (
+                        <span className="text-[10px] bg-amber-50 text-amber-700 rounded-full px-2.5 py-1 font-black">
+                          من المكتبة
                         </span>
                       ) : (
                         <span className="text-[10px] bg-gray-100 text-gray-400 rounded-full px-2.5 py-1 font-black">
@@ -859,10 +1186,7 @@ function ReadAdhkarContent() {
                         }`}
                         aria-label="إضافة للمفضلة"
                       >
-                        <Heart
-                          size={18}
-                          fill={isFavorite ? 'currentColor' : 'none'}
-                        />
+                        <Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} />
                       </button>
                     </div>
                   </div>
@@ -884,39 +1208,37 @@ function ReadAdhkarContent() {
                   </button>
 
                   <div className="mt-5 flex flex-wrap items-center gap-2">
-                    {hasAudio ? (
-                      <button
-                        type="button"
-                        onClick={() => playItem(item)}
-                        className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-sm transition ${
-                          isActive && playing
+                    <button
+                      type="button"
+                      onClick={() => playItem(item)}
+                      className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-sm transition ${
+                        selectedReciter.mode === 'external'
+                          ? 'bg-amber-500 text-white hover:opacity-90'
+                          : isActive && playing
                             ? 'bg-mushaf-gold text-white shadow-md'
                             : 'bg-mushaf-teal text-white hover:opacity-90'
-                        }`}
-                      >
-                        {isActive && playing ? (
-                          <Pause size={18} fill="currentColor" />
-                        ) : (
-                          <Play size={18} fill="currentColor" />
-                        )}
-                        {isActive && playing ? 'إيقاف' : 'تشغيل الذكر'}
-                      </button>
-                    ) : (
-                      <span className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gray-100 text-gray-500 font-black text-sm">
-                        قراءة فقط
-                      </span>
-                    )}
+                      }`}
+                    >
+                      {selectedReciter.mode === 'external' ? (
+                        <ExternalLink size={18} />
+                      ) : isActive && playing ? (
+                        <Pause size={18} fill="currentColor" />
+                      ) : (
+                        <Play size={18} fill="currentColor" />
+                      )}
+                      {selectedReciter.mode === 'external'
+                        ? 'فتح تسجيل القارئ'
+                        : isActive && playing
+                          ? 'إيقاف'
+                          : 'تشغيل الذكر'}
+                    </button>
 
                     <button
                       type="button"
                       onClick={() => copyItem(item)}
                       className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-mushaf-paper text-mushaf-teal font-black text-sm hover:bg-mushaf-teal/10 transition"
                     >
-                      {copiedId === item.id ? (
-                        <CheckCheck size={18} />
-                      ) : (
-                        <Copy size={18} />
-                      )}
+                      {copiedId === item.id ? <CheckCheck size={18} /> : <Copy size={18} />}
                       {copiedId === item.id ? 'تم النسخ' : 'نسخ'}
                     </button>
 
@@ -937,9 +1259,7 @@ function ReadAdhkarContent() {
                         </span>
                       ) : (
                         <div className="bg-mushaf-paper rounded-2xl px-4 py-2 border border-mushaf-border/30 text-center">
-                          <span className="text-[10px] text-gray-400 font-bold block">
-                            متبقي
-                          </span>
+                          <span className="text-[10px] text-gray-400 font-bold block">متبقي</span>
                           <span className="text-lg font-black text-mushaf-teal">
                             {arabicDigits(remaining)}
                           </span>
@@ -953,16 +1273,9 @@ function ReadAdhkarContent() {
 
             {progress === 100 && (
               <div className="bg-gradient-to-br from-[#175E67] to-[#0D383E] text-white rounded-[2rem] p-7 text-center shadow-xl border border-mushaf-gold/20">
-                <CheckCheck
-                  size={46}
-                  className="mx-auto text-mushaf-gold mb-3"
-                />
-                <h2 className="font-black text-2xl mb-2">
-                  تقبّل الله طاعتكم
-                </h2>
-                <p className="text-white/75 text-sm">
-                  أتممت {pageTitle} كاملًا.
-                </p>
+                <CheckCheck size={46} className="mx-auto text-mushaf-gold mb-3" />
+                <h2 className="font-black text-2xl mb-2">تقبّل الله طاعتكم</h2>
+                <p className="text-white/75 text-sm">أتممت {pageTitle} كاملًا.</p>
 
                 <Link
                   href="/adhkar"
