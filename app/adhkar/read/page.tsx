@@ -56,6 +56,7 @@ type PlayerMode = 'item' | 'section' | null
 
 const DATA_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json'
 const AUDIO_BASE_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main'
+const AUDIO_PROXY_PATH = '/api/adhkar-audio'
 const ARCHIVE_AUDIO_BASE = 'https://archive.org/download/makkah-live.-net-athkar-01'
 
 const ADHKAR_RECITERS: AdhkarReciter[] = [
@@ -193,10 +194,19 @@ function arabicDigits(value: number | string) {
   return String(value).replace(/\d/g, (digit) => '٠١٢٣٤٥٦٧٨٩'[Number(digit)])
 }
 
-function toAbsoluteAudioUrl(value?: string) {
+function resolveAudioUrl(value?: string) {
   if (!value) return ''
-  if (/^https?:\/\//i.test(value)) return value
-  return `${AUDIO_BASE_URL}${value.startsWith('/') ? value : `/${value}`}`
+  return /^https?:\/\//i.test(value)
+    ? value
+    : `${AUDIO_BASE_URL}${value.startsWith('/') ? value : `/${value}`}`
+}
+
+function getPlaybackUrls(value?: string) {
+  const directUrl = resolveAudioUrl(value)
+  if (!directUrl) return []
+
+  const proxiedUrl = `${AUDIO_PROXY_PATH}?url=${encodeURIComponent(directUrl)}`
+  return [proxiedUrl, directUrl]
 }
 
 function buildCounts(items: AdhkarItem[]) {
@@ -354,8 +364,8 @@ function ReadAdhkarContent() {
     (index: number, repetition = 1) => {
       if (index < 0 || index >= items.length) return
       const item = items[index]
-      const url = toAbsoluteAudioUrl(item.audio)
-      if (!url) return
+      const urls = getPlaybackUrls(item.audio)
+      if (!urls.length) return
 
       playerTokenRef.current += 1
       const token = playerTokenRef.current
@@ -373,7 +383,8 @@ function ReadAdhkarContent() {
         previous.load()
       }
 
-      const audio = new Audio(url)
+      let sourceIndex = 0
+      const audio = new Audio(urls[sourceIndex])
       audio.preload = 'auto'
       audio.volume = muted ? 0 : 1
       audioRef.current = audio
@@ -400,6 +411,17 @@ function ReadAdhkarContent() {
 
       audio.onerror = () => {
         if (token !== playerTokenRef.current) return
+
+        if (sourceIndex + 1 < urls.length) {
+          sourceIndex += 1
+          audio.src = urls[sourceIndex]
+          audio.load()
+          void audio.play().catch((error) => {
+            console.error('Adhkar fallback playback error:', error)
+          })
+          return
+        }
+
         sequenceActiveRef.current = false
         setPlaying(false)
         setPlayerMode(null)
@@ -474,7 +496,11 @@ function ReadAdhkarContent() {
       previous.load()
     }
 
-    const audio = new Audio(selectedTrack.url)
+    const urls = getPlaybackUrls(selectedTrack.url)
+    if (!urls.length) return
+
+    let sourceIndex = 0
+    const audio = new Audio(urls[sourceIndex])
     audio.preload = 'metadata'
     audio.volume = muted ? 0 : 1
     audioRef.current = audio
@@ -502,6 +528,17 @@ function ReadAdhkarContent() {
     }
     audio.onerror = () => {
       if (token !== playerTokenRef.current) return
+
+      if (sourceIndex + 1 < urls.length) {
+        sourceIndex += 1
+        audio.src = urls[sourceIndex]
+        audio.load()
+        void audio.play().catch((error) => {
+          console.error('Section fallback playback error:', error)
+        })
+        return
+      }
+
       setPlaying(false)
       setPlayerMode(null)
       setErrorMessage('تعذر تشغيل هذا الورد الصوتي حاليًا، ويمكنك متابعة الأذكار قراءةً وعدًا.')
