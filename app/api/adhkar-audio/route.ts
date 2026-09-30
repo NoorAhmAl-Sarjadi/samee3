@@ -1,97 +1,65 @@
 import { NextResponse } from 'next/server'
 
+export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-const ALLOWED_AUDIO_HOSTS = new Set([
-  'archive.org',
-  'www.archive.org',
-  'd1.islamhouse.com',
-  'cdn.jsdelivr.net',
-  'raw.githubusercontent.com',
-])
+const ALLOWED_ORIGINS = [
+  'https://download.tvquran.com',
+  'https://d1.islamhouse.com',
+  'https://cdn.jsdelivr.net',
+  'https://archive.org',
+]
 
-function isAllowedAudioUrl(value: string) {
+function isAllowedUrl(value: string) {
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' && ALLOWED_AUDIO_HOSTS.has(url.hostname)
+    return url.protocol === 'https:' && ALLOWED_ORIGINS.includes(url.origin)
   } catch {
     return false
   }
 }
 
-function copyHeader(source: Headers, target: Headers, name: string) {
-  const value = source.get(name)
-  if (value) target.set(name, value)
-}
+export async function GET(request: Request) {
+  const url = new URL(request.url)
+  const target = url.searchParams.get('url') || ''
 
-async function handleAudio(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const encodedUrl = searchParams.get('url')
-
-  if (!encodedUrl || !isAllowedAudioUrl(encodedUrl)) {
-    return NextResponse.json(
-      { ok: false, error: 'رابط صوت غير مسموح.' },
-      { status: 400 },
-    )
+  if (!target || !isAllowedUrl(target)) {
+    return NextResponse.json({ ok: false, error: 'Invalid audio URL' }, { status: 400 })
   }
 
-  let upstream: Response
-
   try {
-    const requestHeaders = new Headers()
     const range = request.headers.get('range')
-    const ifRange = request.headers.get('if-range')
+    const upstreamHeaders = new Headers({ Accept: 'audio/mpeg,audio/*;q=0.9,*/*;q=0.5' })
+    if (range) upstreamHeaders.set('Range', range)
 
-    if (range) requestHeaders.set('Range', range)
-    if (ifRange) requestHeaders.set('If-Range', ifRange)
-    requestHeaders.set('Accept', 'audio/mpeg,audio/*;q=0.9,*/*;q=0.1')
-    requestHeaders.set('User-Agent', 'SAMEE3-adhkar-audio/1.0')
-
-    upstream = await fetch(encodedUrl, {
+    const response = await fetch(target, {
       method: 'GET',
-      headers: requestHeaders,
+      headers: upstreamHeaders,
       redirect: 'follow',
       cache: 'no-store',
     })
+
+    if (!response.ok && response.status !== 206) {
+      return NextResponse.json({ ok: false, error: `Upstream HTTP ${response.status}` }, { status: 502 })
+    }
+
+    const headers = new Headers()
+    headers.set('Content-Type', response.headers.get('content-type') || 'audio/mpeg')
+    headers.set('Accept-Ranges', response.headers.get('accept-ranges') || 'bytes')
+    headers.set('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
+
+    for (const name of ['content-length', 'content-range', 'etag', 'last-modified']) {
+      const value = response.headers.get(name)
+      if (value) headers.set(name, value)
+    }
+
+    return new Response(response.body, {
+      status: response.status,
+      headers,
+    })
   } catch (error) {
-    console.error('Adhkar audio upstream error:', error)
-    return NextResponse.json(
-      { ok: false, error: 'تعذر الوصول إلى الملف الصوتي.' },
-      { status: 502 },
-    )
+    console.error('adhkar-audio proxy error:', error)
+    return NextResponse.json({ ok: false, error: 'Audio proxy failed' }, { status: 502 })
   }
-
-  if (!upstream.ok && upstream.status !== 206 && upstream.status !== 416) {
-    return NextResponse.json(
-      { ok: false, error: `الملف الصوتي أعاد الحالة ${upstream.status}.` },
-      { status: 502 },
-    )
-  }
-
-  if (!upstream.body) {
-    return NextResponse.json(
-      { ok: false, error: 'لم يرجع الخادم محتوى صوتيًا.' },
-      { status: 502 },
-    )
-  }
-
-  const headers = new Headers()
-  copyHeader(upstream.headers, headers, 'content-type')
-  copyHeader(upstream.headers, headers, 'content-length')
-  copyHeader(upstream.headers, headers, 'content-range')
-  copyHeader(upstream.headers, headers, 'accept-ranges')
-  copyHeader(upstream.headers, headers, 'etag')
-  copyHeader(upstream.headers, headers, 'last-modified')
-  headers.set('Cache-Control', 'public, max-age=3600, s-maxage=3600')
-  headers.set('Content-Disposition', 'inline')
-
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers,
-  })
-}
-
-export async function GET(request: Request) {
-  return handleAudio(request)
 }
