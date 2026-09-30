@@ -1,7 +1,6 @@
 'use client'
 
 import {
-  ArrowRight,
   useCallback,
   useEffect,
   useMemo,
@@ -12,6 +11,7 @@ import {
 import Link from 'next/link'
 import {
   ArrowDownToLine,
+  ArrowRight,
   BookOpen,
   Check,
   ChevronDown,
