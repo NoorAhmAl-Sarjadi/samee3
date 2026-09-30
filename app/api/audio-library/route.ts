@@ -12,11 +12,13 @@ type LibraryItem = {
   audioUrl: string
   authorName?: string
   section: Section
+  sourceName: string
   sourceUrl: string
   duration?: number
   downloadable: boolean
   bookId?: string
   record?: number
+  isSynthetic?: boolean
 }
 
 type Book = {
@@ -24,11 +26,18 @@ type Book = {
   name: string
   records: number
   synthetic?: boolean
+  source: string
 }
 
 const SERMONS_API = 'https://sermons.islamic.network/api'
 const HADITH_API = 'https://api.hadith.to/v1'
+const ISLAMHOUSE_API = 'https://api.islamhouse.com/v1'
+const ISLAMHOUSE_API_KEY = process.env.ISLAMHOUSE_API_KEY || ''
 
+/*
+ * Quran TV يعرض حاليًا 10 تسجيلات للرقية الشرعية مع تشغيل وتنزيل من المصدر.
+ * الروابط تستخدم الملفات المنشورة في المصدر نفسه ولا تعيد استضافة الصوت داخل سميع.
+ */
 const RUQYAH_ITEMS: LibraryItem[] = [
   ['011', 'إدريس أبكر'],
   ['010', 'ماهر المعيقلي'],
@@ -47,6 +56,7 @@ const RUQYAH_ITEMS: LibraryItem[] = [
   audioUrl: `https://quran.tv/mp3/roqya/files/${file}.mp3`,
   authorName: String(name),
   section: 'ruqyah',
+  sourceName: 'Quran TV',
   sourceUrl: 'https://quran.tv/prs/roqya/',
   downloadable: true,
 }))
@@ -61,7 +71,32 @@ const HADITH_BOOK_NAMES: Record<string, string> = {
   malik: 'موطأ مالك',
   riyad: 'رياض الصالحين',
   'musnad-ahmad': 'مسند أحمد',
+  nawawi40: 'الأربعون النووية',
+  qudsi40: 'الأربعون حديثًا قدسيًا',
+  shahwaliullah40: 'الأربعون حديثًا للشاه ولي الله',
 }
+
+const SUNNAH_SEARCH_TERMS = [
+  'صحيح البخاري',
+  'صحيح مسلم',
+  'سنن أبي داود',
+  'سنن النسائي',
+  'سنن الترمذي',
+  'جامع الترمذي',
+  'سنن ابن ماجه',
+  'موطأ مالك',
+  'رياض الصالحين',
+  'الشمائل المحمدية',
+  'مشكاة المصابيح',
+  'بلوغ المرام',
+  'الأدب المفرد',
+  'مسند أحمد',
+  'عمدة الأحكام',
+  'مصطلح الحديث',
+  'شرح الحديث',
+  'شرح السنة',
+  'كتاب السنة',
+]
 
 function unique<T extends { id: string }>(items: T[]) {
   const seen = new Set<string>()
@@ -77,10 +112,23 @@ function extractStrings(value: unknown): string[] {
     return value.match(/https?:\/\/[^\s"']+\.mp3(?:\?[^\s"']*)?/gi) || []
   }
   if (Array.isArray(value)) return value.flatMap(extractStrings)
-  if (value && typeof value === 'object') {
-    return Object.values(value).flatMap(extractStrings)
-  }
+  if (value && typeof value === 'object') return Object.values(value).flatMap(extractStrings)
   return []
+}
+
+function textValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeSearch(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[ًٌٍَُِّْـ]/g, '')
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function walkSermons(node: unknown, currentTitle = '', currentUrl = '', out: LibraryItem[] = []) {
@@ -88,30 +136,26 @@ function walkSermons(node: unknown, currentTitle = '', currentUrl = '', out: Lib
     node.forEach((child) => walkSermons(child, currentTitle, currentUrl, out))
     return out
   }
-
   if (!node || typeof node !== 'object') return out
 
   const object = node as Record<string, unknown>
-  const titleKeys = ['title', 'name', 'subject', 'sermon_title', 'sermonTitle']
-  const urlKeys = ['url', 'page_url', 'pageUrl', 'href', 'link']
-
   const title =
-    titleKeys
-      .map((key) => object[key])
-      .find((value) => typeof value === 'string' && value.trim())?.toString().trim() ||
-    currentTitle
+    ['title', 'name', 'subject', 'sermon_title', 'sermonTitle']
+      .map((key) => textValue(object[key]))
+      .find(Boolean) || currentTitle
 
   const pageUrl =
-    urlKeys
-      .map((key) => object[key])
-      .find((value) => typeof value === 'string' && value.startsWith('http'))?.toString() ||
-    currentUrl
+    ['url', 'page_url', 'pageUrl', 'href', 'link']
+      .map((key) => textValue(object[key]))
+      .find((value) => /^https?:\/\//i.test(value)) || currentUrl
 
   for (const mp3 of extractStrings(object)) {
     const decoded = mp3.replace(/\\u0026/g, '&')
+    if (!/\/ar[-_]/i.test(decoded)) continue
+
     const filename = decodeURIComponent(decoded.split('/').pop()?.split('?')[0] || '')
     const fallback = filename
-      .replace(/\.(mp3)$/i, '')
+      .replace(/\.mp3$/i, '')
       .replace(/^\d{4}-\d{2}-\d{2}-ar-/, '')
       .replace(/[_-]+/g, ' ')
       .trim()
@@ -121,8 +165,9 @@ function walkSermons(node: unknown, currentTitle = '', currentUrl = '', out: Lib
       title: title || fallback || 'خطبة جمعة',
       subtitle: 'خطبة جمعة',
       audioUrl: decoded,
-      authorName: 'أوقاف الإمارات',
+      authorName: 'أرشيف أوقاف الإمارات',
       section: 'khutbah',
+      sourceName: 'Sermons by Islamic Network',
       sourceUrl: pageUrl || 'https://sermons.islamic.network/uae-awqaf/',
       downloadable: true,
     })
@@ -136,18 +181,24 @@ function walkSermons(node: unknown, currentTitle = '', currentUrl = '', out: Lib
   return out
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
+async function fetchJson<T>(url: string, options?: RequestInit & { next?: { revalidate?: number } }): Promise<T> {
   const response = await fetch(url, {
+    ...options,
     cache: 'no-store',
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      ...(options?.headers || {}),
+    },
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return response.json() as Promise<T>
 }
 
 async function loadKhutbahs() {
+  const currentYear = new Date().getUTCFullYear()
   const urls: string[] = []
-  for (let year = 2026; year >= 2015; year -= 1) {
+
+  for (let year = currentYear; year >= 2015; year -= 1) {
     urls.push(`${SERMONS_API}/uae-awqaf/${year}/friday.json`)
   }
 
@@ -158,35 +209,40 @@ async function loadKhutbahs() {
     if (result.status === 'fulfilled') walkSermons(result.value, '', '', items)
   })
 
-  return unique(
-    items.filter((item) => /\/ar[-_]/i.test(item.audioUrl))
-  ).slice(0, 500)
+  return unique(items)
 }
 
 async function loadHadithBooks(): Promise<Book[]> {
-  const result = await fetchJson<{ collections?: Book[] }>(`${HADITH_API}/collections`)
+  const result = await fetchJson<{ collections?: Array<Record<string, unknown>> }>(`${HADITH_API}/collections`)
   const collections = Array.isArray(result.collections) ? result.collections : []
 
   return collections
-    .filter((book) => !book.synthetic && HADITH_BOOK_NAMES[book.id])
+    .filter((book) => HADITH_BOOK_NAMES[String(book.id)] && !Boolean(book.synthetic))
     .map((book) => ({
-      ...book,
-      name: HADITH_BOOK_NAMES[book.id] || book.name,
+      id: String(book.id),
+      name: HADITH_BOOK_NAMES[String(book.id)],
+      records: Number(book.records ?? book.count ?? book.total ?? 0),
+      synthetic: false,
+      source: 'Hadith.to',
     }))
+    .sort((a, b) => {
+      const order = Object.keys(HADITH_BOOK_NAMES)
+      return order.indexOf(a.id) - order.indexOf(b.id)
+    })
 }
 
 async function loadHadithItems(bookId: string, start: number, limit: number) {
   const bookName = HADITH_BOOK_NAMES[bookId]
   if (!bookName) throw new Error('Unknown hadith book')
 
-  const indexes = Array.from(
-    { length: Math.max(1, Math.min(limit, 30)) },
-    (_, i) => start + i
-  )
+  const requested = Math.max(1, Math.min(limit, 50))
+  const indexes = Array.from({ length: requested }, (_, index) => start + index)
 
   const results = await Promise.allSettled(
     indexes.map((record) =>
-      fetchJson<any>(`${HADITH_API}/hadith/${encodeURIComponent(bookId)}/${record}`)
+      fetchJson<any>(
+        `${HADITH_API}/hadith/${encodeURIComponent(bookId)}/${record}?include=timings`
+      )
     )
   )
 
@@ -199,24 +255,83 @@ async function loadHadithItems(bookId: string, start: number, limit: number) {
     if (!data?.media?.available || !data?.media?.audio) return
 
     const record = Number(data.record || indexes[index])
-    const text = String(data.arabic || '').trim()
+    const text = textValue(data.arabic)
 
     items.push({
       id: `sunnah-${bookId}-${record}`,
       title: `${bookName} — الحديث ${record}`,
       subtitle: text || 'حديث صوتي',
       audioUrl: String(data.media.audio),
-      authorName: 'رواية صوتية',
+      authorName: 'تسجيل صوتي',
       section: 'sunnah',
-      sourceUrl: String(data.links?.website || 'https://hadith.to/'),
+      sourceName: 'Hadith.to',
+      sourceUrl: String(data.links?.website || `https://hadith.to/${bookId}/${record}`),
       duration: Number(data.wordTimings?.duration) || undefined,
       downloadable: true,
       bookId,
       record,
+      isSynthetic: Boolean(data.media?.synthetic || data.synthetic),
     })
   })
 
   return items.sort((a, b) => (a.record || 0) - (b.record || 0))
+}
+
+async function loadIslamHouseSunnahExtras(): Promise<LibraryItem[]> {
+  if (!ISLAMHOUSE_API_KEY) return []
+
+  const pageCount = 8
+  const pages = Array.from({ length: pageCount }, (_, index) => index + 1)
+  const responses = await Promise.allSettled(
+    pages.map((page) =>
+      fetchJson<{ data?: unknown[] }>(
+        `${ISLAMHOUSE_API}/${encodeURIComponent(ISLAMHOUSE_API_KEY)}/main/audios/ar/showall/${page}/50/json/`,
+      )
+    )
+  )
+
+  const items: LibraryItem[] = []
+
+  for (const result of responses) {
+    if (result.status !== 'fulfilled') continue
+    const records = Array.isArray(result.value.data) ? result.value.data : []
+
+    for (const raw of records as Array<Record<string, unknown>>) {
+      const title = textValue(raw.title)
+      const description = textValue(raw.description)
+      const combined = normalizeSearch(`${title} ${description}`)
+
+      if (!SUNNAH_SEARCH_TERMS.some((term) => combined.includes(normalizeSearch(term)))) continue
+
+      const preparedBy = Array.isArray(raw.prepared_by) ? raw.prepared_by as Array<Record<string, unknown>> : []
+      const author =
+        textValue(preparedBy.find((entry) => entry.kind === 'author')?.title) ||
+        textValue(preparedBy.find((entry) => entry.type === 'author')?.title) ||
+        textValue(preparedBy[0]?.title) ||
+        'دار الإسلام'
+
+      const attachments = Array.isArray(raw.attachments) ? raw.attachments as Array<Record<string, unknown>> : []
+      attachments.forEach((attachment, index) => {
+        const url = textValue(attachment.url)
+        if (!/\.(mp3|m4a|ogg|wav|aac|opus)(\?|$)/i.test(url)) return
+
+        items.push({
+          id: `islamhouse-sunnah-${String(raw.id ?? 'item')}-${String(attachment.order ?? index + 1)}`,
+          title: textValue(attachment.description) || title || 'مادة حديثية صوتية',
+          subtitle: author,
+          audioUrl: url,
+          authorName: author,
+          section: 'sunnah',
+          sourceName: 'IslamHouse',
+          sourceUrl: textValue(raw.api_url) || 'https://islamhouse.com/ar/category/144409/audios/',
+          duration: Number(attachment.duration) || undefined,
+          downloadable: true,
+        })
+      })
+    }
+  }
+
+  return unique(items)
 }
 
 export async function GET(request: Request) {
@@ -233,30 +348,52 @@ export async function GET(request: Request) {
         ok: true,
         section,
         items: RUQYAH_ITEMS,
+        total: RUQYAH_ITEMS.length,
       })
     }
 
     if (section === 'khutbah') {
       const items = await loadKhutbahs()
-      return NextResponse.json({ ok: true, section, items })
+      return NextResponse.json({
+        ok: true,
+        section,
+        items,
+        total: items.length,
+      })
     }
 
     const bookId = searchParams.get('book')
 
     if (!bookId) {
-      const books = await loadHadithBooks()
-      return NextResponse.json({ ok: true, section, books })
+      const [books, extras] = await Promise.all([
+        loadHadithBooks(),
+        loadIslamHouseSunnahExtras(),
+      ])
+
+      return NextResponse.json({
+        ok: true,
+        section,
+        books,
+        extras,
+        totalBooks: books.length,
+        totalExtras: extras.length,
+      })
     }
 
     const start = Math.max(1, Number(searchParams.get('start') || '1'))
-    const limit = Math.max(1, Math.min(30, Number(searchParams.get('limit') || '20')))
+    const limit = Math.max(1, Math.min(50, Number(searchParams.get('limit') || '50')))
     const items = await loadHadithItems(bookId, start, limit)
+    const bookRecords = (await loadHadithBooks()).find((book) => book.id === bookId)?.records || 0
+    const nextStart = start + limit
 
     return NextResponse.json({
       ok: true,
       section,
       bookId,
       items,
+      hasMore: bookRecords > 0 ? nextStart <= bookRecords : items.length === limit,
+      nextStart,
+      records: bookRecords,
     })
   } catch (error) {
     console.error('audio-library error', error)
