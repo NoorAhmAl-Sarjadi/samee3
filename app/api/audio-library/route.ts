@@ -71,9 +71,6 @@ const HADITH_BOOK_NAMES: Record<string, string> = {
   malik: 'موطأ مالك',
   riyad: 'رياض الصالحين',
   'musnad-ahmad': 'مسند أحمد',
-  nawawi40: 'الأربعون النووية',
-  qudsi40: 'الأربعون حديثًا قدسيًا',
-  shahwaliullah40: 'الأربعون حديثًا للشاه ولي الله',
 }
 
 const SUNNAH_SEARCH_TERMS = [
@@ -118,6 +115,11 @@ function extractStrings(value: unknown): string[] {
 
 function textValue(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function truncateText(value: string, max = 180) {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized
 }
 
 function normalizeSearch(value: string) {
@@ -253,6 +255,7 @@ async function loadHadithItems(bookId: string, start: number, limit: number) {
 
     const data = result.value
     if (!data?.media?.available || !data?.media?.audio) return
+    if (Boolean(data.media.synthetic || data.synthetic)) return
 
     const record = Number(data.record || indexes[index])
     const text = textValue(data.arabic)
@@ -260,13 +263,14 @@ async function loadHadithItems(bookId: string, start: number, limit: number) {
     items.push({
       id: `sunnah-${bookId}-${record}`,
       title: `${bookName} — الحديث ${record}`,
-      subtitle: text || 'حديث صوتي',
+      subtitle: truncateText(text || 'حديث صوتي'),
       audioUrl: String(data.media.audio),
       authorName: 'تسجيل صوتي',
       section: 'sunnah',
       sourceName: 'Hadith.to',
       sourceUrl: String(data.links?.website || `https://hadith.to/${bookId}/${record}`),
-      duration: Number(data.wordTimings?.duration) || undefined,
+      duration:
+        Number(data.wordTimings?.duration ?? data.media?.duration) || undefined,
       downloadable: true,
       bookId,
       record,
@@ -380,8 +384,10 @@ export async function GET(request: Request) {
       })
     }
 
-    const start = Math.max(1, Number(searchParams.get('start') || '1'))
-    const limit = Math.max(1, Math.min(50, Number(searchParams.get('limit') || '50')))
+    const requestedStart = Number(searchParams.get('start') || '1')
+    const requestedLimit = Number(searchParams.get('limit') || '50')
+    const start = Number.isFinite(requestedStart) ? Math.max(1, Math.floor(requestedStart)) : 1
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(50, Math.floor(requestedLimit))) : 50
     const items = await loadHadithItems(bookId, start, limit)
     const bookRecords = (await loadHadithBooks()).find((book) => book.id === bookId)?.records || 0
     const nextStart = start + limit
