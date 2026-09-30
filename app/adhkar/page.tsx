@@ -52,9 +52,13 @@ function arabicDigits(value: number | string) {
 
 function displayCategoryName(category: AdhkarCategory) {
   const name = String(category.category || '').trim()
-  if (name.includes('الصباح') || name.includes('المساء') || name.includes('النوم') || name.includes('الاستيقاظ')) {
-    return name
-  }
+
+  if (name.includes('النوم')) return 'أذكار النوم'
+  if (name.includes('الاستيقاظ')) return 'أذكار الاستيقاظ'
+  if (name.includes('الصباح') && name.includes('المساء')) return 'أذكار الصباح والمساء'
+  if (name.includes('الصباح')) return 'أذكار الصباح'
+  if (name.includes('المساء')) return 'أذكار المساء'
+
   return 'أذكار متنوعة'
 }
 
@@ -150,7 +154,7 @@ export default function AdhkarPage() {
               <div>
                 <h2 className="font-black text-xl">وردك اليومي</h2>
                 <p className="text-white/70 text-sm mt-1">
-                  اضغط على الذكر لتسمع صوته
+                  اضغط على الذكر لتقرأه وتستمع للتسجيل المتاح، مع مكتبة أصوات حقيقية إضافية
                 </p>
               </div>
             </div>
@@ -293,7 +297,8 @@ export default function AdhkarPage() {
           ) : filteredCategories.length ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {filteredCategories.map((category) => {
-                const tone = categoryTone(category.category)
+                const displayName = displayCategoryName(category)
+                const tone = categoryTone(displayName)
                 const audioCount = category.array?.filter((item) => item.audio).length ?? 0
 
                 return (
@@ -311,7 +316,7 @@ export default function AdhkarPage() {
 
                       <div className="min-w-0">
                         <span className="font-black text-mushaf-dark text-base group-hover:text-mushaf-teal transition block truncate">
-                          {category.category}
+                          {displayCategoryName(category)}
                         </span>
 
                         <span className="text-[11px] text-gray-400 mt-1 block">
