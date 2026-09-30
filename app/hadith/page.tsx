@@ -477,15 +477,32 @@ export default function HadithPage() {
     setDesignError("")
 
     try {
-      const width = 1440
-      const outer = 46
-      const headerHeight = 285
-      const footerHeight = 180
-      const cardX = 88
-      const cardY = headerHeight + 58
+      if (typeof document !== "undefined" && document.fonts?.ready) {
+        await document.fonts.ready
+      }
+
+      // قالب اجتماعي فاخر: عرض 1080px وارتفاع ديناميكي حتى لا يُقص الحديث الطويل.
+      const width = 1080
+      const outer = 28
+      const headerX = outer
+      const headerY = outer
+      const headerW = width - outer * 2
+      const headerH = 290
+      const cardX = 68
+      const cardY = 348
       const cardWidth = width - cardX * 2
-      const textMaxWidth = cardWidth - 180
-      const cleanText = visibleHadith.arabic.replace(/\s+/g, " ").trim()
+      const textMaxWidth = 760
+      const footerHeight = 150
+
+      const cleanText = visibleHadith.arabic
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+
+      const narrator = visibleHadith.english?.narrator?.trim() || ""
+      const chapterName = currentChapter?.name_ar?.trim() || ""
+      const bookName = selectedBook.name_ar.trim()
+      const hadithNumber = getHadithNumber(visibleHadith)
 
       const measureCanvas = document.createElement("canvas")
       const measureCtx = measureCanvas.getContext("2d")
@@ -493,46 +510,61 @@ export default function HadithPage() {
 
       measureCtx.direction = "rtl"
       measureCtx.textAlign = "center"
+      measureCtx.textBaseline = "alphabetic"
 
-      let fontSize = 62
-      let lineHeight = 94
-      let lines: string[] = []
+      const makeLines = (fontSize: number) => {
+        measureCtx.font = `600 ${fontSize}px "Amiri Quran", "Amiri", "Noto Naskh Arabic", serif`
 
-      const buildLines = (size: number) => {
-        measureCtx.font = `600 ${size}px "Amiri Quran", "Amiri", serif`
-        const result: string[] = []
         const words = cleanText.split(/\s+/)
-        let line = ""
+        const lines: string[] = []
+        let current = ""
 
         for (const word of words) {
-          const candidate = line ? `${line} ${word}` : word
+          const candidate = current ? `${current} ${word}` : word
+
           if (measureCtx.measureText(candidate).width <= textMaxWidth) {
-            line = candidate
+            current = candidate
+            continue
+          }
+
+          if (current) lines.push(current)
+
+          if (measureCtx.measureText(word).width <= textMaxWidth) {
+            current = word
           } else {
-            if (line) result.push(line)
-            line = word
+            let chunk = ""
+            for (const char of word) {
+              const candidateChunk = chunk + char
+              if (measureCtx.measureText(candidateChunk).width <= textMaxWidth) {
+                chunk = candidateChunk
+              } else {
+                if (chunk) lines.push(chunk)
+                chunk = char
+              }
+            }
+            current = chunk
           }
         }
 
-        if (line) result.push(line)
-        return result
+        if (current) lines.push(current)
+        return lines
       }
 
-      lines = buildLines(fontSize)
-      while (lines.length > 12 && fontSize > 48) {
+      let fontSize = 58
+      let lineHeight = 92
+      let lines = makeLines(fontSize)
+
+      while (lines.length > 15 && fontSize > 42) {
         fontSize -= 2
-        lineHeight = Math.round(fontSize * 1.5)
-        lines = buildLines(fontSize)
+        lineHeight = Math.round(fontSize * 1.58)
+        lines = makeLines(fontSize)
       }
 
-      const narrator = visibleHadith.english?.narrator?.trim() || ""
-      const narratorHeight = narrator ? 70 : 0
       const textBlockHeight = Math.max(lineHeight, lines.length * lineHeight)
-      const cardHeight = Math.max(
-        760,
-        textBlockHeight + 350 + narratorHeight,
-      )
-      const height = cardY + cardHeight + footerHeight
+      const narratorBlock = narrator ? 82 : 0
+      const cardHeight = Math.max(650, textBlockHeight + narratorBlock + 340)
+      const footerY = cardY + cardHeight
+      const height = footerY + footerHeight + outer
 
       const canvas = document.createElement("canvas")
       canvas.width = width
@@ -543,222 +575,257 @@ export default function HadithPage() {
 
       ctx.direction = "rtl"
       ctx.textAlign = "center"
+      ctx.textBaseline = "alphabetic"
+      ctx.imageSmoothingEnabled = true
 
-      // Background
+      const roundedRectPath = (
+        context: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        r: number,
+      ) => {
+        const radius = Math.min(r, w / 2, h / 2)
+        context.beginPath()
+        context.moveTo(x + radius, y)
+        context.lineTo(x + w - radius, y)
+        context.quadraticCurveTo(x + w, y, x + w, y + radius)
+        context.lineTo(x + w, y + h - radius)
+        context.quadraticCurveTo(x + w, y + h, x + w - radius, y + h)
+        context.lineTo(x + radius, y + h)
+        context.quadraticCurveTo(x, y + h, x, y + h - radius)
+        context.lineTo(x, y + radius)
+        context.quadraticCurveTo(x, y, x + radius, y)
+        context.closePath()
+      }
+
+      const drawPill = (
+        text: string,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        fill: string,
+        textColor: string,
+        font: string,
+      ) => {
+        roundedRectPath(ctx, x, y, w, h, h / 2)
+        ctx.fillStyle = fill
+        ctx.fill()
+        ctx.fillStyle = textColor
+        ctx.font = font
+        ctx.fillText(text, x + w / 2, y + h * 0.67)
+      }
+
+      const drawStar = (cx: number, cy: number, outerRadius: number, innerRadius: number) => {
+        ctx.beginPath()
+        for (let i = 0; i < 16; i += 1) {
+          const radius = i % 2 === 0 ? outerRadius : innerRadius
+          const angle = -Math.PI / 2 + (i * Math.PI) / 8
+          const x = cx + Math.cos(angle) * radius
+          const y = cy + Math.sin(angle) * radius
+          if (i === 0) ctx.moveTo(x, y)
+          else ctx.lineTo(x, y)
+        }
+        ctx.closePath()
+      }
+
+      // الخلفية
       const background = ctx.createLinearGradient(0, 0, width, height)
-      background.addColorStop(0, "#F4EFE3")
-      background.addColorStop(0.48, "#FFFDF8")
-      background.addColorStop(1, "#E9E0CF")
+      background.addColorStop(0, "#F5F0E6")
+      background.addColorStop(0.42, "#FFFDF8")
+      background.addColorStop(1, "#E8DFCD")
       ctx.fillStyle = background
       ctx.fillRect(0, 0, width, height)
 
-      // Subtle geometric pattern
+      // زخرفة هندسية خافتة.
       ctx.save()
-      ctx.globalAlpha = 0.045
-      ctx.strokeStyle = "#174F56"
-      ctx.lineWidth = 2
-      for (let x = -120; x < width + 160; x += 150) {
-        for (let y = -80; y < height + 160; y += 150) {
-          ctx.beginPath()
-          ctx.moveTo(x + 75, y)
-          ctx.lineTo(x + 150, y + 75)
-          ctx.lineTo(x + 75, y + 150)
-          ctx.lineTo(x, y + 75)
-          ctx.closePath()
+      ctx.globalAlpha = 0.035
+      ctx.strokeStyle = "#164C53"
+      ctx.lineWidth = 1.5
+      for (let x = -80; x < width + 120; x += 120) {
+        for (let y = -80; y < height + 120; y += 120) {
+          drawStar(x + 60, y + 60, 34, 15)
           ctx.stroke()
           ctx.beginPath()
-          ctx.arc(x + 75, y + 75, 11, 0, Math.PI * 2)
+          ctx.arc(x + 60, y + 60, 7, 0, Math.PI * 2)
           ctx.stroke()
         }
       }
       ctx.restore()
 
-      // Outer frame
-      ctx.strokeStyle = "#B5904C"
-      ctx.lineWidth = 4
+      // الإطار الخارجي.
+      ctx.strokeStyle = "#B7904E"
+      ctx.lineWidth = 3
       ctx.strokeRect(outer, outer, width - outer * 2, height - outer * 2)
+      ctx.strokeStyle = "rgba(183,144,78,0.34)"
       ctx.lineWidth = 1
-      ctx.strokeStyle = "rgba(181,144,76,0.48)"
-      ctx.strokeRect(
-        outer + 16,
-        outer + 16,
-        width - (outer + 16) * 2,
-        height - (outer + 16) * 2,
-      )
+      ctx.strokeRect(outer + 12, outer + 12, width - (outer + 12) * 2, height - (outer + 12) * 2)
 
-      // Header
-      const header = ctx.createLinearGradient(0, 0, width, headerHeight)
-      header.addColorStop(0, "#0C3D43")
-      header.addColorStop(1, "#1D646C")
-      ctx.fillStyle = header
-      ctx.fillRect(outer, outer, width - outer * 2, headerHeight - outer)
+      // الهيدر.
+      const headerGradient = ctx.createLinearGradient(headerX, headerY, headerX + headerW, headerY + headerH)
+      headerGradient.addColorStop(0, "#0A363B")
+      headerGradient.addColorStop(0.55, "#124D54")
+      headerGradient.addColorStop(1, "#1E666D")
 
-      ctx.fillStyle = "rgba(198,161,90,0.16)"
-      ctx.beginPath()
-      ctx.arc(175, 132, 108, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(width - 175, 132, 108, 0, Math.PI * 2)
+      roundedRectPath(ctx, headerX, headerY, headerW, headerH, 34)
+      ctx.fillStyle = headerGradient
       ctx.fill()
 
-      // Brand
-      ctx.fillStyle = "#EAD39B"
-      ctx.font = '700 48px "Aref Ruqaa", "Amiri", serif'
-      ctx.fillText("مصحف سَميع", width / 2, 105)
+      const glowLeft = ctx.createRadialGradient(130, 100, 0, 130, 100, 220)
+      glowLeft.addColorStop(0, "rgba(215,173,92,0.16)")
+      glowLeft.addColorStop(1, "rgba(215,173,92,0)")
+      ctx.fillStyle = glowLeft
+      ctx.fillRect(headerX, headerY, headerW, headerH)
 
-      ctx.fillStyle = "#FFFFFF"
-      ctx.font = '800 30px "Tajawal", Arial, sans-serif'
-      ctx.fillText("بطاقة حديث نبوي", width / 2, 155)
+      const glowRight = ctx.createRadialGradient(width - 140, 180, 0, width - 140, 180, 230)
+      glowRight.addColorStop(0, "rgba(255,255,255,0.08)")
+      glowRight.addColorStop(1, "rgba(255,255,255,0)")
+      ctx.fillStyle = glowRight
+      ctx.fillRect(headerX, headerY, headerW, headerH)
 
-      // Book + chapter line
-      ctx.fillStyle = "rgba(255,255,255,0.74)"
-      ctx.font = '500 20px "Tajawal", Arial, sans-serif'
-      const contextText = currentChapter?.name_ar
-        ? `${selectedBook.name_ar} • ${currentChapter.name_ar}`
-        : selectedBook.name_ar
-      ctx.fillText(contextText, width / 2, 198)
-
-      // Hadith number badge
-      const badgeWidth = 300
-      const badgeHeight = 64
-      const badgeX = (width - badgeWidth) / 2
-      const badgeY = 224
-      const radius = 32
-
-      ctx.beginPath()
-      ctx.moveTo(badgeX + radius, badgeY)
-      ctx.arcTo(
-        badgeX + badgeWidth,
-        badgeY,
-        badgeX + badgeWidth,
-        badgeY + badgeHeight,
-        radius,
-      )
-      ctx.arcTo(
-        badgeX + badgeWidth,
-        badgeY + badgeHeight,
-        badgeX,
-        badgeY + badgeHeight,
-        radius,
-      )
-      ctx.arcTo(
-        badgeX,
-        badgeY + badgeHeight,
-        badgeX,
-        badgeY,
-        radius,
-      )
-      ctx.arcTo(
-        badgeX,
-        badgeY,
-        badgeX + badgeWidth,
-        badgeY,
-        radius,
-      )
-      ctx.closePath()
-      ctx.fillStyle = "#C6A15A"
-      ctx.fill()
-
-      ctx.fillStyle = "#183F43"
-      ctx.font = '800 25px "Tajawal", Arial, sans-serif'
-      ctx.fillText(
-        `حديث ${arabicDigits(getHadithNumber(visibleHadith))}`,
-        width / 2,
-        badgeY + 41,
-      )
-
-      // Main hadith card shadow
       ctx.save()
-      ctx.shadowColor = "rgba(24,63,67,0.17)"
-      ctx.shadowBlur = 36
-      ctx.shadowOffsetY = 16
-      ctx.beginPath()
-      ctx.roundRect(cardX, cardY, cardWidth, cardHeight, 40)
-      ctx.fillStyle = "rgba(255,255,255,0.96)"
+      ctx.globalAlpha = 0.16
+      ctx.strokeStyle = "#E2BE73"
+      ctx.lineWidth = 2
+      drawStar(108, 105, 42, 18)
+      ctx.stroke()
+      drawStar(width - 108, 105, 42, 18)
+      ctx.stroke()
+      ctx.restore()
+
+      ctx.fillStyle = "#E7C984"
+      ctx.font = '700 48px "Aref Ruqaa", "Amiri", serif'
+      ctx.fillText("مصحف سَميع", width / 2, 102)
+
+      ctx.fillStyle = "rgba(255,255,255,0.92)"
+      ctx.font = '800 28px "Tajawal", Arial, sans-serif'
+      ctx.fillText("بطاقة حديث", width / 2, 150)
+
+      drawPill(
+        "مكتبة الأحاديث",
+        width / 2 - 148,
+        180,
+        296,
+        44,
+        "rgba(255,255,255,0.10)",
+        "rgba(255,255,255,0.86)",
+        '700 17px "Tajawal", Arial, sans-serif',
+      )
+
+      ctx.fillStyle = "rgba(255,255,255,0.65)"
+      ctx.font = '500 17px "Tajawal", Arial, sans-serif'
+      const headerContext = chapterName ? `${bookName}  •  ${chapterName}` : bookName
+      ctx.fillText(headerContext, width / 2, 255)
+
+      drawPill(
+        `حديث ${arabicDigits(hadithNumber)}`,
+        width / 2 - 118,
+        274,
+        236,
+        50,
+        "#D2AD62",
+        "#153F44",
+        '800 21px "Tajawal", Arial, sans-serif',
+      )
+
+      // البطاقة الرئيسية.
+      ctx.save()
+      ctx.shadowColor = "rgba(11,50,55,0.16)"
+      ctx.shadowBlur = 34
+      ctx.shadowOffsetY = 14
+      roundedRectPath(ctx, cardX, cardY, cardWidth, cardHeight, 38)
+      ctx.fillStyle = "rgba(255,255,255,0.97)"
       ctx.fill()
       ctx.restore()
 
-      // Main hadith card
-      ctx.beginPath()
-      ctx.roundRect(cardX, cardY, cardWidth, cardHeight, 40)
-      ctx.fillStyle = "rgba(255,255,255,0.96)"
+      roundedRectPath(ctx, cardX, cardY, cardWidth, cardHeight, 38)
+      ctx.fillStyle = "rgba(255,255,255,0.97)"
       ctx.fill()
-      ctx.strokeStyle = "rgba(181,144,76,0.42)"
+      ctx.strokeStyle = "rgba(183,144,78,0.42)"
       ctx.lineWidth = 2
       ctx.stroke()
 
-      // Decorative quote mark
-      ctx.fillStyle = "rgba(181,144,76,0.18)"
-      ctx.font = '700 210px Georgia, serif'
-      ctx.fillText("”", cardX + 105, cardY + 180)
+      roundedRectPath(ctx, cardX + 16, cardY + 16, cardWidth - 32, cardHeight - 32, 30)
+      ctx.strokeStyle = "rgba(183,144,78,0.18)"
+      ctx.lineWidth = 1
+      ctx.stroke()
 
-      // Hadith text
-      ctx.fillStyle = "#20383A"
-      ctx.font = `600 ${fontSize}px "Amiri Quran", "Amiri", serif`
+      // زخرفة أعلى البطاقة.
+      ctx.fillStyle = "#C39A51"
+      drawStar(width / 2, cardY + 58, 17, 7)
+      ctx.fill()
 
-      let textY =
-        cardY +
-        165 +
-        Math.max(
-          0,
-          (cardHeight - 330 - textBlockHeight - narratorHeight) / 2,
-        )
+      // علامات اقتباس زخرفية شفافة.
+      ctx.fillStyle = "rgba(195,154,81,0.16)"
+      ctx.font = '700 150px Georgia, serif'
+      ctx.fillText("❞", cardX + 92, cardY + 172)
 
-      for (const currentLine of lines) {
-        ctx.fillText(currentLine, width / 2, textY)
+      ctx.fillStyle = "rgba(195,154,81,0.11)"
+      ctx.font = '700 130px Georgia, serif'
+      ctx.fillText("❝", width - cardX - 88, footerY - 78)
+
+      // النص العربي.
+      ctx.fillStyle = "#263B3D"
+      ctx.font = `600 ${fontSize}px "Amiri Quran", "Amiri", "Noto Naskh Arabic", serif`
+      ctx.textBaseline = "alphabetic"
+
+      const textStartY =
+        cardY + 150 + Math.max(0, (cardHeight - 390 - textBlockHeight - narratorBlock) / 2)
+
+      let textY = textStartY
+      for (const line of lines) {
+        ctx.fillText(line, width / 2, textY)
         textY += lineHeight
       }
 
-      // Narrator
-      if (narrator) {
-        const narratorY = cardY + cardHeight - 120
-        ctx.strokeStyle = "rgba(181,144,76,0.24)"
-        ctx.lineWidth = 2
-        ctx.beginPath()
-        ctx.moveTo(cardX + 170, narratorY - 42)
-        ctx.lineTo(width - cardX - 170, narratorY - 42)
-        ctx.stroke()
-
-        ctx.fillStyle = "#7B705F"
-        ctx.font = '700 24px "Tajawal", Arial, sans-serif'
-        ctx.fillText(`الراوي: ${narrator}`, width / 2, narratorY)
-      }
-
-      // Footer
-      const footerY = height - 100
-      const divider = ctx.createLinearGradient(
-        220,
-        0,
-        width - 220,
-        0,
-      )
-      divider.addColorStop(0, "rgba(181,144,76,0)")
-      divider.addColorStop(0.5, "#B5904C")
-      divider.addColorStop(1, "rgba(181,144,76,0)")
-      ctx.strokeStyle = divider
+      const separatorY = textStartY + textBlockHeight + 38
+      const separator = ctx.createLinearGradient(cardX + 180, 0, width - cardX - 180, 0)
+      separator.addColorStop(0, "rgba(183,144,78,0)")
+      separator.addColorStop(0.5, "rgba(183,144,78,0.58)")
+      separator.addColorStop(1, "rgba(183,144,78,0)")
+      ctx.strokeStyle = separator
       ctx.lineWidth = 2
       ctx.beginPath()
-      ctx.moveTo(220, footerY - 26)
-      ctx.lineTo(width - 220, footerY - 26)
+      ctx.moveTo(cardX + 180, separatorY)
+      ctx.lineTo(width - cardX - 180, separatorY)
       ctx.stroke()
 
+      if (narrator) {
+        ctx.fillStyle = "#847660"
+        ctx.font = '700 22px "Tajawal", Arial, sans-serif'
+        ctx.fillText(`الراوي: ${narrator}`, width / 2, separatorY + 58)
+      }
+
+      // التذييل.
+      const footerCenter = footerY + 83
       ctx.fillStyle = "#174F56"
-      ctx.font = '800 25px "Tajawal", Arial, sans-serif'
-      ctx.fillText("مصحف سَميع • مكتبة الأحاديث", width / 2, footerY + 12)
+      ctx.font = '800 22px "Tajawal", Arial, sans-serif'
+      ctx.fillText("مصحف سَميع", width / 2, footerCenter)
 
       ctx.fillStyle = "#8A806F"
-      ctx.font = '500 18px "Tajawal", Arial, sans-serif'
-      ctx.fillText(
-        `المصدر: ${selectedBook.name_ar} — حديث ${arabicDigits(getHadithNumber(visibleHadith))}`,
-        width / 2,
-        footerY + 49,
-      )
+      ctx.font = '500 16px "Tajawal", Arial, sans-serif'
+      const footerSource = chapterName
+        ? `${bookName}  •  ${chapterName}  •  حديث ${arabicDigits(hadithNumber)}`
+        : `${bookName}  •  حديث ${arabicDigits(hadithNumber)}`
+      ctx.fillText(footerSource, width / 2, footerCenter + 32)
+
+      ctx.fillStyle = "rgba(23,79,86,0.58)"
+      ctx.font = '500 13px "Tajawal", Arial, sans-serif'
+      ctx.fillText("بطاقة رقمية من مكتبة الأحاديث — مصحف سميع", width / 2, footerCenter + 57)
+
+      ctx.fillStyle = "#C39A51"
+      ctx.beginPath()
+      ctx.arc(width / 2 - 72, footerCenter + 52, 3, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(width / 2 + 72, footerCenter + 52, 3, 0, Math.PI * 2)
+      ctx.fill()
 
       const dataUrl = canvas.toDataURL("image/png", 1)
       setDesignUrl(dataUrl)
-      setDesignFileName(
-        `samee3-hadith-${selectedBook.id}-${getHadithNumber(visibleHadith)}.png`,
-      )
+      setDesignFileName(`samee3-hadith-${selectedBook.id}-${hadithNumber}-premium.png`)
     } catch (err) {
       console.error("Hadith design error:", err)
       setDesignError("تعذر إنشاء صورة الحديث على هذا الجهاز.")
