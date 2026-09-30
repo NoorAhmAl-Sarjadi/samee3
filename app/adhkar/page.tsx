@@ -49,6 +49,7 @@ type AdhkarReciter = {
 
 const DATA_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json'
 const AUDIO_BASE_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main'
+const AUDIO_PROXY_PATH = '/api/adhkar-audio'
 const ARCHIVE_AUDIO_BASE = 'https://archive.org/download/makkah-live.-net-athkar-01'
 
 const ADHKAR_RECITERS: AdhkarReciter[] = [
