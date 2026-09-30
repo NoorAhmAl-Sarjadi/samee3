@@ -15,8 +15,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  CirclePause,
-  CirclePlay,
   Clock3,
   Download,
   FileArchive,
@@ -77,6 +75,14 @@ type RadioStation = {
   url: string
 }
 
+type SunnahBook = {
+  id: string
+  name: string
+  records: number
+  synthetic?: boolean
+  source?: string
+}
+
 type LibraryAudio = {
   id: string
   title: string
@@ -90,6 +96,9 @@ type LibraryAudio = {
   isStream?: boolean
   sourceUrl?: string
   image?: string | null
+  bookId?: string
+  record?: number
+  isSynthetic?: boolean
 }
 
 type PlayerItem = {
@@ -117,7 +126,7 @@ type OfflineRecord = {
 type TabKey = 'quran' | 'ruqyah' | 'khutbah' | 'sunnah'
 
 const MP3QURAN_API = 'https://mp3quran.net/api/v3'
-const ISLAMHOUSE_PROXY = '/api/islamhouse'
+const AUDIO_LIBRARY_API = '/api/audio-library'
 
 const FAVORITE_RECITER_NAMES = [
   'مشاري راشد العفاسي',
@@ -131,63 +140,12 @@ const FAVORITE_RECITER_NAMES = [
   'سعد الغامدي',
 ]
 
-/*
- * هذه قائمة تشغيلية قابلة للتعديل.
- * الغرض منها إبقاء قسم "كتب السنة" مركزًا على الكتب الحديثية
- * والعلوم الشرعية ذات الصلة بدل عرض كل صوت عشوائيًا.
- */
-const SUNNAH_BOOK_KEYWORDS = [
-  'صحيح البخاري',
-  'صحيح مسلم',
-  'رياض الصالحين',
-  'الشمائل المحمدية',
-  'سنن أبي داود',
-  'سنن الترمذي',
-  'سنن النسائي',
-  'سنن ابن ماجه',
-  'موطأ مالك',
-  'شرح صحيح البخاري',
-  'شرح صحيح مسلم',
-  'شرح رياض الصالحين',
-  'شرح الشمائل',
-  'السنة',
-  'الحديث',
-]
-
-const KHUTBAH_KEYWORDS = [
-  'خطبة',
-  'خطب',
-  'الجمعة',
-  'جمعة',
-  'خطبة الجمعة',
-  'عيد',
-  'موعظة',
-  'محاضرة',
-  'درس',
-  'دروس',
-]
-
-const RUQYAH_KEYWORDS = [
-  'الرقية',
-  'رقية شرعية',
-  'الرُقية',
-  'الرقية الشرعية',
-  'رقى',
-  'رقية',
-]
 
 /*
  * يمكن توسيعها يدويًا بأسماء المشايخ التي يريد مدير المنصة السماح
  * بمحتواهم في القسم العلمي. عندما تكون فارغة سيُعتمد تصنيف المصدر
  * نفسه بدل منع المواد.
  */
-const SUNNI_AUTHOR_ALLOWLIST: string[] = [
-  // مثال:
-  // 'عبدالعزيز بن باز',
-  // 'محمد بن صالح العثيمين',
-  // 'صالح بن فوزان الفوزان',
-]
-
 function normalizeArabic(value: string) {
   return value
     .toLowerCase()
@@ -201,17 +159,6 @@ function normalizeArabic(value: string) {
     .trim()
 }
 
-function matchesAny(value: string, keywords: string[]) {
-  const normalized = normalizeArabic(value)
-  return keywords.some((keyword) => normalized.includes(normalizeArabic(keyword)))
-}
-
-function isAllowedAuthor(name = '') {
-  if (!SUNNI_AUTHOR_ALLOWLIST.length) return true
-  return SUNNI_AUTHOR_ALLOWLIST.some((allowed) =>
-    normalizeArabic(name).includes(normalizeArabic(allowed))
-  )
-}
 
 function pad3(value: number) {
   return String(value).padStart(3, '0')
@@ -437,14 +384,17 @@ export default function AudioPage() {
   const [reciters, setReciters] = useState<Reciter[]>([])
   const [surahs, setSurahs] = useState<Surah[]>([])
   const [radios, setRadios] = useState<RadioStation[]>([])
-  const [ruqyahStations, setRuqyahStations] = useState<RadioStation[]>([])
-  const [sunnahRadios, setSunnahRadios] = useState<RadioStation[]>([])
 
   const [libraryItems, setLibraryItems] = useState<LibraryAudio[]>([])
-  const [libraryPage, setLibraryPage] = useState(1)
-  const [libraryHasMore, setLibraryHasMore] = useState(true)
+  const [sunnahBooks, setSunnahBooks] = useState<SunnahBook[]>([])
+  const [sunnahExtras, setSunnahExtras] = useState<LibraryAudio[]>([])
+  const [selectedSunnahBookId, setSelectedSunnahBookId] = useState<string | null>(null)
+  const [sunnahHasMore, setSunnahHasMore] = useState(false)
+  const [sunnahNextStart, setSunnahNextStart] = useState(1)
+  const [selectedRuqyahId, setSelectedRuqyahId] = useState<string | null>(null)
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [libraryUnavailable, setLibraryUnavailable] = useState(false)
+  const [libraryError, setLibraryError] = useState('')
 
   const [selectedRiwaya, setSelectedRiwaya] = useState<Riwaya | null>(null)
   const [selectedReciter, setSelectedReciter] = useState<Reciter | null>(null)
@@ -536,19 +486,9 @@ export default function AudioPage() {
         nextRiwayat[0] ||
         null
 
-      const nextRuqyah = radioList.filter((station) =>
-        matchesAny(station.name, RUQYAH_KEYWORDS)
-      )
-
-      const nextSunnah = radioList.filter((station) =>
-        matchesAny(station.name, SUNNAH_BOOK_KEYWORDS)
-      )
-
       setRiwayat(nextRiwayat)
       setSurahs(nextSurahs)
       setRadios(radioList)
-      setRuqyahStations(nextRuqyah)
-      setSunnahRadios(nextSunnah)
       setSelectedRiwaya(preferredRiwaya)
     } catch (err) {
       console.error('Audio base library error:', err)
@@ -559,119 +499,68 @@ export default function AudioPage() {
   }, [])
 
   const loadLibraryContent = useCallback(
-    async (page: number, append: boolean, tab: Exclude<TabKey, 'quran'>) => {
+    async (
+      tab: Exclude<TabKey, 'quran'>,
+      bookId?: string,
+      start = 1,
+      append = false
+    ) => {
       setLibraryLoading(true)
+      setLibraryUnavailable(false)
+      setLibraryError('')
 
       try {
+        const params = new URLSearchParams({ section: tab })
+        if (bookId) params.set('book', bookId)
+        if (bookId && tab === 'sunnah') {
+          params.set('start', String(start))
+          params.set('limit', '50')
+        }
+
         const result = await fetchJson<{
-          links?: {
-            pages_number?: number
-            total_items?: number
-            current_page?: number
+          ok?: boolean
+          items?: LibraryAudio[]
+          books?: SunnahBook[]
+          extras?: LibraryAudio[]
+          error?: string
+          hasMore?: boolean
+          nextStart?: number
+        }>(`${AUDIO_LIBRARY_API}?${params.toString()}`)
+
+        if (result.ok === false) {
+          throw new Error(result.error || 'Library request failed')
+        }
+
+        if (tab === 'sunnah' && !bookId) {
+          const books = Array.isArray(result.books) ? result.books : []
+          setSunnahBooks(books)
+          setSunnahExtras(Array.isArray(result.extras) ? result.extras : [])
+          setSelectedSunnahBookId(null)
+          setLibraryItems([])
+          setSunnahHasMore(false)
+          setSunnahNextStart(1)
+        } else {
+          const items = Array.isArray(result.items) ? result.items : []
+          setLibraryItems((previous) => append ? [...previous, ...items.filter((item) => !previous.some((old) => old.id === item.id))] : items)
+          if (tab === 'ruqyah') {
+            setSelectedRuqyahId(items[0]?.id || null)
           }
-          data?: unknown[]
-        }>(
-          `${ISLAMHOUSE_PROXY}?type=audios&page=${page}&limit=50`
-        )
-
-        const rawItems = Array.isArray(result.data) ? result.data : []
-
-        const parsed: LibraryAudio[] = rawItems.flatMap((raw: any) => {
-          const title = String(raw?.title || '').trim()
-          const preparedBy = Array.isArray(raw?.prepared_by)
-            ? raw.prepared_by
-            : []
-
-          const authorName =
-            preparedBy.find((item: any) => item?.kind === 'author')?.title ||
-            preparedBy.find((item: any) => item?.type === 'author')?.title ||
-            preparedBy[0]?.title ||
-            ''
-
-          if (!title || !isAllowedAuthor(authorName)) return []
-
-          const attachments = Array.isArray(raw?.attachments)
-            ? raw.attachments
-            : []
-
-          return attachments
-            .filter(
-              (attachment: any) =>
-                typeof attachment?.url === 'string' &&
-                /\.(mp3|m4a|ogg|wav|aac|opus)(\?|$)/i.test(attachment.url)
-            )
-            .map((attachment: any, index: number) => {
-              const combinedTitle = `${title} ${attachment?.description || ''}`
-              const section = matchesAny(combinedTitle, RUQYAH_KEYWORDS)
-                ? 'ruqyah'
-                : matchesAny(combinedTitle, SUNNAH_BOOK_KEYWORDS)
-                  ? 'sunnah'
-                  : matchesAny(combinedTitle, KHUTBAH_KEYWORDS)
-                    ? 'khutbah'
-                    : null
-
-              if (!section) return null
-
-              return {
-              id: `${raw?.id || 'item'}-${attachment?.order || index + 1}`,
-              title:
-                String(attachment?.description || '').trim() ||
-                title ||
-                'مادة صوتية',
-              subtitle: authorName || 'مكتبة سميع',
-              audioUrl: attachment.url,
-              sourceName: 'IslamHouse',
-              authorName: authorName || undefined,
-              section: matchesAny(
-                `${title} ${attachment?.description || ''}`,
-                RUQYAH_KEYWORDS
-              )
-                ? 'ruqyah'
-                : matchesAny(
-                      `${title} ${attachment?.description || ''}`,
-                      SUNNAH_BOOK_KEYWORDS
-                    )
-                    ? 'sunnah'
-                    : matchesAny(
-                          `${title} ${attachment?.description || ''}`,
-                          KHUTBAH_KEYWORDS
-                        )
-                        ? 'khutbah'
-                        : null,
-              duration: Number.isFinite(Number(attachment?.duration))
-                ? Number(attachment.duration)
-                : undefined,
-              downloadable: true,
-              isStream: false,
-              sourceUrl: raw?.api_url,
-              image: raw?.image || null,
-              }
-            })
-            .filter(Boolean) as LibraryAudio[]
-        })
-
-        setLibraryItems((previous) => {
-          const merged = append ? [...previous, ...parsed] : parsed
-          const seen = new Set<string>()
-          return merged.filter((item) => {
-            if (seen.has(item.id)) return false
-            seen.add(item.id)
-            return true
-          })
-        })
-
-        const lastPage = Number(result.links?.pages_number || page)
-        setLibraryHasMore(page < lastPage)
-        setLibraryPage(page)
-
-        /*
-         * عدم وجود نتائج مطابقة في صفحة واحدة لا يعني أن المصدر فارغ.
-         * يظل القسم قابلًا للتحميل من الصفحات التالية.
-         */
-        setLibraryUnavailable(false)
+          if (tab === 'sunnah' && bookId) {
+            setSunnahHasMore(Boolean(result.hasMore))
+            setSunnahNextStart(Number(result.nextStart || start + 50))
+          }
+        }
       } catch (err) {
-        console.error('IslamHouse content error:', err)
+        console.error('Audio library content error:', err)
+        if (!append) setLibraryItems([])
         setLibraryUnavailable(true)
+        setLibraryError(
+          tab === 'sunnah'
+            ? 'تعذر تحميل كتب السنة الصوتية حاليًا.'
+            : tab === 'khutbah'
+              ? 'تعذر تحميل أرشيف الخطب الصوتية حاليًا.'
+              : 'تعذر تحميل مكتبة الرقية الصوتية حاليًا.'
+        )
       } finally {
         setLibraryLoading(false)
       }
@@ -687,7 +576,6 @@ export default function AudioPage() {
   useEffect(() => {
     if (!selectedRiwaya) return
 
-    const riwayaId = selectedRiwaya.id
     let cancelled = false
 
     async function loadReciters() {
@@ -697,7 +585,7 @@ export default function AudioPage() {
       try {
         const result = await fetchJson<{ reciters: Reciter[] }>(
           `${MP3QURAN_API}/reciters?language=ar&rewaya=${encodeURIComponent(
-            riwayaId
+            selectedRiwaya.id
           )}`
         )
 
@@ -812,21 +700,6 @@ export default function AudioPage() {
     )
   }, [activeTab, libraryItems, search])
 
-  const ruqyahLibraryItems = useMemo(
-    () => libraryItems.filter((item) => item.section === 'ruqyah'),
-    [libraryItems]
-  )
-
-  const khutbahLibraryItems = useMemo(
-    () => libraryItems.filter((item) => item.section === 'khutbah'),
-    [libraryItems]
-  )
-
-  const sunnahLibraryItems = useMemo(
-    () => libraryItems.filter((item) => item.section === 'sunnah'),
-    [libraryItems]
-  )
-
   const quranQueue = useMemo<PlayerItem[]>(() => {
     if (!selectedRiwaya || !selectedReciter || !selectedMoshaf) return []
 
@@ -911,32 +784,29 @@ export default function AudioPage() {
   )
 
   useEffect(() => {
-    if (!player) return
+    const audio = audioRef.current
+    if (!audio || !player) return
 
-    const currentPlayer = player
     let disposed = false
 
     async function prepare() {
-      const currentAudio = audioRef.current
-      if (!currentAudio) return
-
       try {
-        let source = currentPlayer.audioUrl
-        const offlineSource = await loadOfflineAudioUrl(currentPlayer)
+        let source = player.audioUrl
+        const offlineSource = await loadOfflineAudioUrl(player)
         if (offlineSource) source = offlineSource
 
         if (disposed) return
 
-        currentAudio.src = source
-        currentAudio.playbackRate = playbackRate
-        currentAudio.volume = isMuted ? 0 : volume
-        currentAudio.load()
+        audio.src = source
+        audio.playbackRate = playbackRate
+        audio.volume = isMuted ? 0 : volume
+        audio.load()
 
         const playNow = async () => {
           if (!pendingPlayRef.current || disposed) return
           pendingPlayRef.current = false
           try {
-            await currentAudio.play()
+            await audio.play()
           } catch (err) {
             console.error('Audio play failed:', err)
             setIsPlaying(false)
@@ -944,10 +814,10 @@ export default function AudioPage() {
           }
         }
 
-        if (currentAudio.readyState >= 3) {
+        if (audio.readyState >= 3) {
           await playNow()
         } else {
-          currentAudio.addEventListener('canplay', playNow, { once: true })
+          audio.addEventListener('canplay', playNow, { once: true })
         }
       } catch (err) {
         console.error('Player prepare error:', err)
@@ -1471,7 +1341,7 @@ export default function AudioPage() {
               </h1>
             </div>
             <p className="mt-1 text-xs font-medium text-gray-500">
-              مكتبة سميع — القرآن والرُّقية والخطب وكتب السنة
+              مكتبة سميع — القرآن والرقية وكتب الحديث والخطب
             </p>
           </div>
 
@@ -1575,6 +1445,271 @@ export default function AudioPage() {
               </div>
             </section>
 
+      {player && (
+        <div className="sticky top-[4.75rem] z-40 mt-5">
+          <div className="mx-auto max-w-6xl overflow-hidden rounded-[2rem] border border-mushaf-gold/30 bg-gradient-to-br from-[#175E67] via-[#124A51] to-[#0D383E] text-white shadow-[0_24px_80px_rgba(13,56,62,0.42)]">
+            <div className="border-b border-white/10 px-4 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-white/60">
+                  <ListMusic size={14} />
+                  <span>
+                    {queue.length
+                      ? `${arabicDigits(queueIndex + 1)} من ${arabicDigits(
+                          queue.length
+                        )}`
+                      : 'المشغل'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {currentOffline && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-mushaf-gold/15 px-2 py-1 text-[10px] font-black text-mushaf-gold">
+                      <WifiOff size={12} />
+                      دون إنترنت
+                    </span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowMorePlayer((value) => !value)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10"
+                    aria-label="خيارات المشغل"
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={closePlayer}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10"
+                    aria-label="إغلاق المشغل"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 sm:p-4">
+              <div className="flex items-center gap-3 sm:gap-4">
+                <AudioAvatar size="player" playing={isPlaying} />
+
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-black text-mushaf-gold">
+                    {player.reciterName}
+                  </p>
+                  <p className="mt-1 truncate text-base font-black sm:text-lg">
+                    {player.title}
+                  </p>
+                  <p className="mt-1 truncate text-[11px] text-white/50">
+                    {player.subtitle}
+                  </p>
+                </div>
+
+                <div className="hidden items-center gap-1 sm:flex">
+                  <button
+                    type="button"
+                    onClick={() => void goQueue(-1)}
+                    disabled={!queue.length}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 disabled:opacity-30"
+                    title="السابق"
+                  >
+                    <SkipBack size={17} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void togglePlayer()}
+                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-mushaf-teal shadow-lg"
+                    title={isPlaying ? 'إيقاف مؤقت' : 'تشغيل'}
+                  >
+                    {isPlaying ? (
+                      <Pause size={21} fill="currentColor" />
+                    ) : (
+                      <Play size={21} fill="currentColor" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void goQueue(1)}
+                    disabled={!queue.length}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 disabled:opacity-30"
+                    title="التالي"
+                  >
+                    <SkipForward size={17} />
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void togglePlayer()}
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-mushaf-teal shadow-lg sm:hidden"
+                  title={isPlaying ? 'إيقاف مؤقت' : 'تشغيل'}
+                >
+                  {isPlaying ? (
+                    <Pause size={21} fill="currentColor" />
+                  ) : (
+                    <Play size={21} fill="currentColor" />
+                  )}
+                </button>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <span className="w-12 text-center text-[10px] font-bold text-white/50">
+                  {formatDuration(progress)}
+                </span>
+
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 0}
+                  step={0.1}
+                  value={Math.min(progress, duration || 0)}
+                  onChange={(event) => seekTo(Number(event.target.value))}
+                  disabled={!duration}
+                  className="w-full accent-[var(--mushaf-gold,#D97706)]"
+                  aria-label="تقدم الملف"
+                />
+
+                <span className="w-12 text-center text-[10px] font-bold text-white/50">
+                  {formatDuration(duration)}
+                </span>
+              </div>
+
+              {showMorePlayer && (
+                <div className="mt-3 grid gap-3 rounded-2xl border border-white/10 bg-white/5 p-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <div>
+                    <p className="mb-2 text-[10px] font-bold text-white/45">
+                      سرعة التشغيل
+                    </p>
+                    <select
+                      value={playbackRate}
+                      onChange={(event) =>
+                        setPlaybackRate(Number(event.target.value))
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-transparent px-3 py-2 text-xs font-black text-white outline-none"
+                    >
+                      {[0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => (
+                        <option key={rate} value={rate} className="text-black">
+                          {rate}x
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[10px] font-bold text-white/45">
+                      التكرار
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRepeatMode((current) =>
+                          current === 'off'
+                            ? 'one'
+                            : current === 'one'
+                              ? 'all'
+                              : 'off'
+                        )
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black"
+                    >
+                      {repeatMode === 'off'
+                        ? 'بدون تكرار'
+                        : repeatMode === 'one'
+                          ? 'تكرار الملف'
+                          : 'تكرار القائمة'}
+                    </button>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[10px] font-bold text-white/45">
+                      الصوت
+                    </p>
+                    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsMuted((value) => !value)}
+                        className="flex h-9 w-9 items-center justify-center"
+                        aria-label="كتم الصوت"
+                      >
+                        {isMuted ? (
+                          <VolumeX size={16} />
+                        ) : (
+                          <Volume2 size={16} />
+                        )}
+                      </button>
+
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={isMuted ? 0 : volume}
+                        onChange={(event) => {
+                          setVolume(Number(event.target.value))
+                          setIsMuted(false)
+                        }}
+                        className="w-full accent-[var(--mushaf-gold,#D97706)]"
+                        aria-label="مستوى الصوت"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[10px] font-bold text-white/45">
+                      دون إنترنت
+                    </p>
+                    <button
+                      type="button"
+                      disabled={!!player.isStream || offlineBusyKey !== null}
+                      onClick={() =>
+                        currentOffline
+                          ? void removeOfflinePlayer(player)
+                          : void saveOfflinePlayer(player)
+                      }
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black disabled:opacity-35"
+                    >
+                      {offlineBusyKey === offlineKeyFor(player) ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : currentOffline ? (
+                        <Trash2 size={15} />
+                      ) : (
+                        <WifiOff size={15} />
+                      )}
+
+                      {currentOffline ? 'حذف النسخة' : 'حفظ دون نت'}
+                    </button>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[10px] font-bold text-white/45">
+                      تنزيل
+                    </p>
+                    <button
+                      type="button"
+                      disabled={!!player.isStream}
+                      onClick={() =>
+                        void downloadDirect(
+                          player.audioUrl,
+                          `${player.title} - ${player.reciterName}`,
+                          !!player.isStream
+                        )
+                      }
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black disabled:opacity-35"
+                    >
+                      <ArrowDownToLine size={15} />
+                      تنزيل الملف
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
             <section className="mt-6">
               <div className="grid gap-2 rounded-3xl border border-mushaf-border/35 bg-white p-2 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
                 {(
@@ -1598,8 +1733,10 @@ export default function AudioPage() {
                         setShowReciters(false)
                         setShowSurahs(false)
 
-                        if (tab !== 'quran' && libraryItems.length === 0) {
-                          void loadLibraryContent(1, false, tab)
+                        if (tab !== 'quran') {
+                          setSelectedSunnahBookId(null)
+                          setLibraryItems([])
+                          void loadLibraryContent(tab)
                         }
                       }}
                       className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black transition ${
@@ -2114,536 +2251,299 @@ export default function AudioPage() {
               <>
                 {activeTab === 'ruqyah' && (
                   <section className="mt-7">
-                    <div className="rounded-3xl border border-mushaf-gold/20 bg-white p-5 shadow-sm">
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="rounded-[2rem] border border-mushaf-gold/20 bg-white p-5 shadow-sm sm:p-6">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>
-                          <h2 className="text-xl font-black text-mushaf-dark">
-                            الرُّقية الشرعية
-                          </h2>
-                          <p className="mt-1 text-sm leading-7 text-gray-500">
-                            يتم جمع الرقية الشرعية المتاحة من المصادر المتصلة حاليًا،
-                            مع فصل البث المباشر عن التسجيلات الصوتية القابلة للتنزيل.
+                          <p className="text-xs font-black text-mushaf-gold">مكتبة الرُّقية الشرعية</p>
+                          <h2 className="mt-1 text-2xl font-black text-mushaf-dark">اختر قارئ الرقية</h2>
+                          <p className="mt-2 text-sm leading-7 text-gray-500">
+                            تسجيلات بشرية منشورة مجانًا من مصدر Quran TV، مع اختيار قارئ مستقل وتشغيله مباشرة من مشغل سميع العلوي.
                           </p>
                         </div>
-
-                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-mushaf-paper text-mushaf-gold">
-                          <Sparkles size={27} />
+                        <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-mushaf-paper text-mushaf-gold">
+                          <Sparkles size={30} />
                         </div>
                       </div>
                     </div>
 
-                    {ruqyahStations.length > 0 && (
-                      <div className="mt-4">
-                        <div className="mb-3 flex items-center gap-2">
-                          <Radio size={17} className="text-mushaf-gold" />
-                          <h3 className="font-black text-mushaf-dark">
-                            البث المباشر
-                          </h3>
-                        </div>
-
-                        <div className="grid gap-3 lg:grid-cols-2">
-                          {ruqyahStations.map((station) => {
-                            const playing =
-                              player?.kind === 'library' &&
-                              player.libraryId === `radio:${station.id}`
-
-                            const stationQueue = ruqyahStations.map((entry) => ({
-                              kind: 'library' as const,
-                              title: entry.name,
-                              subtitle: 'بث مباشر',
-                              audioUrl: entry.url,
-                              reciterName: entry.name,
-                              libraryId: `radio:${entry.id}`,
-                              sourceName: 'MP3Quran Radio',
-                              isStream: true,
-                            }))
-
-                            const stationIndex = stationQueue.findIndex(
-                              (entry) => entry.libraryId === `radio:${station.id}`
-                            )
-
-                            return (
-                              <div
-                                key={station.id}
-                                className="rounded-3xl border border-mushaf-border/30 bg-white p-4 shadow-sm"
+                    {libraryLoading ? (
+                      <div className="flex flex-col items-center justify-center gap-3 py-16 text-mushaf-teal">
+                        <Loader2 size={36} className="animate-spin" />
+                        <p className="font-black">جاري تحميل القراء...</p>
+                      </div>
+                    ) : libraryUnavailable ? (
+                      <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 p-7 text-center">
+                        <p className="font-black text-amber-800">{libraryError || 'تعذر تحميل الرقية حاليًا.'}</p>
+                      </div>
+                    ) : (
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {libraryItems.filter((item) => item.section === 'ruqyah').map((item) => {
+                          const active = selectedRuqyahId === item.id
+                          const playing = player?.kind === 'library' && player.libraryId === item.id
+                          return (
+                            <article
+                              key={item.id}
+                              className={`group overflow-hidden rounded-[1.8rem] border bg-white p-4 shadow-sm transition ${
+                                active ? 'border-mushaf-gold ring-2 ring-mushaf-gold/10' : 'border-mushaf-border/30 hover:border-mushaf-teal'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setSelectedRuqyahId(item.id)}
+                                className="w-full text-right"
                               >
-                                <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-3">
                                   <div className="h-16 w-16 shrink-0">
-                                    <AudioAvatar
-                                      size="player"
-                                      playing={playing && isPlaying}
-                                    />
+                                    <AudioAvatar size="player" playing={playing && isPlaying} />
                                   </div>
-
                                   <div className="min-w-0 flex-1">
-                                    <h3 className="truncate font-black text-mushaf-dark">
-                                      {station.name}
-                                    </h3>
-                                    <p className="mt-1 text-xs text-gray-400">
-                                      بث مباشر — لا يُحفظ دون إنترنت
-                                    </p>
+                                    <p className="text-[10px] font-black text-mushaf-gold">رقية شرعية</p>
+                                    <h3 className="mt-1 truncate text-base font-black text-mushaf-dark">{item.authorName || item.subtitle}</h3>
+                                    <p className="mt-1 text-[11px] text-gray-400">تسجيل مجاني منشور</p>
                                   </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void startPlayer(
-                                        stationQueue[stationIndex],
-                                        stationQueue,
-                                        stationIndex,
-                                        true
-                                      )
-                                    }
-                                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-mushaf-teal text-white"
-                                  >
-                                    {playing && isPlaying ? (
-                                      <Pause size={20} fill="currentColor" />
-                                    ) : (
-                                      <Play size={20} fill="currentColor" />
-                                    )}
-                                  </button>
                                 </div>
+                              </button>
+                              <div className="mt-4 flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void playLibraryItem(item)}
+                                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-mushaf-teal py-3 text-xs font-black text-white"
+                                >
+                                  {playing && isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+                                  {playing && isPlaying ? 'إيقاف' : 'تشغيل الرقية'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void downloadDirect(item.audioUrl, `الرقية الشرعية - ${item.authorName || item.subtitle}`)}
+                                  className="flex h-11 w-11 items-center justify-center rounded-2xl bg-mushaf-paper text-mushaf-gold"
+                                  title="تنزيل"
+                                >
+                                  <Download size={16} />
+                                </button>
                               </div>
-                            )
-                          })}
-                        </div>
+                            </article>
+                          )
+                        })}
                       </div>
                     )}
 
-                    {ruqyahLibraryItems.length > 0 && (
-                      <div className="mt-6">
-                        <div className="mb-3 flex items-center gap-2">
-                          <Download size={17} className="text-mushaf-teal" />
-                          <h3 className="font-black text-mushaf-dark">
-                            التسجيلات الصوتية الفردية
-                          </h3>
-                        </div>
-
-                        <div className="grid gap-3 lg:grid-cols-2">
-                          {ruqyahLibraryItems.map((item) => {
-                            const libraryPlayer: PlayerItem = {
-                              kind: 'library',
-                              title: item.title,
-                              subtitle: item.subtitle,
-                              audioUrl: item.audioUrl,
-                              reciterName: item.authorName || item.subtitle,
-                              libraryId: item.id,
-                              sourceName: item.sourceName,
-                              isStream: false,
-                            }
-
-                            const key = offlineKeyFor(libraryPlayer)
-                            const saved = offlineKeys.has(key)
-                            const busy = offlineBusyKey === key
-                            const playing =
-                              player?.kind === 'library' &&
-                              player.libraryId === item.id
-
-                            return (
-                              <div
-                                key={item.id}
-                                className={`rounded-3xl border bg-white p-4 shadow-sm ${
-                                  playing
-                                    ? 'border-mushaf-gold ring-2 ring-mushaf-gold/10'
-                                    : 'border-mushaf-border/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-4">
-                                  <div className="h-16 w-16 shrink-0">
-                                    <AudioAvatar
-                                      size="player"
-                                      playing={playing && isPlaying}
-                                    />
-                                  </div>
-
-                                  <div className="min-w-0 flex-1">
-                                    <p className="line-clamp-2 font-black text-mushaf-dark">
-                                      {item.title}
-                                    </p>
-                                    <p className="mt-1 truncate text-xs font-bold text-mushaf-teal">
-                                      {item.authorName || item.subtitle}
-                                    </p>
-                                  </div>
-
-                                  <div className="flex shrink-0 gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => void playLibraryItem(item)}
-                                      className="flex h-10 w-10 items-center justify-center rounded-full bg-mushaf-teal text-white"
-                                      title="تشغيل"
-                                    >
-                                      {playing && isPlaying ? (
-                                        <Pause size={16} fill="currentColor" />
-                                      ) : (
-                                        <Play size={16} fill="currentColor" />
-                                      )}
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        void downloadDirect(
-                                          item.audioUrl,
-                                          `${item.title} - ${item.authorName || ''}`
-                                        )
-                                      }
-                                      className="flex h-10 w-10 items-center justify-center rounded-full bg-mushaf-paper text-mushaf-gold"
-                                      title="تنزيل على الجهاز"
-                                    >
-                                      <Download size={16} />
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      disabled={busy}
-                                      onClick={() =>
-                                        saved
-                                          ? void removeOfflinePlayer(libraryPlayer)
-                                          : void saveOfflinePlayer(libraryPlayer)
-                                      }
-                                      className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                                        saved
-                                          ? 'bg-mushaf-gold text-white'
-                                          : 'bg-mushaf-paper text-mushaf-teal'
-                                      }`}
-                                      title={saved ? 'حذف النسخة' : 'حفظ دون إنترنت'}
-                                    >
-                                      {busy ? (
-                                        <Loader2 size={16} className="animate-spin" />
-                                      ) : saved ? (
-                                        <Check size={16} />
-                                      ) : (
-                                        <WifiOff size={16} />
-                                      )}
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
+                    {!libraryLoading && !libraryUnavailable && selectedRuqyahId && (
+                      <div className="mt-4 rounded-2xl border border-mushaf-teal/10 bg-mushaf-teal/5 px-4 py-3 text-xs font-bold text-mushaf-teal">
+                        القارئ المحدد: {libraryItems.find((item) => item.id === selectedRuqyahId)?.authorName || '—'} — اضغط تشغيل لبدء الرقية.
                       </div>
                     )}
-
-                    {libraryUnavailable &&
-                      ruqyahStations.length === 0 &&
-                      ruqyahLibraryItems.length === 0 && (
-                        <div className="mt-5 rounded-3xl border border-mushaf-border/30 bg-white p-8 text-center">
-                          <p className="font-black text-mushaf-dark">
-                            لا توجد تسجيلات رقية فردية في المصدر الحالي.
-                          </p>
-                          <p className="mt-2 text-sm leading-7 text-gray-500">
-                            عند تفعيل مصدر IslamHouse بالمفتاح الصحيح ستظهر المواد الصوتية المطابقة.
-                          </p>
-                        </div>
-                      )}
                   </section>
                 )}
 
-                {(activeTab === 'khutbah' || activeTab === 'sunnah') && (
+                {activeTab === 'sunnah' && (
                   <section className="mt-7">
-                    <div className="rounded-3xl border border-mushaf-border/30 bg-white p-5 shadow-sm">
+                    <div className="rounded-[2rem] border border-mushaf-gold/20 bg-white p-5 shadow-sm sm:p-6">
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                         <div>
-                          <h2 className="text-xl font-black text-mushaf-dark">
-                            {tabTitle[activeTab]}
-                          </h2>
-                          <p className="mt-1 text-sm leading-7 text-gray-500">
-                            {tabDescription[activeTab]}
-                          </p>
-                        </div>
-
-                        <div className="relative w-full lg:max-w-sm">
-                          <Search
-                            size={18}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
-                          />
-                          <input
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            placeholder="ابحث في العناوين أو أسماء المشايخ..."
-                            className="w-full rounded-2xl bg-mushaf-paper py-3 pl-4 pr-11 text-sm font-bold outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {activeTab === 'sunnah' && sunnahRadios.length > 0 && (
-                      <div className="mt-5">
-                        <div className="mb-3 flex items-center justify-between">
-                          <h3 className="font-black text-mushaf-dark">
-                            إذاعات كتب السنة
-                          </h3>
-                          <span className="rounded-xl bg-mushaf-teal/10 px-3 py-2 text-xs font-black text-mushaf-teal">
-                            {arabicDigits(sunnahRadios.length)} مصدر
-                          </span>
-                        </div>
-
-                        <div className="grid gap-3 lg:grid-cols-3">
-                          {sunnahRadios.map((station) => {
-                            const queue = sunnahRadios.map((entry) => ({
-                              kind: 'library' as const,
-                              title: entry.name,
-                              subtitle: 'بث مباشر',
-                              audioUrl: entry.url,
-                              reciterName: entry.name,
-                              libraryId: `radio:${entry.id}`,
-                              sourceName: 'MP3Quran Radio',
-                              isStream: true,
-                            }))
-
-                            const idx = queue.findIndex(
-                              (entry) => entry.libraryId === `radio:${station.id}`
-                            )
-
-                            const active =
-                              player?.kind === 'library' &&
-                              player.libraryId === `radio:${station.id}`
-
-                            return (
-                              <div
-                                key={station.id}
-                                className="rounded-3xl border border-mushaf-border/30 bg-white p-4 shadow-sm"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div className="h-14 w-14 shrink-0">
-                                    <AudioAvatar
-                                      size="player"
-                                      playing={active && isPlaying}
-                                    />
-                                  </div>
-
-                                  <div className="min-w-0 flex-1">
-                                    <p className="line-clamp-2 font-black text-mushaf-dark">
-                                      {station.name}
-                                    </p>
-                                    <p className="mt-1 text-[11px] text-gray-400">
-                                      بث مباشر
-                                    </p>
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void startPlayer(queue[idx], queue, idx, true)
-                                    }
-                                    className="flex h-11 w-11 items-center justify-center rounded-full bg-mushaf-teal text-white"
-                                  >
-                                    {active && isPlaying ? (
-                                      <Pause size={18} fill="currentColor" />
-                                    ) : (
-                                      <Play size={18} fill="currentColor" />
-                                    )}
-                                  </button>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="mt-4 rounded-2xl border border-mushaf-border/25 bg-mushaf-paper/60 p-3 text-xs leading-6 text-gray-500">
-                      المصدر الموسع يعتمد على مواد صوتية يتيحها المصدر البرمجي المربوط بسميع.
-                      لا يوجد مصدر واحد يضمن جمع كل الخطب والتسجيلات في العالم، لذلك صُممت
-                      المكتبة بنظام مصادر قابل للتوسع، مع إبقاء رابط المصدر لكل مادة.
-                    </div>
-
-                    <div className="mt-5">
-                      <div className="mb-3 flex items-center justify-between">
-                        <h3 className="font-black text-mushaf-dark">
-                          الملفات الصوتية
-                        </h3>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void loadLibraryContent(
-                              libraryPage + 1,
-                              true,
-                              activeTab as Exclude<TabKey, 'quran'>
-                            )
-                          }
-                          disabled={
-                            libraryLoading ||
-                            !libraryHasMore
-                          }
-                          className="rounded-xl border border-mushaf-border/30 bg-white px-3 py-2 text-xs font-black text-mushaf-teal disabled:opacity-40"
-                        >
-                          {libraryLoading
-                            ? 'جاري التحميل...'
-                            : libraryHasMore
-                              ? 'تحميل المزيد'
-                              : 'تم تحميل المتاح'}
-                        </button>
-                      </div>
-
-                      {libraryUnavailable ? (
-                        <div className="rounded-3xl border border-amber-100 bg-amber-50 p-8 text-center">
-                          <p className="font-black text-amber-800">
-                            مصدر المكتبة الموسعة غير متاح حاليًا.
-                          </p>
-                          <p className="mt-2 text-sm leading-7 text-amber-700">
-                            تأكد من ضبط ISLAMHOUSE_API_KEY في الخادم ثم أعد تحميل الصفحة.
-                          </p>
-                        </div>
-                      ) : filteredLibraryItems.length === 0 ? (
-                        <div className="rounded-3xl border border-mushaf-border/30 bg-white p-8 text-center">
-                          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-mushaf-paper text-mushaf-teal">
-                            <Headphones size={25} />
-                          </div>
-                          <p className="mt-3 font-black text-mushaf-dark">
-                            لا توجد نتيجة مطابقة في الصفحات المحمّلة حتى الآن.
-                          </p>
+                          <p className="text-xs font-black text-mushaf-gold">موسوعة السنة الصوتية</p>
+                          <h2 className="mt-1 text-2xl font-black text-mushaf-dark">كتب الحديث المتاحة صوتيًا</h2>
                           <p className="mt-2 text-sm leading-7 text-gray-500">
-                            استخدم «تحميل المزيد» لجلب صفحات إضافية من المصدر.
+                            تضم المكتبة مجموعات حديثية مجانية متاحة عبر Hadith.to، ومعها مواد صوتية إضافية من المصادر المفتوحة عندما تكون متوفرة.
                           </p>
                         </div>
-                      ) : (
-                        <div className="grid gap-3 lg:grid-cols-2">
-                          {filteredLibraryItems.map((item) => {
-                            const libraryPlayer: PlayerItem = {
-                              kind: 'library',
-                              title: item.title,
-                              subtitle: item.subtitle,
-                              audioUrl: item.audioUrl,
-                              reciterName:
-                                item.authorName || item.subtitle,
-                              libraryId: item.id,
-                              sourceName: item.sourceName,
-                              isStream: item.isStream,
-                            }
+                        {selectedSunnahBookId && (
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedSunnahBookId(null); setLibraryItems([]); setSunnahHasMore(false); setSunnahNextStart(1) }}
+                            className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-paper px-4 py-3 text-xs font-black text-mushaf-teal"
+                          >
+                            <ArrowRight size={16} /> كل الكتب
+                          </button>
+                        )}
+                      </div>
+                    </div>
 
-                            const key = offlineKeyFor(libraryPlayer)
-                            const saved = offlineKeys.has(key)
-                            const busy = offlineBusyKey === key
+                    {libraryLoading ? (
+                      <div className="flex flex-col items-center justify-center gap-3 py-16 text-mushaf-teal">
+                        <Loader2 size={36} className="animate-spin" />
+                        <p className="font-black">جاري تجهيز المكتبة الصوتية...</p>
+                      </div>
+                    ) : libraryUnavailable ? (
+                      <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 p-7 text-center">
+                        <p className="font-black text-amber-800">{libraryError || 'تعذر تحميل كتب السنة.'}</p>
+                      </div>
+                    ) : !selectedSunnahBookId ? (
+                      <>
+                        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {sunnahBooks.map((book) => (
+                          <button
+                            key={book.id}
+                            type="button"
+                            onClick={() => { setSelectedSunnahBookId(book.id); setSearch(''); setSunnahNextStart(1); setSunnahHasMore(false); void loadLibraryContent('sunnah', book.id, 1, false) }}
+                            className="rounded-[1.8rem] border border-mushaf-border/30 bg-white p-5 text-right shadow-sm transition hover:-translate-y-0.5 hover:border-mushaf-teal hover:shadow-md"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-mushaf-paper text-mushaf-gold">
+                                <BookOpen size={25} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <h3 className="truncate text-base font-black text-mushaf-dark">{book.name}</h3>
+                                <p className="mt-1 text-[11px] text-gray-400">{book.records ? `${arabicDigits(book.records)} حديث` : 'مجموعة حديثية'}</p>
+                              </div>
+                            </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <span className="rounded-full bg-mushaf-teal/10 px-2.5 py-1 text-[10px] font-black text-mushaf-teal">مصدر مجاني</span>
+                              {book.synthetic && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-black text-amber-700">صوت مُولَّد</span>}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
 
-                            const playing =
-                              player?.kind === 'library' &&
-                              player.libraryId === item.id
-
-                            return (
-                              <div
-                                key={item.id}
-                                className={`rounded-3xl border bg-white p-4 shadow-sm transition ${
-                                  playing
-                                    ? 'border-mushaf-gold ring-2 ring-mushaf-gold/10'
-                                    : 'border-mushaf-border/30 hover:border-mushaf-teal'
-                                }`}
-                              >
-                                <div className="flex items-center gap-4">
-                                  <div className="h-16 w-16 shrink-0">
-                                    <AudioAvatar
-                                      size="player"
-                                      playing={playing && isPlaying}
-                                    />
-                                  </div>
-
+                      {sunnahExtras.length > 0 && (
+                        <div className="mt-7">
+                          <div className="mb-3 flex items-center justify-between">
+                            <div>
+                              <p className="text-xs font-black text-mushaf-gold">مصادر إضافية</p>
+                              <h3 className="mt-1 font-black text-mushaf-dark">سلاسل وقراءات حديثية مجانية</h3>
+                            </div>
+                            <span className="rounded-xl bg-mushaf-teal/10 px-3 py-2 text-xs font-black text-mushaf-teal">{arabicDigits(sunnahExtras.length)} مادة</span>
+                          </div>
+                          <div className="grid gap-3 lg:grid-cols-2">
+                            {sunnahExtras.slice(0, 40).map((item) => (
+                              <div key={item.id} className="rounded-3xl border border-mushaf-border/30 bg-white p-4 shadow-sm">
+                                <div className="flex items-center gap-3">
+                                  <div className="h-14 w-14 shrink-0"><AudioAvatar size="player" playing={player?.kind === 'library' && player.libraryId === item.id && isPlaying} /></div>
                                   <div className="min-w-0 flex-1">
-                                    <h3 className="line-clamp-2 font-black text-mushaf-dark">
-                                      {item.title}
-                                    </h3>
-                                    <p className="mt-1 truncate text-xs font-bold text-mushaf-teal">
-                                      {item.authorName || item.subtitle}
-                                    </p>
-                                    <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-400">
-                                      <Clock3 size={13} />
-                                      {formatDuration(item.duration)}
-                                      <span>•</span>
-                                      <span>{item.sourceName}</span>
-                                    </div>
+                                    <p className="line-clamp-2 font-black text-mushaf-dark">{item.title}</p>
+                                    <p className="mt-1 truncate text-xs text-mushaf-teal">{item.authorName || item.subtitle}</p>
                                   </div>
-
-                                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => void playLibraryItem(item)}
-                                      className="flex h-10 w-10 items-center justify-center rounded-full bg-mushaf-teal text-white"
-                                      title="تشغيل"
-                                    >
-                                      {playing && isPlaying ? (
-                                        <Pause size={16} fill="currentColor" />
-                                      ) : (
-                                        <Play size={16} fill="currentColor" />
-                                      )}
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        void downloadDirect(
-                                          item.audioUrl,
-                                          `${item.title} - ${
-                                            item.authorName || ''
-                                          }`,
-                                          !!item.isStream
-                                        )
-                                      }
-                                      disabled={!item.downloadable}
-                                      className="flex h-10 w-10 items-center justify-center rounded-full bg-mushaf-paper text-mushaf-gold disabled:opacity-40"
-                                      title="تنزيل"
-                                    >
-                                      <Download size={16} />
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      disabled={busy || !!item.isStream}
-                                      onClick={() => {
-                                        if (saved) {
-                                          void removeOfflinePlayer(libraryPlayer)
-                                        } else {
-                                          void saveOfflinePlayer(libraryPlayer)
-                                        }
-                                      }}
-                                      className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                                        saved
-                                          ? 'bg-mushaf-gold text-white'
-                                          : 'bg-mushaf-paper text-mushaf-teal'
-                                      } disabled:opacity-40`}
-                                      title={
-                                        saved
-                                          ? 'حذف من دون إنترنت'
-                                          : 'حفظ دون إنترنت'
-                                      }
-                                    >
-                                      {busy ? (
-                                        <Loader2
-                                          size={16}
-                                          className="animate-spin"
-                                        />
-                                      ) : saved ? (
-                                        <Check size={16} />
-                                      ) : (
-                                        <WifiOff size={16} />
-                                      )}
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (item.sourceUrl) {
-                                          window.open(
-                                            item.sourceUrl,
-                                            '_blank',
-                                            'noopener,noreferrer'
-                                          )
-                                        }
-                                      }}
-                                      disabled={!item.sourceUrl}
-                                      className="flex h-10 w-10 items-center justify-center rounded-full bg-mushaf-paper text-mushaf-dark disabled:opacity-35"
-                                      title="المصدر"
-                                    >
-                                      <MoreHorizontal size={17} />
-                                    </button>
-                                  </div>
+                                  <button type="button" onClick={() => void playLibraryItem(item)} className="flex h-11 w-11 items-center justify-center rounded-full bg-mushaf-teal text-white"><Play size={17} fill="currentColor" /></button>
                                 </div>
                               </div>
-                            )
-                          })}
+                            ))}
+                          </div>
                         </div>
                       )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="mt-5">
+                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-xs font-bold text-gray-400">الكتاب المحدد</p>
+                            <h3 className="mt-1 text-xl font-black text-mushaf-dark">{sunnahBooks.find((book) => book.id === selectedSunnahBookId)?.name || selectedSunnahBookId}</h3>
+                          </div>
+                          <div className="relative w-full sm:max-w-sm">
+                            <Search size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث في الأحاديث الصوتية..." className="w-full rounded-2xl bg-white py-3 pl-4 pr-11 text-sm font-bold outline-none border border-mushaf-border/30" />
+                          </div>
+                        </div>
+
+                        {filteredLibraryItems.length === 0 ? (
+                          <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-14 text-center">
+                            <Headphones size={30} className="mx-auto text-mushaf-teal" />
+                            <p className="mt-3 font-black text-mushaf-dark">لا يوجد صوت مستقل متاح في هذه المجموعة حاليًا.</p>
+                            <p className="mt-2 text-xs leading-6 text-gray-400">يمكنك فتح المجموعة الأخرى والعودة إلى قائمة الكتب.</p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid gap-3 lg:grid-cols-2">
+                            {filteredLibraryItems.map((item) => {
+                              const playing = player?.kind === 'library' && player.libraryId === item.id
+                              const libraryPlayer: PlayerItem = { kind: 'library', title: item.title, subtitle: item.subtitle, audioUrl: item.audioUrl, reciterName: item.authorName || 'رواية صوتية', libraryId: item.id, sourceName: item.sourceName, isStream: false }
+                              const saved = offlineKeys.has(offlineKeyFor(libraryPlayer))
+                              const busy = offlineBusyKey === offlineKeyFor(libraryPlayer)
+                              return (
+                                <article key={item.id} className={`rounded-3xl border bg-white p-4 shadow-sm transition ${playing ? 'border-mushaf-gold ring-2 ring-mushaf-gold/10' : 'border-mushaf-border/30'}`}>
+                                  <div className="flex items-center gap-3">
+                                    <div className="h-14 w-14 shrink-0"><AudioAvatar size="player" playing={playing && isPlaying} /></div>
+                                    <div className="min-w-0 flex-1">
+                                      <h4 className="line-clamp-2 font-black text-mushaf-dark">{item.title}</h4>
+                                      <p className="mt-1 text-xs font-bold text-mushaf-teal">حديث {arabicDigits(item.record || 0)}</p>
+                                    </div>
+                                    <button type="button" onClick={() => void playLibraryItem(item)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-mushaf-teal text-white">{playing && isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button>
+                                  </div>
+                                  <div className="mt-3 flex gap-2">
+                                    <button type="button" onClick={() => void downloadDirect(item.audioUrl, item.title)} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-mushaf-paper py-2.5 text-xs font-black text-mushaf-gold"><Download size={15} /> تنزيل</button>
+                                    <button type="button" disabled={busy} onClick={() => saved ? void removeOfflinePlayer(libraryPlayer) : void saveOfflinePlayer(libraryPlayer)} className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black ${saved ? 'bg-mushaf-gold text-white' : 'bg-mushaf-paper text-mushaf-teal'}`}><WifiOff size={15} /> {saved ? 'محفوظ دون نت' : 'حفظ دون نت'}</button>
+                                  </div>
+                                </article>
+                              )
+                            })}
+                          </div>
+                            {sunnahHasMore && (
+                              <button
+                              type="button"
+                              onClick={() => void loadLibraryContent('sunnah', selectedSunnahBookId || undefined, sunnahNextStart, true)}
+                              disabled={libraryLoading}
+                              className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-mushaf-border/30 bg-white py-3 text-sm font-black text-mushaf-teal disabled:opacity-50"
+                            >
+                              {libraryLoading ? <Loader2 size={17} className="animate-spin" /> : <ChevronDown size={17} />}
+                              {libraryLoading ? 'جاري تحميل المزيد...' : 'تحميل ٥٠ حديثًا إضافيًا'}
+                              </button>
+                            )}
+                          </>
+                        )}
+                        </div>
+                      </>
+                    )}
+                  </section>
+                )}
+
+                {activeTab === 'khutbah' && (
+                  <section className="mt-7">
+                    <div className="rounded-[2rem] border border-mushaf-gold/20 bg-white p-5 shadow-sm sm:p-6">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                        <div>
+                          <p className="text-xs font-black text-mushaf-gold">أرشيف الخطب</p>
+                          <h2 className="mt-1 text-2xl font-black text-mushaf-dark">مكتبة الخطب والدروس الصوتية</h2>
+                          <p className="mt-2 text-sm leading-7 text-gray-500">
+                            أرشيف واسع من خطب الجمعة مع ملفات MP3 عربية متاحة مجانًا عبر المصادر المفتوحة، مع الاحتفاظ برابط المصدر لكل مادة.
+                          </p>
+                        </div>
+                        <div className="relative w-full lg:max-w-sm">
+                          <Search size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث بعنوان الخطبة..." className="w-full rounded-2xl bg-mushaf-paper py-3 pl-4 pr-11 text-sm font-bold outline-none" />
+                        </div>
+                      </div>
                     </div>
+
+                    {libraryLoading ? (
+                      <div className="flex flex-col items-center justify-center gap-3 py-16 text-mushaf-teal">
+                        <Loader2 size={36} className="animate-spin" />
+                        <p className="font-black">جاري تحميل أرشيف الخطب...</p>
+                      </div>
+                    ) : libraryUnavailable ? (
+                      <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 p-7 text-center">
+                        <p className="font-black text-amber-800">{libraryError || 'تعذر تحميل الخطب حاليًا.'}</p>
+                      </div>
+                    ) : filteredLibraryItems.length === 0 ? (
+                      <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white py-14 text-center">
+                        <Headphones size={30} className="mx-auto text-mushaf-teal" />
+                        <p className="mt-3 font-black text-mushaf-dark">لا توجد خطب مطابقة للبحث.</p>
+                      </div>
+                    ) : (
+                      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+                        {filteredLibraryItems.map((item) => {
+                          const libraryPlayer: PlayerItem = { kind: 'library', title: item.title, subtitle: item.subtitle, audioUrl: item.audioUrl, reciterName: item.authorName || 'تسجيل صوتي', libraryId: item.id, sourceName: item.sourceName, isStream: false }
+                          const playing = player?.kind === 'library' && player.libraryId === item.id
+                          const saved = offlineKeys.has(offlineKeyFor(libraryPlayer))
+                          const busy = offlineBusyKey === offlineKeyFor(libraryPlayer)
+                          return (
+                            <article key={item.id} className={`rounded-3xl border bg-white p-4 shadow-sm ${playing ? 'border-mushaf-gold ring-2 ring-mushaf-gold/10' : 'border-mushaf-border/30'}`}>
+                              <div className="flex items-center gap-3">
+                                <div className="h-14 w-14 shrink-0"><AudioAvatar size="player" playing={playing && isPlaying} /></div>
+                                <div className="min-w-0 flex-1">
+                                  <h3 className="line-clamp-2 font-black text-mushaf-dark">{item.title}</h3>
+                                  <p className="mt-1 truncate text-xs font-bold text-mushaf-teal">{item.authorName || item.subtitle}</p>
+                                  <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-400"><Clock3 size={12} />{formatDuration(item.duration)}<span>•</span>{item.sourceName}</div>
+                                </div>
+                              </div>
+                              <div className="mt-3 grid grid-cols-4 gap-2">
+                                <button type="button" onClick={() => void playLibraryItem(item)} className="flex items-center justify-center gap-1 rounded-xl bg-mushaf-teal py-2.5 text-white text-xs font-black col-span-2">{playing && isPlaying ? <Pause size={15} /> : <Play size={15} />} تشغيل</button>
+                                <button type="button" onClick={() => void downloadDirect(item.audioUrl, item.title)} className="flex items-center justify-center rounded-xl bg-mushaf-paper text-mushaf-gold" title="تنزيل"><Download size={15} /></button>
+                                <button type="button" disabled={busy} onClick={() => saved ? void removeOfflinePlayer(libraryPlayer) : void saveOfflinePlayer(libraryPlayer)} className={`flex items-center justify-center rounded-xl ${saved ? 'bg-mushaf-gold text-white' : 'bg-mushaf-paper text-mushaf-teal'}`} title={saved ? 'حذف النسخة' : 'حفظ دون إنترنت'}>{saved ? <Check size={15} /> : <WifiOff size={15} />}</button>
+                              </div>
+                            </article>
+                          )
+                        })}
+                      </div>
+                    )}
                   </section>
                 )}
               </>
@@ -2651,271 +2551,6 @@ export default function AudioPage() {
           </>
         )}
       </main>
-
-      {player && (
-        <div className="fixed inset-x-3 bottom-24 z-50">
-          <div className="mx-auto max-w-6xl overflow-hidden rounded-[2rem] border border-mushaf-gold/30 bg-gradient-to-br from-[#175E67] via-[#124A51] to-[#0D383E] text-white shadow-[0_24px_80px_rgba(13,56,62,0.42)]">
-            <div className="border-b border-white/10 px-4 py-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-white/60">
-                  <ListMusic size={14} />
-                  <span>
-                    {queue.length
-                      ? `${arabicDigits(queueIndex + 1)} من ${arabicDigits(
-                          queue.length
-                        )}`
-                      : 'المشغل'}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {currentOffline && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-mushaf-gold/15 px-2 py-1 text-[10px] font-black text-mushaf-gold">
-                      <WifiOff size={12} />
-                      دون إنترنت
-                    </span>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setShowMorePlayer((value) => !value)}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10"
-                    aria-label="خيارات المشغل"
-                  >
-                    <MoreHorizontal size={16} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={closePlayer}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10"
-                    aria-label="إغلاق المشغل"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3 sm:p-4">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <AudioAvatar size="player" playing={isPlaying} />
-
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-black text-mushaf-gold">
-                    {player.reciterName}
-                  </p>
-                  <p className="mt-1 truncate text-base font-black sm:text-lg">
-                    {player.title}
-                  </p>
-                  <p className="mt-1 truncate text-[11px] text-white/50">
-                    {player.subtitle}
-                  </p>
-                </div>
-
-                <div className="hidden items-center gap-1 sm:flex">
-                  <button
-                    type="button"
-                    onClick={() => void goQueue(-1)}
-                    disabled={!queue.length}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 disabled:opacity-30"
-                    title="السابق"
-                  >
-                    <SkipBack size={17} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void togglePlayer()}
-                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-mushaf-teal shadow-lg"
-                    title={isPlaying ? 'إيقاف مؤقت' : 'تشغيل'}
-                  >
-                    {isPlaying ? (
-                      <Pause size={21} fill="currentColor" />
-                    ) : (
-                      <Play size={21} fill="currentColor" />
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void goQueue(1)}
-                    disabled={!queue.length}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 disabled:opacity-30"
-                    title="التالي"
-                  >
-                    <SkipForward size={17} />
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => void togglePlayer()}
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-mushaf-teal shadow-lg sm:hidden"
-                  title={isPlaying ? 'إيقاف مؤقت' : 'تشغيل'}
-                >
-                  {isPlaying ? (
-                    <Pause size={21} fill="currentColor" />
-                  ) : (
-                    <Play size={21} fill="currentColor" />
-                  )}
-                </button>
-              </div>
-
-              <div className="mt-3 flex items-center gap-2">
-                <span className="w-12 text-center text-[10px] font-bold text-white/50">
-                  {formatDuration(progress)}
-                </span>
-
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 0}
-                  step={0.1}
-                  value={Math.min(progress, duration || 0)}
-                  onChange={(event) => seekTo(Number(event.target.value))}
-                  disabled={!duration}
-                  className="w-full accent-[var(--mushaf-gold,#D97706)]"
-                  aria-label="تقدم الملف"
-                />
-
-                <span className="w-12 text-center text-[10px] font-bold text-white/50">
-                  {formatDuration(duration)}
-                </span>
-              </div>
-
-              {showMorePlayer && (
-                <div className="mt-3 grid gap-3 rounded-2xl border border-white/10 bg-white/5 p-3 sm:grid-cols-2 lg:grid-cols-5">
-                  <div>
-                    <p className="mb-2 text-[10px] font-bold text-white/45">
-                      سرعة التشغيل
-                    </p>
-                    <select
-                      value={playbackRate}
-                      onChange={(event) =>
-                        setPlaybackRate(Number(event.target.value))
-                      }
-                      className="w-full rounded-xl border border-white/10 bg-transparent px-3 py-2 text-xs font-black text-white outline-none"
-                    >
-                      {[0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => (
-                        <option key={rate} value={rate} className="text-black">
-                          {rate}x
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[10px] font-bold text-white/45">
-                      التكرار
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setRepeatMode((current) =>
-                          current === 'off'
-                            ? 'one'
-                            : current === 'one'
-                              ? 'all'
-                              : 'off'
-                        )
-                      }
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black"
-                    >
-                      {repeatMode === 'off'
-                        ? 'بدون تكرار'
-                        : repeatMode === 'one'
-                          ? 'تكرار الملف'
-                          : 'تكرار القائمة'}
-                    </button>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[10px] font-bold text-white/45">
-                      الصوت
-                    </p>
-                    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsMuted((value) => !value)}
-                        className="flex h-9 w-9 items-center justify-center"
-                        aria-label="كتم الصوت"
-                      >
-                        {isMuted ? (
-                          <VolumeX size={16} />
-                        ) : (
-                          <Volume2 size={16} />
-                        )}
-                      </button>
-
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={isMuted ? 0 : volume}
-                        onChange={(event) => {
-                          setVolume(Number(event.target.value))
-                          setIsMuted(false)
-                        }}
-                        className="w-full accent-[var(--mushaf-gold,#D97706)]"
-                        aria-label="مستوى الصوت"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[10px] font-bold text-white/45">
-                      دون إنترنت
-                    </p>
-                    <button
-                      type="button"
-                      disabled={!!player.isStream || offlineBusyKey !== null}
-                      onClick={() =>
-                        currentOffline
-                          ? void removeOfflinePlayer(player)
-                          : void saveOfflinePlayer(player)
-                      }
-                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black disabled:opacity-35"
-                    >
-                      {offlineBusyKey === offlineKeyFor(player) ? (
-                        <Loader2 size={15} className="animate-spin" />
-                      ) : currentOffline ? (
-                        <Trash2 size={15} />
-                      ) : (
-                        <WifiOff size={15} />
-                      )}
-
-                      {currentOffline ? 'حذف النسخة' : 'حفظ دون نت'}
-                    </button>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[10px] font-bold text-white/45">
-                      تنزيل
-                    </p>
-                    <button
-                      type="button"
-                      disabled={!!player.isStream}
-                      onClick={() =>
-                        void downloadDirect(
-                          player.audioUrl,
-                          `${player.title} - ${player.reciterName}`,
-                          !!player.isStream
-                        )
-                      }
-                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black disabled:opacity-35"
-                    >
-                      <ArrowDownToLine size={15} />
-                      تنزيل الملف
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-2xl border border-mushaf-gold/20 bg-[#0D383E] px-5 py-3 text-center text-sm font-black text-white shadow-2xl">
