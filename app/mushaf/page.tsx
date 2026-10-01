@@ -1083,6 +1083,9 @@ export default function MushafPage() {
   const touchStartY = useRef<number | null>(null)
   const [turnDirection, setTurnDirection] = useState<TurnDirection>(null)
   const [turning, setTurning] = useState(false)
+  const [pageDragX, setPageDragX] = useState(0)
+  const [pageDragY, setPageDragY] = useState(0)
+  const [isPageDragging, setIsPageDragging] = useState(false)
   const [openPicker, setOpenPicker] = useState<'riwaya' | 'reciter' | 'surah' | null>(null)
   const pageTurnAudioContextRef = useRef<AudioContext | null>(null)
   const audioRestoreAttemptedRef = useRef(false)
@@ -1533,76 +1536,115 @@ export default function MushafPage() {
 
     nodes.forEach((node) => {
       node.classList.remove('samee3-pressed-ayah', 'samee3-playing-ayah')
+    })
+
+    const matchesAyah = (node: Element, item: Ayah | null | undefined) => {
+      if (!item) return false
 
       const sheet = node.closest('.samee3-page-sheet') as HTMLElement | null
       const sheetSurah = Number(sheet?.dataset.surahNumber || 0)
-
       const nodeSurah = Number(
         node.getAttribute('surah') ||
           node.getAttribute('data-surah') ||
           sheetSurah ||
           0,
       )
-
       const nodeGlobalAyah = Number(
-        node.getAttribute('data-ayah') || node.getAttribute('ayah') || 0,
+        node.getAttribute('data-ayah') ||
+          node.getAttribute('ayah') ||
+          0,
       )
       const nodeLocalAyah = Number(
         node.getAttribute('data-ayah-number') ||
           node.getAttribute('data-local-ayah') ||
-          (nodeGlobalAyah ? 0 : node.getAttribute('ayah')) ||
           0,
       )
 
-      const matchesAyah = (item: Ayah | null | undefined) => {
-        if (!item) return false
-        const itemSurah = Number(item.surah?.number || 0)
-        const itemGlobal = Number(item.number || 0)
-        const itemLocal = Number(item.numberInSurah || 0)
-        const surahMatches = !nodeSurah || nodeSurah === itemSurah
-        return surahMatches && (
-          (nodeGlobalAyah > 0 && nodeGlobalAyah === itemGlobal) ||
-          (nodeLocalAyah > 0 && nodeLocalAyah === itemLocal)
-        )
-      }
+      const itemSurah = Number(item.surah?.number || 0)
+      if (nodeSurah && itemSurah && nodeSurah !== itemSurah) return false
 
-      const playingMatch = matchesAyah(visiblePlayingAyah)
-      const pressedMatch =
-        pressedAyahNumber !== null &&
-        !!selectedAyah &&
-        Number(selectedAyah.numberInSurah) === Number(pressedAyahNumber) &&
-        matchesAyah(selectedAyah)
+      return (
+        (nodeGlobalAyah > 0 && nodeGlobalAyah === Number(item.number)) ||
+        (nodeLocalAyah > 0 && nodeLocalAyah === Number(item.numberInSurah))
+      )
+    }
 
-      if (playingMatch) node.classList.add('samee3-playing-ayah')
-      if (pressedMatch) node.classList.add('samee3-pressed-ayah')
-
-      if (!playingMatch) return
-
-      // تظليل HTML مستقل فوق مساحة الصفحة. هذا أكثر ثباتًا مع <tspan>
-      // ومع SVG القادم من مصادر مختلفة، ويظهر خلف النص بدل تغطيته.
-      const art = node.closest('.samee3-page-art') as HTMLElement | null
-      if (!art) return
-
-      const rect = node.getBoundingClientRect()
+    const addHighlightForNodeRects = (art: HTMLElement, matchingNodes: Element[]) => {
       const artRect = art.getBoundingClientRect()
-      if (!rect.width || !rect.height || !artRect.width || !artRect.height) return
+      if (!artRect.width || !artRect.height) return
 
-      const highlight = document.createElement('span')
-      highlight.className = 'samee3-live-ayah-highlight'
-      highlight.setAttribute('aria-hidden', 'true')
-      highlight.style.left = `${Math.max(0, rect.left - artRect.left - 7)}px`
-      highlight.style.top = `${Math.max(0, rect.top - artRect.top - Math.max(3, rect.height * 0.18))}px`
-      highlight.style.width = `${Math.min(artRect.width, rect.width + 14)}px`
-      highlight.style.height = `${rect.height + Math.max(6, rect.height * 0.36)}px`
-      highlight.style.setProperty('--samee3-highlight-scale', '1')
-      art.prepend(highlight)
+      const rects = matchingNodes
+        .flatMap((node) => Array.from(node.getClientRects()))
+        .filter((rect) => rect.width > 2 && rect.height > 5)
+        .map((rect) => ({
+          left: rect.left - artRect.left - 6,
+          top: rect.top - artRect.top - Math.max(3, rect.height * 0.17),
+          right: rect.right - artRect.left + 6,
+          bottom: rect.bottom - artRect.top + Math.max(4, rect.height * 0.22),
+        }))
+        .sort((a, b) => a.top - b.top || a.left - b.left)
+
+      if (!rects.length) return
+
+      const grouped: typeof rects = []
+      rects.forEach((rect) => {
+        const previous = grouped[grouped.length - 1]
+        if (previous && Math.abs(previous.top - rect.top) <= Math.max(10, (rect.bottom - rect.top) * 0.45)) {
+          previous.left = Math.min(previous.left, rect.left)
+          previous.right = Math.max(previous.right, rect.right)
+          previous.top = Math.min(previous.top, rect.top)
+          previous.bottom = Math.max(previous.bottom, rect.bottom)
+        } else {
+          grouped.push({ ...rect })
+        }
+      })
+
+      grouped.forEach((rect) => {
+        const highlight = document.createElement('span')
+        highlight.className = 'samee3-live-ayah-highlight'
+        highlight.setAttribute('aria-hidden', 'true')
+        highlight.style.left = `${Math.max(0, rect.left)}px`
+        highlight.style.top = `${Math.max(0, rect.top)}px`
+        highlight.style.width = `${Math.max(12, Math.min(artRect.width - Math.max(0, rect.left), rect.right - rect.left))}px`
+        highlight.style.height = `${Math.max(12, rect.bottom - rect.top)}px`
+        highlight.style.setProperty('--samee3-highlight-scale', '1')
+        art.appendChild(highlight)
+      })
+    }
+
+    artContainers.forEach((art) => {
+      const artNodes = Array.from(
+        art.querySelectorAll<SVGElement>(
+          '.ayahPolygon, .samee3-text-ayah, .samee3-ayah, [data-ayah], [data-ayah-number]',
+        ),
+      )
+
+      const playingNodes = visiblePlayingAyah
+        ? artNodes.filter((node) => matchesAyah(node, visiblePlayingAyah))
+        : []
+
+      const pressedNodes =
+        pressedAyahNumber !== null && selectedAyah
+          ? artNodes.filter(
+              (node) =>
+                Number(selectedAyah.numberInSurah) === Number(pressedAyahNumber) &&
+                matchesAyah(node, selectedAyah),
+            )
+          : []
+
+      playingNodes.forEach((node) => node.classList.add('samee3-playing-ayah'))
+      pressedNodes.forEach((node) => node.classList.add('samee3-pressed-ayah'))
+
+      if (playingNodes.length) addHighlightForNodeRects(art, playingNodes)
     })
   }, [leftPageData, pageData, playingAyahNumber, pressedAyahNumber, rightPageData, selectedAyah])
 
   useEffect(() => {
-    const timer = window.setTimeout(highlightSearchedAyah, 120)
+    const timer = window.setTimeout(highlightSearchedAyah, 60)
     return () => window.clearTimeout(timer)
-  }, [highlightSearchedAyah, svg, leftSvg, selectedAyah, playingAyahNumber])
+  }, [highlightSearchedAyah, svg, leftSvg, selectedAyah, playingAyahNumber, pageNumber])
+
+
 
   const mainDisplayedSvg = useMemo(() => {
     // السوسي والبزي لا نعرض لهما الـSVG النصي القديم الذي كان يحتوي
@@ -1777,6 +1819,9 @@ export default function MushafPage() {
     navigatingRef.current = true
     setTurnDirection(direction)
     setTurning(true)
+    setIsPageDragging(false)
+    setPageDragX(0)
+    setPageDragY(0)
     playPageTurnSound()
 
     const params = new URLSearchParams(searchParams.toString())
@@ -1794,13 +1839,13 @@ export default function MushafPage() {
     // نعطي حركة الورقة لحظة تبدأ قبل تبديل المحتوى حتى لا يظهر تبديل مفاجئ.
     window.setTimeout(() => {
       router.push(`/mushaf?${params.toString()}`)
-    }, 70)
+    }, 145)
 
     window.setTimeout(() => {
       navigatingRef.current = false
       setTurning(false)
       setTurnDirection(null)
-    }, 540)
+    }, 400)
   }, [pageNumber, playPageTurnSound, router, searchParams])
 
   /*
@@ -1816,25 +1861,53 @@ export default function MushafPage() {
 
       if (
         target.closest(
-          'button, select, input, textarea, a, .samee3-top-controls, .samee3-bottom-shell, .samee3-reader-toggle, .samee3-ayah-overlay, .samee3-image-preview-overlay',
+          'button, select, input, textarea, a, .samee3-top-controls, .samee3-bottom-shell, .samee3-reader-toggle, .samee3-ayah-overlay, .samee3-image-preview-overlay, .samee3-picker-menu, .samee3-search-results-overlay',
         )
       ) {
         pointerStartX.current = null
         pointerStartY.current = null
         pointerIdRef.current = null
+        setIsPageDragging(false)
         return
       }
 
       pointerStartX.current = event.clientX
       pointerStartY.current = event.clientY
       pointerIdRef.current = event.pointerId
+      setIsPageDragging(true)
+      setPageDragX(0)
+      setPageDragY(0)
 
       try {
-        event.currentTarget.setPointerCapture(
-          event.pointerId,
-        )
+        event.currentTarget.setPointerCapture(event.pointerId)
       } catch {
-        // بعض المتصفحات قد لا تدعم pointer capture.
+        // بعض المتصفحات لا تدعم pointer capture بشكل كامل.
+      }
+    },
+    [],
+  )
+
+  const movePagePointer = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (
+        pointerIdRef.current === null ||
+        event.pointerId !== pointerIdRef.current ||
+        pointerStartX.current === null ||
+        pointerStartY.current === null
+      ) {
+        return
+      }
+
+      const deltaX = event.clientX - pointerStartX.current
+      const deltaY = event.clientY - pointerStartY.current
+
+      if (Math.abs(deltaX) > Math.abs(deltaY) + 6) {
+        event.preventDefault()
+        const maxDrag = Math.min(window.innerWidth * 0.42, 230)
+        const limitedX = Math.max(-maxDrag, Math.min(maxDrag, deltaX))
+        const limitedY = Math.max(-18, Math.min(18, deltaY))
+        setPageDragX(limitedX)
+        setPageDragY(limitedY)
       }
     },
     [],
@@ -1851,48 +1924,34 @@ export default function MushafPage() {
         return
       }
 
-      const deltaX =
-        event.clientX - pointerStartX.current
-
-      const deltaY =
-        event.clientY - pointerStartY.current
+      const deltaX = event.clientX - pointerStartX.current
+      const deltaY = event.clientY - pointerStartY.current
+      const basePage = isDesktop ? desktopRightPage : pageNumber
 
       pointerStartX.current = null
       pointerStartY.current = null
       pointerIdRef.current = null
+      setIsPageDragging(false)
+      setPageDragX(0)
+      setPageDragY(0)
 
-      if (
-        Math.abs(deltaY) > Math.abs(deltaX) ||
-        Math.abs(deltaX) < 45
-      ) {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      } catch {
+        // تجاهل اختلاف دعم Pointer Capture.
+      }
+
+      if (Math.abs(deltaY) > Math.abs(deltaX) * 0.78 || Math.abs(deltaX) < 46) {
         return
       }
 
-      const step = 1
-      const basePage = isDesktop
-        ? desktopRightPage
-        : pageNumber
-
       if (deltaX > 0) {
-        navigateTo(
-          basePage + step,
-          undefined,
-          'next',
-        )
+        navigateTo(basePage + 1, undefined, 'next')
       } else {
-        navigateTo(
-          basePage - step,
-          undefined,
-          'prev',
-        )
+        navigateTo(basePage - 1, undefined, 'prev')
       }
     },
-    [
-      desktopRightPage,
-      isDesktop,
-      navigateTo,
-      pageNumber,
-    ],
+    [desktopRightPage, isDesktop, navigateTo, pageNumber],
   )
 
   const cancelPagePointer = useCallback(
@@ -1908,6 +1967,9 @@ export default function MushafPage() {
       pointerStartX.current = null
       pointerStartY.current = null
       pointerIdRef.current = null
+      setIsPageDragging(false)
+      setPageDragX(0)
+      setPageDragY(0)
     },
     [],
   )
@@ -4009,6 +4071,7 @@ export default function MushafPage() {
       dir="rtl"
       className="samee3-reader fixed inset-0 z-[40] overflow-hidden bg-[#f5f0e4]"
       onPointerDown={beginPagePointer}
+      onPointerMove={movePagePointer}
       onPointerUp={finishPagePointer}
       onPointerCancel={cancelPagePointer}
     >
@@ -4293,17 +4356,17 @@ export default function MushafPage() {
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
         .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
         .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; perspective:1800px; background:#f5f0e4; touch-action:pan-y; }
-        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .52s cubic-bezier(.22,.72,.18,1), filter .52s ease; will-change:transform, filter; transform-origin:center center; }
+        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .38s cubic-bezier(.22,.78,.2,1), filter .38s ease; will-change:transform, filter; transform-origin:center center; }
         .samee3-spread.is-desktop { padding:8px 14px 14px; }
         .samee3-spread.is-mobile { padding:0; }
         /* تقليب هادئ ونظيف بدون خط/شريط ظل في منتصف الصفحة */
         .samee3-spread.is-turning.next {
-          transform:translate3d(-3px,0,0) rotateY(-2.5deg) scale(.998);
-          filter:drop-shadow(-7px 5px 14px rgba(64,49,30,.075));
+          transform:translate3d(-10%,0,0) rotateY(-9deg) rotateZ(-.35deg) scale(.985);
+          filter:drop-shadow(-22px 10px 28px rgba(64,49,30,.18));
         }
         .samee3-spread.is-turning.prev {
-          transform:translate3d(3px,0,0) rotateY(2.5deg) scale(.998);
-          filter:drop-shadow(7px 5px 14px rgba(64,49,30,.075));
+          transform:translate3d(10%,0,0) rotateY(9deg) rotateZ(.35deg) scale(.985);
+          filter:drop-shadow(22px 10px 28px rgba(64,49,30,.18));
         }
         .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 10px 42px rgba(83,63,34,.11); isolation:isolate; }
         .is-desktop .samee3-page-sheet {
