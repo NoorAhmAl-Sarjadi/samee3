@@ -9,12 +9,9 @@ title: {
 default: ‘مصحف سميع’,
 template: ‘%s | مصحف سميع’,
 },
-
 description:
 ‘موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.’,
-
 applicationName: ‘مصحف سميع’,
-
 manifest: ‘/manifest.json’,
 
 icons: {
