@@ -10,10 +10,17 @@ type PrintedRiwaya =
   | 'douri'
   | 'shubah'
 
+type PrintedEdition =
+  | 'hafs-kfqc'
+  | 'warsh-kfqc'
+  | 'qalon-kfqc'
+  | 'douri-kfqc'
+  | 'shubah-kfqc'
+
 type TextRiwaya = 'sousi' | 'bazzi'
 type Riwaya = PrintedRiwaya | TextRiwaya
 
-const EDITIONS: Record<PrintedRiwaya, string> = {
+const EDITIONS: Record<PrintedRiwaya, PrintedEdition> = {
   hafs: 'hafs-kfqc',
   warsh: 'warsh-kfqc',
   qalun: 'qalon-kfqc',
@@ -355,7 +362,7 @@ async function findRealMushafImage(
 
 function preparePrintedMushafSvg(
   rawSvg: string,
-  edition: PrintedRiwaya,
+  edition: PrintedEdition,
   page: number,
 ): string {
   let svg = rawSvg
@@ -377,7 +384,7 @@ function preparePrintedMushafSvg(
   if (!hasMushafAttr) {
     normalizedOpeningSvg = normalizedOpeningSvg.replace(
       /<svg\b/i,
-      `<svg data-mushaf=\"${escapeXml(`${edition}-kfqc`)}\"`,
+      `<svg data-mushaf=\"${escapeXml(edition)}\"`,
     )
   }
 
