@@ -13,7 +13,6 @@ description:
 ‘موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.’,
 applicationName: ‘مصحف سميع’,
 manifest: ‘/manifest.json’,
-
 icons: {
 icon: [
 {
@@ -29,13 +28,11 @@ type: ‘image/svg+xml’,
 },
 ],
 },
-
 appleWebApp: {
 capable: true,
 statusBarStyle: ‘default’,
 title: ‘مصحف سميع’,
 },
-
 formatDetection: {
 telephone: false,
 },
