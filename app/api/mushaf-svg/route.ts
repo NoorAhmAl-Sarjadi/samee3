@@ -215,7 +215,10 @@ const REAL_MUSHAF_IMAGE_BASES: Record<TextRiwaya, string[]> = {
   ],
 }
 
-const REAL_MUSHAF_IMAGE_TIMEOUT = 8_000
+const REAL_MUSHAF_IMAGE_TIMEOUT = 3_500
+
+const realMushafImageCache = new Map<string, string | null>()
+const realMushafImagePromiseCache = new Map<string, Promise<string | null>>()
 
 function buildImageCandidates(
   riwaya: TextRiwaya,
@@ -246,37 +249,191 @@ function buildImageCandidates(
   )
 }
 
+async function probeImageCandidate(url: string): Promise<string | null> {
+  const headController = new AbortController()
+  const headTimeoutId = setTimeout(
+    () => headController.abort(),
+    REAL_MUSHAF_IMAGE_TIMEOUT,
+  )
+
+  try {
+    const headResponse = await fetch(url, {
+      method: 'HEAD',
+      cache: 'force-cache',
+      signal: headController.signal,
+      headers: {
+        Accept: 'image/avif,image/webp,image/jpeg;q=0.9,*/*;q=0.5',
+      },
+    })
+
+    if (headResponse.ok) return url
+
+    // إذا أعاد الخادم 404 فلا داعي لطلب GET ثانٍ لنفس الاسم.
+    if (headResponse.status !== 405 && headResponse.status !== 501) {
+      return null
+    }
+  } catch {
+    // بعض خدمات الملفات لا تتعامل جيدًا مع HEAD؛ نجرب GET لاحقًا.
+  } finally {
+    clearTimeout(headTimeoutId)
+  }
+
+  const getController = new AbortController()
+  const getTimeoutId = setTimeout(
+    () => getController.abort(),
+    REAL_MUSHAF_IMAGE_TIMEOUT,
+  )
+
+  try {
+    const getResponse = await fetch(url, {
+      method: 'GET',
+      cache: 'force-cache',
+      signal: getController.signal,
+      headers: {
+        Accept: 'image/avif,image/webp,image/jpeg;q=0.9,*/*;q=0.5',
+        Range: 'bytes=0-0',
+      },
+    })
+
+    if (getResponse.ok || getResponse.status === 206) return url
+  } catch {
+    // جرّب الاسم التالي.
+  } finally {
+    clearTimeout(getTimeoutId)
+  }
+
+  return null
+}
+
 async function findRealMushafImage(
   riwaya: TextRiwaya,
   page: number,
 ): Promise<string | null> {
-  const candidates = buildImageCandidates(riwaya, page)
+  const cacheKey = `${riwaya}:${page}`
+  const cached = realMushafImageCache.get(cacheKey)
+  if (cached !== undefined) return cached
 
-  for (const url of candidates) {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      REAL_MUSHAF_IMAGE_TIMEOUT,
-    )
+  const inFlight = realMushafImagePromiseCache.get(cacheKey)
+  if (inFlight) return inFlight
 
-    try {
-      const response = await fetch(url, {
-        method: 'HEAD',
-        cache: 'force-cache',
-        signal: controller.signal,
-      })
+  const promise = (async () => {
+    const candidates = buildImageCandidates(riwaya, page)
 
-      if (response.ok) {
-        return url
-      }
-    } catch {
-      // جرّب الاسم التالي.
-    } finally {
-      clearTimeout(timeoutId)
+    // نبدأ بأكثر التسميات شيوعًا، ثم نكمل الباقي على دفعات صغيرة
+    // حتى لا يسبب فتح صفحة واحدة عشرات الطلبات المتزامنة.
+    const batches: string[][] = []
+    const batchSize = 4
+
+    for (let i = 0; i < candidates.length; i += batchSize) {
+      batches.push(candidates.slice(i, i + batchSize))
     }
+
+    for (const batch of batches) {
+      const results = await Promise.all(
+        batch.map((url) => probeImageCandidate(url)),
+      )
+
+      const found = results.find((url): url is string => Boolean(url))
+      if (found) {
+        realMushafImageCache.set(cacheKey, found)
+        return found
+      }
+    }
+
+    realMushafImageCache.set(cacheKey, null)
+    return null
+  })()
+
+  realMushafImagePromiseCache.set(cacheKey, promise)
+
+  try {
+    return await promise
+  } finally {
+    realMushafImagePromiseCache.delete(cacheKey)
+  }
+}
+
+function preparePrintedMushafSvg(
+  rawSvg: string,
+  edition: PrintedRiwaya,
+  page: number,
+): string {
+  let svg = rawSvg
+    .replace(/^\s*<\?xml[^>]*\?>/i, '')
+    .replace(/^\s*<!DOCTYPE[^>]*>/i, '')
+    .trim()
+
+  const openingSvgMatch = svg.match(/<svg\b[^>]*>/i)
+  if (!openingSvgMatch) {
+    throw new Error('المصدر المرئي لا يحتوي على عنصر SVG رئيسي صالح.')
   }
 
-  return null
+  const openingSvg = openingSvgMatch[0]
+  const hasMushafAttr = /\bdata-mushaf=\"/i.test(openingSvg)
+  const hasPageAttr = /\bdata-page=\"/i.test(openingSvg)
+
+  let normalizedOpeningSvg = openingSvg
+
+  if (!hasMushafAttr) {
+    normalizedOpeningSvg = normalizedOpeningSvg.replace(
+      /<svg\b/i,
+      `<svg data-mushaf=\"${escapeXml(`${edition}-kfqc`)}\"`,
+    )
+  }
+
+  if (!hasPageAttr) {
+    normalizedOpeningSvg = normalizedOpeningSvg.replace(
+      /<svg\b/i,
+      `<svg data-page=\"${escapeXml(page)}\"`,
+    )
+  }
+
+  const interactionStyle = `
+<style id=\"samee3-mushaf-interaction\">
+  /*
+   * Quran SVG يأتي وفيه مسار دقيق لكل آية.
+   * في بعض الروايات تكون طبقة الحروف أعلى من طبقة الآيات،
+   * لذلك نعطل pointer-events عن محتوى الرسم ونُبقيها للـayahPolygon فقط.
+   */
+  #content,
+  #content *,
+  #ayah_markers,
+  #ayah_markers * {
+    pointer-events: none !important;
+  }
+
+  .ayahPolygon {
+    pointer-events: all !important;
+    cursor: pointer;
+    fill: #c7934f !important;
+    fill-opacity: 0 !important;
+    stroke: none;
+  }
+
+  .ayahPolygon.samee3-pressed-ayah {
+    fill: #0e99d4 !important;
+    fill-opacity: .10 !important;
+    stroke: none !important;
+  }
+
+  .ayahPolygon.samee3-playing-ayah {
+    fill: #c7934f !important;
+    fill-opacity: .20 !important;
+    stroke: #c7934f !important;
+    stroke-opacity: .26 !important;
+    stroke-width: 2px !important;
+  }
+</style>`
+
+  svg = svg.replace(openingSvg, normalizedOpeningSvg)
+
+  if (/<\/svg>\s*$/i.test(svg)) {
+    svg = svg.replace(/<\/svg>\s*$/i, `${interactionStyle}\n</svg>`)
+  } else {
+    svg += interactionStyle
+  }
+
+  return svg.trim()
 }
 
 function buildRealImageMushafSvg(
@@ -497,6 +654,8 @@ function buildRealImageMushafSvg(
 <svg xmlns="http://www.w3.org/2000/svg"
      viewBox="0 0 ${viewWidth} ${viewHeight}"
      preserveAspectRatio="xMidYMid meet"
+     data-mushaf="${escapeXml(riwaya)}"
+     data-page="${escapeXml(page)}"
      role="img"
      aria-label="صفحة المصحف ${escapeXml(page)} من رواية ${escapeXml(riwaya)}">
   <style>
@@ -761,7 +920,10 @@ function buildTextMushafSvg(
       word-spacing: 0;
       dominant-baseline: alphabetic;
     }
-    .samee3-ayah { cursor: pointer; }
+    .samee3-ayah {
+      cursor: pointer;
+      pointer-events: all;
+    }
     .samee3-ayah-marker {
       font-family: '${escapeXml(fontFamily)}', serif;
       font-size: 0.62em;
@@ -856,9 +1018,9 @@ export async function GET(request: NextRequest) {
         )
       }
 
-      const svg = (await response.text()).trim()
+      const rawSvg = (await response.text()).trim()
 
-      if (!svg || !svg.includes('<svg')) {
+      if (!rawSvg || !rawSvg.includes('<svg')) {
         return NextResponse.json(
           {
             error: 'المصدر لم يرجع SVG صالحًا.',
@@ -870,6 +1032,12 @@ export async function GET(request: NextRequest) {
         )
       }
 
+      const svg = preparePrintedMushafSvg(
+        rawSvg,
+        edition,
+        page,
+      )
+
       return NextResponse.json(
         {
           success: true,
@@ -878,6 +1046,10 @@ export async function GET(request: NextRequest) {
           edition,
           page,
           svg,
+          interaction: {
+            ayahLayer: 'ayahPolygon',
+            geometry: 'per-ayah-polygon',
+          },
         },
         {
           headers: {
