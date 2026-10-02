@@ -4640,9 +4640,6 @@ export default function MushafPage() {
                           onClick={() => void handleJuzSelect(item.number)}
                         >
                           <span>الجزء {arabicNumber(item.number)}</span>
-                          <small>
-                            {arabicNumber(item.start.surah)}:{arabicNumber(item.start.ayah)}
-                          </small>
                         </button>
                       ))}
                     </div>
