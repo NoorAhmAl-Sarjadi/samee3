@@ -82,8 +82,6 @@ type LocalReciter = {
   surahIds: number[]
 }
 
-type TurnDirection = 'next' | 'prev' | null
-
 type SearchResult = {
   id: string
   text: string
@@ -1080,11 +1078,16 @@ export default function MushafPage() {
   const pointerIdRef = useRef<number | null>(null)
   const touchStartX = useRef<number | null>(null)
   const touchStartY = useRef<number | null>(null)
-  const [turnDirection, setTurnDirection] = useState<TurnDirection>(null)
-  const [turning, setTurning] = useState(false)
+  const [pageSettleX, setPageSettleX] = useState(0)
   const [pageDragX, setPageDragX] = useState(0)
   const [pageDragY, setPageDragY] = useState(0)
   const [isPageDragging, setIsPageDragging] = useState(false)
+  const [turnPreview, setTurnPreview] = useState<{
+    page: number
+    data: PageData | null
+    html: string
+  } | null>(null)
+  const turnPreviewRequestRef = useRef(0)
   const [openPicker, setOpenPicker] = useState<'riwaya' | 'reciter' | 'surah' | null>(null)
   const pageTurnAudioContextRef = useRef<AudioContext | null>(null)
   const audioRestoreAttemptedRef = useRef(false)
@@ -1395,6 +1398,11 @@ export default function MushafPage() {
   }, [pageNumber, prefetchRiwayaPage, riwaya])
 
   useEffect(() => {
+    setTurnPreview(null)
+    setPageSettleX(0)
+  }, [pageNumber, riwaya])
+
+  useEffect(() => {
     let cancelled = false
     // لا نعرض طبقة تحميل فوق الصفحة في كل انتقال؛ الصفحة السابقة تبقى ظاهرة
     // حتى تكتمل الصفحة الجديدة، ومع الـ cache غالبًا ستكون فورية.
@@ -1577,24 +1585,27 @@ export default function MushafPage() {
           rects.push(fallbackRect)
         }
 
-        rects.slice(0, 6).forEach((rect) => {
-          const relativeLeft = rect.left - artRect.left
-          const relativeTop = rect.top - artRect.top
-          const maxWidth = artRect.width * 0.96
+        // في صفحات المصحف المطبوعة نستخدم نفس مسار الآية (ayahPolygon)
+        // كتظليل حقيقي؛ هذا يمنع ظهور شريط/ظل منفصل أسفل النص.
+        // نحتفظ بطبقة ناعمة جدًا فقط للروايات النصية (السوسي والبزي).
+        if (!node.classList.contains('ayahPolygon')) {
+          rects.slice(0, 6).forEach((rect) => {
+            const relativeLeft = rect.left - artRect.left
+            const relativeTop = rect.top - artRect.top
+            const maxWidth = artRect.width * 0.94
 
-          // تجاهل hit-box واسع جدًا؛ نفضّل التظليل البصري الخاص بالـSVG
-          // بدل تلوين الصفحة كلها عندما يكون العنصر مجرد منطقة نقر.
-          if (rect.width > maxWidth && !node.classList.contains('ayahPolygon')) return
+            if (rect.width > maxWidth) return
 
-          const highlight = document.createElement('span')
-          highlight.className = 'samee3-live-ayah-highlight'
-          highlight.setAttribute('aria-hidden', 'true')
-          highlight.style.left = `${Math.max(0, relativeLeft - 6)}px`
-          highlight.style.top = `${Math.max(0, relativeTop - Math.max(3, rect.height * 0.16))}px`
-          highlight.style.width = `${Math.min(artRect.width, rect.width + 12)}px`
-          highlight.style.height = `${Math.min(artRect.height, rect.height + Math.max(7, rect.height * 0.32))}px`
-          art.appendChild(highlight)
-        })
+            const highlight = document.createElement('span')
+            highlight.className = 'samee3-live-ayah-highlight'
+            highlight.setAttribute('aria-hidden', 'true')
+            highlight.style.left = `${Math.max(0, relativeLeft - 2)}px`
+            highlight.style.top = `${Math.max(0, relativeTop - 1)}px`
+            highlight.style.width = `${Math.min(artRect.width, rect.width + 4)}px`
+            highlight.style.height = `${Math.min(artRect.height, rect.height + 2)}px`
+            art.appendChild(highlight)
+          })
+        }
       })
     })
   }, [leftPageData, pageData, playingAyahNumber, pressedAyahNumber, rightPageData, selectedAyah])
@@ -1753,10 +1764,40 @@ export default function MushafPage() {
     }
   }, [])
 
+  const prepareTurnPreview = useCallback(async (targetPage: number) => {
+    const safePage = clampPage(targetPage)
+    const requestId = ++turnPreviewRequestRef.current
+
+    try {
+      const [data, rawSvg] = await Promise.all([
+        fetchPageData(safePage),
+        fetchSvg(safePage),
+      ])
+
+      if (requestId !== turnPreviewRequestRef.current) return
+
+      const html =
+        (riwaya === 'sousi' || riwaya === 'bazzi') && data?.ayahs?.length
+          ? buildTextMushafSvg(data, riwaya)
+          : rawSvg
+
+      if (!html) return
+
+      setTurnPreview({
+        page: safePage,
+        data,
+        html,
+      })
+    } catch {
+      // الصفحة البديلة تحسين بصري فقط؛ لا نوقف القراءة إذا تعذر تحميلها.
+    }
+  }, [fetchPageData, fetchSvg, riwaya])
+
   const navigateTo = useCallback((
     page: number,
     extra?: { surah?: number; ayah?: string; clearJuz?: boolean },
     direction: 'next' | 'prev' = 'next',
+    options?: { startX?: number },
   ) => {
     const nextPage = clampPage(page)
     if (navigatingRef.current) return
@@ -1786,12 +1827,29 @@ export default function MushafPage() {
     }
 
     navigatingRef.current = true
-    setTurnDirection(direction)
-    setTurning(true)
+
+    const targetPage = nextPage
+    void prepareTurnPreview(targetPage)
+
+    const startX = Number.isFinite(options?.startX)
+      ? Number(options?.startX)
+      : 0
+    const finalX = direction === 'next'
+      ? Math.max(window.innerWidth, 520)
+      : -Math.max(window.innerWidth, 520)
+
     setIsPageDragging(false)
-    setPageDragX(0)
     setPageDragY(0)
-    playPageTurnSound()
+    setPageDragX(0)
+    setPageSettleX(startX)
+
+    // تبدأ الصفحة البديلة تحت الصفحة الحالية، ثم تنزلق الصفحة الحالية
+    // بنفس اتجاه السحب بدون 3D أو تدوير أو تعتيم.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        setPageSettleX(finalX)
+      })
+    })
 
     const params = new URLSearchParams(searchParams.toString())
     params.set('page', String(nextPage))
@@ -1805,23 +1863,24 @@ export default function MushafPage() {
       params.delete('juzEnd')
     }
 
-    // نعطي حركة الورقة لحظة تبدأ قبل تبديل المحتوى حتى لا يظهر تبديل مفاجئ.
+    // ننتظر اكتمال انتقال الصفحة البصري قبل تبديل المحتوى.
     window.setTimeout(() => {
       router.push(`/mushaf?${params.toString()}`)
-    }, 145)
+    }, 215)
 
     window.setTimeout(() => {
       navigatingRef.current = false
-      setTurning(false)
-      setTurnDirection(null)
-    }, 400)
-  }, [pageNumber, playPageTurnSound, router, searchParams])
+      setPageSettleX(0)
+      setTurnPreview(null)
+    }, 270)
+  }, [pageNumber, prepareTurnPreview, router, searchParams])
 
   /*
    * التقليب بالماوس/اللمس باستخدام Pointer Events.
    * الاتجاه المطلوب:
-   * يسار -> يمين = الصفحة التالية.
-   * يمين -> يسار = الصفحة السابقة.
+   * سحب لليمين = الصفحة التالية.
+   * سحب لليسار = الصفحة السابقة.
+   * لا توجد زاوية 3D ولا دوران ولا ظلال أثناء السحب.
    */
   const beginPagePointer = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -1846,6 +1905,8 @@ export default function MushafPage() {
       setIsPageDragging(true)
       setPageDragX(0)
       setPageDragY(0)
+      setPageSettleX(0)
+      setTurnPreview(null)
 
       try {
         event.currentTarget.setPointerCapture(event.pointerId)
@@ -1872,14 +1933,19 @@ export default function MushafPage() {
 
       if (Math.abs(deltaX) > Math.abs(deltaY) + 6) {
         event.preventDefault()
-        const maxDrag = Math.min(window.innerWidth * 0.50, 290)
+        const maxDrag = Math.min(window.innerWidth * 0.92, 760)
         const limitedX = Math.max(-maxDrag, Math.min(maxDrag, deltaX))
-        const limitedY = Math.max(-24, Math.min(24, deltaY))
         setPageDragX(limitedX)
-        setPageDragY(limitedY * 0.55)
+        setPageDragY(0)
+
+        const basePage = isDesktop ? desktopRightPage : pageNumber
+        const targetPage = deltaX > 0
+          ? clampPage(basePage + 1)
+          : clampPage(basePage - 1)
+        void prepareTurnPreview(targetPage)
       }
     },
-    [],
+    [desktopRightPage, isDesktop, pageNumber, prepareTurnPreview],
   )
 
   const finishPagePointer = useCallback(
@@ -1918,14 +1984,19 @@ export default function MushafPage() {
         return
       }
 
-      // اترك قيمة السحب لحظة حتى تبدأ حركة الورقة من مكان إصبع المستخدم،
-      // ثم ينتقل التنقل إلى الحركة النهائية السريعة.
-      setIsPageDragging(false)
-      if (deltaX > 0) {
-        navigateTo(basePage + 1, undefined, 'next')
-      } else {
-        navigateTo(basePage - 1, undefined, 'prev')
-      }
+      const nextDirection = deltaX > 0 ? 'next' : 'prev'
+      const targetPage = deltaX > 0
+        ? clampPage(basePage + 1)
+        : clampPage(basePage - 1)
+
+      // نمرر نقطة السحب الحالية حتى تستمر الصفحة من نفس مكان الإصبع
+      // بدل أن تقفز إلى الصفر قبل أن تكمل انتقالها.
+      navigateTo(
+        targetPage,
+        undefined,
+        nextDirection,
+        { startX: deltaX },
+      )
     },
     [desktopRightPage, isDesktop, navigateTo, pageNumber],
   )
@@ -1946,6 +2017,8 @@ export default function MushafPage() {
       setIsPageDragging(false)
       setPageDragX(0)
       setPageDragY(0)
+      setPageSettleX(0)
+      setTurnPreview(null)
     },
     [],
   )
@@ -4079,28 +4152,42 @@ export default function MushafPage() {
           </div>
         ) : null}
 
-        <div
-          className={`samee3-spread ${isDesktop ? 'is-desktop' : 'is-mobile'} ${isPageDragging ? 'is-dragging' : ''} ${turning ? `is-turning ${turnDirection}` : ''}`}
-          style={
-            isPageDragging
-              ? {
-                  transform: `translate3d(${pageDragX}px, ${pageDragY}px, 0) rotateY(${pageDragX * -0.026}deg) rotateZ(${pageDragY * 0.045}deg) scale(${1 - Math.min(Math.abs(pageDragX) / 6000, 0.035)})`,
-                  transition: 'none',
-                  filter: `drop-shadow(${pageDragX * -0.08}px 16px 24px rgba(64,49,30,0.18))`,
-                }
-              : undefined
-          }
-        >
-          <MushafPageSheet
-              page={pageNumber}
-              data={pageData}
-              html={mainDisplayedSvg}
-              side="single"
-              meta={rightMeta}
-              onAyahClick={handleAyahClick}
-              onAyahPointerDown={handleAyahPointerDown}
-              onAyahPointerUp={handleAyahPointerUp}
-            />
+        <div className={`samee3-spread ${isDesktop ? 'is-desktop' : 'is-mobile'} ${isPageDragging ? 'is-dragging' : ''}`}>
+          <div className="samee3-turn-stack">
+            {turnPreview ? (
+              <div className="samee3-turn-underlay">
+                <MushafPageSheet
+                  page={turnPreview.page}
+                  data={turnPreview.data}
+                  html={turnPreview.html}
+                  side="single"
+                  meta={pageMeta(turnPreview.data, turnPreview.page)}
+                  onAyahClick={() => undefined}
+                  onAyahPointerDown={() => undefined}
+                  onAyahPointerUp={() => undefined}
+                />
+              </div>
+            ) : null}
+
+            <div
+              className={`samee3-turn-current ${isPageDragging ? 'is-dragging' : ''}`}
+              style={{
+                transform: `translate3d(${isPageDragging ? pageDragX : pageSettleX}px, 0, 0)`,
+                transition: isPageDragging ? 'none' : 'transform .24s cubic-bezier(.22,.74,.2,1)',
+              }}
+            >
+              <MushafPageSheet
+                page={pageNumber}
+                data={pageData}
+                html={mainDisplayedSvg}
+                side="single"
+                meta={rightMeta}
+                onAyahClick={handleAyahClick}
+                onAyahPointerDown={handleAyahPointerDown}
+                onAyahPointerUp={handleAyahPointerUp}
+              />
+            </div>
+          </div>
         </div>
 
 {showChrome ? (
@@ -4351,24 +4438,18 @@ export default function MushafPage() {
       <style jsx global>{`
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
         .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
-        .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; perspective:2000px; background:radial-gradient(circle at center, #fffdf7 0%, #f5f0e4 58%, #eee5d6 100%); touch-action:pan-y; overscroll-behavior:none; }
-        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform-style:preserve-3d; transition:transform .27s cubic-bezier(.2,.86,.25,1), filter .27s ease, opacity .27s ease; will-change:transform, filter, opacity; transform-origin:center center; }
+        .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; background:#f5f0e4; touch-action:pan-y; overscroll-behavior:none; }
+        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform:none !important; transition:none; will-change:auto; }
         .samee3-spread.is-desktop { padding:8px 14px 14px; }
         .samee3-spread.is-mobile { padding:0; }
         .samee3-spread.is-dragging { cursor:grabbing; user-select:none; }
-        .samee3-spread::after { content:""; position:absolute; inset:2% 4% 2%; border-radius:22px; pointer-events:none; opacity:0; background:linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.06) 45%, rgba(121,83,34,.16) 100%); mix-blend-mode:multiply; transform:translateZ(2px); transition:opacity .22s ease; }
-        .samee3-spread.is-turning::after { opacity:.72; }
-        .samee3-spread.is-turning.next {
-          transform:translate3d(-82%,0,0) rotateY(-8deg) rotateZ(-.45deg) scale(.965);
-          filter:drop-shadow(-34px 16px 34px rgba(64,49,30,.24));
-          opacity:.98;
-        }
-        .samee3-spread.is-turning.prev {
-          transform:translate3d(82%,0,0) rotateY(8deg) rotateZ(.45deg) scale(.965);
-          filter:drop-shadow(34px 16px 34px rgba(64,49,30,.24));
-          opacity:.98;
-        }
-        .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 10px 42px rgba(83,63,34,.11); isolation:isolate; }
+        .samee3-turn-stack { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:visible; }
+        .samee3-turn-underlay { position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+        .samee3-turn-underlay .samee3-page-sheet { pointer-events:none !important; }
+        .samee3-turn-current { position:relative; z-index:2; display:flex; align-items:center; justify-content:center; width:100%; height:100%; transform:translate3d(0,0,0); transition:transform .24s cubic-bezier(.22,.74,.2,1); will-change:transform; }
+        .samee3-turn-current.is-dragging { transition:none !important; }
+        .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 4px 16px rgba(83,63,34,.07); isolation:isolate; }
+        .samee3-turn-current.is-dragging .samee3-page-sheet { box-shadow:none; }
         .is-desktop .samee3-page-sheet {
           height:min(calc(100dvh - 24px), 1020px);
           width:auto;
@@ -4423,34 +4504,16 @@ export default function MushafPage() {
         .samee3-page-art > svg { position:relative; z-index:2; width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
         .samee3-live-ayah-highlight {
           position:absolute;
-          z-index:4;
+          z-index:1;
           display:block;
           pointer-events:none !important;
-          border-radius:10px;
-          background:
-            linear-gradient(180deg, rgba(255,249,231,.12) 0%, rgba(205,157,88,.16) 30%, rgba(205,157,88,.23) 54%, rgba(205,157,88,.13) 78%, rgba(255,249,231,.08) 100%);
-          border:1px solid rgba(190,139,67,.24);
-          box-shadow:
-            0 4px 14px rgba(157,101,32,.14),
-            inset 0 1px 0 rgba(255,255,255,.45),
-            inset 0 -1px 0 rgba(157,101,32,.10);
-          backdrop-filter:blur(1.2px);
-          mix-blend-mode:multiply;
-          opacity:.92;
-          transform:translateZ(8px);
-          animation:samee3AyahHighlightPulse 1.65s ease-in-out infinite;
-        }
-        .samee3-live-ayah-highlight::after {
-          content:"";
-          position:absolute;
-          inset:1px 13% 1px;
-          border-radius:inherit;
-          background:linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent);
-          opacity:.9;
-        }
-        @keyframes samee3AyahHighlightPulse {
-          0%,100% { opacity:.78; transform:translateZ(0) scale(.995); }
-          50% { opacity:1; transform:translateZ(0) scale(1.008); }
+          border-radius:5px;
+          background:rgba(199,147,79,.075);
+          border:0;
+          box-shadow:none;
+          backdrop-filter:none;
+          mix-blend-mode:normal;
+          opacity:1;
         }
         .samee3-text-ayah { display:inline; cursor:pointer; border-radius:8px; transition:background .12s ease, box-shadow .12s ease, filter .12s ease, color .12s ease; }
         .samee3-text-ayah.samee3-pressed-ayah {
@@ -4458,10 +4521,11 @@ export default function MushafPage() {
           box-shadow:inset 0 -0.34em 0 rgba(14,153,212,.16), 0 3px 7px rgba(14,153,212,.13) !important;
         }
         .samee3-text-ayah.samee3-playing-ayah {
-          background:linear-gradient(180deg, rgba(255,249,232,.10), rgba(199,147,79,.14), rgba(199,147,79,.19)) !important;
-          box-shadow:inset 0 -0.30em 0 rgba(199,147,79,.20), 0 2px 9px rgba(160,105,36,.13), inset 0 1px 0 rgba(255,255,255,.22) !important;
-          text-shadow:0 1px 2px rgba(89,58,19,.10);
-          filter:drop-shadow(0 1px 3px rgba(160,105,36,.15));
+          background:transparent !important;
+          box-shadow:none !important;
+          text-shadow:0 0 5px rgba(199,147,79,.16);
+          filter:none;
+          fill:#8b6a3d !important;
         }
         .samee3-page-art .ayahPolygon.samee3-pressed-ayah {
           fill:#0e99d4 !important;
@@ -4472,24 +4536,20 @@ export default function MushafPage() {
         .samee3-page-art .ayahPolygon.samee3-playing-ayah,
         .samee3-page-art .samee3-ayah.samee3-playing-ayah {
           fill:#c7934f !important;
-          fill-opacity:.17 !important;
-          stroke:#c7934f !important;
-          stroke-opacity:.32 !important;
-          stroke-width:2.2px !important;
-          filter:drop-shadow(0 2px 8px rgba(157,101,32,.30));
+          fill-opacity:.09 !important;
+          stroke:none !important;
+          filter:none !important;
         }
         .samee3-page-art [data-ayah].samee3-playing-ayah,
         .samee3-page-art [data-ayah-number].samee3-playing-ayah {
           fill:#c7934f !important;
-          fill-opacity:.20 !important;
-          stroke:#c7934f !important;
-          stroke-opacity:.22 !important;
-          filter:drop-shadow(0 2px 7px rgba(157,101,32,.24));
+          fill-opacity:.09 !important;
+          stroke:none !important;
+          filter:none !important;
         }
         .samee3-page-art .ayahPolygon.samee3-playing-ayah * {
-          stroke:#c7934f !important;
-          stroke-opacity:.10 !important;
-          filter:drop-shadow(0 1px 4px rgba(157,101,32,.20));
+          stroke:none !important;
+          filter:none !important;
         }
         .samee3-page-art .samee3-ayah.samee3-playing-ayah + *,
         .samee3-page-art .samee3-ayah.samee3-playing-ayah * {
@@ -4639,8 +4699,8 @@ export default function MushafPage() {
         .samee3-toast { position:absolute; z-index:130; left:50%; bottom:calc(max(12px,env(safe-area-inset-bottom)) + 84px); transform:translateX(-50%); display:flex; align-items:center; gap:7px; padding:10px 14px; border-radius:999px; background:#173d45; color:#fff; font-size:11px; font-weight:900; box-shadow:0 10px 30px rgba(18,49,57,.25); }
 
         @media (prefers-reduced-motion: reduce) {
-          .samee3-live-ayah-highlight { animation:none !important; }
-          .samee3-spread { transition-duration:.01ms !important; }
+          .samee3-live-ayah-highlight { transition:none !important; }
+          .samee3-turn-current { transition:none !important; }
         }
 
         @media (max-width:767px) {
