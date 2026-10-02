@@ -1817,9 +1817,37 @@ export default function MushafPage() {
     setPressedAyahNumber(found?.numberInSurah || found?.number || null)
   }, [resolveSelectedAyahFromElement])
 
-  const handleAyahPointerUp = useCallback(() => {
+  const handleAyahPointerUp = useCallback((event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => {
+    const pointerMoved = pointerMovedRef.current
+    const target = event.target as Element | null
+
+    if (!pointerMoved && target) {
+      const polygon = target.closest(
+        '.ayahPolygon, .samee3-ayah-hit, [data-ayah], [data-ayah-number], .samee3-text-ayah, .samee3-ayah',
+      )
+
+      if (polygon) {
+        const found = resolveSelectedAyahFromElement(polygon, sourceData)
+
+        if (found) {
+          setSelectedAyah(found)
+          setShowAyahActions(true)
+
+          try {
+            const saved = JSON.parse(localStorage.getItem('samee3_bookmarks') || '[]')
+            setIsSaved(
+              Array.isArray(saved) &&
+                saved.some((item: { number?: number }) => item?.number === found.number),
+            )
+          } catch {
+            setIsSaved(false)
+          }
+        }
+      }
+    }
+
     setPressedAyahNumber(null)
-  }, [])
+  }, [resolveSelectedAyahFromElement])
 
   const playPageTurnSound = useCallback(() => {
     try {
@@ -1869,22 +1897,25 @@ export default function MushafPage() {
         fetchSvg(safePage),
       ])
 
-      if (requestId !== turnPreviewRequestRef.current) return
+      if (requestId !== turnPreviewRequestRef.current) return null
 
       const html =
         (riwaya === 'sousi' || riwaya === 'bazzi') && data?.ayahs?.length
           ? buildTextMushafSvg(data, riwaya)
           : rawSvg
 
-      if (!html) return
+      if (!html) return null
 
-      setTurnPreview({
+      const preview = {
         page: safePage,
         data,
         html,
-      })
+      }
+
+      setTurnPreview(preview)
+      return preview
     } catch {
-      // الصفحة البديلة تحسين بصري فقط؛ لا نوقف القراءة إذا تعذر تحميلها.
+      return null
     }
   }, [fetchPageData, fetchSvg, riwaya])
 
@@ -1898,72 +1929,91 @@ export default function MushafPage() {
     if (navigatingRef.current) return
     if (nextPage === pageNumber && !extra?.ayah && !extra?.surah) return
 
-    const audio = audioRef.current as Samee3AudioElement | null
-    if (audio?.__samee3NetworkUrl && audio.__samee3Surah) {
-      const previous = readPersistentAudioState()
-      writePersistentAudioState({
-        networkUrl: audio.__samee3NetworkUrl,
-        surah: Number(audio.__samee3Surah),
-        ayah: previous?.ayah ?? null,
-        currentTime: Number.isFinite(audio.currentTime)
-          ? Math.max(0, audio.currentTime)
-          : previous?.currentTime ?? 0,
-        playing: !audio.paused,
-        riwaya: audio.__samee3Riwaya || previous?.riwaya || 'hafs',
-        reciterId: Number(audio.__samee3ReciterId || previous?.reciterId || DEFAULT_RECITER_API_ID),
-        reciterName: audio.__samee3ReciterName || previous?.reciterName || DEFAULT_RECITER_NAME,
-        moshafId: audio.__samee3MoshafId ?? previous?.moshafId ?? null,
-        page: pageNumber,
-        updatedAt: Date.now(),
-      })
-      audio.__samee3Page = pageNumber
-    }
+    const run = async () => {
+      const audio = audioRef.current as Samee3AudioElement | null
+      if (audio?.__samee3NetworkUrl && audio.__samee3Surah) {
+        const previous = readPersistentAudioState()
+        writePersistentAudioState({
+          networkUrl: audio.__samee3NetworkUrl,
+          surah: Number(audio.__samee3Surah),
+          ayah: previous?.ayah ?? null,
+          currentTime: Number.isFinite(audio.currentTime)
+            ? Math.max(0, audio.currentTime)
+            : previous?.currentTime ?? 0,
+          playing: !audio.paused,
+          riwaya: audio.__samee3Riwaya || previous?.riwaya || 'hafs',
+          reciterId: Number(audio.__samee3ReciterId || previous?.reciterId || DEFAULT_RECITER_API_ID),
+          reciterName: audio.__samee3ReciterName || previous?.reciterName || DEFAULT_RECITER_NAME,
+          moshafId: audio.__samee3MoshafId ?? previous?.moshafId ?? null,
+          page: pageNumber,
+          updatedAt: Date.now(),
+        })
+        audio.__samee3Page = pageNumber
+      }
 
-    navigatingRef.current = true
-    pendingNavigationPageRef.current = nextPage
-    const targetPage = nextPage
+      navigatingRef.current = true
+      pendingNavigationPageRef.current = nextPage
 
-    // الصفحة الجديدة تُجهّز تحت الحالية قبل بدء الحركة.
-    void prepareTurnPreview(targetPage)
+      const existingPreview =
+        turnPreview &&
+        turnPreview.page === nextPage
+          ? turnPreview
+          : null
 
-    const startX = Number.isFinite(options?.startX)
-      ? Number(options?.startX)
-      : 0
+      const preview = existingPreview || await prepareTurnPreview(nextPage)
 
-    const finalX = direction === 'next'
-      ? Math.max(window.innerWidth + 24, 560)
-      : -Math.max(window.innerWidth + 24, 560)
+      if (!preview || preview.page !== nextPage) {
+        navigatingRef.current = false
+        pendingNavigationPageRef.current = null
+        turnPreviewPageRef.current = null
+        setIsPageDragging(false)
+        setPageDragX(0)
+        setPageDragY(0)
+        return
+      }
 
-    setIsPageDragging(false)
-    setPageDragX(0)
-    setPageDragY(0)
-    setPageSettleX(startX)
+      /*
+       * الصفحة الجديدة أصبحت جاهزة بالفعل تحت الصفحة الحالية.
+       * لذلك لا نبدأ الحركة قبل وجودها، وهذا يمنع ظهور فراغ أو رجوع
+       * بصري بين الصفحتين.
+       */
+      setTurnPreview(preview)
 
-    window.requestAnimationFrame(() => {
+      const startX = Number.isFinite(options?.startX)
+        ? Number(options?.startX)
+        : 0
+
+      const finalX = direction === 'next'
+        ? Math.max(window.innerWidth + 24, 560)
+        : -Math.max(window.innerWidth + 24, 560)
+
+      setIsPageDragging(false)
+      setPageDragY(0)
+      setPageSettleX(startX)
+
       window.requestAnimationFrame(() => {
-        setPageSettleX(finalX)
+        window.requestAnimationFrame(() => {
+          setPageSettleX(finalX)
+        })
       })
-    })
 
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('page', String(nextPage))
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('page', String(nextPage))
 
-    if (extra?.surah) params.set('surah', String(extra.surah))
-    if (extra?.ayah) params.set('ayah', extra.ayah)
-    else params.delete('ayah')
+      if (extra?.surah) params.set('surah', String(extra.surah))
+      if (extra?.ayah) params.set('ayah', extra.ayah)
+      else params.delete('ayah')
 
-    if (extra?.clearJuz) {
-      params.delete('juz')
-      params.delete('juzStart')
-      params.delete('juzEnd')
-    }
+      if (extra?.clearJuz) {
+        params.delete('juz')
+        params.delete('juzStart')
+        params.delete('juzEnd')
+      }
 
-    // لا نغيّر المحتوى الحالي أثناء الحركة. نحدّث الـURL بعد أن تصل الصفحة
-    // الحالية لنهايتها، وتظل الـunderlay هي الصفحة الجديدة حتى تكتمل بياناتها.
-    window.setTimeout(() => {
-      router.push(`/mushaf?${params.toString()}`)
+      window.setTimeout(() => {
+        router.push(`/mushaf?${params.toString()}`)
+      }, 240)
 
-      // حماية فقط من تعليق الحالة إذا تعذر تحميل الصفحة الجديدة.
       window.setTimeout(() => {
         if (pendingNavigationPageRef.current !== nextPage) return
         if (pageNumber !== nextPage) return
@@ -1974,9 +2024,11 @@ export default function MushafPage() {
         turnPreviewPageRef.current = null
         pendingNavigationPageRef.current = null
         navigatingRef.current = false
-      }, 3500)
-    }, 260)
-  }, [pageNumber, prepareTurnPreview, router, searchParams])
+      }, 1600)
+    }
+
+    void run()
+  }, [pageNumber, prepareTurnPreview, router, searchParams, turnPreview])
 
   /*
    * التقليب بالماوس/اللمس باستخدام Pointer Events.
@@ -2020,9 +2072,16 @@ export default function MushafPage() {
       setPageDragY(0)
       setPageSettleX(0)
 
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId)
-      } catch {}
+      /*
+       * لا نستخدم pointer capture عندما يبدأ اللمس فوق آية.
+       * هذا يحافظ على click/tap الطبيعي للآية حتى تظهر لوحة الخيارات،
+       * وفي الوقت نفسه نستطيع اكتشاف السحب إذا تجاوز المستخدم حد الحركة.
+       */
+      if (!ayahTarget) {
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        } catch {}
+      }
     },
     [],
   )
@@ -2312,7 +2371,9 @@ export default function MushafPage() {
 
   const selectedReciter = useMemo(() => {
     const current = reciters.find((item) => item.apiId === selectedReciterId && (requestedMoshafId <= 0 || item.moshafId === requestedMoshafId))
-    return current || reciters.find((item) => item.apiId === selectedReciterId) || reciters[0] || null
+    const explicit = reciters.find((item) => item.apiId === selectedReciterId)
+    const defaultReciter = reciters.find((item) => item.apiId === DEFAULT_RECITER_API_ID)
+    return current || explicit || defaultReciter || reciters[0] || null
   }, [reciters, requestedMoshafId, selectedReciterId])
 
   const updateRouteAudioSelection = useCallback((nextRiwaya: Riwaya, nextReciter?: LocalReciter | null, nextSurah?: number) => {
@@ -4589,7 +4650,7 @@ export default function MushafPage() {
         .samee3-turn-underlay .samee3-page-sheet { pointer-events:none !important; }
         .samee3-turn-current { position:relative; z-index:2; display:flex; align-items:center; justify-content:center; width:100%; height:100%; transform:translate3d(0,0,0); transition:transform .26s cubic-bezier(.2,.76,.2,1); will-change:transform; filter:none !important; backface-visibility:visible; }
         .samee3-turn-current.is-dragging { transition:none !important; }
-        .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 4px 16px rgba(83,63,34,.07); isolation:isolate; }
+        .samee3-page-sheet { position:relative; height:100%; touch-action:pan-y; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 4px 16px rgba(83,63,34,.07); isolation:isolate; }
         .samee3-turn-current.is-dragging .samee3-page-sheet { box-shadow:none; }
         .is-desktop .samee3-page-sheet {
           height:min(calc(100dvh - 24px), 1020px);
@@ -4642,8 +4703,20 @@ export default function MushafPage() {
         .samee3-text-line-svg { font-family:'Amiri Quran','Amiri',serif; font-size:36px; fill:#15191e; }
         .samee3-text-line-svg .samee3-ayah-number { fill:#b78945; }
         .samee3-page-art { position:absolute; inset:94px 7px 88px; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; }
+        .samee3-page-art { touch-action:pan-y; }
         .samee3-page-art > svg { position:relative; z-index:2; width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
-        .samee3-live-ayah-highlight { display:none !important; }
+        .samee3-live-ayah-highlight {
+          position:absolute;
+          z-index:3;
+          display:block;
+          pointer-events:none !important;
+          border-radius:999px;
+          background:rgba(199,147,79,.09);
+          border:0;
+          box-shadow:none !important;
+          mix-blend-mode:normal;
+          opacity:.92;
+        }
         .samee3-text-ayah { display:inline; cursor:pointer; border-radius:8px; transition:background .12s ease, box-shadow .12s ease, filter .12s ease, color .12s ease; }
         .samee3-text-ayah.samee3-pressed-ayah {
           background:transparent !important;
@@ -4871,7 +4944,7 @@ type MushafPageSheetProps = {
   meta: { surah: string; juz: number; page: number }
   onAyahClick: (event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => void
   onAyahPointerDown: (event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => void
-  onAyahPointerUp: () => void
+  onAyahPointerUp: (event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => void
 }
 
 function buildTextMushafSvg(data: PageData | null, riwaya: 'sousi' | 'bazzi') {
@@ -4994,8 +5067,8 @@ function MushafPageSheet({ page, data, html, side, meta, onAyahClick, onAyahPoin
       data-surah-number={data?.ayahs?.[0]?.surah?.number || ''}
       onClick={(event) => onAyahClick(event, data)}
       onPointerDown={(event) => onAyahPointerDown(event, data)}
-      onPointerUp={onAyahPointerUp}
-      onPointerCancel={onAyahPointerUp}
+      onPointerUp={(event) => onAyahPointerUp(event, data)}
+      onPointerCancel={(event) => onAyahPointerUp(event, data)}
     >
       <div className="samee3-page-meta">
         <div className="meta-side">
