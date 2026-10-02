@@ -1,71 +1,100 @@
-import ‘./globals.css’
-import type { Metadata, Viewport } from ‘next’
-import { AuthProvider } from ‘@/context/AuthContext’
-import BottomNav from ‘@/components/BottomNav’
-import ServiceWorkerRegistration from ‘@/components/ServiceWorkerRegistration’
+// app/layout.tsx
+
+import './globals.css'
+import type { Metadata, Viewport } from 'next'
+import type { ReactNode } from 'react'
+
+import { AuthProvider } from '@/context/AuthContext'
+import BottomNav from '@/components/BottomNav'
+import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 
 export const metadata: Metadata = {
-title: {
-default: ‘مصحف سميع’,
-template: ‘%s | مصحف سميع’,
-},
-description:
-‘موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.’,
-applicationName: ‘مصحف سميع’,
-manifest: ‘/manifest.json’,
+  title: {
+    default: 'مصحف سميع',
+    template: '%s | مصحف سميع',
+  },
+  description:
+    'موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.',
+  applicationName: 'مصحف سميع',
+  manifest: '/manifest.json',
 
-icons: {
-icon: [
-{
-url: ‘/icon.svg’,
-type: ‘image/svg+xml’,
-},
-],
-shortcut: [
-{
-url: ‘/icon.svg’,
-type: ‘image/svg+xml’,
-},
-],
-apple: [
-{
-url: ‘/icon.svg’,
-type: ‘image/svg+xml’,
-},
-],
-},
+  keywords: [
+    'مصحف سميع',
+    'القرآن الكريم',
+    'مصحف',
+    'قرآن',
+    'قراء',
+    'استماع القرآن',
+    'تحميل القرآن',
+  ],
 
-appleWebApp: {
-capable: true,
-statusBarStyle: ‘default’,
-title: ‘مصحف سميع’,
-},
+  authors: [
+    {
+      name: 'مصحف سميع',
+    },
+  ],
 
-formatDetection: {
-telephone: false,
-},
+  creator: 'مصحف سميع',
+  publisher: 'مصحف سميع',
+
+  robots: {
+    index: true,
+    follow: true,
+  },
+
+  icons: {
+    icon: [
+      {
+        url: '/icon.svg',
+        type: 'image/svg+xml',
+      },
+    ],
+    shortcut: [
+      {
+        url: '/icon.svg',
+        type: 'image/svg+xml',
+      },
+    ],
+    apple: [
+      {
+        url: '/icon.svg',
+        type: 'image/svg+xml',
+      },
+    ],
+  },
+
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'مصحف سميع',
+  },
+
+  formatDetection: {
+    telephone: false,
+  },
 }
 
 export const viewport: Viewport = {
-themeColor: ‘#0284C7’,
-width: ‘device-width’,
-initialScale: 1,
-viewportFit: ‘cover’,
+  themeColor: '#0284C7',
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
 }
 
 export default function RootLayout({
-children,
+  children,
 }: Readonly<{
-children: React.ReactNode
+  children: ReactNode
 }>) {
-return (
-      <main className="min-h-screen">
-        {children}
-      </main>
-      <BottomNav />
-    </AuthProvider>
-  </body>
-</html>
-
-)
+  return (
+    <html lang="ar" dir="rtl">
+      <body className="min-h-screen antialiased">
+        <AuthProvider>
+          <main className="min-h-screen">{children}</main>
+          <BottomNav />
+          <ServiceWorkerRegistration />
+        </AuthProvider>
+      </body>
+    </html>
+  )
 }
