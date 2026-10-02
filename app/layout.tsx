@@ -13,16 +13,34 @@ description:
 ‘موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.’,
 applicationName: ‘مصحف سميع’,
 manifest: ‘/manifest.json’,
+
 icons: {
-icon: ‘/icon.svg’,
-shortcut: ‘/icon.svg’,
-apple: ‘/icon.svg’,
+icon: [
+{
+url: ‘/icon.svg’,
+type: ‘image/svg+xml’,
 },
+],
+shortcut: [
+{
+url: ‘/icon.svg’,
+type: ‘image/svg+xml’,
+},
+],
+apple: [
+{
+url: ‘/icon.svg’,
+type: ‘image/svg+xml’,
+},
+],
+},
+
 appleWebApp: {
 capable: true,
 statusBarStyle: ‘default’,
 title: ‘مصحف سميع’,
 },
+
 formatDetection: {
 telephone: false,
 },
@@ -41,6 +59,13 @@ children,
 children: React.ReactNode
 }>) {
 return (
-{children}
+      <main className="min-h-screen">
+        {children}
+      </main>
+      <BottomNav />
+    </AuthProvider>
+  </body>
+</html>
+
 )
 }
