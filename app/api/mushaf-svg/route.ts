@@ -410,6 +410,15 @@ function preparePrintedMushafSvg(
     pointer-events: none !important;
   }
 
+  /*
+   * مهم جدًا: #content * أعلى في specificity من .ayahPolygon.
+   * لذلك نعيد تفعيل مناطق الآيات بشكل صريح داخل نفس الحاوية،
+   * وإلا يصبح النقر على الآية غير قابل للوصول.
+   */
+  #content .ayahPolygon,
+  #content * .ayahPolygon,
+  #ayah_markers .ayahPolygon,
+  #ayah_markers * .ayahPolygon,
   .ayahPolygon {
     pointer-events: all !important;
     cursor: pointer;
@@ -685,6 +694,7 @@ function buildRealImageMushafSvg(
   <g
     id="samee3-ayah-hit-layer"
     aria-hidden="true"
+    style="pointer-events:all !important;"
   >
     ${ayahHotspots}
   </g>
