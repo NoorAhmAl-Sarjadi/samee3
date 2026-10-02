@@ -396,12 +396,10 @@ function preparePrintedMushafSvg(
   }
 
   const interactionStyle = `
-<style id=\"samee3-mushaf-interaction\">
+<style id="samee3-mushaf-interaction">
   /*
-   * الصفحة المطبوعة نفسها لا ترسم أي تظليل.
-   * الـSVG مسؤول فقط عن تحديد مناطق الآيات والتفاعل معها،
-   * بينما الشكل البصري للآية أثناء التلاوة تديره واجهة المصحف.
-   * هذا يمنع ظهور أكثر من طبقة لون أو ظل فوق نفس الآية.
+   * المصحف المطبوع مسؤول عن الرسم، وهذه الطبقة مسؤولة عن التفاعل فقط.
+   * لا نضع هنا أي لون أو ظل مرئي للآية.
    */
   #content,
   #content *,
@@ -411,23 +409,27 @@ function preparePrintedMushafSvg(
   }
 
   /*
-   * مهم جدًا: #content * أعلى في specificity من .ayahPolygon.
-   * لذلك نعيد تفعيل مناطق الآيات بشكل صريح داخل نفس الحاوية،
-   * وإلا يصبح النقر على الآية غير قابل للوصول.
+   * إعادة تفعيل مسار الآية مع specificity أعلى من #content *.
+   * نفعّل العنصر نفسه وأبناءه لأن click قد يصل إلى path/polygon داخلي.
    */
   #content .ayahPolygon,
-  #content * .ayahPolygon,
+  #content .ayahPolygon *,
   #ayah_markers .ayahPolygon,
-  #ayah_markers * .ayahPolygon,
-  .ayahPolygon {
+  #ayah_markers .ayahPolygon *,
+  .ayahPolygon,
+  .ayahPolygon * {
     pointer-events: all !important;
     cursor: pointer;
-    fill: transparent !important;
-    fill-opacity: 0 !important;
-    stroke: none !important;
   }
 
-  .samee3-ayah {
+  .ayahPolygon {
+    fill: transparent;
+    fill-opacity: 0;
+    stroke: none;
+  }
+
+  .samee3-ayah,
+  .samee3-ayah-hit {
     pointer-events: all !important;
     cursor: pointer;
   }
