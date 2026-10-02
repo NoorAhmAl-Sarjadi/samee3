@@ -14,19 +14,9 @@ description:
 applicationName: ‘مصحف سميع’,
 manifest: ‘/manifest.json’,
 icons: {
-icon: [
-{
-url: ‘/icon.svg’,
-type: ‘image/svg+xml’,
-},
-],
-shortcut: [’/icon.svg’],
-apple: [
-{
-url: ‘/icon.svg’,
-type: ‘image/svg+xml’,
-},
-],
+icon: ‘/icon.svg’,
+shortcut: ‘/icon.svg’,
+apple: ‘/icon.svg’,
 },
 appleWebApp: {
 capable: true,
@@ -51,11 +41,6 @@ children,
 children: React.ReactNode
 }>) {
 return (
-      <main className="min-h-screen">{children}</main>
-      <BottomNav />
-    </AuthProvider>
-  </body>
-</html>
-
+{children}
 )
 }
