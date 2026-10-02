@@ -398,9 +398,10 @@ function preparePrintedMushafSvg(
   const interactionStyle = `
 <style id=\"samee3-mushaf-interaction\">
   /*
-   * Quran SVG يأتي وفيه مسار دقيق لكل آية.
-   * في بعض الروايات تكون طبقة الحروف أعلى من طبقة الآيات،
-   * لذلك نعطل pointer-events عن محتوى الرسم ونُبقيها للـayahPolygon فقط.
+   * الصفحة المطبوعة نفسها لا ترسم أي تظليل.
+   * الـSVG مسؤول فقط عن تحديد مناطق الآيات والتفاعل معها،
+   * بينما الشكل البصري للآية أثناء التلاوة تديره واجهة المصحف.
+   * هذا يمنع ظهور أكثر من طبقة لون أو ظل فوق نفس الآية.
    */
   #content,
   #content *,
@@ -412,23 +413,14 @@ function preparePrintedMushafSvg(
   .ayahPolygon {
     pointer-events: all !important;
     cursor: pointer;
-    fill: #c7934f !important;
+    fill: transparent !important;
     fill-opacity: 0 !important;
-    stroke: none;
-  }
-
-  .ayahPolygon.samee3-pressed-ayah {
-    fill: #0e99d4 !important;
-    fill-opacity: .10 !important;
     stroke: none !important;
   }
 
-  .ayahPolygon.samee3-playing-ayah {
-    fill: #c7934f !important;
-    fill-opacity: .20 !important;
-    stroke: #c7934f !important;
-    stroke-opacity: .26 !important;
-    stroke-width: 2px !important;
+  .samee3-ayah {
+    pointer-events: all !important;
+    cursor: pointer;
   }
 </style>`
 
@@ -641,7 +633,7 @@ function buildRealImageMushafSvg(
 
       return `
 <rect
-  class="samee3-ayah"
+  class="samee3-ayah-hit"
   data-ayah="${escapeXml(ayah.key)}"
   data-surah="${escapeXml(ayah.surah)}"
   data-ayah-number="${escapeXml(ayah.ayah)}"
@@ -649,10 +641,7 @@ function buildRealImageMushafSvg(
   y="${y1.toFixed(2)}"
   width="${viewWidth - 110}"
   height="${height.toFixed(2)}"
-  fill="transparent"
-  fill-opacity="0"
-  stroke="none"
-  pointer-events="all"
+  style="fill:transparent !important;fill-opacity:0 !important;stroke:none !important;pointer-events:all !important;"
 />`
     })
     .join('')
@@ -666,17 +655,13 @@ function buildRealImageMushafSvg(
      role="img"
      aria-label="صفحة المصحف ${escapeXml(page)} من رواية ${escapeXml(riwaya)}">
   <style>
-    .samee3-ayah {
-      fill: transparent;
-      fill-opacity: 0;
-      stroke: none;
+    /* طبقة التفاعل شفافة تمامًا ولا تستخدم أي hover مرئي. */
+    .samee3-ayah-hit {
+      fill: transparent !important;
+      fill-opacity: 0 !important;
+      stroke: none !important;
       cursor: pointer;
-      pointer-events: all;
-    }
-
-    .samee3-ayah:hover {
-      fill: rgba(180, 145, 75, 0.025);
-      fill-opacity: 0.025;
+      pointer-events: all !important;
     }
   </style>
 
