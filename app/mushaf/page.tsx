@@ -1647,13 +1647,10 @@ export default function MushafPage() {
         clampPage(pageNumber - 1),
       ]))
 
-      // لا نضرب الشبكة بـ 7 روايات × عدة صفحات مرة واحدة.
-      // نبدأ بالصفحة الحالية من كل الروايات، ثم نوسع التخزين للرواية المفتوحة.
-      const riwayat = Object.keys(RIWAYA_NAMES) as Riwaya[]
-      for (const target of riwayat) {
-        if (cancelled) return
-        void prefetchRiwayaPage(target, pageNumber)
-        await new Promise((resolve) => window.setTimeout(resolve, 55))
+      // ندفئ الرواية الحالية فقط؛ تحميل كل الروايات عند فتح المصحف
+      // يضغط الذاكرة والشبكة على شاشات العرض الضعيفة.
+      if (!cancelled) {
+        void prefetchRiwayaPage(riwaya, pageNumber)
       }
 
       for (const page of nearby) {
@@ -1711,9 +1708,10 @@ export default function MushafPage() {
 
   useEffect(() => {
     let cancelled = false
-    // لا نعرض طبقة تحميل فوق الصفحة في كل انتقال؛ الصفحة السابقة تبقى ظاهرة
-    // حتى تكتمل الصفحة الجديدة، ومع الـ cache غالبًا ستكون فورية.
-    setLoading(false)
+    // لا نترك شاشة بيضاء أثناء انتظار بيانات الصفحة أو SVG، خصوصًا على
+    // شاشات العرض/المتصفحات الأبطأ. الصفحة السابقة تبقى في الذاكرة أثناء
+    // الانتقال، لكن عند أول فتح نعرض حالة تحميل واضحة بدل الفراغ.
+    setLoading(true)
     setError('')
 
     const rightPage = desktopRightPage
@@ -1752,9 +1750,11 @@ export default function MushafPage() {
 
         setSvg(svgResults[0] || '')
         setLeftSvg('')
+        if (!cancelled) setLoading(false)
       } catch (loadError) {
         console.error(loadError)
         if (!cancelled) {
+          setLoading(false)
           setError(loadError instanceof Error ? loadError.message : 'تعذر تحميل المصحف')
         }
       }
@@ -2055,13 +2055,45 @@ export default function MushafPage() {
     const target = event.target as Element | null
     if (!target) return
 
-    const polygon = target.closest(
+    let ayahElement: Element | null = target.closest(
       '.ayahPolygon, .samee3-ayah-hit, [data-ayah], [data-ayah-number], .samee3-text-ayah, .samee3-ayah',
     )
-    if (!polygon) return
+
+    // بعض متصفحات شاشات العرض قد ترجع عنصر SVG الجذر بدل مسار الآية،
+    // خصوصًا مع <image> داخل SVG. لذلك نحدد الآية أسفل مؤشر الماوس
+    // من bounding boxes لمسارات الآيات كخطة احتياطية.
+    if (!ayahElement) {
+      const current = event.currentTarget as HTMLElement
+      const x = event.clientX
+      const y = event.clientY
+      const candidates = Array.from(
+        current.querySelectorAll<SVGElement>(
+          '.ayahPolygon, .samee3-ayah-hit, [data-ayah], [data-ayah-number], .samee3-text-ayah, .samee3-ayah',
+        ),
+      )
+
+      let best: SVGElement | null = null
+      let bestArea = Number.POSITIVE_INFINITY
+
+      for (const candidate of candidates) {
+        const rect = candidate.getBoundingClientRect()
+        if (rect.width <= 1 || rect.height <= 1) continue
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue
+
+        const area = rect.width * rect.height
+        if (area < bestArea) {
+          best = candidate
+          bestArea = area
+        }
+      }
+
+      ayahElement = best
+    }
+
+    if (!ayahElement) return
 
     event.stopPropagation()
-    const found = resolveSelectedAyahFromElement(polygon, sourceData)
+    const found = resolveSelectedAyahFromElement(ayahElement, sourceData)
     if (!found) return
 
     setSelectedAyah(found)
@@ -2085,16 +2117,43 @@ export default function MushafPage() {
     const target = event.target as Element | null
     if (!target) return
 
-    const polygon = target.closest(
+    let ayahElement: Element | null = target.closest(
       '.ayahPolygon, .samee3-ayah-hit, [data-ayah], [data-ayah-number], .samee3-text-ayah, .samee3-ayah',
     )
 
-    if (!polygon) {
+    if (!ayahElement) {
+      const current = event.currentTarget as HTMLElement
+      const x = event.clientX
+      const y = event.clientY
+      let best: SVGElement | null = null
+      let bestArea = Number.POSITIVE_INFINITY
+
+      const candidates = Array.from(
+        current.querySelectorAll<SVGElement>(
+          '.ayahPolygon, .samee3-ayah-hit, [data-ayah], [data-ayah-number], .samee3-text-ayah, .samee3-ayah',
+        ),
+      )
+
+      for (const candidate of candidates) {
+        const rect = candidate.getBoundingClientRect()
+        if (rect.width <= 1 || rect.height <= 1) continue
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue
+        const area = rect.width * rect.height
+        if (area < bestArea) {
+          best = candidate
+          bestArea = area
+        }
+      }
+
+      ayahElement = best
+    }
+
+    if (!ayahElement) {
       setPressedAyahNumber(null)
       return
     }
 
-    const found = resolveSelectedAyahFromElement(polygon, sourceData)
+    const found = resolveSelectedAyahFromElement(ayahElement, sourceData)
     setPressedAyahNumber(found?.numberInSurah || found?.number || null)
   }, [resolveSelectedAyahFromElement])
 
@@ -4699,6 +4758,17 @@ export default function MushafPage() {
       onPointerCancel={cancelPagePointer}
     >
       <div className="samee3-book-stage" onClick={dismissChrome}>
+        {loading && !error ? (
+          <div className="samee3-mushaf-loading" role="status" aria-live="polite">
+            <div className="samee3-mushaf-loading-card">
+              <div className="samee3-mushaf-loading-mark"><BookOpen size={24} /></div>
+              <strong>جاري فتح المصحف</strong>
+              <span>يتم تجهيز الصفحة من المصدر المختار…</span>
+              <div className="samee3-mushaf-loading-bar"><i /></div>
+            </div>
+          </div>
+        ) : null}
+
         {error ? (
           <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
             <div className="max-w-sm rounded-[26px] border border-[#dfd1b9] bg-[#fffdf7] p-6 text-center shadow-xl">
@@ -5084,6 +5154,14 @@ export default function MushafPage() {
         .samee3-spread.is-dragging { cursor:grabbing; user-select:none; }
         .samee3-turn-stack { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:visible; }
         .samee3-turn-underlay { position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; pointer-events:none; transform:none !important; filter:none !important; }
+        .samee3-mushaf-loading { position:absolute; inset:0; z-index:120; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(245,240,228,.96); }
+        .samee3-mushaf-loading-card { width:min(92vw,360px); padding:28px 24px 22px; border:1px solid rgba(184,137,71,.22); border-radius:28px; background:rgba(255,253,248,.97); box-shadow:0 20px 60px rgba(67,50,28,.16); text-align:center; display:flex; flex-direction:column; align-items:center; gap:9px; }
+        .samee3-mushaf-loading-mark { width:52px; height:52px; display:flex; align-items:center; justify-content:center; border-radius:18px; background:#f3ead8; color:#a56d2d; margin-bottom:2px; }
+        .samee3-mushaf-loading-card strong { color:#392b1e; font-size:16px; font-weight:900; }
+        .samee3-mushaf-loading-card span { color:#7d8790; font-size:11px; font-weight:800; line-height:1.7; }
+        .samee3-mushaf-loading-bar { width:100%; height:4px; overflow:hidden; border-radius:999px; background:#eee4d3; margin-top:7px; }
+        .samee3-mushaf-loading-bar i { display:block; width:42%; height:100%; border-radius:inherit; background:#c7934f; animation:samee3-loading-slide 1.15s ease-in-out infinite; }
+        @keyframes samee3-loading-slide { 0% { transform:translateX(-150%); } 100% { transform:translateX(340%); } }
         .samee3-turn-underlay .samee3-page-sheet { pointer-events:none !important; }
         .samee3-turn-current { position:relative; z-index:2; display:flex; align-items:center; justify-content:center; width:100%; height:100%; transform:translate3d(0,0,0); transition:transform .26s cubic-bezier(.2,.76,.2,1); will-change:transform; filter:none !important; backface-visibility:visible; }
         .samee3-turn-current.is-dragging { transition:none !important; }
