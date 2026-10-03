@@ -96,6 +96,24 @@ type SearchResult = {
   ayah: number
 }
 
+type TafsirBook = {
+  id: number
+  name: string
+  short_name: string
+  author: string
+}
+
+const FALLBACK_TAFSIR_BOOKS: TafsirBook[] = [
+  { id: 2012, name: 'التفسير الميسر', short_name: 'الميسر', author: 'مجموعة من العلماء' },
+  { id: 136, name: 'تفسير القرآن العظيم', short_name: 'ابن كثير', author: 'إسماعيل بن عمر ابن كثير' },
+  { id: 4, name: 'جامع البيان في تأويل آي القرآن', short_name: 'الطبري', author: 'محمد بن جرير الطبري' },
+  { id: 2, name: 'معالم التنزيل', short_name: 'البغوي', author: 'الحسين بن مسعود البغوي' },
+  { id: 3, name: 'تيسير الكريم الرحمن', short_name: 'السعدي', author: 'عبد الرحمن بن ناصر السعدي' },
+  { id: 1469, name: 'الجامع لأحكام القرآن', short_name: 'القرطبي', author: 'محمد بن أحمد القرطبي' },
+  { id: 27796, name: 'أضواء البيان في إيضاح القرآن بالقرآن', short_name: 'أضواء البيان', author: 'محمد الأمين الشنقيطي' },
+  { id: 54, name: 'أيسر التفاسير', short_name: 'أيسر التفاسير', author: 'أبو بكر الجزائري' },
+]
+
 type AyahTiming = {
   ayah?: number
   start_time?: number
@@ -1200,6 +1218,11 @@ export default function MushafPage() {
   const [isSaved, setIsSaved] = useState(false)
   const [tafsirText, setTafsirText] = useState('')
   const [tafsirLoading, setTafsirLoading] = useState(false)
+  const [tafsirBooks, setTafsirBooks] = useState<TafsirBook[]>(FALLBACK_TAFSIR_BOOKS)
+  const [tafsirBooksLoading, setTafsirBooksLoading] = useState(false)
+  const [selectedTafsirBookId, setSelectedTafsirBookId] = useState<number | null>(null)
+  const [tafsirPickerOpen, setTafsirPickerOpen] = useState(false)
+  const [selectedTafsirBook, setSelectedTafsirBook] = useState<TafsirBook | null>(null)
   const [toast, setToast] = useState('')
   const [imageGenerating, setImageGenerating] = useState(false)
   const [imagePreview, setImagePreview] = useState<{
@@ -4138,24 +4161,116 @@ export default function MushafPage() {
   }, [loadAudioForSurah, repeatAyahNumber, selectedAyah, triggerToast])
 
 
-  const fetchTafsir = async (ayah: Ayah): Promise<string> => {
-    if (!ayah.surah?.number) return 'لم يتوفر التفسير الآن.'
-    setTafsirLoading(true)
+  const loadTafsirBooks = useCallback(async (surahNumber: number) => {
+    if (!surahNumber) return FALLBACK_TAFSIR_BOOKS
+
+    setTafsirBooksLoading(true)
     try {
-      const response = await fetch(`https://api.alquran.cloud/v1/ayah/${ayah.surah.number}:${ayah.numberInSurah}/editions/ar.muyassar`, { cache: 'no-store' })
-      const payload = await response.json()
-      const first = Array.isArray(payload?.data) ? payload.data[0] : payload?.data
-      const text = String(first?.text || '').trim() || 'لم يتوفر التفسير الآن.'
+      const response = await fetch(
+        `/api/tafsir?mode=books&surah=${encodeURIComponent(String(surahNumber))}`,
+        { cache: 'no-store', headers: { Accept: 'application/json' } },
+      )
+
+      const payload = await response.json().catch(() => null)
+      const remoteBooks = Array.isArray(payload?.books)
+        ? payload.books
+            .map((book: Partial<TafsirBook>) => ({
+              id: Number(book.id),
+              name: String(book.name || '').trim(),
+              short_name: String(book.short_name || '').trim(),
+              author: String(book.author || '').trim(),
+            }))
+            .filter(
+              (book: TafsirBook) =>
+                Number.isInteger(book.id) &&
+                book.id > 0 &&
+                book.name,
+            )
+        : []
+
+      const books = remoteBooks.length ? remoteBooks : FALLBACK_TAFSIR_BOOKS
+      setTafsirBooks(books)
+      return books
+    } catch {
+      setTafsirBooks(FALLBACK_TAFSIR_BOOKS)
+      return FALLBACK_TAFSIR_BOOKS
+    } finally {
+      setTafsirBooksLoading(false)
+    }
+  }, [])
+
+  const fetchTafsir = useCallback(async (ayah: Ayah, bookId?: number): Promise<string> => {
+    if (!ayah.surah?.number) return 'لم يتوفر التفسير الآن.'
+
+    const resolvedBookId =
+      Number.isInteger(bookId) && Number(bookId) > 0
+        ? Number(bookId)
+        : Number(selectedTafsirBookId || 2012)
+
+    setTafsirLoading(true)
+    setTafsirText('')
+
+    try {
+      const response = await fetch(
+        `/api/tafsir?mode=ayah&surah=${encodeURIComponent(String(ayah.surah.number))}&ayah=${encodeURIComponent(String(ayah.numberInSurah))}&book=${encodeURIComponent(String(resolvedBookId))}`,
+        { cache: 'no-store', headers: { Accept: 'application/json' } },
+      )
+      const payload = await response.json().catch(() => null)
+
+      if (!response.ok || payload?.success === false || !String(payload?.text || '').trim()) {
+        throw new Error(
+          typeof payload?.error === 'string'
+            ? payload.error
+            : 'تعذر تحميل التفسير.',
+        )
+      }
+
+      const text = String(payload.text).trim()
+      const remoteBook = payload?.tafsirBook && typeof payload.tafsirBook === 'object'
+        ? payload.tafsirBook
+        : null
+      const book =
+        tafsirBooks.find((item) => item.id === resolvedBookId) ||
+        (remoteBook
+          ? {
+              id: resolvedBookId,
+              name: String(remoteBook.name || 'التفسير'),
+              short_name: String(remoteBook.short_name || ''),
+              author: String(remoteBook.author || ''),
+            }
+          : null)
+
+      setSelectedTafsirBookId(resolvedBookId)
+      if (book) setSelectedTafsirBook(book)
       setTafsirText(text)
       return text
-    } catch {
-      const fallback = 'تعذر تحميل التفسير الآن.'
-      setTafsirText(fallback)
-      return fallback
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'تعذر تحميل التفسير الآن.'
+      setTafsirText(message || 'تعذر تحميل التفسير الآن.')
+      return message || 'تعذر تحميل التفسير الآن.'
     } finally {
       setTafsirLoading(false)
     }
-  }
+  }, [selectedTafsirBookId, tafsirBooks])
+
+  const openTafsirChooser = useCallback(async () => {
+    if (!selectedAyah?.surah?.number) return
+
+    setShowAyahActions(true)
+    setTafsirPickerOpen(true)
+    setTafsirText('')
+    setSelectedTafsirBook(null)
+    await loadTafsirBooks(Number(selectedAyah.surah.number))
+  }, [loadTafsirBooks, selectedAyah])
+
+  const chooseTafsirBook = useCallback(async (book: TafsirBook) => {
+    if (!selectedAyah?.surah?.number) return
+    setSelectedTafsirBookId(book.id)
+    setSelectedTafsirBook(book)
+    setTafsirPickerOpen(false)
+    await fetchTafsir(selectedAyah, book.id)
+  }, [fetchTafsir, selectedAyah])
+
 
   const copyAyah = async () => {
     if (!selectedAyah) return
@@ -4192,10 +4307,22 @@ export default function MushafPage() {
     if (!selectedAyah || imageGenerating) return
 
     setImageGenerating(true)
+
     try {
       let interpretation = tafsirText
-      if (withTafsir && !interpretation) {
-        interpretation = await fetchTafsir(selectedAyah)
+      let imageTafsirBook: TafsirBook | null = selectedTafsirBook
+
+      if (withTafsir) {
+        const requestedBookId = selectedTafsirBookId || 2012
+        if (!interpretation || selectedTafsirBookId !== requestedBookId) {
+          interpretation = await fetchTafsir(selectedAyah, requestedBookId)
+        }
+
+        imageTafsirBook =
+          tafsirBooks.find((book) => book.id === requestedBookId) ||
+          FALLBACK_TAFSIR_BOOKS.find((book) => book.id === requestedBookId) ||
+          selectedTafsirBook ||
+          null
       }
 
       try {
@@ -4205,43 +4332,55 @@ export default function MushafPage() {
       }
 
       const canvas = document.createElement('canvas')
-      const width = 1400
-      const contentWidth = 1160
+      const width = 1440
+      const outerX = 52
+      const cardX = 78
+      const cardWidth = width - cardX * 2
+      const contentWidth = 1120
       const centerX = width / 2
       const ayahText = selectedAyah.text.trim()
 
+      /*
+       * تصميمان متناسقان:
+       * 1) الآية فقط: بطاقة تحريرية هادئة وراقية قابلة للمشاركة.
+       * 2) الآية + التفسير: صفحة قراءة مصغرة بتدرج هرمي واضح للنص.
+       */
       const ayahLayout = fitArabicLines(
         canvas,
         ayahText,
         '"Amiri Quran", "Amiri", serif',
-        88,
-        42,
+        withTafsir ? 82 : 96,
+        withTafsir ? 40 : 46,
         contentWidth,
-        withTafsir ? 7 : 10,
+        withTafsir ? 8 : 9,
       )
 
       const tafsirLayout = withTafsir
         ? fitArabicLines(
             canvas,
             interpretation || 'لم يتوفر التفسير الآن.',
-            '"Amiri", serif',
-            38,
+            '"Amiri", "Tajawal", sans-serif',
+            39,
             24,
             contentWidth,
-            9,
+            11,
           )
         : null
 
-      const ayahTop = 292
       const ayahHeight = ayahLayout.lines.length * ayahLayout.lineHeight
-      const tafsirTop = ayahTop + ayahHeight + 94
       const tafsirHeight = tafsirLayout
         ? tafsirLayout.lines.length * tafsirLayout.lineHeight
         : 0
 
+      const ayahBlockTop = withTafsir ? 360 : 350
+      const tafsirBlockTop = ayahBlockTop + ayahHeight + (withTafsir ? 110 : 0)
+      const tafsirBottom = tafsirLayout
+        ? tafsirBlockTop + tafsirHeight + 156
+        : 0
+
       const targetHeight = withTafsir
-        ? Math.min(1820, Math.max(1080, tafsirTop + tafsirHeight + 150))
-        : Math.min(1160, Math.max(820, ayahTop + ayahHeight + 125))
+        ? Math.min(2500, Math.max(1420, tafsirBottom))
+        : Math.min(1360, Math.max(980, ayahBlockTop + ayahHeight + 250))
 
       canvas.width = width
       canvas.height = targetHeight
@@ -4252,111 +4391,245 @@ export default function MushafPage() {
         return
       }
 
-      // خلفية فاخرة هادئة مستوحاة من ورق المصحف مع تدرج أخضر-عاجي.
-      const gradient = context.createLinearGradient(0, 0, width, targetHeight)
-      gradient.addColorStop(0, '#fffaf1')
-      gradient.addColorStop(0.52, '#fbf8ef')
-      gradient.addColorStop(1, '#eef8f8')
-      context.fillStyle = gradient
-      context.fillRect(0, 0, width, targetHeight)
-
-      // هالة خفيفة جدًا في الوسط.
-      const glow = context.createRadialGradient(centerX, targetHeight * 0.42, 80, centerX, targetHeight * 0.42, 760)
-      glow.addColorStop(0, 'rgba(255,255,255,.78)')
-      glow.addColorStop(1, 'rgba(255,255,255,0)')
-      context.fillStyle = glow
-      context.fillRect(0, 0, width, targetHeight)
-
-      context.strokeStyle = '#bd8b48'
-      context.lineWidth = 5
-      context.strokeRect(30, 30, width - 60, targetHeight - 60)
-
-      context.strokeStyle = 'rgba(189,139,72,.38)'
-      context.lineWidth = 2
-      context.strokeRect(54, 54, width - 108, targetHeight - 108)
-
-      // زوايا زخرفية بسيطة بدل الزحمة البصرية.
-      const drawCorner = (x: number, y: number, sx: number, sy: number) => {
-        context.save()
-        context.translate(x, y)
-        context.scale(sx, sy)
-        context.strokeStyle = 'rgba(21,94,103,.38)'
-        context.lineWidth = 3
-        context.beginPath()
-        context.moveTo(0, 50)
-        context.quadraticCurveTo(0, 0, 50, 0)
-        context.stroke()
-        context.beginPath()
-        context.moveTo(16, 42)
-        context.quadraticCurveTo(20, 20, 42, 16)
-        context.stroke()
-        context.restore()
+      const palette = {
+        ink: '#17202b',
+        muted: '#6f7884',
+        gold: '#b98a45',
+        goldSoft: '#d6b77a',
+        cream: '#fbf8f0',
+        cream2: '#f4efe5',
+        navy: '#0d1722',
+        navy2: '#172536',
+        white: '#fffdfa',
       }
-      drawCorner(64, 64, 1, 1)
-      drawCorner(width - 64, 64, -1, 1)
-      drawCorner(64, targetHeight - 64, 1, -1)
-      drawCorner(width - 64, targetHeight - 64, -1, -1)
 
+      const roundedRect = (
+        ctx: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        r: number,
+      ) => {
+        const radius = Math.min(r, w / 2, h / 2)
+        ctx.beginPath()
+        ctx.moveTo(x + radius, y)
+        ctx.arcTo(x + w, y, x + w, y + h, radius)
+        ctx.arcTo(x + w, y + h, x, y + h, radius)
+        ctx.arcTo(x, y + h, x, y, radius)
+        ctx.arcTo(x, y, x + w, y, radius)
+        ctx.closePath()
+      }
+
+      const drawDiamond = (
+        ctx: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        size: number,
+        fill: string,
+        stroke: string,
+      ) => {
+        ctx.save()
+        ctx.translate(x, y)
+        ctx.rotate(Math.PI / 4)
+        ctx.fillStyle = fill
+        ctx.strokeStyle = stroke
+        ctx.lineWidth = 2
+        roundedRect(ctx, -size / 2, -size / 2, size, size, 5)
+        ctx.fill()
+        ctx.stroke()
+        ctx.restore()
+      }
+
+      // =========================
+      // خلفية حديثة داكنة
+      // =========================
+      const background = context.createLinearGradient(0, 0, width, targetHeight)
+      background.addColorStop(0, palette.navy)
+      background.addColorStop(0.45, '#101e2d')
+      background.addColorStop(1, '#0a121c')
+      context.fillStyle = background
+      context.fillRect(0, 0, width, targetHeight)
+
+      const topGlow = context.createRadialGradient(centerX, 120, 30, centerX, 120, 620)
+      topGlow.addColorStop(0, 'rgba(214,183,122,.20)')
+      topGlow.addColorStop(0.42, 'rgba(185,138,69,.07)')
+      topGlow.addColorStop(1, 'rgba(185,138,69,0)')
+      context.fillStyle = topGlow
+      context.fillRect(0, 0, width, 360)
+
+      const bottomGlow = context.createRadialGradient(centerX, targetHeight - 60, 10, centerX, targetHeight - 60, 520)
+      bottomGlow.addColorStop(0, 'rgba(255,255,255,.06)')
+      bottomGlow.addColorStop(1, 'rgba(255,255,255,0)')
+      context.fillStyle = bottomGlow
+      context.fillRect(0, targetHeight - 260, width, 260)
+
+      // إطار خارجي فائق الخفة.
+      context.strokeStyle = 'rgba(214,183,122,.30)'
+      context.lineWidth = 1.5
+      roundedRect(context, outerX, outerX, width - outerX * 2, targetHeight - outerX * 2, 38)
+      context.stroke()
+
+      // =========================
+      // رأس التصميم
+      // =========================
       context.textAlign = 'center'
       try { context.direction = 'rtl' } catch {}
 
-      context.fillStyle = '#155e67'
-      context.font = '700 62px "Aref Ruqaa", "Amiri", serif'
-      context.fillText(`سورة ${getSurahName(selectedAyah.surah?.number)}`, centerX, 122)
+      context.fillStyle = 'rgba(251,248,240,.74)'
+      context.font = '600 22px "Tajawal", sans-serif'
+      context.fillText('مَصْحَف سَمِيع', centerX, 108)
 
-      context.fillStyle = '#a66f2d'
-      context.font = '700 29px "Tajawal", sans-serif'
-      context.fillText(
-        `الآية ${arabicNumber(selectedAyah.numberInSurah)}  •  مصحف سميع`,
-        centerX,
-        174,
-      )
+      context.fillStyle = palette.goldSoft
+      context.font = '500 17px "Tajawal", sans-serif'
+      context.fillText('القرآن الكريم', centerX, 138)
 
-      // ميدالية رقم الآية.
-      context.fillStyle = '#fffaf0'
-      context.strokeStyle = '#c7934f'
-      context.lineWidth = 3
+      // فاصل زخرفي صغير بدل الإطار التقليدي.
+      context.strokeStyle = 'rgba(214,183,122,.36)'
+      context.lineWidth = 1
       context.beginPath()
-      context.arc(centerX, 231, 34, 0, Math.PI * 2)
-      context.fill()
+      context.moveTo(centerX - 190, 178)
+      context.lineTo(centerX - 26, 178)
+      context.moveTo(centerX + 26, 178)
+      context.lineTo(centerX + 190, 178)
       context.stroke()
-      context.fillStyle = '#9a662b'
-      context.font = '700 24px "Amiri", serif'
-      context.fillText(arabicNumber(selectedAyah.numberInSurah), centerX, 239)
+      drawDiamond(context, centerX, 178, 15, '#b98a45', '#e0c797')
+
+      // عنوان السورة والمرجع.
+      context.fillStyle = palette.white
+      context.font = '700 62px "Aref Ruqaa", "Amiri", serif'
+      context.fillText(`سورة ${getSurahName(selectedAyah.surah?.number)}`, centerX, 246)
+
+      const referenceText = `الآية ${arabicNumber(selectedAyah.numberInSurah)}`
+      context.font = '600 22px "Tajawal", sans-serif'
+      context.fillStyle = 'rgba(255,253,250,.74)'
+      context.fillText(referenceText, centerX, 286)
+
+      // =========================
+      // بطاقة الآية
+      // =========================
+      context.save()
+      context.shadowColor = 'rgba(0,0,0,.28)'
+      context.shadowBlur = 38
+      context.shadowOffsetY = 16
+      roundedRect(context, cardX, 318, cardWidth, withTafsir ? ayahHeight + 92 : ayahHeight + 118, 34)
+      context.fillStyle = palette.cream
+      context.fill()
+      context.restore()
+
+      context.strokeStyle = 'rgba(185,138,69,.28)'
+      context.lineWidth = 1.5
+      roundedRect(context, cardX, 318, cardWidth, withTafsir ? ayahHeight + 92 : ayahHeight + 118, 34)
+      context.stroke()
+
+      // شريط ذهبي دقيق على حافة البطاقة.
+      context.fillStyle = palette.gold
+      roundedRect(context, cardX + 32, 342, 4, withTafsir ? ayahHeight + 44 : ayahHeight + 70, 2)
+      context.fill()
+
+      // رقم الآية داخل كبسولة حديثة.
+      const badgeWidth = 106
+      const badgeX = centerX - badgeWidth / 2
+      roundedRect(context, badgeX, 346, badgeWidth, 42, 21)
+      context.fillStyle = 'rgba(185,138,69,.11)'
+      context.fill()
+      context.strokeStyle = 'rgba(185,138,69,.36)'
+      context.lineWidth = 1
+      context.stroke()
+      context.fillStyle = '#86652f'
+      context.font = '700 22px "Tajawal", sans-serif'
+      context.fillText(referenceText, centerX, 374)
 
       drawFittedArabicLines(
         context,
         ayahLayout,
         centerX,
-        ayahTop,
-        '#172235',
+        ayahBlockTop,
+        palette.ink,
       )
 
       if (tafsirLayout) {
-        const dividerY = ayahTop + ayahHeight + 34
-        context.strokeStyle = 'rgba(189,139,72,.32)'
-        context.lineWidth = 2
+        // =========================
+        // قسم التفسير — تصميم تحريري حديث
+        // =========================
+        const tafsirHeaderY = ayahBlockTop + ayahHeight + 78
+        const tafsirCardTop = tafsirHeaderY + 52
+        const tafsirCardHeight = tafsirHeight + 86
+
+        context.strokeStyle = 'rgba(185,138,69,.26)'
+        context.lineWidth = 1
         context.beginPath()
-        context.moveTo(260, dividerY)
-        context.lineTo(width - 260, dividerY)
+        context.moveTo(cardX + 76, tafsirHeaderY)
+        context.lineTo(width - cardX - 76, tafsirHeaderY)
         context.stroke()
 
-        context.fillStyle = '#155e67'
-        context.font = '700 30px "Tajawal", sans-serif'
-        context.fillText('التفسير الميسر', centerX, dividerY + 56)
+        context.fillStyle = palette.goldSoft
+        context.font = '700 24px "Tajawal", sans-serif'
+        context.fillText('التفسير', centerX, tafsirHeaderY + 34)
 
+        context.save()
+        context.shadowColor = 'rgba(0,0,0,.24)'
+        context.shadowBlur = 26
+        context.shadowOffsetY = 10
+        roundedRect(context, cardX, tafsirCardTop, cardWidth, tafsirCardHeight, 30)
+        context.fillStyle = 'rgba(251,248,240,.975)'
+        context.fill()
+        context.restore()
+
+        context.strokeStyle = 'rgba(185,138,69,.22)'
+        context.lineWidth = 1.2
+        roundedRect(context, cardX, tafsirCardTop, cardWidth, tafsirCardHeight, 30)
+        context.stroke()
+
+        const tafsirLabel =
+          imageTafsirBook?.short_name ||
+          imageTafsirBook?.name ||
+          'التفسير الميسر'
+        const tafsirAuthor = imageTafsirBook?.author || ''
+
+        context.textAlign = 'right'
+        context.fillStyle = '#69512d'
+        context.font = '700 28px "Tajawal", sans-serif'
+        context.fillText(tafsirLabel, width - cardX - 58, tafsirCardTop + 52)
+
+        if (tafsirAuthor) {
+          context.fillStyle = '#8a9097'
+          context.font = '500 17px "Tajawal", sans-serif'
+          context.fillText(tafsirAuthor, width - cardX - 58, tafsirCardTop + 80)
+        }
+
+        context.textAlign = 'center'
         drawFittedArabicLines(
           context,
           tafsirLayout,
           centerX,
-          tafsirTop,
-          '#4c5563',
+          tafsirCardTop + 122,
+          '#47515d',
         )
       }
 
-      context.fillStyle = 'rgba(21,94,103,.66)'
-      context.font = '700 20px "Tajawal", sans-serif'
-      context.fillText('مصحف سميع', centerX, targetHeight - 82)
+      // =========================
+      // التوقيع السفلي
+      // =========================
+      const footerY = targetHeight - 78
+      context.textAlign = 'center'
+      context.fillStyle = 'rgba(251,248,240,.62)'
+      context.font = '500 17px "Tajawal", sans-serif'
+      context.fillText(
+        `مصحف سميع  •  ${getSurahName(selectedAyah.surah?.number)}  •  ${referenceText}`,
+        centerX,
+        footerY,
+      )
+
+      context.fillStyle = 'rgba(214,183,122,.56)'
+      context.font = '500 14px "Tajawal", sans-serif'
+      context.fillText(
+        withTafsir
+          ? `نص الآية مع ${imageTafsirBook?.short_name || imageTafsirBook?.name || 'التفسير'}`
+          : 'مشاركة الآية من مصحف سميع',
+        centerX,
+        footerY + 26,
+      )
 
       const filename = `samee3-ayah-${selectedAyah.surah?.number || 0}-${selectedAyah.numberInSurah}${withTafsir ? '-tafsir' : ''}.png`
       const blob = await new Promise<Blob | null>((resolve) => {
@@ -4715,13 +4988,47 @@ export default function MushafPage() {
               <button type="button" onClick={() => void copyAyah()}><Copy size={19} /><span>نسخ</span></button>
               <button type="button" disabled={imageGenerating} onClick={() => void downloadAyahCard(false)}><ImageIcon size={19} /><span>{imageGenerating ? 'جاري التجهيز...' : 'تصميم كصورة'}</span></button>
               <button type="button" disabled={imageGenerating} onClick={() => void downloadAyahCard(true)}><FileText size={19} /><span>{imageGenerating ? 'جاري التجهيز...' : 'صورة مع التفسير'}</span></button>
-              <button type="button" onClick={() => { setShowAyahActions(false); void fetchTafsir(selectedAyah) }}><Sparkles size={19} /><span>التفسير</span></button>
+              <button type="button" className={tafsirPickerOpen || tafsirLoading || tafsirText ? 'saved' : ''} onClick={() => void openTafsirChooser()}><Sparkles size={19} /><span>التفسير</span></button>
               <button type="button" className={isSaved ? 'saved' : ''} onClick={bookmarkAyah}><Bookmark size={19} /><span>{isSaved ? 'محفوظة' : 'الحفظ'}</span></button>
             </div>
 
+            {tafsirPickerOpen ? (
+              <div className="samee3-tafsir-picker">
+                <div className="samee3-tafsir-picker-head">
+                  <div>
+                    <span>اختر كتاب التفسير</span>
+                    <strong>{selectedTafsirBook ? selectedTafsirBook.short_name || selectedTafsirBook.name : 'مصادر التفسير المتاحة'}</strong>
+                  </div>
+                  {tafsirBooksLoading ? <Loader2 size={17} className="animate-spin" /> : <Sparkles size={17} />}
+                </div>
+
+                {tafsirBooksLoading && !tafsirBooks.length ? (
+                  <div className="samee3-tafsir-loading">جاري تحميل كتب التفسير...</div>
+                ) : (
+                  <div className="samee3-tafsir-books">
+                    {tafsirBooks.map((book) => (
+                      <button
+                        key={book.id}
+                        type="button"
+                        className={selectedTafsirBookId === book.id ? 'is-selected' : ''}
+                        onClick={() => void chooseTafsirBook(book)}
+                      >
+                        <span>{book.short_name || book.name}</span>
+                        <small>{book.author}</small>
+                        {selectedTafsirBookId === book.id ? <Check size={16} /> : null}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
             {tafsirLoading || tafsirText ? (
               <div className="samee3-tafsir-box">
-                <div className="flex items-center gap-2 font-black text-[#155e67]">{tafsirLoading ? <Loader2 size={17} className="animate-spin" /> : <Sparkles size={17} />} التفسير</div>
+                <div className="samee3-tafsir-title">
+                  <span className="flex items-center gap-2 font-black text-[#155e67]">{tafsirLoading ? <Loader2 size={17} className="animate-spin" /> : <Sparkles size={17} />} {selectedTafsirBook?.name || 'التفسير'}</span>
+                  {selectedTafsirBook?.author ? <small>{selectedTafsirBook.author}</small> : null}
+                </div>
                 <p>{tafsirLoading ? 'جاري تحميل التفسير...' : tafsirText}</p>
               </div>
             ) : null}
@@ -5011,6 +5318,20 @@ export default function MushafPage() {
         .samee3-ayah-actions-grid button { min-height:62px; border:1px solid #e8dfd0; background:#fff; color:#314154; border-radius:17px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; font-weight:900; font-size:10px; }
         .samee3-ayah-actions-grid button:hover { border-color:#b9ddea; color:#0e87b8; }
         .samee3-ayah-actions-grid button.saved { background:#effaf7; border-color:#b8e2d1; color:#127457; }
+        .samee3-tafsir-picker { margin-top:14px; padding:12px; border-radius:20px; background:linear-gradient(180deg,#fffdf8,#f7fbfc); border:1px solid #d9e7ea; }
+        .samee3-tafsir-picker-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:2px 2px 10px; color:#155e67; }
+        .samee3-tafsir-picker-head > div { display:flex; flex-direction:column; gap:3px; }
+        .samee3-tafsir-picker-head span { color:#9b6a32; font-size:10px; font-weight:900; }
+        .samee3-tafsir-picker-head strong { color:#1b2a3c; font-size:14px; font-weight:900; }
+        .samee3-tafsir-books { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; max-height:34dvh; overflow:auto; overscroll-behavior:contain; }
+        .samee3-tafsir-books button { position:relative; min-height:62px; padding:8px 34px 8px 9px; border:1px solid #e7e0d2; border-radius:14px; background:#fff; color:#29384a; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:3px; text-align:right; font-weight:900; }
+        .samee3-tafsir-books button:hover, .samee3-tafsir-books button.is-selected { border-color:#b9ddea; background:#eef9fc; color:#0b7ea7; }
+        .samee3-tafsir-books button > svg { position:absolute; left:9px; top:9px; color:#0e87b8; }
+        .samee3-tafsir-books button span { font-size:12px; line-height:1.35; }
+        .samee3-tafsir-books button small { color:#8d806e; font-size:9px; font-weight:800; line-height:1.35; }
+        .samee3-tafsir-loading { min-height:60px; display:flex; align-items:center; justify-content:center; color:#738394; font-size:11px; font-weight:900; }
+        .samee3-tafsir-title { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+        .samee3-tafsir-title small { color:#9b8a72; font-size:9px; font-weight:900; line-height:1.6; text-align:left; }
         .samee3-tafsir-box { margin-top:14px; padding:14px; border-radius:18px; background:#f2fafc; border:1px solid #cfe8ef; color:#4c5968; font-size:12px; line-height:2; }
         .samee3-tafsir-box p { margin-top:8px; white-space:pre-wrap; }
         .samee3-image-preview-overlay { position:absolute; z-index:150; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(25,34,39,.46); backdrop-filter:blur(8px); }
@@ -5052,6 +5373,7 @@ export default function MushafPage() {
           .samee3-text-line-svg { font-size:33px; }
           .samee3-page-footer { left:12px; bottom:calc(max(2px,env(safe-area-inset-bottom)) + 7px); }
           .samee3-ayah-actions-grid { grid-template-columns:repeat(2,1fr); }
+          .samee3-tafsir-books { grid-template-columns:1fr; max-height:31dvh; }
           .samee3-ayah-preview { font-size:21px; }
           .samee3-image-preview-sheet { width:calc(100vw - 20px); max-height:94dvh; padding:10px; }
           .samee3-image-preview-frame img { max-height:64dvh; }
