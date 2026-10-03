@@ -686,6 +686,7 @@ function buildRealImageMushafSvg(
 
   <image
     href="${escapeXml(imageUrl)}"
+    xlink:href="${escapeXml(imageUrl)}"
     x="0"
     y="0"
     width="${viewWidth}"
