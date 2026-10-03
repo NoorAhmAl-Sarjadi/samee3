@@ -13,9 +13,12 @@ export const metadata: Metadata = {
     default: 'مصحف سميع',
     template: '%s | مصحف سميع',
   },
+
   description:
     'موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.',
+
   applicationName: 'مصحف سميع',
+
   manifest: '/manifest.json',
 
   keywords: [
@@ -42,23 +45,29 @@ export const metadata: Metadata = {
     follow: true,
   },
 
+  /*
+   * الأيقونة الأساسية موجودة فعليًا في:
+   * app/icon.svg
+   *
+   * Next.js يتعرف على app/icon.svg تلقائيًا،
+   * ونصرّح بها هنا أيضًا حتى يكون مرجع الـhead واضحًا وصريحًا.
+   *
+   * لا نضع SVG كـ apple-touch-icon لأن file convention
+   * الخاص بـ apple-icon في Next.js يعتمد على PNG/JPG.
+   */
   icons: {
     icon: [
       {
         url: '/icon.svg',
         type: 'image/svg+xml',
+        sizes: 'any',
       },
     ],
     shortcut: [
       {
         url: '/icon.svg',
         type: 'image/svg+xml',
-      },
-    ],
-    apple: [
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
+        sizes: 'any',
       },
     ],
   },
