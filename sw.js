@@ -1,26 +1,77 @@
 /* =========================================================
-   SAMEE3 Quran - Service Worker
-   Offline / PWA Cache
+   SAMEE3 Quran - Service Worker V2
+   Strong offline shell + Quran audio cache
    ========================================================= */
 
-const CACHE_VERSION = 'samee3-v1';
+const CACHE_VERSION = 'samee3-v2';
 const APP_CACHE = `${CACHE_VERSION}-app`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
+const AUDIO_CACHE = `${CACHE_VERSION}-audio`;
 
 /*
- * ملفات أساسية يمكن تشغيلها Offline.
- * لا نضع هنا ملفات خارجية أو API responses.
+ * هذا الكاش القديم ينشئه app/mushaf/page.tsx مباشرة عبر Cache Storage.
+ * نحتفظ به عند تفعيل نسخة جديدة حتى لا تضيع صفحات المصحف المخزنة سابقًا.
  */
+const APP_MANAGED_CACHES = new Set([
+  'samee3-mushaf-pages-v2',
+]);
+
 const PRECACHE_URLS = [
   '/',
   '/manifest.json',
+  '/icon.svg',
 ];
 
-/*
- * أثناء التحديث:
- * نحذف إصدارات الكاش القديمة.
- */
+const AUDIO_HOST_ALLOWLIST = new Set([
+  'mp3quran.net',
+]);
+
+function isAllowedQuranAudioRequest(request) {
+  if (!request || request.method !== 'GET') return false;
+
+  try {
+    const url = new URL(request.url);
+    const hostname = url.hostname.toLowerCase();
+    const isAllowedHost =
+      AUDIO_HOST_ALLOWLIST.has(hostname) ||
+      hostname.endsWith('.mp3quran.net');
+
+    const isMp3 = /\.mp3(?:$|[?#])/i.test(url.pathname + url.search + url.hash);
+    const isAudioDestination = request.destination === 'audio';
+
+    return isAllowedHost && (isMp3 || isAudioDestination);
+  } catch {
+    return false;
+  }
+}
+
+async function cacheAudioResponse(request) {
+  const cache = await caches.open(AUDIO_CACHE);
+
+  const cached = await cache.match(request.url);
+  if (cached) {
+    return cached;
+  }
+
+  const response = await fetch(request);
+
+  /*
+   * لا نخزن استجابة 206 الجزئية الناتجة عن Range requests.
+   * app/mushaf/page.tsx يقوم بتخزين نسخة 200 كاملة في الخلفية،
+   * وعند وجودها يستطيع هذا الـService Worker تقديمها Offline.
+   */
+  if (response && (response.ok || response.type === 'opaque') && response.status !== 206) {
+    try {
+      await cache.put(request.url, response.clone());
+    } catch (error) {
+      console.warn('SAMEE3: تعذر حفظ ملف الصوت في كاش الـService Worker.', error);
+    }
+  }
+
+  return response;
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(APP_CACHE)
@@ -29,9 +80,6 @@ self.addEventListener('install', (event) => {
   );
 });
 
-/*
- * السيطرة على الصفحات المفتوحة فورًا بعد التفعيل.
- */
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
@@ -39,11 +87,14 @@ self.addEventListener('activate', (event) => {
         return Promise.all(
           cacheNames
             .filter((cacheName) => {
+              if (!cacheName.startsWith('samee3-')) return false;
+
               return (
-                cacheName.startsWith('samee3-') &&
                 cacheName !== APP_CACHE &&
                 cacheName !== PAGE_CACHE &&
-                cacheName !== STATIC_CACHE
+                cacheName !== STATIC_CACHE &&
+                cacheName !== AUDIO_CACHE &&
+                APP_MANAGED_CACHES.has(cacheName) === false
               );
             })
             .map((cacheName) => caches.delete(cacheName))
@@ -53,9 +104,6 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-/*
- * التحقق من أن الطلب من نفس الموقع.
- */
 function isSameOrigin(request) {
   try {
     return new URL(request.url).origin === self.location.origin;
@@ -64,32 +112,15 @@ function isSameOrigin(request) {
   }
 }
 
-/*
- * استبعاد الأشياء التي لا نريد Service Worker
- * أن يتدخل فيها.
- */
 function shouldIgnoreRequest(request) {
   const url = new URL(request.url);
 
-  /*
-   * لا نتعامل مع POST / PUT / PATCH / DELETE.
-   * الكاش مخصص لطلبات GET فقط.
-   */
-  if (request.method !== 'GET') {
-    return true;
-  }
+  if (request.method !== 'GET') return true;
+  if (!isSameOrigin(request)) return true;
 
   /*
-   * لا نتدخل في المواقع الخارجية.
-   * مثل YouTube أو أي CDN خارجي.
-   */
-  if (!isSameOrigin(request)) {
-    return true;
-  }
-
-  /*
-   * لا نخزن طلبات Next الداخلية الديناميكية كصفحات عادية.
-   * ملفات JS/CSS والصور يمكن تخزينها.
+   * الـAPI يتولى تخزينه التطبيق نفسه عبر Cache Storage.
+   * لا نريد أن نحول كل استجابة API إلى Navigation cache.
    */
   if (
     url.pathname.startsWith('/api/') ||
@@ -101,16 +132,10 @@ function shouldIgnoreRequest(request) {
   return false;
 }
 
-/*
- * هل الطلب عبارة عن navigation لصفحة؟
- */
 function isNavigationRequest(request) {
   return request.mode === 'navigate';
 }
 
-/*
- * هل الملف من ملفات Next.js الثابتة؟
- */
 function isStaticAsset(request) {
   const url = new URL(request.url);
 
@@ -131,20 +156,12 @@ function isStaticAsset(request) {
   );
 }
 
-/*
- * Network First:
- * نحاول الحصول على أحدث نسخة من الإنترنت.
- * عند انقطاع الإنترنت نستخدم النسخة المحفوظة.
- */
 async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
 
   try {
     const response = await fetch(request);
 
-    /*
-     * نحفظ فقط الاستجابات السليمة.
-     */
     if (response && response.ok) {
       await cache.put(request, response.clone());
     }
@@ -153,26 +170,17 @@ async function networkFirst(request, cacheName) {
   } catch {
     const cachedResponse = await cache.match(request);
 
-    if (cachedResponse) {
-      return cachedResponse;
-    }
+    if (cachedResponse) return cachedResponse;
 
     throw new Error('Offline and resource is not cached');
   }
 }
 
-/*
- * Cache First:
- * مناسب للملفات الثابتة التي تحمل باسم version/hash.
- */
 async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
-
   const cachedResponse = await cache.match(request);
 
-  if (cachedResponse) {
-    return cachedResponse;
-  }
+  if (cachedResponse) return cachedResponse;
 
   try {
     const response = await fetch(request);
@@ -187,71 +195,54 @@ async function cacheFirst(request, cacheName) {
   }
 }
 
-/*
- * التعامل مع كل الطلبات.
- */
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
   /*
-   * Service Worker يتدخل في GET من نفس الموقع فقط.
+   * أولًا: القرآن الصوتي الخارجي.
+   * هذا يجب أن يأتي قبل isSameOrigin لأن MP3Quran مصدر خارجي.
    */
-  if (shouldIgnoreRequest(request)) {
+  if (isAllowedQuranAudioRequest(request)) {
+    event.respondWith(
+      cacheAudioResponse(request).catch(async () => {
+        const cache = await caches.open(AUDIO_CACHE);
+        const cachedResponse = await cache.match(request.url);
+
+        if (cachedResponse) return cachedResponse;
+
+        throw new Error('Offline and Quran audio is not cached');
+      })
+    );
+
     return;
   }
 
-  /*
-   * صفحات التطبيق:
-   * Network First ثم الكاش عند عدم وجود الإنترنت.
-   */
+  if (shouldIgnoreRequest(request)) return;
+
   if (isNavigationRequest(request)) {
     event.respondWith(
       networkFirst(request, PAGE_CACHE).catch(async () => {
-        /*
-         * في حال لم نجد الصفحة نفسها في الكاش،
-         * نحاول استخدام الصفحة الرئيسية المحفوظة
-         * بدل عرض صفحة متصفح مكسورة.
-         */
         const cache = await caches.open(APP_CACHE);
 
         return (
           await cache.match('/') ||
           new Response(
-            `
-              <!doctype html>
-              <html lang="ar" dir="rtl">
-                <head>
-                  <meta charset="utf-8">
-                  <meta name="viewport" content="width=device-width,initial-scale=1">
-                  <title>مصحف سميع</title>
-                  <style>
-                    body {
-                      margin: 0;
-                      min-height: 100vh;
-                      display: flex;
-                      align-items: center;
-                      justify-content: center;
-                      background: #fcfbf8;
-                      color: #0f172a;
-                      font-family: Arial, sans-serif;
-                      text-align: center;
-                      padding: 24px;
-                    }
-                  </style>
-                </head>
-                <body>
-                  <div>
-                    <h2>مصحف سميع</h2>
-                    <p>هذه الصفحة غير محفوظة على الجهاز للعمل بدون إنترنت.</p>
-                  </div>
-                </body>
-              </html>
-            `,
+            `<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مصحف سميع</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fcfbf8;color:#0f172a;font-family:Arial,sans-serif;text-align:center;padding:24px}
+.card{max-width:520px}
+</style>
+</head>
+<body><div class="card"><h2>مصحف سميع</h2><p>المحتوى المطلوب غير محفوظ على الجهاز للعمل بدون إنترنت.</p></div></body>
+</html>`,
             {
               status: 503,
-              headers: {
-                'Content-Type': 'text/html; charset=utf-8',
-              },
+              headers: { 'Content-Type': 'text/html; charset=utf-8' },
             }
           )
         );
@@ -261,49 +252,33 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  /*
-   * ملفات Next.js والملفات الثابتة:
-   * Cache First.
-   */
   if (isStaticAsset(request)) {
-    event.respondWith(
-      cacheFirst(request, STATIC_CACHE)
-    );
-
+    event.respondWith(cacheFirst(request, STATIC_CACHE));
     return;
   }
 
-  /*
-   * باقي ملفات الموقع:
-   * Network First مع الاحتفاظ بما تم تحميله سابقًا.
-   */
   event.respondWith(
     networkFirst(request, STATIC_CACHE).catch(async () => {
       const cache = await caches.open(STATIC_CACHE);
       const cachedResponse = await cache.match(request);
 
-      if (cachedResponse) {
-        return cachedResponse;
-      }
+      if (cachedResponse) return cachedResponse;
 
       throw new Error('Offline resource is not cached');
     })
   );
 });
 
-/*
- * رسالة اختيارية من التطبيق لمسح الكاش عند الحاجة.
- */
 self.addEventListener('message', (event) => {
-  if (!event.data) {
+  const data = event.data;
+  if (!data) return;
+
+  if (data.type === 'SKIP_WAITING') {
+    event.waitUntil(self.skipWaiting());
     return;
   }
 
-  if (event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-
-  if (event.data.type === 'CLEAR_SAMEE3_CACHE') {
+  if (data.type === 'CLEAR_SAMEE3_CACHE') {
     event.waitUntil(
       caches.keys().then((cacheNames) => {
         return Promise.all(
@@ -311,6 +286,37 @@ self.addEventListener('message', (event) => {
             .filter((name) => name.startsWith('samee3-'))
             .map((name) => caches.delete(name))
         );
+      })
+    );
+    return;
+  }
+
+  /*
+   * يسمح للتطبيق ببدء تخزين ملف صوت كامل في الخلفية.
+   * نستخدم fetch بدون CORS حتى نتمكن من تخزين الاستجابة opaque
+   * في الحالات التي لا يسمح فيها المصدر بقراءة الـbody من الصفحة.
+   */
+  if (data.type === 'CACHE_AUDIO_URL' && typeof data.url === 'string') {
+    const url = data.url;
+
+    event.waitUntil(
+      caches.open(AUDIO_CACHE).then(async (cache) => {
+        const existing = await cache.match(url);
+        if (existing) return;
+
+        try {
+          const response = await fetch(url, {
+            method: 'GET',
+            mode: 'no-cors',
+            cache: 'no-store',
+          });
+
+          if (response && (response.type === 'opaque' || response.ok) && response.status !== 206) {
+            await cache.put(url, response);
+          }
+        } catch (error) {
+          console.warn('SAMEE3: background audio cache failed.', error);
+        }
       })
     );
   }
