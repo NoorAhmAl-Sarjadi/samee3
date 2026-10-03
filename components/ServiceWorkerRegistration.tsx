@@ -10,45 +10,54 @@ export default function ServiceWorkerRegistration() {
     }
 
     let isReloading = false
+    let disposed = false
 
     const registerServiceWorker = async () => {
       try {
         const registration = await navigator.serviceWorker.register('/sw.js', {
           scope: '/',
+          updateViaCache: 'none',
         })
+
+        if (disposed) return
 
         console.log(
           'SAMEE3 Service Worker registered:',
-          registration.scope
+          registration.scope,
         )
 
-        // طلب تحديث نسخة الـ Service Worker
         try {
           await registration.update()
         } catch (updateError) {
           console.warn(
             'SAMEE3 Service Worker update warning:',
-            updateError
+            updateError,
           )
+        }
+
+        /*
+         * نحاول جعل مساحة التخزين أكثر ثباتًا للـPWA.
+         * المتصفح هو صاحب القرار النهائي، لذلك فشل هذا الطلب لا يكسر التطبيق.
+         */
+        try {
+          if ('storage' in navigator && 'persist' in navigator.storage) {
+            await navigator.storage.persist()
+          }
+        } catch {
+          // التخزين العادي يظل فعالًا حتى لو لم يمنح المتصفح persistent storage.
         }
       } catch (error) {
         console.error(
           'SAMEE3 Service Worker registration failed:',
-          error
+          error,
         )
       }
     }
 
-    // التسجيل مباشرة بدون انتظار window.load
-    registerServiceWorker()
+    void registerServiceWorker()
 
-    // عند انتقال التحكم للـ Service Worker،
-    // نعيد تحميل الصفحة مرة واحدة حتى تصبح الصفحة الحالية
-    // تحت تحكم الـ Service Worker ويتم تخزين ملفاتها.
     const handleControllerChange = () => {
-      if (isReloading) {
-        return
-      }
+      if (isReloading || disposed) return
 
       isReloading = true
       window.location.reload()
@@ -56,13 +65,14 @@ export default function ServiceWorkerRegistration() {
 
     navigator.serviceWorker.addEventListener(
       'controllerchange',
-      handleControllerChange
+      handleControllerChange,
     )
 
     return () => {
+      disposed = true
       navigator.serviceWorker.removeEventListener(
         'controllerchange',
-        handleControllerChange
+        handleControllerChange,
       )
     }
   }, [])
