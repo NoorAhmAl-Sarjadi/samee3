@@ -902,9 +902,184 @@ type Samee3AudioElement = HTMLAudioElement & {
   __samee3Timings?: AyahTiming[]
   __samee3LastPersist?: number
   __samee3PersistentHandlersInstalled?: boolean
+  __samee3ObjectUrl?: string
 }
 
 const SAMEE3_AUDIO_STORAGE_KEY = 'samee3_persistent_audio_v2'
+const SAMEE3_AUDIO_CACHE_NAME = 'samee3-audio-v2'
+const SAMEE3_TIMINGS_STORAGE_PREFIX = 'samee3_ayah_timing_v2:'
+
+function isBrowserOffline() {
+  return typeof navigator !== 'undefined' && navigator.onLine === false
+}
+
+function timingStorageKey(surahNumber: number, readId: number) {
+  return `${SAMEE3_TIMINGS_STORAGE_PREFIX}${readId}:${surahNumber}`
+}
+
+function readCachedAyahTimings(surahNumber: number, readId: number): AyahTiming[] {
+  if (!surahNumber || !readId || typeof localStorage === 'undefined') return []
+
+  try {
+    const raw = localStorage.getItem(timingStorageKey(surahNumber, readId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+
+    return parsed
+      .map((item: unknown) => {
+        const row = item as Record<string, unknown>
+        return {
+          ayah: Number(row?.ayah),
+          start_time: Number(row?.start_time),
+          end_time: Number(row?.end_time),
+        } satisfies AyahTiming
+      })
+      .filter(
+        (item: AyahTiming) =>
+          Number.isFinite(Number(item.ayah)) &&
+          Number(item.ayah) > 0 &&
+          Number.isFinite(Number(item.start_time)),
+      )
+      .sort(
+        (a: AyahTiming, b: AyahTiming) =>
+          Number(a.start_time) - Number(b.start_time),
+      )
+  } catch {
+    return []
+  }
+}
+
+function writeCachedAyahTimings(
+  surahNumber: number,
+  readId: number,
+  timings: AyahTiming[],
+) {
+  if (!surahNumber || !readId || !timings.length || typeof localStorage === 'undefined') return
+
+  try {
+    localStorage.setItem(
+      timingStorageKey(surahNumber, readId),
+      JSON.stringify(timings),
+    )
+  } catch {
+    // امتلاء localStorage لا يجب أن يمنع تشغيل التلاوة.
+  }
+}
+
+async function getCachedAudioSource(
+  networkUrl: string,
+): Promise<{ src: string; objectUrl: string | null } | null> {
+  if (!networkUrl || typeof caches === 'undefined') return null
+
+  try {
+    const cache = await caches.open(SAMEE3_AUDIO_CACHE_NAME)
+    const cached = await cache.match(networkUrl)
+    if (!cached) return null
+
+    /*
+     * إذا كانت الاستجابة قابلة للقراءة، نحولها إلى Blob URL.
+     * هذا هو المسار الأقوى لأنه لا يعتمد على بقاء Service Worker حيًا.
+     */
+    if (cached.type !== 'opaque') {
+      const blob = await cached.blob()
+      if (blob.size > 0) {
+        const objectUrl = URL.createObjectURL(blob)
+        return { src: objectUrl, objectUrl }
+      }
+    }
+
+    /*
+     * الاستجابة opaque لا يمكن للصفحة قراءة body الخاص بها،
+     * لكن Service Worker يستطيع تقديمها عند طلب networkUrl.
+     */
+    return { src: networkUrl, objectUrl: null }
+  } catch {
+    return null
+  }
+}
+
+async function cacheAudioForOffline(networkUrl: string): Promise<boolean> {
+  if (!networkUrl || /^blob:/i.test(networkUrl) || typeof caches === 'undefined') {
+    return false
+  }
+
+  try {
+    const cache = await caches.open(SAMEE3_AUDIO_CACHE_NAME)
+    const existing = await cache.match(networkUrl)
+    if (existing) return true
+
+    /*
+     * المسار الأول: استجابة CORS كاملة يمكن إعادة استخدامها كـBlob URL.
+     */
+    try {
+      const corsResponse = await fetch(networkUrl, {
+        method: 'GET',
+        cache: 'no-store',
+        mode: 'cors',
+        credentials: 'omit',
+      })
+
+      if (corsResponse.ok && corsResponse.status !== 206) {
+        await cache.put(networkUrl, corsResponse.clone())
+        return true
+      }
+    } catch {
+      // ننتقل إلى المسار الاحتياطي عبر Service Worker.
+    }
+
+    /*
+     * المسار الاحتياطي: opaque response. هذا مفيد للـService Worker
+     * عندما لا يسمح خادم الصوت بقراءة body من JavaScript.
+     */
+    try {
+      const opaqueResponse = await fetch(networkUrl, {
+        method: 'GET',
+        cache: 'no-store',
+        mode: 'no-cors',
+        credentials: 'omit',
+      })
+
+      if (opaqueResponse.type === 'opaque') {
+        await cache.put(networkUrl, opaqueResponse)
+        return true
+      }
+    } catch {
+      // لا نكسر التشغيل الطبيعي بسبب تعذر التخزين المسبق.
+    }
+  } catch {
+    return false
+  }
+
+  try {
+    const controller = navigator.serviceWorker?.controller
+    if (controller) {
+      controller.postMessage({
+        type: 'CACHE_AUDIO_URL',
+        url: networkUrl,
+      })
+    }
+  } catch {
+    // Service Worker غير جاهز؛ التشغيل الشبكي يظل طبيعيًا.
+  }
+
+  return false
+}
+
+async function releaseCachedObjectUrl(
+  audio: Samee3AudioElement | null,
+) {
+  const current = audio?.__samee3ObjectUrl
+  if (!current) return
+
+  try {
+    URL.revokeObjectURL(current)
+  } catch {
+    // تجاهل تحرير URL في المتصفحات القديمة.
+  }
+
+  if (audio) audio.__samee3ObjectUrl = undefined
+}
 
 function readPersistentAudioState(): PersistentAudioState | null {
   try {
@@ -3046,15 +3221,23 @@ export default function MushafPage() {
       return [] as AyahTiming[]
     }
 
+    const cachedTimings = readCachedAyahTimings(surahNumber, readId)
+    if (cachedTimings.length) {
+      ayahTimingsRef.current = cachedTimings
+    }
+
+    if (isBrowserOffline()) {
+      return cachedTimings
+    }
+
     try {
       const timingResponse = await fetch(
         `https://mp3quran.net/api/v3/ayat_timing?surah=${surahNumber}&read=${encodeURIComponent(String(readId))}`,
-        { cache: 'force-cache' },
+        { cache: 'no-store' },
       )
 
       if (!timingResponse.ok) {
-        ayahTimingsRef.current = []
-        return [] as AyahTiming[]
+        return cachedTimings
       }
 
       const payload = await timingResponse.json()
@@ -3083,11 +3266,15 @@ export default function MushafPage() {
         )
         .sort((a: AyahTiming, b: AyahTiming) => Number(a.start_time) - Number(b.start_time))
 
-      ayahTimingsRef.current = timings
-      return timings
+      if (timings.length) {
+        writeCachedAyahTimings(surahNumber, readId, timings)
+        ayahTimingsRef.current = timings
+        return timings
+      }
+
+      return cachedTimings
     } catch {
-      ayahTimingsRef.current = []
-      return [] as AyahTiming[]
+      return cachedTimings
     }
   }, [])
 
@@ -3328,27 +3515,20 @@ export default function MushafPage() {
       audioSurahRef.current = surahNumber
       let finalUrl = networkUrl
 
-      try {
-        if ('caches' in window) {
-          const cached = await caches.match(networkUrl)
-          if (cached) {
-            const blob = await cached.blob()
-
-            if (audioObjectUrlRef.current) {
-              URL.revokeObjectURL(audioObjectUrlRef.current)
-            }
-
-            const localUrl = URL.createObjectURL(blob)
-            audioObjectUrlRef.current = localUrl
-            finalUrl = localUrl
-          }
-        }
-      } catch {
-        // نستخدم المصدر الشبكي.
-      }
-
       const audio = audioRef.current as Samee3AudioElement | null
       if (!audio) return
+
+      const cachedSource = await getCachedAudioSource(networkUrl)
+      if (cachedSource) {
+        await releaseCachedObjectUrl(audio)
+        finalUrl = cachedSource.src
+        audio.__samee3ObjectUrl = cachedSource.objectUrl || undefined
+      } else if (isBrowserOffline()) {
+        setAudioError('السورة غير محفوظة للاستماع بدون إنترنت. شغّلها مرة واحدة أثناء الاتصال لحفظها تلقائيًا.')
+        triggerToast('هذه السورة غير محفوظة بعد للاستماع بدون إنترنت.')
+        setAudioLoading(false)
+        return
+      }
 
       audio.__samee3NetworkUrl = networkUrl
       audio.__samee3Surah = surahNumber
@@ -3473,6 +3653,22 @@ export default function MushafPage() {
       if (shouldPlay) {
         await audio.play()
       }
+
+      // لا نؤخر بداية التلاوة بسبب التحميل إلى Offline cache.
+      // التخزين يتم في الخلفية بعد بدء التشغيل.
+      if (!cachedSource) {
+        void cacheAudioForOffline(networkUrl)
+      }
+
+      // نجهز السورة التالية مسبقًا حتى تستمر التلاوة حتى بدون إنترنت.
+      const preferredIds = activeReciter?.surahIds?.length
+        ? activeReciter.surahIds
+        : SURAH_LIST.map((item) => item.id)
+      const nextSurah = nextContinuousSurah(surahNumber, preferredIds)
+      if (nextSurah !== surahNumber) {
+        const nextUrl = `${String(server).replace(/\/$/, '')}/${String(nextSurah).padStart(3, '0')}.mp3`
+        void cacheAudioForOffline(nextUrl)
+      }
     } catch (error) {
       console.error(error)
       const message = error instanceof Error ? error.message : ''
@@ -3580,6 +3776,8 @@ export default function MushafPage() {
     if (!audio.__samee3PersistentHandlersInstalled) {
       const persistentPlay = () => {
         persistAudioSnapshotFromElement(audio, true)
+        const networkUrl = audio.__samee3NetworkUrl || ''
+        if (networkUrl) void cacheAudioForOffline(networkUrl)
       }
 
       const persistentPause = () => {
@@ -3668,43 +3866,77 @@ export default function MushafPage() {
         audio.__samee3CurrentAyah = 1
         audio.__samee3Server = server.replace(/\/$/, '')
         audio.__samee3Timings = []
-        audio.src = nextUrl
-        audio.preload = 'auto'
-        audio.load()
-        persistAudioSnapshotFromElement(audio, true, nextPage)
 
-        void fetch(
-          `https://mp3quran.net/api/v3/ayat_timing?surah=${nextSurah}&read=${encodeURIComponent(String(audio.__samee3ReciterId || DEFAULT_RECITER_API_ID))}`,
-          { cache: 'force-cache' },
-        ).then(async (response) => {
-          if (!response.ok) return
-          const payload = await response.json()
-          const raw = Array.isArray(payload)
-            ? payload
-            : Array.isArray(payload?.ayat_timing)
-              ? payload.ayat_timing
-              : Array.isArray(payload?.data)
-                ? payload.data
-                : []
-          const timings = raw
-            .map((item: any) => ({
-              ayah: Number(item?.ayah ?? item?.ayah_number ?? item?.number ?? 0),
-              start_time: Number(item?.start_time ?? item?.start ?? 0),
-              end_time: Number(item?.end_time ?? item?.end ?? 0),
-            }))
-            .filter(
-              (item: AyahTiming) =>
-                Number(item.ayah) > 0 &&
-                Number.isFinite(Number(item.start_time)),
-            )
-            .sort(
-              (a: AyahTiming, b: AyahTiming) =>
-                Number(a.start_time) - Number(b.start_time),
-            )
-          if (timings.length) audio.__samee3Timings = timings
-        }).catch(() => {})
+        const playNextCached = async () => {
+          const cachedSource = await getCachedAudioSource(nextUrl)
 
-        void audio.play().catch(() => {})
+          if (!cachedSource && isBrowserOffline()) {
+            persistAudioSnapshotFromElement(audio, false, nextPage)
+            return
+          }
+
+          await releaseCachedObjectUrl(audio)
+
+          const sourceUrl = cachedSource?.src || nextUrl
+          audio.__samee3ObjectUrl = cachedSource?.objectUrl || undefined
+          audio.src = sourceUrl
+          audio.preload = 'auto'
+          audio.load()
+          persistAudioSnapshotFromElement(audio, true, nextPage)
+
+          const cachedTimings = readCachedAyahTimings(
+            nextSurah,
+            Number(audio.__samee3ReciterId || DEFAULT_RECITER_API_ID),
+          )
+          if (cachedTimings.length) {
+            audio.__samee3Timings = cachedTimings
+          }
+
+          void cacheAudioForOffline(nextUrl)
+          void audio.play().catch(() => {})
+
+          if (!isBrowserOffline()) {
+            void fetch(
+              `https://mp3quran.net/api/v3/ayat_timing?surah=${nextSurah}&read=${encodeURIComponent(String(audio.__samee3ReciterId || DEFAULT_RECITER_API_ID))}`,
+              { cache: 'no-store' },
+            ).then(async (response) => {
+              if (!response.ok) return
+              const payload = await response.json()
+              const raw = Array.isArray(payload)
+                ? payload
+                : Array.isArray(payload?.ayat_timing)
+                  ? payload.ayat_timing
+                  : Array.isArray(payload?.data)
+                    ? payload.data
+                    : []
+              const timings = raw
+                .map((item: any) => ({
+                  ayah: Number(item?.ayah ?? item?.ayah_number ?? item?.number ?? 0),
+                  start_time: Number(item?.start_time ?? item?.start ?? 0),
+                  end_time: Number(item?.end_time ?? item?.end ?? 0),
+                }))
+                .filter(
+                  (item: AyahTiming) =>
+                    Number(item.ayah) > 0 &&
+                    Number.isFinite(Number(item.start_time)),
+                )
+                .sort(
+                  (a: AyahTiming, b: AyahTiming) =>
+                    Number(a.start_time) - Number(b.start_time),
+                )
+              if (timings.length) {
+                writeCachedAyahTimings(
+                  nextSurah,
+                  Number(audio.__samee3ReciterId || DEFAULT_RECITER_API_ID),
+                  timings,
+                )
+                audio.__samee3Timings = timings
+              }
+            }).catch(() => {})
+          }
+        }
+
+        void playNextCached()
       }
 
       audio.addEventListener('play', persistentPlay)
@@ -3918,9 +4150,22 @@ export default function MushafPage() {
     audio.__samee3CurrentAyah = saved.ayah
     audio.__samee3Server = extractServerFromNetworkUrl(saved.networkUrl)
 
-    if (!sameLoadedAudio) {
-      audio.src = saved.networkUrl
+    const restoreAudioSource = async () => {
+      if (sameLoadedAudio) return true
+
+      const cachedSource = await getCachedAudioSource(saved.networkUrl)
+      if (!cachedSource && isBrowserOffline()) {
+        setAudioError('التلاوة المحفوظة غير متاحة بالكامل بدون اتصال على هذا الجهاز.')
+        setAudioDisplayUrl(saved.networkUrl)
+        return false
+      }
+
+      await releaseCachedObjectUrl(audio)
+      const sourceUrl = cachedSource?.src || saved.networkUrl
+      audio.__samee3ObjectUrl = cachedSource?.objectUrl || undefined
+      audio.src = sourceUrl
       audio.load()
+      return true
     }
 
     const restorePosition = () => {
@@ -3932,6 +4177,8 @@ export default function MushafPage() {
         // نبقي الموضع الذي استطاع المتصفح استعادته.
       }
     }
+
+    const restorePromise = restoreAudioSource()
 
     if (audio.readyState >= 1) restorePosition()
     else if (!sameLoadedAudio) {
@@ -4000,9 +4247,13 @@ export default function MushafPage() {
     // حالة عنصر Audio الحالية أهم من localStorage عند العودة لنفس العنصر.
     // هذا يمنع الضغط على إيقاف من مشغل الهاتف من التحول إلى تشغيل تلقائي قديم.
     setIsPlaying(!audio.paused)
-    if (saved.playing && audio.paused && !sameLoadedAudio) {
-      void audio.play().catch(() => {})
-    }
+    void restorePromise.then((ready) => {
+      if (!ready) return
+      setAudioDisplayUrl(saved.networkUrl)
+      if (saved.playing && audio.paused && !sameLoadedAudio) {
+        void audio.play().catch(() => {})
+      }
+    })
   }, [
     leftPageData,
     loadAyahTimings,
