@@ -788,10 +788,11 @@ export default function AudioPage() {
 
   useEffect(() => {
     if (!audioRef.current || !player) return
-    const currentAudio = audioRef.current!
-    const currentPlayer = player!
 
+    const currentAudio = audioRef.current
+    const currentPlayer = player
     let disposed = false
+    let playListener: (() => void) | null = null
 
     async function prepare() {
       try {
@@ -799,16 +800,22 @@ export default function AudioPage() {
         const offlineSource = await loadOfflineAudioUrl(currentPlayer)
         if (offlineSource) source = offlineSource
 
-        if (disposed) return
+        if (disposed || audioRef.current !== currentAudio) return
 
+        /*
+         * مهم: تغيير مستوى الصوت أو سرعة التشغيل لا يعيد تحميل الملف.
+         * إعادة src/load هنا كانت سبب توقف التلاوة وتهنيج المشغل عند
+         * تحريك شريط الصوت. هذه الـeffect تعمل فقط عند تغيير الملف نفسه.
+         */
+        currentAudio.pause()
         currentAudio.src = source
-        currentAudio.playbackRate = playbackRate
-        currentAudio.volume = isMuted ? 0 : volume
         currentAudio.load()
 
         const playNow = async () => {
+          playListener = null
           if (!pendingPlayRef.current || disposed) return
           pendingPlayRef.current = false
+
           try {
             await currentAudio.play()
           } catch (err) {
@@ -818,13 +825,16 @@ export default function AudioPage() {
           }
         }
 
-        if (currentAudio.readyState >= 3) {
+        if (currentAudio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
           await playNow()
         } else {
+          playListener = playNow
           currentAudio.addEventListener('canplay', playNow, { once: true })
         }
       } catch (err) {
+        if (disposed) return
         console.error('Player prepare error:', err)
+        setIsPlaying(false)
         notify('تعذر تجهيز الملف الصوتي.')
       }
     }
@@ -833,15 +843,12 @@ export default function AudioPage() {
 
     return () => {
       disposed = true
+      if (playListener) {
+        currentAudio.removeEventListener('canplay', playListener)
+        playListener = null
+      }
     }
-  }, [
-    isMuted,
-    loadOfflineAudioUrl,
-    notify,
-    playbackRate,
-    player,
-    volume,
-  ])
+  }, [loadOfflineAudioUrl, notify, player])
 
   useEffect(() => {
     const audio = audioRef.current
