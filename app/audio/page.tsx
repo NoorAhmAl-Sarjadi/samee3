@@ -130,6 +130,10 @@ type TabKey = 'quran' | 'ruqyah' | 'khutbah' | 'sunnah'
 const MP3QURAN_API = 'https://mp3quran.net/api/v3'
 const AUDIO_LIBRARY_API = '/api/audio-library'
 
+// نفس مخزن Cache Storage الذي يستخدمه مصحف سميع لحفظ تلاوات القرآن.
+// بهذا الشكل لا يُعاد تنزيل السورة إذا كان المستخدم قد حفظها من المصحف.
+const SAMEE3_QURAN_AUDIO_CACHE = 'samee3-audio-v2'
+
 const FAVORITE_RECITER_NAMES = [
   'مشاري راشد العفاسي',
   'محمود خليل الحصري',
@@ -429,6 +433,7 @@ export default function AudioPage() {
   const [repeatMode, setRepeatMode] = useState<'off' | 'one' | 'all'>('off')
 
   const [offlineKeys, setOfflineKeys] = useState<Set<string>>(new Set())
+  const [sharedQuranUrls, setSharedQuranUrls] = useState<Set<string>>(new Set())
   const [offlineBusyKey, setOfflineBusyKey] = useState<string | null>(null)
   const [zipBusy, setZipBusy] = useState(false)
 
@@ -449,6 +454,23 @@ export default function AudioPage() {
       setOfflineKeys(new Set(records.map((record) => record.key)))
     } catch (err) {
       console.warn('Offline index load failed:', err)
+    }
+
+    try {
+      if (typeof caches !== 'undefined') {
+        const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
+        const requests = await cache.keys()
+        setSharedQuranUrls(
+          new Set(
+            requests
+              .map((request) => request.url)
+              .filter((url) => /\.mp3(?:$|\?)/i.test(url))
+          )
+        )
+      }
+    } catch (err) {
+      console.warn('Shared Quran cache index load failed:', err)
+      setSharedQuranUrls(new Set())
     }
   }, [])
 
@@ -750,11 +772,70 @@ export default function AudioPage() {
     async (item: PlayerItem) => {
       if (!item.libraryId && !item.surahId) return null
 
-      const key =
-        item.kind === 'quran'
-          ? `quran:${item.reciterId}:${item.riwayaId}:${item.surahId}`
-          : `library:${item.libraryId}`
+      if (item.kind === 'quran') {
+        // أولًا: استخدم نفس Cache Storage الخاص بالمصحف، حتى لا نكرر التنزيل.
+        try {
+          if (typeof caches !== 'undefined') {
+            const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
+            const shared = await cache.match(item.audioUrl)
 
+            if (shared) {
+              if (shared.type !== 'opaque') {
+                const blob = await shared.blob()
+                if (blob.size > 0) {
+                  revokeObjectUrl()
+                  const objectUrl = URL.createObjectURL(blob)
+                  objectUrlRef.current = objectUrl
+                  return objectUrl
+                }
+              }
+
+              // الاستجابة opaque يمكن لـService Worker تقديمها من نفس الرابط.
+              return item.audioUrl
+            }
+          }
+        } catch (err) {
+          console.warn('Shared Quran cache read failed:', err)
+        }
+
+        // توافق مع التنزيلات القديمة الموجودة في IndexedDB ثم ننقلها للمخزن المشترك.
+        const key = `quran:${item.reciterId}:${item.riwayaId}:${item.surahId}`
+        const legacy = await getOffline(key)
+        if (!legacy) return null
+
+        try {
+          if (typeof caches !== 'undefined') {
+            const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
+            await cache.put(
+              item.audioUrl,
+              new Response(legacy.blob, {
+                status: 200,
+                headers: { 'Content-Type': legacy.blob.type || 'audio/mpeg' },
+              })
+            )
+            await deleteOffline(key)
+            setSharedQuranUrls((previous) => {
+              const next = new Set(previous)
+              next.add(item.audioUrl)
+              return next
+            })
+
+            revokeObjectUrl()
+            const objectUrl = URL.createObjectURL(legacy.blob)
+            objectUrlRef.current = objectUrl
+            return objectUrl
+          }
+        } catch (err) {
+          console.warn('Legacy Quran cache migration failed:', err)
+        }
+
+        revokeObjectUrl()
+        const objectUrl = URL.createObjectURL(legacy.blob)
+        objectUrlRef.current = objectUrl
+        return objectUrl
+      }
+
+      const key = `library:${item.libraryId}`
       const offline = await getOffline(key)
       if (!offline) return null
 
@@ -1125,6 +1206,74 @@ export default function AudioPage() {
     setOfflineBusyKey(key)
 
     try {
+      if (item.kind === 'quran') {
+        if (typeof caches === 'undefined') throw new Error('CACHE_UNAVAILABLE')
+
+        const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
+        const existing = await cache.match(item.audioUrl)
+        if (existing) {
+          await loadOfflineIndex()
+          notify('التلاوة محفوظة بالفعل على الجهاز — لن يتم تنزيلها مرة أخرى.')
+          return
+        }
+
+        let cached = false
+
+        try {
+          const response = await fetch(item.audioUrl, {
+            method: 'GET',
+            cache: 'no-store',
+            mode: 'cors',
+            credentials: 'omit',
+          })
+          if (response.ok && response.status !== 206) {
+            await cache.put(item.audioUrl, response.clone())
+            cached = true
+          }
+        } catch {
+          // نستخدم Service Worker عند منع CORS.
+        }
+
+        if (!cached) {
+          try {
+            const response = await fetch(item.audioUrl, {
+              method: 'GET',
+              cache: 'no-store',
+              mode: 'no-cors',
+              credentials: 'omit',
+            })
+            if (response.type === 'opaque') {
+              await cache.put(item.audioUrl, response.clone())
+              cached = true
+            }
+          } catch {
+            // نجرّب إرسال الطلب للـService Worker.
+          }
+        }
+
+        if (!cached && navigator.serviceWorker?.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'CACHE_AUDIO_URL',
+            url: item.audioUrl,
+          })
+          await new Promise((resolve) => window.setTimeout(resolve, 700))
+          const verified = await cache.match(item.audioUrl)
+          cached = Boolean(verified)
+        }
+
+        if (!cached) throw new Error('QURAN_CACHE_FAILED')
+
+        setSharedQuranUrls((previous) => {
+          const next = new Set(previous)
+          next.add(item.audioUrl)
+          return next
+        })
+        await loadOfflineIndex()
+        notify('تم حفظ التلاوة على الجهاز للاستماع دون إنترنت.')
+        return
+      }
+
+      // المواد غير القرآنية تبقى في IndexedDB الخاص بالمكتبة.
       const response = await fetch(item.audioUrl, { mode: 'cors' })
       if (!response.ok) throw new Error('offline fetch failed')
 
@@ -1143,7 +1292,9 @@ export default function AudioPage() {
     } catch (err) {
       console.error('Offline save failed:', err)
       notify(
-        'تعذر الحفظ دون إنترنت. غالبًا يمنع مصدر الصوت القراءة عبر CORS.'
+        item.kind === 'quran'
+          ? 'تعذر حفظ التلاوة دون إنترنت. تأكد من اتصالك ثم حاول مرة أخرى.'
+          : 'تعذر الحفظ دون إنترنت. غالبًا يمنع مصدر الصوت القراءة عبر CORS.'
       )
     } finally {
       setOfflineBusyKey(null)
@@ -1151,9 +1302,23 @@ export default function AudioPage() {
   }
 
   const removeOfflinePlayer = async (item: PlayerItem) => {
-    const key = offlineKeyFor(item)
     try {
-      await deleteOffline(key)
+      if (item.kind === 'quran') {
+        if (typeof caches !== 'undefined') {
+          const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
+          await cache.delete(item.audioUrl)
+        }
+        // حذف أي نسخة قديمة من IndexedDB أيضًا.
+        await deleteOffline(offlineKeyFor(item)).catch(() => {})
+        setSharedQuranUrls((previous) => {
+          const next = new Set(previous)
+          next.delete(item.audioUrl)
+          return next
+        })
+      } else {
+        await deleteOffline(offlineKeyFor(item))
+      }
+
       await loadOfflineIndex()
       notify('تم حذف النسخة المحفوظة من الجهاز.')
     } catch (err) {
@@ -1253,43 +1418,79 @@ export default function AudioPage() {
     setQuranZipProgress(0)
 
     try {
+      if (typeof caches === 'undefined') throw new Error('CACHE_UNAVAILABLE')
+
+      const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
       const total = availableSurahs.length
       let completed = 0
 
       for (const surah of availableSurahs) {
+        const url = `${selectedMoshaf.server}${pad3(surah.id)}.mp3`
         const key = `quran:${selectedReciter.id}:${selectedRiwaya.id}:${surah.id}`
 
-        if (offlineKeys.has(key)) {
-          completed += 1
-          setQuranZipProgress(Math.round((completed / total) * 100))
-          continue
+        // نفس المخزن المشترك: ما حفظه المصحف أو المكتبة لا يعاد تنزيله.
+        let existing = await cache.match(url)
+
+        if (!existing) {
+          // نقل أي نسخة قديمة من IndexedDB إلى Cache Storage بدل إعادة تنزيلها.
+          const legacy = await getOffline(key)
+          if (legacy) {
+            await cache.put(
+              url,
+              new Response(legacy.blob, {
+                status: 200,
+                headers: { 'Content-Type': legacy.blob.type || 'audio/mpeg' },
+              })
+            )
+            await deleteOffline(key).catch(() => {})
+            existing = await cache.match(url)
+          }
         }
 
-        const url = `${selectedMoshaf.server}${pad3(surah.id)}.mp3`
-        const response = await fetch(url, { mode: 'cors' })
+        if (!existing) {
+          try {
+            const response = await fetch(url, {
+              method: 'GET',
+              cache: 'no-store',
+              mode: 'cors',
+              credentials: 'omit',
+            })
+            if (response.ok && response.status !== 206) {
+              await cache.put(url, response.clone())
+              existing = response
+            }
+          } catch {
+            // حاول Service Worker في الخطوة التالية.
+          }
+        }
 
-        if (response.ok) {
-          const blob = await response.blob()
+        if (!existing && navigator.serviceWorker?.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'CACHE_AUDIO_URL',
+            url,
+          })
+          await new Promise((resolve) => window.setTimeout(resolve, 700))
+          existing = await cache.match(url)
+        }
 
-          await putOffline({
-            key,
-            title: surah.name,
-            subtitle: `${selectedReciter.name} — ${selectedRiwaya.name}`,
-            blob,
-            savedAt: Date.now(),
+        if (existing) {
+          setSharedQuranUrls((previous) => {
+            const next = new Set(previous)
+            next.add(url)
+            return next
           })
         }
 
         completed += 1
-        setQuranZipProgress(Math.round((completed / total) * 100))
+        setQuranZipProgress(Math.round((completed / Math.max(total, 1)) * 100))
       }
 
       await loadOfflineIndex()
-      notify('تم حفظ السور المتاحة على الجهاز للاستماع دون إنترنت.')
+      notify('تم حفظ السور المتاحة في المخزن المشترك — ولن تُنزّل مرة أخرى من المصحف.')
     } catch (err) {
       console.error('Whole Quran offline error:', err)
       notify(
-        'تعذر حفظ المصحف كاملًا. قد تمنع بعض خوادم الصوت الحفظ البرمجي.'
+        'تعذر حفظ المصحف كاملًا. قد يمنع مصدر الصوت الحفظ البرمجي.'
       )
     } finally {
       setZipBusy(false)
@@ -1330,7 +1531,11 @@ export default function AudioPage() {
     sunnah: 'كتب الحديث والشروح والسلاسل الصوتية المتاحة في المصدر.',
   }
 
-  const currentOffline = player ? offlineKeys.has(offlineKeyFor(player)) : false
+  const currentOffline = player
+    ? player.kind === 'quran'
+      ? offlineKeys.has(offlineKeyFor(player)) || sharedQuranUrls.has(player.audioUrl)
+      : offlineKeys.has(offlineKeyFor(player))
+    : false
 
   return (
     <div
@@ -2155,7 +2360,7 @@ export default function AudioPage() {
                             ? offlineKeyFor(currentItem)
                             : ''
 
-                          const saved = !!currentKey && offlineKeys.has(currentKey)
+                          const saved = !!currentKey && (offlineKeys.has(currentKey) || sharedQuranUrls.has(currentItem?.audioUrl || ''))
                           const busy = offlineBusyKey === currentKey
 
                           return (
