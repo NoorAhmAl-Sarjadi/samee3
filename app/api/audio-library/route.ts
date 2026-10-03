@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
-export const runtime = 'nodejs'
 
 type Section = 'ruqyah' | 'khutbah' | 'sunnah'
 
@@ -30,77 +29,30 @@ type Book = {
   source: string
 }
 
-const ISLAMWAY_BASE = 'https://ar.islamway.net'
+const SERMONS_API = 'https://sermons.islamic.network/api'
 const HADITH_API = 'https://api.hadith.to/v1'
 const ISLAMHOUSE_API = 'https://api.islamhouse.com/v1'
 const ISLAMHOUSE_API_KEY = process.env.ISLAMHOUSE_API_KEY || ''
 
-const ISLAMWAY_PAGE_COUNT = 3
-const ISLAMWAY_MAX_KHUTBAHS = 900
-const ISLAMWAY_REQUEST_TIMEOUT = 12000
+const KHUTBAH_FIRST_YEAR = 2015
+const KHUTBAH_MAX_ITEMS = 1200
+const KHUTBAH_REQUEST_TIMEOUT = 12000
+const ISLAMHOUSE_KHUTBAH_PAGES = 12
 
-/**
- * مكتبة الخطب والمحاضرات في سميع تعتمد هنا على مصادر الشيوخ في طريق الإسلام.
- * لا نعيد استضافة الصوت؛ نعيد رابط MP3 المنشور في المصدر نفسه.
- *
- * أضفنا مجموعة كبيرة من المشايخ الآن، بدل أرشيف خطب عام تابع لجهة واحدة.
- * المعرّفات الآتية هي معرّفات صفحات الشيوخ على طريق الإسلام.
- */
-const ISLAMWAY_SCHOLARS = [
-  {
-    id: '39',
-    name: 'عبد الحميد كشك',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/39`,
-  },
-  {
-    id: '28',
-    name: 'محمد حسان',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/28`,
-  },
-  {
-    id: '32',
-    name: 'أبو إسحاق الحويني',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/32`,
-  },
-  {
-    id: '76',
-    name: 'محمد حسين يعقوب',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/76`,
-  },
-  {
-    id: '16',
-    name: 'عبد العزيز بن باز',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/16`,
-  },
-  {
-    id: '50',
-    name: 'محمد بن صالح العثيمين',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/50`,
-  },
-  {
-    id: '125',
-    name: 'محمد بن عبد الرحمن العريفي',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/125`,
-  },
-  {
-    id: '323',
-    name: 'صالح بن عواد المغامسي',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/323`,
-  },
-  {
-    id: '99',
-    name: 'صالح بن فوزان الفوزان',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/99`,
-  },
-  {
-    id: '114',
-    name: 'محمود المصري',
-    sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/114`,
-  },
-] as const
+const ARABIC_KHUTBAH_TERMS = [
+  'خطبة',
+  'الجمعة',
+  'خطب الجمعة',
+  'خطبة الجمعة',
+  'خطيب',
+  'المنبر',
+  'عيد الفطر',
+  'عيد الاضحى',
+]
 
 /*
- * تسجيلات رقية بشرية منشورة مباشرة من Quran TV.
+ * Quran TV يعرض حاليًا 10 تسجيلات للرقية الشرعية مع تشغيل وتنزيل من المصدر.
+ * الروابط تستخدم الملفات المنشورة في المصدر نفسه ولا تعيد استضافة الصوت داخل سميع.
  */
 const RUQYAH_ITEMS: LibraryItem[] = [
   ['011', 'إدريس أبكر'],
@@ -123,295 +75,7 @@ const RUQYAH_ITEMS: LibraryItem[] = [
   sourceName: 'Quran TV',
   sourceUrl: 'https://quran.tv/prs/roqya/',
   downloadable: true,
-  isSynthetic: false,
 }))
-
-function decodeHtml(value: string) {
-  return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-}
-
-function stripHtml(value: string) {
-  return decodeHtml(
-    value
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-  ).trim()
-}
-
-function normalizeArabicText(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[ًٌٍَُِّْـ]/g, '')
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/ى/g, 'ي')
-    .replace(/ؤ/g, 'و')
-    .replace(/ئ/g, 'ي')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function normalizeAudioUrl(url: string) {
-  return decodeHtml(url)
-    .replace(/\\u0026/g, '&')
-    .replace(/\\\//g, '/')
-    .replace(/&amp;/gi, '&')
-    .replace(/\s+/g, '')
-}
-
-function isAllowedAudioUrl(url: string) {
-  if (!/^https?:\/\//i.test(url)) return false
-  if (!/\.(?:mp3|m4a|ogg|wav|aac|opus)(?:\?|$)/i.test(url)) return false
-  return /(?:islamway\.net|media\.islamway\.net|download\.media\.islamway\.net)/i.test(url)
-}
-
-function absoluteIslamwayUrl(value: string) {
-  if (!value) return ''
-  if (/^https?:\/\//i.test(value)) return value
-  if (value.startsWith('//')) return `https:${value}`
-  if (value.startsWith('/')) return `${ISLAMWAY_BASE}${value}`
-  return `${ISLAMWAY_BASE}/${value}`
-}
-
-function inferLessonTitle(html: string, audioStart: number) {
-  const before = html.slice(Math.max(0, audioStart - 18000), audioStart)
-
-  const candidates = [
-    /<h1[^>]*>([\s\S]*?)<\/h1>/gi,
-    /<h2[^>]*>([\s\S]*?)<\/h2>/gi,
-    /<h3[^>]*>([\s\S]*?)<\/h3>/gi,
-    /<a[^>]+href=["'](?:https?:\/\/)?ar\.islamway\.net\/lesson\/[^"']+["'][^>]*>([\s\S]*?)<\/a>/gi,
-    /<a[^>]+href=["']\/lesson\/[^"']+["'][^>]*>([\s\S]*?)<\/a>/gi,
-  ]
-
-  let best = ''
-
-  for (const pattern of candidates) {
-    let match: RegExpExecArray | null
-    while ((match = pattern.exec(before))) {
-      const text = stripHtml(match[1] || '')
-      if (text && text.length >= 3 && text.length <= 240) best = text
-    }
-    if (best) break
-  }
-
-  if (!best) {
-    const chunk = before.slice(Math.max(0, before.length - 4000))
-    const strongMatches = Array.from(
-      chunk.matchAll(/<(?:strong|b)[^>]*>([\s\S]*?)<\/(?:strong|b)>/gi)
-    )
-    for (const match of strongMatches) {
-      const text = stripHtml(match[1] || '')
-      if (text && text.length >= 3 && text.length <= 220) best = text
-    }
-  }
-
-  return best
-}
-
-function inferLessonPageUrl(html: string, audioStart: number) {
-  const before = html.slice(Math.max(0, audioStart - 14000), audioStart)
-  const matches = Array.from(
-    before.matchAll(
-      /href=["'](https?:\/\/ar\.islamway\.net\/lesson\/[^"'#]+|\/lesson\/[^"'#]+)["']/gi
-    )
-  )
-  if (!matches.length) return ''
-  return absoluteIslamwayUrl(matches[matches.length - 1][1])
-}
-
-function hashString(value: string) {
-  let hash = 0
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(index)
-    hash |= 0
-  }
-  return Math.abs(hash).toString(36)
-}
-
-function parseIslamwayScholarPage(
-  html: string,
-  scholar: (typeof ISLAMWAY_SCHOLARS)[number],
-  pageUrl: string
-) {
-  const items: LibraryItem[] = []
-  const seen = new Set<string>()
-
-  const urlPattern = /(?:https?:)?\/\/(?:download\.media\.islamway\.net|media\.islamway\.net)[^\s"'<>]+\.(?:mp3|m4a|ogg|wav|aac|opus)(?:\?[^\s"'<>]+)?/gi
-
-  for (const match of html.matchAll(urlPattern)) {
-    const raw = normalizeAudioUrl(match[0])
-    if (!isAllowedAudioUrl(raw)) continue
-    if (seen.has(raw)) continue
-    seen.add(raw)
-
-    const index = match.index ?? 0
-    const title = inferLessonTitle(html, index)
-    const lessonUrl = inferLessonPageUrl(html, index)
-
-    items.push({
-      id: `islamway-${scholar.id}-${hashString(raw)}`,
-      title: title || `${scholar.name} — مادة صوتية`,
-      subtitle: 'خطب ومحاضرات ودروس',
-      audioUrl: raw,
-      authorName: scholar.name,
-      section: 'khutbah',
-      sourceName: 'طريق الإسلام',
-      sourceUrl: lessonUrl || pageUrl || scholar.sourceUrl,
-      downloadable: true,
-      isSynthetic: false,
-    })
-  }
-
-  return items
-}
-
-function unique<T extends { id: string }>(items: T[]) {
-  const seen = new Set<string>()
-  return items.filter((item) => {
-    if (seen.has(item.id)) return false
-    seen.add(item.id)
-    return true
-  })
-}
-
-function uniqueStrings(items: string[]) {
-  return Array.from(new Set(items))
-}
-
-function textValue(value: unknown) {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function truncateText(value: string, max = 180) {
-  const normalized = value.replace(/\s+/g, ' ').trim()
-  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized
-}
-
-function extractStrings(value: unknown): string[] {
-  if (typeof value === 'string') {
-    const normalized = value
-      .replace(/\\u0026/g, '&')
-      .replace(/\\\//g, '/')
-
-    return (
-      normalized.match(
-        /https?:\/\/[^\s"'<>]+\.(?:mp3|m4a|ogg|wav|aac|opus)(?:\?[^\s"'<>]*)?/gi
-      ) || []
-    )
-  }
-  if (Array.isArray(value)) return value.flatMap(extractStrings)
-  if (value && typeof value === 'object') return Object.values(value).flatMap(extractStrings)
-  return []
-}
-
-async function fetchWithTimeout(
-  url: string,
-  options: RequestInit = {},
-  timeoutMs = ISLAMWAY_REQUEST_TIMEOUT
-) {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; SAMEE3 Audio Library)',
-        Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-        ...(options.headers || {}),
-      },
-    })
-  } finally {
-    clearTimeout(timeoutId)
-  }
-}
-
-async function fetchJson<T>(url: string, options?: RequestInit & { next?: { revalidate?: number } }, timeoutMs = ISLAMWAY_REQUEST_TIMEOUT): Promise<T> {
-  const response = await fetchWithTimeout(
-    url,
-    {
-      ...options,
-      cache: options?.next?.revalidate ? 'force-cache' : 'no-store',
-      next: options?.next,
-    },
-    timeoutMs
-  )
-
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.json() as Promise<T>
-}
-
-async function fetchHtml(url: string) {
-  const response = await fetchWithTimeout(
-    url,
-    { cache: 'force-cache', next: { revalidate: 3600 } } as RequestInit & {
-      next?: { revalidate?: number }
-    },
-    ISLAMWAY_REQUEST_TIMEOUT
-  )
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.text()
-}
-
-async function loadKhutbahScholars() {
-  return ISLAMWAY_SCHOLARS.map((scholar) => ({
-    id: scholar.id,
-    name: scholar.name,
-    sourceUrl: scholar.sourceUrl,
-  }))
-}
-
-async function loadKhutbahsForScholar(scholar: (typeof ISLAMWAY_SCHOLARS)[number]) {
-  const urls = [
-    `${scholar.sourceUrl}`,
-    ...Array.from(
-      { length: ISLAMWAY_PAGE_COUNT - 1 },
-      (_, index) => `${scholar.sourceUrl}?page=${index + 2}`
-    ),
-  ]
-
-  const responses = await Promise.allSettled(
-    urls.map((url) => fetchHtml(url))
-  )
-
-  const items: LibraryItem[] = []
-  responses.forEach((result, index) => {
-    if (result.status !== 'fulfilled') return
-    items.push(...parseIslamwayScholarPage(result.value, scholar, urls[index]))
-  })
-
-  return unique(items)
-}
-
-async function loadKhutbahs() {
-  const scholarResults = await Promise.allSettled(
-    ISLAMWAY_SCHOLARS.map((scholar) => loadKhutbahsForScholar(scholar))
-  )
-
-  const items: LibraryItem[] = []
-  scholarResults.forEach((result) => {
-    if (result.status === 'fulfilled') items.push(...result.value)
-  })
-
-  return unique(items)
-    .filter(
-      (item) =>
-        item.section === 'khutbah' &&
-        item.audioUrl &&
-        !item.isSynthetic
-    )
-    .slice(0, ISLAMWAY_MAX_KHUTBAHS)
-}
 
 const HADITH_BOOK_NAMES: Record<string, string> = {
   bukhari: 'صحيح البخاري',
@@ -586,7 +250,7 @@ function sermonTimestamp(item: LibraryItem) {
 async function fetchJson<T>(
   url: string,
   options?: RequestInit & { next?: { revalidate?: number } },
-  timeoutMs = ISLAMWAY_REQUEST_TIMEOUT
+  timeoutMs = KHUTBAH_REQUEST_TIMEOUT
 ): Promise<T> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -608,6 +272,116 @@ async function fetchJson<T>(
   } finally {
     clearTimeout(timeoutId)
   }
+}
+
+async function loadKhutbahs() {
+  const currentYear = new Date().getUTCFullYear()
+  const years = Array.from(
+    { length: Math.max(0, currentYear - KHUTBAH_FIRST_YEAR + 1) },
+    (_, index) => currentYear - index
+  )
+
+  const urls = years.map(
+    (year) => `${SERMONS_API}/uae-awqaf/${year}/friday.json`
+  )
+
+  const responses = await Promise.allSettled(
+    urls.map((url) =>
+      fetchJson<unknown>(url, { next: { revalidate: 3600 } })
+    )
+  )
+
+  const networkItems: LibraryItem[] = []
+
+  responses.forEach((result) => {
+    if (result.status === 'fulfilled') {
+      walkSermons(result.value, '', '', networkItems)
+    }
+  })
+
+  const islamHouseItems = await loadIslamHouseKhutbahs()
+
+  return unique([...networkItems, ...islamHouseItems])
+    .filter((item) => item.audioUrl && item.section === 'khutbah')
+    .sort((a, b) => sermonTimestamp(b) - sermonTimestamp(a))
+    .slice(0, KHUTBAH_MAX_ITEMS)
+}
+
+async function loadIslamHouseKhutbahs(): Promise<LibraryItem[]> {
+  if (!ISLAMHOUSE_API_KEY) return []
+
+  const pages = Array.from(
+    { length: ISLAMHOUSE_KHUTBAH_PAGES },
+    (_, index) => index + 1
+  )
+
+  const responses = await Promise.allSettled(
+    pages.map((page) =>
+      fetchJson<{ data?: unknown[] }>(
+        `${ISLAMHOUSE_API}/${encodeURIComponent(ISLAMHOUSE_API_KEY)}/main/audios/ar/showall/${page}/50/json/`,
+        { next: { revalidate: 3600 } }
+      )
+    )
+  )
+
+  const items: LibraryItem[] = []
+
+  for (const result of responses) {
+    if (result.status !== 'fulfilled') continue
+
+    const records = Array.isArray(result.value.data) ? result.value.data : []
+
+    for (const raw of records as Array<Record<string, unknown>>) {
+      const title = textValue(raw.title)
+      const description = textValue(raw.description)
+      const combined = normalizeSearch(`${title} ${description}`)
+
+      if (
+        !ARABIC_KHUTBAH_TERMS.some((term) =>
+          combined.includes(normalizeSearch(term))
+        )
+      ) {
+        continue
+      }
+
+      const preparedBy = Array.isArray(raw.prepared_by)
+        ? (raw.prepared_by as Array<Record<string, unknown>>)
+        : []
+
+      const author =
+        textValue(preparedBy.find((entry) => entry.kind === 'author')?.title) ||
+        textValue(preparedBy.find((entry) => entry.type === 'author')?.title) ||
+        textValue(preparedBy[0]?.title) ||
+        'إسلام هاوس'
+
+      const attachments = Array.isArray(raw.attachments)
+        ? (raw.attachments as Array<Record<string, unknown>>)
+        : []
+
+      attachments.forEach((attachment, index) => {
+        const url = textValue(attachment.url)
+        if (!/\.(mp3|m4a|ogg|wav|aac|opus)(\?|$)/i.test(url)) return
+
+        items.push({
+          id: `islamhouse-khutbah-${String(raw.id ?? 'item')}-${String(attachment.order ?? index + 1)}`,
+          title: textValue(attachment.description) || title || 'خطبة جمعة',
+          subtitle: 'خطبة جمعة',
+          audioUrl: url,
+          authorName: author,
+          section: 'khutbah',
+          sourceName: 'IslamHouse',
+          sourceUrl:
+            textValue(raw.api_url) ||
+            'https://islamhouse.com/ar/category/144409/audios/',
+          duration: Number(attachment.duration) || undefined,
+          downloadable: true,
+          isSynthetic: false,
+        })
+      })
+    }
+  }
+
+  return unique(items)
 }
 
 async function loadHadithBooks(): Promise<Book[]> {
@@ -757,15 +531,24 @@ export async function GET(request: Request) {
         section,
         items,
         total: items.length,
-        scholars: ISLAMWAY_SCHOLARS.map((scholar) => ({
-          id: scholar.id,
-          name: scholar.name,
-          sourceUrl: scholar.sourceUrl,
-        })),
-        source: {
-          name: 'طريق الإسلام',
-          url: ISLAMWAY_BASE,
-          note: 'الملفات الصوتية تُستخدم من الروابط المنشورة في المصدر نفسه ولا تُعاد استضافتها داخل سميع.',
+        sources: {
+          primary: {
+            name: 'Sermons by Islamic Network — أوقاف الإمارات',
+            url: 'https://sermons.islamic.network/uae-awqaf/',
+            coverage: '2015–الحاضر',
+          },
+          secondary: ISLAMHOUSE_API_KEY
+            ? {
+                name: 'IslamHouse',
+                url: 'https://islamhouse.com/ar/category/144409/audios/',
+                enabled: true,
+              }
+            : {
+                name: 'IslamHouse',
+                url: 'https://islamhouse.com/ar/category/144409/audios/',
+                enabled: false,
+                reason: 'يتطلب مفتاح API خاصًا بالحساب.',
+              },
         },
       })
     }
