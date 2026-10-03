@@ -543,10 +543,15 @@ export default function AudioPage() {
 
       try {
         const params = new URLSearchParams({ section: tab })
-        if (bookId) params.set('book', bookId)
+
+        // في السنة يكون book هو معرف الكتاب، وفي الخطب نستخدمه كمعرف الشيخ
+        // حتى يبقى توقيع الدالة بسيطًا ومتوافقًا مع بقية أقسام المكتبة.
         if (bookId && tab === 'sunnah') {
+          params.set('book', bookId)
           params.set('start', String(start))
           params.set('limit', '50')
+        } else if (bookId && tab === 'khutbah') {
+          params.set('scholar', bookId)
         }
 
         const result = await fetchJson<{
@@ -2778,6 +2783,8 @@ export default function AudioPage() {
                                     onClick={() => {
                                       setSelectedKhutbahScholarId(scholar.id)
                                       setSearch('')
+                                      setLibraryItems([])
+                                      void loadLibraryContent('khutbah', scholar.id, 1, false)
                                     }}
                                     className={`rounded-3xl border p-4 text-right transition-all ${
                                       active
