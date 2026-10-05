@@ -123,11 +123,22 @@ const SUNNAH_SEARCH_TERMS = [
   'كتاب السنة',
 ]
 
-function unique<T extends { id: string }>(items: T[]): T[] {
+function unique<T extends { id: string }>(items: T[]): T[]
+function unique<T extends { url: string }>(items: T[]): T[]
+function unique<T>(items: T[]): T[] {
   const seen = new Set<string>()
+
   return items.filter((item) => {
-    if (seen.has(item.id)) return false
-    seen.add(item.id)
+    const record = item as { id?: unknown; url?: unknown }
+    const key =
+      typeof record.id === 'string'
+        ? `id:${record.id}`
+        : typeof record.url === 'string'
+          ? `url:${record.url}`
+          : JSON.stringify(item)
+
+    if (seen.has(key)) return false
+    seen.add(key)
     return true
   })
 }
