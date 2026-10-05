@@ -1439,6 +1439,8 @@ export default function MushafPage() {
   const [pageDragX, setPageDragX] = useState(0)
   const [pageDragY, setPageDragY] = useState(0)
   const [isPageDragging, setIsPageDragging] = useState(false)
+  const [pageTurnProgress, setPageTurnProgress] = useState(0)
+  const [pageTurnDirection, setPageTurnDirection] = useState<'next' | 'prev' | null>(null)
   const [turnPreview, setTurnPreview] = useState<{
     page: number
     data: PageData | null
@@ -2470,17 +2472,20 @@ export default function MushafPage() {
         ? Number(options?.startX)
         : 0
 
-      const finalX = direction === 'next'
-        ? Math.max(window.innerWidth + 24, 560)
-        : -Math.max(window.innerWidth + 24, 560)
+      // يبدأ التقليب من موضع الإصبع الحالي، ثم تتحول الصفحة إلى
+      // ورقة حقيقية تدور حول الحافة بدل خروجها خطيًا من الشاشة.
+      const initialProgress = Math.min(0.94, Math.max(0, Math.abs(startX) / Math.max(1, window.innerWidth * 0.72)))
 
+      setPageTurnDirection(direction)
+      setPageTurnProgress(Math.max(initialProgress, 0.018))
+      setPageDragX(startX)
       setIsPageDragging(false)
       setPageDragY(0)
-      setPageSettleX(startX)
+      setPageSettleX(0)
 
       window.requestAnimationFrame(() => {
         window.requestAnimationFrame(() => {
-          setPageSettleX(finalX)
+          setPageTurnProgress(1)
         })
       })
 
@@ -2499,11 +2504,13 @@ export default function MushafPage() {
 
       window.setTimeout(() => {
         router.push(`/mushaf?${params.toString()}`)
-      }, 240)
+      }, 560)
 
       window.setTimeout(() => {
         if (pendingNavigationPageRef.current !== nextPage) return
         if (pageNumber !== nextPage) return
+        setPageTurnProgress(0)
+        setPageTurnDirection(null)
         setPageSettleX(0)
         setPageDragX(0)
         setPageDragY(0)
@@ -2511,7 +2518,7 @@ export default function MushafPage() {
         turnPreviewPageRef.current = null
         pendingNavigationPageRef.current = null
         navigatingRef.current = false
-      }, 1600)
+      }, 1100)
     }
 
     void run()
@@ -2519,10 +2526,10 @@ export default function MushafPage() {
 
   /*
    * التقليب بالماوس/اللمس باستخدام Pointer Events.
-   * الاتجاه المطلوب:
+   * الصفحة تتحرك مع الإصبع ثم تنطوي كطبقة ورقية حول الحافة،
+   * مع ظل داخلي خفيف وإحساس ورقي قريب من تقليب صفحات المصحف الحقيقي.
    * سحب لليمين = الصفحة التالية.
    * سحب لليسار = الصفحة السابقة.
-   * لا توجد زاوية 3D ولا دوران ولا ظلال أثناء السحب.
    */
   const beginPagePointer = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -2558,6 +2565,8 @@ export default function MushafPage() {
       setPageDragX(0)
       setPageDragY(0)
       setPageSettleX(0)
+      setPageTurnProgress(0)
+      setPageTurnDirection(null)
 
       /*
        * لا نستخدم pointer capture عندما يبدأ اللمس فوق آية.
@@ -2600,10 +2609,13 @@ export default function MushafPage() {
 
         const maxDrag = Math.min(window.innerWidth * 0.98, 900)
         const limitedX = Math.max(-maxDrag, Math.min(maxDrag, deltaX))
+        const turnProgress = Math.min(0.94, Math.abs(deltaX) / Math.max(1, window.innerWidth * 0.72))
 
         setIsPageDragging(true)
         setPageDragX(limitedX)
         setPageDragY(0)
+        setPageTurnProgress(turnProgress)
+        setPageTurnDirection(deltaX >= 0 ? 'next' : 'prev')
 
         const basePage = isDesktop ? desktopRightPage : pageNumber
         const targetPage = deltaX > 0
@@ -2658,6 +2670,8 @@ export default function MushafPage() {
         setIsPageDragging(false)
         setPageDragX(0)
         setPageDragY(0)
+        setPageTurnProgress(0)
+        setPageTurnDirection(null)
         return
       }
 
@@ -2671,6 +2685,8 @@ export default function MushafPage() {
 
       if (targetPage === basePage) {
         setPageDragX(0)
+        setPageTurnProgress(0)
+        setPageTurnDirection(null)
         return
       }
 
@@ -2704,6 +2720,8 @@ export default function MushafPage() {
       setPageDragX(0)
       setPageDragY(0)
       setPageSettleX(0)
+      setPageTurnProgress(0)
+      setPageTurnDirection(null)
       setTurnPreview(null)
     },
     [],
@@ -4999,6 +5017,19 @@ export default function MushafPage() {
   const rightMeta = pageMeta(isDesktop ? rightPageData : pageData, desktopRightPage, (isDesktop ? rightPageData : pageData)?.ayahs?.[0]?.surah?.number || currentSurahNumber)
   const leftMeta = pageMeta(leftPageData, desktopLeftPage || pageNumber + 1, leftSurahNumber)
 
+  const visualTurnProgress = Math.max(0, Math.min(1, pageTurnProgress))
+  const visualTurnDirection = pageTurnDirection || (pageDragX >= 0 ? 'next' : 'prev')
+  const easedTurn = 1 - Math.pow(1 - visualTurnProgress, 1.72)
+  const turnAngle = 78 * easedTurn
+  const turnLift = Math.sin(easedTurn * Math.PI) * 10
+  const turnDepth = 2 + easedTurn * 18
+  const pageTurnStyle: React.CSSProperties = {
+    '--samee3-turn-progress': String(visualTurnProgress),
+    '--samee3-turn-angle': `${visualTurnDirection === 'next' ? -turnAngle : turnAngle}deg`,
+    '--samee3-turn-lift': `${turnLift}px`,
+    '--samee3-turn-depth': `${turnDepth}px`,
+  } as React.CSSProperties
+
   return (
     <main
       dir="rtl"
@@ -5057,10 +5088,6 @@ export default function MushafPage() {
 
             <div
               className={`samee3-turn-current ${isPageDragging ? 'is-dragging' : ''}`}
-              style={{
-                transform: `translate3d(${isPageDragging ? pageDragX : pageSettleX}px, 0, 0)`,
-                transition: isPageDragging ? 'none' : 'transform .24s cubic-bezier(.22,.74,.2,1)',
-              }}
             >
               <MushafPageSheet
                 page={pageNumber}
@@ -5068,6 +5095,9 @@ export default function MushafPage() {
                 html={mainDisplayedSvg}
                 side="single"
                 meta={rightMeta}
+                turnDirection={visualTurnProgress > 0.001 ? visualTurnDirection : null}
+                turnProgress={visualTurnProgress}
+                turnStyle={pageTurnStyle}
                 onAyahClick={handleAyahClick}
                 onAyahPointerDown={handleAyahPointerDown}
                 onAyahPointerUp={handleAyahPointerUp}
@@ -5398,8 +5428,8 @@ export default function MushafPage() {
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
         .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
         .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; background:#f5f0e4; touch-action:pan-y; overscroll-behavior:none; }
-        .samee3-book-stage, .samee3-turn-stack, .samee3-turn-current, .samee3-turn-underlay { transform:none !important; perspective:none !important; filter:none !important; }
-        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform:none !important; transition:none; will-change:auto; }
+        .samee3-book-stage, .samee3-turn-stack, .samee3-turn-current, .samee3-turn-underlay { transform:none !important; filter:none !important; }
+        .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform:none !important; transition:none; will-change:auto; perspective:1800px; perspective-origin:50% 50%; transform-style:preserve-3d; }
         .samee3-spread.is-desktop { padding:8px 14px 14px; }
         .samee3-spread.is-mobile { padding:0; }
         .samee3-spread.is-dragging { cursor:grabbing; user-select:none; }
@@ -5414,10 +5444,45 @@ export default function MushafPage() {
         .samee3-mushaf-loading-bar i { display:block; width:42%; height:100%; border-radius:inherit; background:#c7934f; animation:samee3-loading-slide 1.15s ease-in-out infinite; }
         @keyframes samee3-loading-slide { 0% { transform:translateX(-150%); } 100% { transform:translateX(340%); } }
         .samee3-turn-underlay .samee3-page-sheet { pointer-events:none !important; }
-        .samee3-turn-current { position:relative; z-index:2; display:flex; align-items:center; justify-content:center; width:100%; height:100%; transform:translate3d(0,0,0); transition:transform .26s cubic-bezier(.2,.76,.2,1); will-change:transform; filter:none !important; backface-visibility:visible; }
-        .samee3-turn-current.is-dragging { transition:none !important; }
-        .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 4px 16px rgba(83,63,34,.07); isolation:isolate; }
-        .samee3-turn-current.is-dragging .samee3-page-sheet { box-shadow:none; }
+        .samee3-turn-current { position:relative; z-index:2; display:flex; align-items:center; justify-content:center; width:100%; height:100%; transform:none !important; transition:none !important; will-change:auto; }
+        .samee3-turn-current.is-dragging { user-select:none; }
+        .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 4px 16px rgba(83,63,34,.07); isolation:isolate; transform-style:preserve-3d; backface-visibility:hidden; transform-origin:50% 50%; will-change:transform,box-shadow; }
+        .samee3-page-sheet.is-turning {
+          z-index:18;
+          transform:translate3d(0,var(--samee3-turn-lift),var(--samee3-turn-depth)) rotateY(var(--samee3-turn-angle)) scaleX(calc(1 - (var(--samee3-turn-progress) * .045)));
+          transition:transform .56s cubic-bezier(.18,.72,.12,1), box-shadow .56s ease;
+          box-shadow:0 14px 34px rgba(49,37,23,.18);
+        }
+        .samee3-page-sheet.turn-next { transform-origin:right center; }
+        .samee3-page-sheet.turn-prev { transform-origin:left center; }
+        .samee3-page-sheet.is-turning::before {
+          content:"";
+          position:absolute;
+          z-index:30;
+          top:0;
+          bottom:0;
+          width:30%;
+          pointer-events:none;
+          opacity:var(--samee3-turn-progress);
+          transition:opacity .25s ease;
+        }
+        .samee3-page-sheet.is-turning::after {
+          content:"";
+          position:absolute;
+          z-index:31;
+          top:0;
+          bottom:0;
+          width:2px;
+          pointer-events:none;
+          background:linear-gradient(180deg, rgba(255,255,255,.15), rgba(118,91,55,.42), rgba(255,255,255,.18));
+          opacity:calc(.22 + (var(--samee3-turn-progress) * .58));
+          box-shadow:0 0 var(--samee3-turn-depth) rgba(52,39,23,.26);
+        }
+        .samee3-page-sheet.turn-next.is-turning::before { right:0; background:linear-gradient(90deg, rgba(255,255,255,0), rgba(87,65,39,.08) 48%, rgba(49,37,23,.24) 100%); }
+        .samee3-page-sheet.turn-next.is-turning::after { right:0; }
+        .samee3-page-sheet.turn-prev.is-turning::before { left:0; background:linear-gradient(270deg, rgba(255,255,255,0), rgba(87,65,39,.08) 48%, rgba(49,37,23,.24) 100%); }
+        .samee3-page-sheet.turn-prev.is-turning::after { left:0; }
+        .samee3-page-sheet.is-turning .samee3-page-art { pointer-events:none; }
         .is-desktop .samee3-page-sheet {
           height:min(calc(100dvh - 24px), 1020px);
           width:auto;
@@ -5678,6 +5743,7 @@ export default function MushafPage() {
         @media (prefers-reduced-motion: reduce) {
           .samee3-live-ayah-highlight { transition:none !important; }
           .samee3-turn-current { transition:none !important; }
+          .samee3-page-sheet.is-turning { transition:none !important; }
         }
 
         @media (max-width:767px) {
@@ -5723,6 +5789,9 @@ type MushafPageSheetProps = {
   html: string
   side: 'left' | 'right' | 'single'
   meta: { surah: string; juz: number; page: number }
+  turnDirection?: 'next' | 'prev' | null
+  turnProgress?: number
+  turnStyle?: React.CSSProperties
   onAyahClick: (event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => void
   onAyahPointerDown: (event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => void
   onAyahPointerUp: () => void
@@ -5841,10 +5910,25 @@ function buildTextMushafSvg(data: PageData | null, riwaya: 'sousi' | 'bazzi') {
   </svg>`
 }
 
-function MushafPageSheet({ page, data, html, side, meta, onAyahClick, onAyahPointerDown, onAyahPointerUp }: MushafPageSheetProps) {
+function MushafPageSheet({
+  page,
+  data,
+  html,
+  side,
+  meta,
+  turnDirection = null,
+  turnProgress = 0,
+  turnStyle,
+  onAyahClick,
+  onAyahPointerDown,
+  onAyahPointerUp,
+}: MushafPageSheetProps) {
+  const turnClass = turnProgress > 0.001 && turnDirection ? `is-turning turn-${turnDirection}` : ''
+
   return (
     <section
-      className={`samee3-page-sheet ${side}`}
+      className={`samee3-page-sheet ${side} ${turnClass}`}
+      style={turnStyle}
       data-surah-number={data?.ayahs?.[0]?.surah?.number || ''}
       onClick={(event) => onAyahClick(event, data)}
       onPointerDown={(event) => onAyahPointerDown(event, data)}
