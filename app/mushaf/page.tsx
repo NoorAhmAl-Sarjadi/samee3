@@ -2527,10 +2527,10 @@ export default function MushafPage() {
 
   /*
    * التقليب بالماوس/اللمس باستخدام Pointer Events.
-   * الاتجاه المطلوب:
+   * الاتجاه البصري الجديد: التقليب من اليسار إلى اليمين.
    * سحب لليمين = الصفحة التالية.
    * سحب لليسار = الصفحة السابقة.
-   * لا توجد زاوية 3D ولا دوران ولا ظلال أثناء السحب.
+   * الحركة تعتمد على شريحة ورقية ضيقة مع انثناء حقيقي وظل خفيف.
    */
   const beginPagePointer = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -5087,15 +5087,18 @@ export default function MushafPage() {
 
               const direction = pageTurnDirection || 'next'
               const isNext = direction === 'next'
+              // اتجاه تقليب المصحف في سميع: الصفحة الجديدة تدخل بصريًا
+              // من اليسار إلى اليمين. لذلك يبدأ خط الانثناء من اليسار (0%)
+              // وينتهي عند اليمين (100%) في حالة next.
               const fold = isNext
-                ? 100 - progress * 100
-                : progress * 100
+                ? progress * 100
+                : 100 - progress * 100
 
-              // شريط الانحناء يظل ضيقًا، ويتسع في منتصف الحركة ثم يضيق
-              // قبل وصول الصفحة إلى طرفها؛ وهذا أقرب لشكل الورقة الحقيقي في الفيديو.
+              // الانثناء في الفيديو ليس خطًا مستقيمًا؛ الحافة تتحرك قليلًا
+              // بين أعلى الصفحة وأسفلها، وتكبر سماكة الثنية في منتصف الحركة.
               const curve = Math.sin(Math.PI * progress)
-              const stripHalf = 1.5 + curve * 10.5
-              const skew = (isNext ? -1 : 1) * (2 + curve * 6)
+              const stripHalf = 1.3 + curve * 9.2
+              const skew = (isNext ? 1 : -1) * (1.5 + curve * 5.5)
 
               const topCenter = fold + skew
               const bottomCenter = fold - skew
@@ -5114,14 +5117,18 @@ export default function MushafPage() {
               const leafClip =
                 `polygon(${topLeft.toFixed(2)}% 0%, ${topRight.toFixed(2)}% 0%, ${right20.toFixed(2)}% 22%, ${right40.toFixed(2)}% 52%, ${bottomRight.toFixed(2)}% 100%, ${bottomLeft.toFixed(2)}% 100%, ${left40.toFixed(2)}% 52%, ${left20.toFixed(2)}% 22%)`
 
+              // الصفحة الأصلية تظل ظاهرة أمام/خلف الثنية، بينما المساحة
+              // التي قطعتها الورقة تُظهر الصفحة الجديدة الموجودة تحتها.
               const staticClip = isNext
-                ? `inset(0 ${Math.max(0, 100 - fold).toFixed(2)}% 0 0)`
-                : `inset(0 0 0 ${Math.max(0, fold).toFixed(2)}%)`
+                ? `inset(0 0 0 ${Math.max(0, Math.min(100, fold)).toFixed(2)}%)`
+                : `inset(0 ${Math.max(0, Math.min(100, 100 - fold)).toFixed(2)}% 0 0)`
 
-              const angle = (isNext ? -1 : 1) * (progress === 0 ? 0 : 78 * curve)
+              // زاوية أعلى من 90° مع backface-visible تعطي إحساس الورقة
+              // البيضاء الرقيقة الظاهر في الفيديو بدل مجرد دوران مسطح.
+              const angle = (isNext ? 1 : -1) * (progress === 0 ? 0 : 104 * curve)
               const transition = pageTurnPhase === 'dragging'
                 ? 'none'
-                : 'clip-path .56s cubic-bezier(.22,.74,.17,1), transform .56s cubic-bezier(.22,.74,.17,1)'
+                : 'clip-path .62s cubic-bezier(.18,.8,.18,1), transform .62s cubic-bezier(.18,.8,.18,1)'
 
               return (
                 <div className={`samee3-page-turn-layer ${active ? 'is-active' : ''}`} aria-hidden="true">
@@ -5150,7 +5157,7 @@ export default function MushafPage() {
                         className={`samee3-turn-leaf-clip ${isNext ? 'is-next' : 'is-prev'} ${pageTurnPhase === 'dragging' ? 'is-dragging' : 'is-committing'}`}
                         style={{
                           clipPath: leafClip,
-                          transition: pageTurnPhase === 'dragging' ? 'none' : 'clip-path .56s cubic-bezier(.22,.74,.17,1)',
+                          transition: pageTurnPhase === 'dragging' ? 'none' : 'clip-path .62s cubic-bezier(.18,.8,.18,1)',
                         }}
                       >
                         <div
@@ -5158,7 +5165,7 @@ export default function MushafPage() {
                           style={{
                             transform: `perspective(1500px) rotateY(${angle.toFixed(3)}deg)`,
                             transformOrigin: `${fold.toFixed(2)}% 50%`,
-                            transition: pageTurnPhase === 'dragging' ? 'none' : 'transform .56s cubic-bezier(.22,.74,.17,1)',
+                            transition: pageTurnPhase === 'dragging' ? 'none' : 'transform .62s cubic-bezier(.18,.8,.18,1)',
                           }}
                         >
                           <MushafPageSheet
@@ -5176,9 +5183,9 @@ export default function MushafPage() {
                         <span
                           className="samee3-turn-paper-highlight"
                           style={{
-                            left: `${Math.max(0, Math.min(100, fold + (isNext ? 1.5 : -1.5))).toFixed(2)}%`,
-                            transform: `translateX(-50%) rotateY(${(angle * 0.55).toFixed(3)}deg)`,
-                            transition: pageTurnPhase === 'dragging' ? 'none' : 'left .56s cubic-bezier(.22,.74,.17,1), transform .56s cubic-bezier(.22,.74,.17,1)',
+                            left: `${Math.max(0, Math.min(100, fold + (isNext ? 1.1 : -1.1))).toFixed(2)}%`,
+                            transform: `translateX(-50%) rotateY(${(angle * 0.48).toFixed(3)}deg)`,
+                            transition: pageTurnPhase === 'dragging' ? 'none' : 'left .62s cubic-bezier(.18,.8,.18,1), transform .62s cubic-bezier(.18,.8,.18,1)',
                           }}
                         />
                       </div>
@@ -5188,7 +5195,7 @@ export default function MushafPage() {
                         style={{
                           left: `${Math.max(0, Math.min(100, fold)).toFixed(2)}%`,
                           transform: `translateX(-50%) rotateY(${(angle * 0.45).toFixed(3)}deg)`,
-                          transition: pageTurnPhase === 'dragging' ? 'none' : 'left .56s cubic-bezier(.22,.74,.17,1), transform .56s cubic-bezier(.22,.74,.17,1)',
+                          transition: pageTurnPhase === 'dragging' ? 'none' : 'left .62s cubic-bezier(.18,.8,.18,1), transform .62s cubic-bezier(.18,.8,.18,1)',
                         }}
                       />
                     </>
@@ -5526,16 +5533,16 @@ export default function MushafPage() {
         .samee3-spread.is-desktop { padding:8px 14px 14px; }
         .samee3-spread.is-mobile { padding:0; }
         .samee3-spread.is-dragging { cursor:grabbing; user-select:none; }
-        .samee3-turn-stack { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:visible; perspective:1800px; perspective-origin:50% 50%; }
+        .samee3-turn-stack { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:visible; perspective:2200px; perspective-origin:50% 50%; }
         .samee3-turn-underlay { position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; pointer-events:none; filter:none !important; }
-        .samee3-page-turn-layer { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; pointer-events:none; transform-style:preserve-3d; perspective:1800px; }
+        .samee3-page-turn-layer { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; pointer-events:none; transform-style:preserve-3d; perspective:2200px; }
         .samee3-page-turn-layer.is-active { pointer-events:none; }
         .samee3-turn-static { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; will-change:clip-path; overflow:visible; }
         .samee3-turn-leaf-clip { position:absolute; inset:0; z-index:5; overflow:hidden; pointer-events:none; transform-style:preserve-3d; }
         .samee3-turn-leaf-page { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; transform-style:preserve-3d; backface-visibility:visible; will-change:transform; }
-        .samee3-turn-leaf-clip.is-dragging { filter:drop-shadow(0 12px 16px rgba(57,39,19,.18)); }
-        .samee3-turn-paper-highlight { position:absolute; top:0; bottom:0; width:13px; pointer-events:none; z-index:7; background:linear-gradient(90deg, rgba(82,60,33,.00) 0%, rgba(82,60,33,.10) 27%, rgba(255,255,255,.92) 52%, rgba(96,70,37,.08) 77%, rgba(96,70,37,.00) 100%); filter:blur(.2px); opacity:.85; }
-        .samee3-turn-edge-shadow { position:absolute; top:3%; bottom:3%; width:22px; pointer-events:none; z-index:6; border-radius:50%; background:radial-gradient(ellipse at center, rgba(61,43,24,.24) 0%, rgba(61,43,24,.10) 40%, rgba(61,43,24,0) 72%); filter:blur(5px); opacity:.68; }
+        .samee3-turn-leaf-clip.is-dragging { filter:drop-shadow(0 14px 20px rgba(57,39,19,.16)); }
+        .samee3-turn-paper-highlight { position:absolute; top:-1%; bottom:-1%; width:17px; pointer-events:none; z-index:7; background:linear-gradient(90deg, rgba(82,60,33,0) 0%, rgba(82,60,33,.08) 20%, rgba(255,255,255,.98) 49%, rgba(255,255,255,.45) 58%, rgba(96,70,37,.08) 78%, rgba(96,70,37,0) 100%); filter:blur(.35px); opacity:.9; mix-blend-mode:screen; }
+        .samee3-turn-edge-shadow { position:absolute; top:2%; bottom:2%; width:30px; pointer-events:none; z-index:6; border-radius:50%; background:radial-gradient(ellipse at center, rgba(51,37,22,.30) 0%, rgba(61,43,24,.13) 34%, rgba(61,43,24,0) 74%); filter:blur(6px); opacity:.74; }
         .samee3-turn-current, .samee3-turn-leaf-page .samee3-page-sheet { transform-style:preserve-3d; }
         .samee3-turn-underlay .samee3-page-sheet { pointer-events:none !important; }
         .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 4px 16px rgba(83,63,34,.07); isolation:isolate; }
