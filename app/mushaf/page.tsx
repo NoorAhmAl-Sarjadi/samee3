@@ -2724,26 +2724,21 @@ export default function MushafPage() {
       setPageDragY(0)
       setPageSettleX(0)
 
-      // ابدأ من مكان إصبع المستخدم عند السحب، وإلا ابدأ من الصفر.
-      const currentProgress = Math.max(0, Math.min(1, pageTurnProgress))
+      // التقليب هنا انتقال ثابت بعد اكتمال السحب فقط.
+      // الصفحة لا تتحرك مع الإصبع أثناء السحب، ولا تبدأ الحركة إلا بعد
+      // قبول السحبة؛ وبذلك لا يحدث رجوع للصفحة الحالية أو وميض بين الصفحات.
+      const animationDuration = 260
+      const currentProgress = 0
       setPageTurnProgress(currentProgress)
       setPageTurnPhase('committing')
-
-      const animationDuration = 300
       playPageTurnSound()
 
       window.requestAnimationFrame(() => {
         if (token !== pageTurnNavigationTokenRef.current) return
-        window.requestAnimationFrame(() => {
-          if (token !== pageTurnNavigationTokenRef.current) return
-          setPageTurnProgress(1)
-        })
+        setPageTurnProgress(1)
       })
 
-      const remaining = Math.max(
-        20,
-        Math.round(animationDuration * (1 - currentProgress)),
-      )
+      const remaining = animationDuration
 
       const params = new URLSearchParams(searchParams.toString())
       params.set('page', String(nextPage))
@@ -2797,7 +2792,6 @@ export default function MushafPage() {
     mainDisplayedSvg,
     pageData,
     pageNumber,
-    pageTurnProgress,
     playPageTurnSound,
     prepareTurnPreview,
     resetPageTurnState,
@@ -2893,8 +2887,6 @@ export default function MushafPage() {
         } catch {}
       }
 
-      const viewportWidth = Math.max(1, window.innerWidth)
-      const limitedX = Math.max(-viewportWidth, Math.min(viewportWidth, deltaX))
       const basePage = pageNumber
       const targetPage = deltaX > 0
         ? clampPage(basePage + 1)
@@ -2902,49 +2894,23 @@ export default function MushafPage() {
 
       if (targetPage === basePage) return
 
-      const progress = Math.min(
-        1,
-        Math.max(0, Math.abs(limitedX) / Math.max(1, viewportWidth * 0.86)),
-      )
-      const direction = deltaX > 0 ? 'next' : 'prev'
+      // مهم: لا نحرك الصفحة بصريًا أثناء سحب الإصبع.
+      // السحب هنا مجرد إشارة لاختيار الاتجاه، والحركة الفعلية تبدأ مرة واحدة
+      // بعد رفع الإصبع واجتياز العتبة. هذا يمنع أي ذهاب وعودة أو تتبع مزعج.
 
-      const preview =
-        turnPreview?.page === targetPage
-          ? turnPreview
-          : getMemoryTurnPreview(targetPage)
-
-      setIsPageDragging(true)
-      setPageTurnPhase('dragging')
-      setPageDragX(limitedX)
-      setPageDragY(0)
-      setPageTurnProgress(progress)
-      setPageTurnDirection(direction)
-      setPageTurnTarget(targetPage)
-
-      if (!pageTurnBase) {
-        setPageTurnBase({
-          page: basePage,
-          data: pageData,
-          html: mainDisplayedSvg,
-        })
-      }
-
-      if (preview) {
-        setTurnPreview(preview)
-      } else {
-        // لا نكسر السحب إذا كانت النسخة البصرية لم تصل بعد؛ نجهزها في الخلفية.
+      // تجهيز الصفحة المقصودة في الخلفية فقط؛ لا نعرض أي طبقة انتقال أثناء السحب.
+      if (turnPreview?.page !== targetPage && !getMemoryTurnPreview(targetPage)) {
         if (turnPreviewPageRef.current !== targetPage) {
           turnPreviewPageRef.current = targetPage
           void prepareTurnPreview(targetPage)
         }
       }
+
+      // لا setState هنا للحركة. الصفحة الحالية تظل ثابتة تمامًا حتى تكتمل السحبة.
     },
     [
       getMemoryTurnPreview,
-      mainDisplayedSvg,
-      pageData,
       pageNumber,
-      pageTurnBase,
       prepareTurnPreview,
       turnPreview,
     ],
@@ -5380,7 +5346,7 @@ export default function MushafPage() {
           </div>
         ) : null}
 
-        <div className={`samee3-spread ${isDesktop ? 'is-desktop' : 'is-mobile'} ${isPageDragging ? 'is-dragging' : ''}`}>
+        <div className={`samee3-spread ${isDesktop ? 'is-desktop' : 'is-mobile'}`}>
           <div className="samee3-turn-stack">
             {(() => {
               const hasPreview =
@@ -5389,7 +5355,7 @@ export default function MushafPage() {
                 Boolean(turnPreview?.html)
 
               const active =
-                pageTurnPhase !== 'idle' &&
+                pageTurnPhase === 'committing' &&
                 pageTurnDirection !== null &&
                 pageTurnTarget !== null &&
                 Boolean(pageTurnBase) &&
@@ -5403,11 +5369,11 @@ export default function MushafPage() {
 
               // next: الصفحة الجديدة تبدأ خارج الإطار من اليسار وتدخل نحو اليمين.
               // prev: الصفحة الجديدة تبدأ خارج الإطار من اليمين وتدخل نحو اليسار.
-              const currentX = isNext ? progress * 100 : -progress * 100
+              // الصفحة الحالية ثابتة تمامًا. الصفحة المستهدفة وحدها تدخل من
+              // الاتجاه المطلوب ثم تصبح الصفحة الحالية بعد تحديث الـroute.
+              const currentX = 0
               const targetX = isNext ? -100 + progress * 100 : 100 - progress * 100
-              const transition = pageTurnPhase === 'dragging'
-                ? 'none'
-                : 'transform 300ms cubic-bezier(.2,.82,.2,1)'
+              const transition = 'transform 260ms cubic-bezier(.22,.8,.24,1)'
 
               const basePage = pageTurnBase?.page ?? pageNumber
               const baseData = pageTurnBase?.data ?? pageData
@@ -5440,6 +5406,7 @@ export default function MushafPage() {
                         transform: `translate3d(${targetX.toFixed(3)}%,0,0)`,
                         transition,
                         willChange: 'transform',
+                        background: '#fcfbf8',
                       }}
                     >
                       <MushafPageSheet
@@ -5459,9 +5426,9 @@ export default function MushafPage() {
                     className="samee3-turn-current"
                     style={{
                       pointerEvents: active ? 'none' : 'auto',
-                      transform: `translate3d(${active ? currentX.toFixed(3) : '0'}%,0,0)`,
-                      transition,
-                      willChange: active ? 'transform' : 'auto',
+                      transform: 'translate3d(0,0,0)',
+                      transition: 'none',
+                      willChange: 'auto',
                     }}
                   >
                     <MushafPageSheet
