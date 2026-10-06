@@ -191,6 +191,19 @@ const PRINTED_RIWAYAT = new Set<Riwaya>([
   'shubah',
 ])
 
+const ALL_MUSHAF_RIWAYAT: Riwaya[] = [
+  'hafs',
+  'warsh',
+  'qalun',
+  'douri',
+  'shubah',
+  'sousi',
+  'bazzi',
+]
+
+const SAMEE3_MUSHAF_PAGE_CACHE_NAME = 'samee3-mushaf-pages-v2'
+const SAMEE3_MUSHAF_WARMUP_STATE_KEY = 'samee3_mushaf_full_warmup_v2'
+
 const RIWAYA_NAMES: Record<Riwaya, string> = {
   hafs: 'حفص عن عاصم',
   warsh: 'ورش عن نافع',
@@ -1455,6 +1468,9 @@ export default function MushafPage() {
   const pageTurnAudioContextRef = useRef<AudioContext | null>(null)
   const audioRestoreAttemptedRef = useRef(false)
   const readingRestoreAttemptedRef = useRef(false)
+  const audioOperationRef = useRef(0)
+  const audioToggleBusyRef = useRef(false)
+  const mushafWarmupRunningRef = useRef(false)
 
   const pageMemoryCacheRef = useRef(new Map<string, PageData>())
   const svgMemoryCacheRef = useRef(new Map<string, string>())
@@ -1602,7 +1618,7 @@ export default function MushafPage() {
 
     try {
       if ('caches' in window) {
-        const cache = await caches.open('samee3-mushaf-pages-v2')
+        const cache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
         await cache.put(url, new Response(JSON.stringify(data), {
           headers: { 'Content-Type': 'application/json' },
         }))
@@ -1752,7 +1768,7 @@ export default function MushafPage() {
 
     try {
       if ('caches' in window) {
-        const cache = await caches.open('samee3-mushaf-pages-v2')
+        const cache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
         await cache.put(url, new Response(JSON.stringify(data), {
           headers: { 'Content-Type': 'application/json' },
         }))
@@ -1767,6 +1783,8 @@ export default function MushafPage() {
   const prefetchRiwayaPage = useCallback(async (targetRiwaya: Riwaya, page: number) => {
     const safePage = clampPage(page)
     const pageUrl = `/api/quran?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
+    let success = true
+
     try {
       if ('caches' in window) {
         const existing = await caches.match(pageUrl)
@@ -1775,7 +1793,9 @@ export default function MushafPage() {
             cache: 'force-cache',
             headers: { Accept: 'application/json' },
           })
-          if (response.ok) {
+          if (!response.ok) {
+            success = false
+          } else {
             const data = await response.clone().json()
             pageMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, {
               ayahs: Array.isArray(data?.ayahs)
@@ -1784,80 +1804,208 @@ export default function MushafPage() {
                   ? data.data.ayahs
                   : [],
             })
-            const cache = await caches.open('samee3-mushaf-pages-v2')
+            const cache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
             await cache.put(pageUrl, response)
           }
         }
       } else {
-        await fetch(pageUrl, { cache: 'force-cache' })
+        const response = await fetch(pageUrl, {
+          cache: 'force-cache',
+          headers: { Accept: 'application/json' },
+        })
+        if (!response.ok) success = false
+      }
+    } catch {
+      success = false
+    }
+
+    const svgUrl = `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
+
+    try {
+      if ('caches' in window) {
+        const existingSvg = await caches.match(svgUrl)
+        if (!existingSvg) {
+          const response = await fetch(svgUrl, { cache: 'force-cache' })
+          if (response.ok) {
+            const data = await response.clone().json()
+            if (data?.success && data?.svg) {
+              svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
+              const cache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
+              await cache.put(svgUrl, response)
+            } else {
+              success = false
+            }
+          } else {
+            success = false
+          }
+        }
+      } else {
+        const response = await fetch(svgUrl, { cache: 'force-cache' })
+        if (!response.ok) success = false
+      }
+    } catch {
+      success = false
+    }
+
+    return success
+  }, [])
+
+  // ============================================================
+  // تسخين كامل للمصحف في الخلفية: 604 صفحة × كل الروايات
+  // ============================================================
+  // لا ننتظر هذه العملية قبل فتح الصفحة، ولا نعرض واجهة تحميل لها.
+  // التخزين يتم في Cache Storage، والتقدم محفوظ لاستئناف العملية لاحقًا.
+  useEffect(() => {
+    let cancelled = false
+    let resumeTimer: number | null = null
+
+    const readWarmupState = (): Set<number> => {
+      try {
+        const raw = localStorage.getItem(SAMEE3_MUSHAF_WARMUP_STATE_KEY)
+        if (!raw) return new Set<number>()
+        const parsed = JSON.parse(raw) as { version?: number; completed?: unknown }
+        if (parsed?.version !== 2 || !Array.isArray(parsed.completed)) {
+          return new Set<number>()
+        }
+        return new Set(
+          parsed.completed
+            .map((value) => Number(value))
+            .filter((value) => Number.isInteger(value) && value >= 0),
+        )
+      } catch {
+        return new Set<number>()
+      }
+    }
+
+    const saveWarmupState = (completed: Set<number>, done = false) => {
+      try {
+        localStorage.setItem(
+          SAMEE3_MUSHAF_WARMUP_STATE_KEY,
+          JSON.stringify({
+            version: 2,
+            done,
+            completed: Array.from(completed).sort((a, b) => a - b),
+            updatedAt: Date.now(),
+          }),
+        )
+      } catch {
+        // Cache Storage هو المصدر الأساسي، فلا نوقف التحميل بسبب localStorage.
+      }
+    }
+
+    const runWarmup = async () => {
+      if (cancelled || !navigator.onLine || !('caches' in window) || mushafWarmupRunningRef.current) return
+      mushafWarmupRunningRef.current = true
+
+      const tasks: Array<{ riwaya: Riwaya; page: number }> = []
+      for (const targetRiwaya of ALL_MUSHAF_RIWAYAT) {
+        for (let page = 1; page <= 604; page += 1) {
+          tasks.push({ riwaya: targetRiwaya, page })
+        }
       }
 
-      // نُحمّل SVG لكل الروايات، بما فيها السوسي والبزي، حتى تكون
-      // طبقة العرض واحدة ولا تعود الروايتان النصيتان إلى تصميم مختلف.
-      const svgUrl = `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
-      const existingSvg = 'caches' in window ? await caches.match(svgUrl) : null
-      if (!existingSvg) {
-        const response = await fetch(svgUrl, { cache: 'force-cache' })
-        if (response.ok) {
-          const data = await response.clone().json()
-          if (data?.success && data?.svg) {
-            svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
-            if ('caches' in window) {
-              const cache = await caches.open('samee3-mushaf-pages-v2')
-              await cache.put(svgUrl, response)
+      const completed = readWarmupState()
+      if (completed.size >= tasks.length) return
+
+      try {
+        if (navigator.storage?.persist) {
+          void navigator.storage.persist().catch(() => false)
+        }
+      } catch {
+        // بعض المتصفحات لا تدعم persistent storage.
+      }
+
+      let cursor = 0
+      let successfulSinceSave = 0
+      const workerCount = Math.min(3, tasks.length)
+
+      const worker = async () => {
+        while (!cancelled && navigator.onLine) {
+          let taskIndex = -1
+
+          while (cursor < tasks.length) {
+            const candidate = cursor
+            cursor += 1
+            if (!completed.has(candidate)) {
+              taskIndex = candidate
+              break
             }
+          }
+
+          if (taskIndex < 0) return
+
+          const task = tasks[taskIndex]
+          const ok = await prefetchRiwayaPage(task.riwaya, task.page)
+
+          if (!ok) {
+            if (navigator.onLine) {
+              await new Promise((resolve) => window.setTimeout(resolve, 1500))
+            }
+            return
+          }
+
+          completed.add(taskIndex)
+          successfulSinceSave += 1
+
+          if (successfulSinceSave >= 8) {
+            successfulSinceSave = 0
+            saveWarmupState(completed)
+          }
+
+          // Yield قصير جدًا حتى لا يشعر المستخدم بأن المصحف أو الصوت يتجمّد.
+          if (completed.size % 6 === 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, 0))
           }
         }
       }
-    } catch {
-      // التحميل المسبق اختياري ولا يعطل الصفحة الحالية.
+
+      await Promise.all(Array.from({ length: workerCount }, () => worker()))
+      saveWarmupState(completed, completed.size >= tasks.length)
+      mushafWarmupRunningRef.current = false
+
+      if (!cancelled && completed.size < tasks.length && navigator.onLine) {
+        resumeTimer = window.setTimeout(() => {
+          void runWarmup()
+        }, 7000)
+      }
     }
-  }, [])
+
+    const start = () => {
+      if (cancelled) return
+      window.setTimeout(() => void runWarmup(), 80)
+    }
+
+    window.addEventListener('online', start)
+    start()
+
+    return () => {
+      cancelled = true
+      mushafWarmupRunningRef.current = false
+      if (resumeTimer !== null) window.clearTimeout(resumeTimer)
+      window.removeEventListener('online', start)
+    }
+  }, [prefetchRiwayaPage])
 
   useEffect(() => {
     let cancelled = false
 
     const run = async () => {
-      // المصحف يتنقل صفحة واحدة فقط في كل اتجاه، على الكمبيوتر والهاتف.
-      // نكتفي بتجهيز الصفحة الحالية والصفحتين المتجاورتين.
       const nearby = Array.from(new Set([
         pageNumber,
         clampPage(pageNumber + 1),
         clampPage(pageNumber - 1),
       ]))
 
-      // ندفئ الرواية الحالية فقط؛ تحميل كل الروايات عند فتح المصحف
-      // يضغط الذاكرة والشبكة على شاشات العرض الضعيفة.
-      if (!cancelled) {
-        void prefetchRiwayaPage(riwaya, pageNumber)
-      }
-
       for (const page of nearby) {
         if (cancelled) return
-        if (page === pageNumber) continue
         void prefetchRiwayaPage(riwaya, page)
-        await new Promise((resolve) => window.setTimeout(resolve, 45))
       }
     }
 
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
-      cancelIdleCallback?: (handle: number) => void
-    }
-
-    let idleId: number | null = null
-    let timeoutId: number | null = null
-
-    if (idleWindow.requestIdleCallback) {
-      idleId = idleWindow.requestIdleCallback(() => void run(), { timeout: 1200 })
-    } else {
-      timeoutId = window.setTimeout(() => void run(), 120)
-    }
+    void run()
 
     return () => {
       cancelled = true
-      if (idleId !== null) idleWindow.cancelIdleCallback?.(idleId)
-      if (timeoutId !== null) window.clearTimeout(timeoutId)
     }
   }, [pageNumber, prefetchRiwayaPage, riwaya])
 
@@ -3501,6 +3649,7 @@ export default function MushafPage() {
       return
     }
 
+    const operationId = ++audioOperationRef.current
     setAudioLoading(true)
     setAudioError('')
 
@@ -3552,6 +3701,8 @@ export default function MushafPage() {
       if (!audio) return
 
       const cachedSource = await getCachedAudioSource(networkUrl)
+      if (operationId !== audioOperationRef.current) return
+
       if (cachedSource) {
         await releaseCachedObjectUrl(audio)
         finalUrl = cachedSource.src
@@ -3575,10 +3726,26 @@ export default function MushafPage() {
         ? [...activeReciter.surahIds]
         : []
 
-      const timings: AyahTiming[] = await loadAyahTimings(
+      const timingsPromise = loadAyahTimings(
         surahNumber,
         activeReciter?.apiId || reciterApiId,
       )
+
+      const immediateCachedTimings = readCachedAyahTimings(
+        surahNumber,
+        activeReciter?.apiId || reciterApiId,
+      )
+
+      const timings: AyahTiming[] = immediateCachedTimings.length
+        ? immediateCachedTimings
+        : await Promise.race([
+            timingsPromise,
+            new Promise<AyahTiming[]>((resolve) =>
+              window.setTimeout(() => resolve([]), 900),
+            ),
+          ])
+
+      if (operationId !== audioOperationRef.current) return
 
       const fallbackFirstAyah = timings.find(
         (item: AyahTiming) => Number(item.ayah) > 0,
@@ -3590,6 +3757,8 @@ export default function MushafPage() {
       const targetStart =
         findTimingStart(timings, effectiveTargetAyah) ??
         (Number.isFinite(Number(fallbackStartSeconds)) ? Number(fallbackStartSeconds) : 0)
+
+      if (operationId !== audioOperationRef.current) return
 
       audio.pause()
       audio.src = finalUrl
@@ -3647,9 +3816,11 @@ export default function MushafPage() {
             { once: true },
           )
 
-          window.setTimeout(done, 2500)
+          window.setTimeout(done, 1800)
         })
       }
+
+      if (operationId !== audioOperationRef.current) return
 
       audio.__samee3Timings = timings
       audio.__samee3CurrentAyah = effectiveTargetAyah
@@ -3684,7 +3855,20 @@ export default function MushafPage() {
       })
 
       if (shouldPlay) {
-        await audio.play()
+        try {
+          await audio.play()
+        } catch (playError) {
+          if (operationId !== audioOperationRef.current) return
+          console.error(playError)
+          setIsPlaying(false)
+          const message = playError instanceof Error ? playError.message : ''
+          if (/not allowed|not supported|user agent/i.test(message)) {
+            setAudioError('')
+            triggerToast('اضغط تشغيل لبدء التلاوة.')
+          } else {
+            setAudioError('تعذر بدء التلاوة. اضغط تشغيل مرة أخرى.')
+          }
+        }
       }
 
       // لا نؤخر بداية التلاوة بسبب التحميل إلى Offline cache.
@@ -3703,6 +3887,7 @@ export default function MushafPage() {
         void cacheAudioForOffline(nextUrl)
       }
     } catch (error) {
+      if (operationId !== audioOperationRef.current) return
       console.error(error)
       const message = error instanceof Error ? error.message : ''
       if (/not allowed|not supported|operation is not supported|user agent/i.test(message)) {
@@ -3712,7 +3897,9 @@ export default function MushafPage() {
         setAudioError('تعذر تشغيل التلاوة حاليًا.')
       }
     } finally {
-      setAudioLoading(false)
+      if (operationId === audioOperationRef.current) {
+        setAudioLoading(false)
+      }
     }
   }, [
     findTimingStart,
@@ -4392,75 +4579,59 @@ export default function MushafPage() {
   ])
 
   const toggleAudio = async () => {
-    const audio = audioRef.current
+    if (audioToggleBusyRef.current) return
+    audioToggleBusyRef.current = true
 
-    const selectedSurah =
-      selectedAyah?.surah?.number
-        ? Number(
-            selectedAyah.surah.number,
-          )
+    try {
+      const audio = audioRef.current
+
+      const selectedSurah = selectedAyah?.surah?.number
+        ? Number(selectedAyah.surah.number)
         : 0
 
-    const selectedLocalAyah =
-      selectedAyah?.numberInSurah
-        ? Number(
-            selectedAyah.numberInSurah,
-          )
+      const selectedLocalAyah = selectedAyah?.numberInSurah
+        ? Number(selectedAyah.numberInSurah)
         : 0
 
-    const selectedAyahGlobalNumber =
-      selectedAyah?.number ?? null
+      const selectedAyahGlobalNumber = selectedAyah?.number ?? null
 
-    /*
-     * وجود آية محددة يعني أن زر التشغيل يجب أن يبدأ من تلك الآية.
-     */
-    if (
-      selectedSurah &&
-      selectedLocalAyah
-    ) {
-      const loadedSurah =
-        Number(
-          audioSurahRef.current || 0,
-        )
+      if (selectedSurah && selectedLocalAyah) {
+        const loadedSurah = Number(audioSurahRef.current || 0)
+        const mustSeekToSelectedAyah =
+          !audio ||
+          !audio.src ||
+          loadedSurah !== selectedSurah ||
+          playingAyahNumber === null ||
+          (selectedAyahGlobalNumber !== null && playingAyahNumber !== selectedAyahGlobalNumber)
 
-      const mustSeekToSelectedAyah =
-        !audio ||
-        !audio.src ||
-        loadedSurah !== selectedSurah ||
-        playingAyahNumber === null ||
-        (
-          selectedAyahGlobalNumber !== null &&
-          playingAyahNumber !==
-            selectedAyahGlobalNumber
-        )
+        if (mustSeekToSelectedAyah) {
+          await loadAudioForSurah(
+            selectedSurah,
+            true,
+            selectedLocalAyah,
+          )
+          return
+        }
+      }
 
-      if (
-        mustSeekToSelectedAyah
-      ) {
-        await loadAudioForSurah(
-          selectedSurah,
-          true,
-          selectedLocalAyah,
-        )
-
+      if (!audio || !audio.src) {
+        await loadAudioForCurrentSurah(true)
         return
       }
-    }
 
-    if (
-      !audio ||
-      !audio.src
-    ) {
-      await loadAudioForCurrentSurah(
-        true,
-      )
-      return
-    }
-
-    if (audio.paused) {
-      await audio.play()
-    } else {
-      audio.pause()
+      if (audio.paused) {
+        try {
+          await audio.play()
+        } catch (error) {
+          console.error(error)
+          setIsPlaying(false)
+          setAudioError('تعذر بدء التلاوة. اضغط تشغيل مرة أخرى.')
+        }
+      } else {
+        audio.pause()
+      }
+    } finally {
+      audioToggleBusyRef.current = false
     }
   }
 
@@ -5094,58 +5265,15 @@ export default function MushafPage() {
 
               const direction = pageTurnDirection || 'next'
               const isNext = direction === 'next'
-
-              /*
-               * التقليب هنا مبني كـ "ورقة حقيقية" وليس تحريكًا للصفحة ككتلة.
-               * في التقليب التالي تتحرك الورقة من الحافة اليسرى إلى اليمنى،
-               * وفي الرجوع تتحرك من اليمنى إلى اليسرى.
-               */
-              const fold = isNext
-                ? progress * 100
-                : 100 - progress * 100
-
-              // نرسم حافة انثناء غير مستقيمة قليلًا حتى لا تبدو كقصّ مستطيل.
-              const curl = Math.sin(Math.PI * progress)
-              const bulge = 1.6 + curl * 5.8
-              const directionSign = isNext ? 1 : -1
-
-              const p0 = fold + directionSign * bulge * 0.90
-              const p1 = fold - directionSign * bulge * 0.55
-              const p2 = fold + directionSign * bulge * 0.78
-              const p3 = fold - directionSign * bulge * 0.90
-              const p4 = fold + directionSign * bulge * 0.38
-
-              const clampPct = (value: number) =>
-                Math.max(0, Math.min(100, value))
-
-              const b0 = clampPct(p0)
-              const b1 = clampPct(p1)
-              const b2 = clampPct(p2)
-              const b3 = clampPct(p3)
-              const b4 = clampPct(p4)
-
-              // الجزء الذي لم ينقلب بعد يظل ظاهرًا فوق الصفحة الموجودة تحته.
-              const staticClip = isNext
-                ? `inset(0 0 0 ${clampPct(fold).toFixed(3)}%)`
-                : `inset(0 ${clampPct(fold).toFixed(3)}% 0 0)`
-
-              // الجزء الذي ينثني هو حافة الورقة نفسها، وليس شريطًا مستقلًا.
-              // عند 90° تصبح الورقة شبه ريشة ضيقة كما في الفيديو، ثم تكمل إلى 180°.
-              const leafClip = isNext
-                ? `polygon(0% 0%, ${b0.toFixed(3)}% 0%, ${b1.toFixed(3)}% 18%, ${b2.toFixed(3)}% 38%, ${b3.toFixed(3)}% 58%, ${b4.toFixed(3)}% 78%, ${clampPct(p0).toFixed(3)}% 100%, 0% 100%)`
-                : `polygon(${clampPct(p0).toFixed(3)}% 0%, 100% 0%, 100% 100%, ${clampPct(p0).toFixed(3)}% 100%, ${b4.toFixed(3)}% 78%, ${b3.toFixed(3)}% 58%, ${b2.toFixed(3)}% 38%, ${b1.toFixed(3)}% 18%)`
-
-              // أهم إصلاح: الزاوية أحادية الاتجاه 0→180، وليست sin() الذي
-              // كان يعيد الصفحة من 104° إلى 0° في نهاية الحركة.
-              const angle = isNext
-                ? -180 * progress
-                : 180 * progress
-
-              const duration = '0.58s'
-              const easing = 'cubic-bezier(.16,.82,.19,1)'
-              const visualTransition = pageTurnPhase === 'dragging'
+              const currentX = isNext ? -100 * progress : 100 * progress
+              const targetX = isNext
+                ? 100 * (1 - progress)
+                : -100 * (1 - progress)
+              const duration = '0.34s'
+              const easing = 'cubic-bezier(.20,.78,.22,1)'
+              const transition = pageTurnPhase === 'dragging'
                 ? 'none'
-                : `clip-path ${duration} ${easing}, transform ${duration} ${easing}`
+                : `transform ${duration} ${easing}`
 
               return (
                 <div
@@ -5155,8 +5283,12 @@ export default function MushafPage() {
                   <div
                     className="samee3-turn-static"
                     style={{
-                      clipPath: active ? staticClip : 'none',
                       pointerEvents: active ? 'none' : 'auto',
+                      transform: active
+                        ? `translate3d(${currentX.toFixed(3)}%, 0, 0)`
+                        : 'translate3d(0, 0, 0)',
+                      transition,
+                      willChange: active ? 'transform' : 'auto',
                     }}
                   >
                     <MushafPageSheet
@@ -5173,51 +5305,21 @@ export default function MushafPage() {
 
                   {active ? (
                     <div
-                      className={`samee3-turn-leaf-clip ${isNext ? 'is-next' : 'is-prev'} ${pageTurnPhase === 'dragging' ? 'is-dragging' : 'is-committing'}`}
+                      className="samee3-turn-slide-target"
+                      aria-hidden="true"
                     >
-                      <div
-                        className="samee3-turn-leaf-page"
-                        style={{
-                          clipPath: leafClip,
-                          transform: `rotateY(${angle.toFixed(3)}deg)`,
-                          transformOrigin: `${clampPct(fold).toFixed(3)}% 50%`,
-                          transition: pageTurnPhase === 'dragging' ? 'none' : visualTransition,
-                        }}
-                      >
-                        <div className="samee3-turn-front">
-                          <MushafPageSheet
-                            page={pageNumber}
-                            data={pageData}
-                            html={mainDisplayedSvg}
-                            side="single"
-                            meta={rightMeta}
-                            onAyahClick={() => undefined}
-                            onAyahPointerDown={() => undefined}
-                            onAyahPointerUp={() => undefined}
-                          />
-                        </div>
-
-                        <div className="samee3-turn-back" aria-hidden="true">
-                          <div className="samee3-turn-back-wash" />
-                        </div>
-
-                        <span
-                          className="samee3-turn-paper-highlight"
-                          style={{
-                            left: `${clampPct(fold + directionSign * 0.9).toFixed(3)}%`,
-                            transform: `translateX(-50%)`,
-                            transition: pageTurnPhase === 'dragging' ? 'none' : `left ${duration} ${easing}`,
-                          }}
-                        />
-                      </div>
-
-                      <span
-                        className="samee3-turn-edge-shadow"
-                        style={{
-                          left: `${clampPct(fold).toFixed(3)}%`,
-                          opacity: active ? (0.22 + curl * 0.38) : 0,
-                          transition: pageTurnPhase === 'dragging' ? 'none' : `left ${duration} ${easing}, opacity ${duration} ${easing}`,
-                        }}
+                      <MushafPageSheet
+                        page={turnPreview?.page || pageTurnTarget || pageNumber}
+                        data={turnPreview?.data || null}
+                        html={turnPreview?.html || ''}
+                        side="single"
+                        meta={pageMeta(
+                          turnPreview?.data || null,
+                          turnPreview?.page || pageTurnTarget || pageNumber,
+                        )}
+                        onAyahClick={() => undefined}
+                        onAyahPointerDown={() => undefined}
+                        onAyahPointerUp={() => undefined}
                       />
                     </div>
                   ) : null}
@@ -5554,23 +5656,13 @@ export default function MushafPage() {
         .samee3-spread.is-desktop { padding:8px 14px 14px; }
         .samee3-spread.is-mobile { padding:0; }
         .samee3-spread.is-dragging { cursor:grabbing; user-select:none; }
-        .samee3-turn-stack { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:visible; perspective:1800px; perspective-origin:50% 50%; }
-        .samee3-turn-underlay { position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; pointer-events:none; filter:none !important; }
-        .samee3-page-turn-layer { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; pointer-events:none; transform-style:preserve-3d; perspective:1800px; overflow:visible; }
+        .samee3-turn-stack { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; perspective:none; }
+        .samee3-turn-underlay { display:none !important; }
+        .samee3-page-turn-layer { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; pointer-events:none; overflow:hidden; }
         .samee3-page-turn-layer.is-active { pointer-events:none; }
-        .samee3-turn-static { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; will-change:clip-path; overflow:visible; }
-        .samee3-turn-leaf-clip { position:absolute; inset:0; z-index:5; display:flex; align-items:center; justify-content:center; overflow:visible; pointer-events:none; transform-style:preserve-3d; }
-        .samee3-turn-leaf-page { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; transform-style:preserve-3d; backface-visibility:visible; will-change:transform, clip-path; overflow:visible; }
-        .samee3-turn-front { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:2; backface-visibility:hidden; transform-style:preserve-3d; }
-        .samee3-turn-back { position:absolute; inset:0; z-index:1; background:linear-gradient(180deg,#fffef9 0%,#f6f0e4 52%,#fffdf7 100%); border:1px solid rgba(177,136,79,.32); border-radius:0; box-shadow:inset -16px 0 28px rgba(125,91,47,.05), inset 16px 0 28px rgba(255,255,255,.68); backface-visibility:visible; transform:rotateY(180deg); transform-style:preserve-3d; }
-        .samee3-turn-back-wash { position:absolute; inset:0; background:radial-gradient(ellipse at 50% 50%, rgba(157,119,72,.04), rgba(255,255,255,0) 65%); }
-        .samee3-turn-leaf-clip.is-dragging { filter:drop-shadow(0 12px 18px rgba(57,39,19,.14)); }
-        .samee3-turn-paper-highlight { position:absolute; top:-2%; bottom:-2%; width:18px; pointer-events:none; z-index:8; border-radius:999px; background:linear-gradient(90deg, rgba(83,60,32,0) 0%, rgba(83,60,32,.08) 24%, rgba(255,255,255,.98) 48%, rgba(255,255,255,.58) 58%, rgba(101,73,37,.08) 78%, rgba(101,73,37,0) 100%); filter:blur(.38px); opacity:.86; mix-blend-mode:screen; }
-        .samee3-turn-edge-shadow { position:absolute; top:2%; bottom:2%; width:34px; pointer-events:none; z-index:9; border-radius:50%; transform:translateX(-50%); background:radial-gradient(ellipse at center, rgba(51,37,22,.30) 0%, rgba(61,43,24,.12) 34%, rgba(61,43,24,0) 74%); filter:blur(6px); }
-        .samee3-turn-current, .samee3-turn-leaf-page .samee3-page-sheet { transform-style:preserve-3d; }
-        .samee3-turn-underlay .samee3-page-sheet { pointer-events:none !important; }
+        .samee3-turn-static { position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+        .samee3-turn-slide-target { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; pointer-events:none; }
         .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 4px 16px rgba(83,63,34,.07); isolation:isolate; }
-        .samee3-turn-leaf-page .samee3-page-sheet { box-shadow:0 10px 28px rgba(70,50,30,.16); }
         .is-desktop .samee3-page-sheet {
           height:min(calc(100dvh - 24px), 1020px);
           width:auto;
@@ -5830,7 +5922,6 @@ export default function MushafPage() {
 
         @media (prefers-reduced-motion: reduce) {
           .samee3-live-ayah-highlight { transition:none !important; }
-          .samee3-turn-leaf-page { transition:none !important; }
         }
 
         @media (max-width:767px) {
