@@ -3018,7 +3018,6 @@ export default function MushafPage() {
         targetPage,
         undefined,
         direction,
-        { startX: deltaX },
       )
     },
     [
