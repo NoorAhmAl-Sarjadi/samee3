@@ -1468,7 +1468,13 @@ export default function MushafPage() {
   } | null>(null)
   const turnPreviewRequestRef = useRef(0)
   const turnPreviewPageRef = useRef<number | null>(null)
+  const turnPreviewCacheRef = useRef(new Map<string, {
+    page: number
+    data: PageData | null
+    html: string
+  }>())
   const pendingNavigationPageRef = useRef<number | null>(null)
+  const pageTurnNavigationTokenRef = useRef(0)
   const [openPicker, setOpenPicker] = useState<'riwaya' | 'reciter' | 'surah' | 'juz' | null>(null)
   const pageTurnAudioContextRef = useRef<AudioContext | null>(null)
   const audioRestoreAttemptedRef = useRef(false)
@@ -2135,12 +2141,12 @@ export default function MushafPage() {
     let cancelled = false
     const nearby = Array.from(
       new Set([clampPage(pageNumber + 1), clampPage(pageNumber - 1)]),
-    )
+    ).filter((targetPage) => targetPage !== pageNumber)
 
     const warm = async () => {
       await Promise.all(
         nearby.map(async (targetPage) => {
-          if (cancelled || targetPage === pageNumber) return
+          if (cancelled) return
           await Promise.all([
             fetchPageData(targetPage).catch(() => null),
             fetchSvg(targetPage).catch(() => ''),
@@ -2565,8 +2571,37 @@ export default function MushafPage() {
     }
   }, [])
 
+  const getMemoryTurnPreview = useCallback((targetPage: number) => {
+    const safePage = clampPage(targetPage)
+    const key = `${riwaya}:${safePage}`
+    const cachedPreview = turnPreviewCacheRef.current.get(key)
+    if (cachedPreview?.html) return cachedPreview
+
+    const data = pageMemoryCacheRef.current.get(key) || null
+    const rawSvg = svgMemoryCacheRef.current.get(key) || ''
+
+    if (!data?.ayahs?.length || !rawSvg) return null
+
+    const html =
+      (riwaya === 'sousi' || riwaya === 'bazzi')
+        ? buildTextMushafSvg(data, riwaya)
+        : rawSvg
+
+    if (!html) return null
+
+    const preview = { page: safePage, data, html }
+    turnPreviewCacheRef.current.set(key, preview)
+    return preview
+  }, [riwaya])
+
   const prepareTurnPreview = useCallback(async (targetPage: number) => {
     const safePage = clampPage(targetPage)
+    const cached = getMemoryTurnPreview(safePage)
+    if (cached) {
+      setTurnPreview(cached)
+      return cached
+    }
+
     const requestId = ++turnPreviewRequestRef.current
 
     try {
@@ -2590,14 +2625,16 @@ export default function MushafPage() {
         html,
       }
 
+      turnPreviewCacheRef.current.set(`${riwaya}:${safePage}`, preview)
       setTurnPreview(preview)
       return preview
     } catch {
       return null
     }
-  }, [fetchPageData, fetchSvg, riwaya])
+  }, [fetchPageData, fetchSvg, getMemoryTurnPreview, riwaya])
 
   const resetPageTurnState = useCallback(() => {
+    pageTurnNavigationTokenRef.current += 1
     setPageSettleX(0)
     setPageDragX(0)
     setPageDragY(0)
@@ -2630,15 +2667,29 @@ export default function MushafPage() {
       return
     }
 
-    const run = async () => {
+    const basePage = pageNumber
+    const baseData = pageData
+    const baseHtml = mainDisplayedSvg
+    const token = ++pageTurnNavigationTokenRef.current
+
+    const startTransition = (preview: {
+      page: number
+      data: PageData | null
+      html: string
+    } | null) => {
+      if (!preview || preview.page !== nextPage) {
+        if (token === pageTurnNavigationTokenRef.current) {
+          resetPageTurnState()
+        }
+        return
+      }
+
+      if (token !== pageTurnNavigationTokenRef.current) return
+      if (navigatingRef.current && pendingNavigationPageRef.current !== nextPage) return
+
       const audio = audioRef.current as Samee3AudioElement | null
-
-      if (
-        audio?.__samee3NetworkUrl &&
-        audio.__samee3Surah
-      ) {
+      if (audio?.__samee3NetworkUrl && audio.__samee3Surah) {
         const previous = readPersistentAudioState()
-
         writePersistentAudioState({
           networkUrl: audio.__samee3NetworkUrl,
           surah: Number(audio.__samee3Surah),
@@ -2647,114 +2698,59 @@ export default function MushafPage() {
             ? Math.max(0, audio.currentTime)
             : previous?.currentTime ?? 0,
           playing: !audio.paused,
-          riwaya:
-            audio.__samee3Riwaya ||
-            previous?.riwaya ||
-            'hafs',
-          reciterId: Number(
-            audio.__samee3ReciterId ||
-            previous?.reciterId ||
-            DEFAULT_RECITER_API_ID,
-          ),
-          reciterName:
-            audio.__samee3ReciterName ||
-            previous?.reciterName ||
-            DEFAULT_RECITER_NAME,
-          moshafId:
-            audio.__samee3MoshafId ??
-            previous?.moshafId ??
-            null,
-          page: pageNumber,
+          riwaya: audio.__samee3Riwaya || previous?.riwaya || 'hafs',
+          reciterId: Number(audio.__samee3ReciterId || previous?.reciterId || DEFAULT_RECITER_API_ID),
+          reciterName: audio.__samee3ReciterName || previous?.reciterName || DEFAULT_RECITER_NAME,
+          moshafId: audio.__samee3MoshafId ?? previous?.moshafId ?? null,
+          page: basePage,
           updatedAt: Date.now(),
         })
-
-        audio.__samee3Page = pageNumber
+        audio.__samee3Page = basePage
       }
 
       navigatingRef.current = true
       pendingNavigationPageRef.current = nextPage
 
-      /*
-       * نأخذ لقطة ثابتة من الصفحة الحالية قبل أي تغيير في الـURL.
-       * هذه النقطة تمنع ظهور:
-       * الصفحة التالية ← الصفحة الحالية ← الصفحة التالية
-       * لأن طبقة التقليب لن تعتمد بعد ذلك على pageNumber المتغير.
-       */
       setPageTurnBase({
-        page: pageNumber,
-        data: pageData,
-        html: mainDisplayedSvg,
+        page: basePage,
+        data: baseData,
+        html: baseHtml,
       })
-
-      const existingPreview =
-        turnPreview?.page === nextPage
-          ? turnPreview
-          : null
-
-      const preview =
-        existingPreview ||
-        await prepareTurnPreview(nextPage)
-
-      if (
-        !preview ||
-        preview.page !== nextPage
-      ) {
-        resetPageTurnState()
-        return
-      }
-
       setTurnPreview(preview)
       setPageTurnDirection(direction)
       setPageTurnTarget(nextPage)
-      setPageTurnPhase('committing')
-
-      const committedStartProgress = Math.max(
-        0,
-        Math.min(0.94, pageTurnProgress),
-      )
-
-      setPageTurnProgress(
-        committedStartProgress,
-      )
       setIsPageDragging(false)
       setPageDragX(0)
       setPageDragY(0)
       setPageSettleX(0)
 
-      /*
-       * تكملة الحركة من نفس مكان إصبع المستخدم.
-       * لا يوجد رجوع للصفحة الحالية ولا إعادة ظهور لها.
-       */
+      // ابدأ من مكان إصبع المستخدم عند السحب، وإلا ابدأ من الصفر.
+      const currentProgress = Math.max(0, Math.min(1, pageTurnProgress))
+      setPageTurnProgress(currentProgress)
+      setPageTurnPhase('committing')
+
+      const animationDuration = 300
+      playPageTurnSound()
+
       window.requestAnimationFrame(() => {
+        if (token !== pageTurnNavigationTokenRef.current) return
         window.requestAnimationFrame(() => {
+          if (token !== pageTurnNavigationTokenRef.current) return
           setPageTurnProgress(1)
         })
       })
 
-      const params = new URLSearchParams(
-        searchParams.toString(),
+      const remaining = Math.max(
+        20,
+        Math.round(animationDuration * (1 - currentProgress)),
       )
 
-      params.set(
-        'page',
-        String(nextPage),
-      )
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('page', String(nextPage))
 
-      if (extra?.surah) {
-        params.set(
-          'surah',
-          String(extra.surah),
-        )
-      }
-
-      if (extra?.ayah) {
-        params.set(
-          'ayah',
-          extra.ayah,
-        )
-      } else {
-        params.delete('ayah')
-      }
+      if (extra?.surah) params.set('surah', String(extra.surah))
+      if (extra?.ayah) params.set('ayah', extra.ayah)
+      else params.delete('ayah')
 
       if (extra?.clearJuz) {
         params.delete('juz')
@@ -2762,63 +2758,47 @@ export default function MushafPage() {
         params.delete('juzEnd')
       }
 
-      /*
-       * نغيّر الـURL بعد اكتمال حركة الصورة،
-       * وليس أثناءها، حتى لا تدخل صفحة Next.js الجديدة
-       * في منتصف الأنيميشن.
-       */
-      const remaining =
-        Math.max(
-          260,
-          Math.round(
-            380 * (1 - committedStartProgress),
-          ),
-        )
-
       window.setTimeout(() => {
-        if (
-          pendingNavigationPageRef.current !==
-          nextPage
-        ) {
-          return
-        }
+        if (token !== pageTurnNavigationTokenRef.current) return
+        if (pendingNavigationPageRef.current !== nextPage) return
+        router.replace(`/mushaf?${params.toString()}`)
+      }, remaining + 18)
 
-        router.replace(
-          `/mushaf?${params.toString()}`,
-        )
-      }, remaining + 20)
-
-      /*
-       * لا نمسح اللقطة القديمة إلا عندما تصبح الصفحة
-       * الجديدة فعلًا هي pageData/svg الحالية.
-       * هذا يمنع أي فلاش أو رجوع للصفحة السابقة.
-       */
+      // حماية أخيرة فقط. عند وصول pageNumber الجديدة، useEffect الخاص بالصفحة يمسح الحالة فورًا.
       window.setTimeout(() => {
-        if (
-          pendingNavigationPageRef.current !==
-          nextPage
-        ) {
-          return
-        }
-
-        if (pageNumber === nextPage) {
-          return
-        }
-
-        /*
-         * في حالة لم يتم تحديث الـURL بسبب تنقل خارجي،
-         * لا نترك حالة تقليب معلقة.
-         */
+        if (token !== pageTurnNavigationTokenRef.current) return
+        if (pageNumber === nextPage) return
+        if (pendingNavigationPageRef.current !== nextPage) return
         resetPageTurnState()
-      }, 1500)
+      }, 1200)
     }
 
-    void run()
+    // الأولوية دائمًا للنسخة الموجودة في الذاكرة حتى يبدأ التقليب من أول لمسة.
+    const immediatePreview =
+      turnPreview?.page === nextPage
+        ? turnPreview
+        : getMemoryTurnPreview(nextPage)
+
+    if (immediatePreview) {
+      startTransition(immediatePreview)
+      return
+    }
+
+    navigatingRef.current = true
+    pendingNavigationPageRef.current = nextPage
+
+    // لو كانت الصفحة المجاورة لم تُجهّز بعد، نجلبها من الكاش/الشبكة ثم نكمل نفس الانتقال.
+    void prepareTurnPreview(nextPage).then((preview) => {
+      if (token !== pageTurnNavigationTokenRef.current) return
+      startTransition(preview)
+    })
   }, [
+    getMemoryTurnPreview,
     mainDisplayedSvg,
     pageData,
     pageNumber,
     pageTurnProgress,
+    playPageTurnSound,
     prepareTurnPreview,
     resetPageTurnState,
     router,
@@ -2827,11 +2807,11 @@ export default function MushafPage() {
   ])
 
   /*
-   * التقليب بالماوس/اللمس باستخدام Pointer Events.
-   * الاتجاه البصري الجديد: التقليب من اليسار إلى اليمين.
-   * سحب لليمين = الصفحة التالية.
-   * سحب لليسار = الصفحة السابقة.
-   * الحركة صفحة كاملة وبسيطة، والصفحة الهدف تكون أسفلها أثناء الحركة.
+   * التقليب المسطح الحقيقي باستخدام Pointer Events.
+   * الاتجاهات ثابتة بصريًا:
+   *  - الصفحة التالية: تدخل من اليسار إلى اليمين.
+   *  - الصفحة السابقة: تدخل من اليمين إلى اليسار.
+   * لا يوجد Page Curl ولا دوران ثلاثي الأبعاد ولا طبقات معكوسة.
    */
   const beginPagePointer = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -2868,16 +2848,15 @@ export default function MushafPage() {
       setPageDragY(0)
       setPageSettleX(0)
 
-      /*
-       * لا نستخدم pointer capture عندما يبدأ اللمس فوق آية.
-       * هذا يحافظ على click/tap الطبيعي للآية حتى تظهر لوحة الخيارات،
-       * وفي الوقت نفسه نستطيع اكتشاف السحب إذا تجاوز المستخدم حد الحركة.
-       */
+      // نحافظ على حركة المؤشر حتى لو خرج قليلًا من حدود الصفحة.
+      // وعند البدء فوق آية نؤجل الـcapture حتى نتأكد أنها سحبة وليست ضغطة.
       if (!ayahTarget) {
         try {
           event.currentTarget.setPointerCapture(event.pointerId)
         } catch {}
       }
+
+      // الصفحتان المجاورتان يتم تسخينهما أصلًا في الخلفية؛ لا نغير واجهة القراءة هنا.
     },
     [],
   )
@@ -2898,62 +2877,76 @@ export default function MushafPage() {
       const horizontal = Math.abs(deltaX)
       const vertical = Math.abs(deltaY)
 
-      // مسافة صغيرة جدًا = tap، وليس سحبًا.
       if (!pointerMovedRef.current) {
-        if (horizontal < 10 && vertical < 10) return
+        if (horizontal < 8 && vertical < 8) return
         pointerMovedRef.current = true
       }
 
-      if (horizontal > vertical + 6 && horizontal > 10) {
-        event.preventDefault()
+      if (horizontal <= vertical + 6 || horizontal <= 8) return
 
-        const maxDrag = Math.min(window.innerWidth * 0.98, 900)
-        const limitedX = Math.max(-maxDrag, Math.min(maxDrag, deltaX))
+      event.preventDefault()
 
-        const basePage = isDesktop ? desktopRightPage : pageNumber
-        const targetPage = deltaX > 0
-          ? clampPage(basePage + 1)
-          : clampPage(basePage - 1)
-        const turnProgress = Math.min(1, Math.max(0, Math.abs(limitedX) / Math.max(1, window.innerWidth * 0.78)))
-        const turnDirection = deltaX > 0 ? 'next' : 'prev'
+      // بعد أن تتضح أنها سحبة أفقية، نأخذ pointer capture حتى لا تضيع الحركة فوق الـSVG أو خارج الصفحة.
+      if (pointerStartedOnAyahRef.current) {
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        } catch {}
+      }
 
-        setIsPageDragging(true)
-        setPageTurnPhase('dragging')
-        setPageDragX(limitedX)
-        setPageDragY(0)
-        setPageTurnProgress(turnProgress)
-        setPageTurnDirection(turnDirection)
-        setPageTurnTarget(targetPage)
+      const viewportWidth = Math.max(1, window.innerWidth)
+      const limitedX = Math.max(-viewportWidth, Math.min(viewportWidth, deltaX))
+      const basePage = pageNumber
+      const targetPage = deltaX > 0
+        ? clampPage(basePage + 1)
+        : clampPage(basePage - 1)
 
-        /*
-         * لقطة ثابتة للصفحة الحالية.
-         * أهم شيء أن هذه اللقطة لا تتغير عندما يتغير الـURL.
-         */
-        if (!pageTurnBase) {
-          setPageTurnBase({
-            page: basePage,
-            data: pageData,
-            html: mainDisplayedSvg,
-          })
-        }
+      if (targetPage === basePage) return
 
-        if (
-          targetPage !== basePage &&
-          turnPreviewPageRef.current !== targetPage
-        ) {
+      const progress = Math.min(
+        1,
+        Math.max(0, Math.abs(limitedX) / Math.max(1, viewportWidth * 0.86)),
+      )
+      const direction = deltaX > 0 ? 'next' : 'prev'
+
+      const preview =
+        turnPreview?.page === targetPage
+          ? turnPreview
+          : getMemoryTurnPreview(targetPage)
+
+      setIsPageDragging(true)
+      setPageTurnPhase('dragging')
+      setPageDragX(limitedX)
+      setPageDragY(0)
+      setPageTurnProgress(progress)
+      setPageTurnDirection(direction)
+      setPageTurnTarget(targetPage)
+
+      if (!pageTurnBase) {
+        setPageTurnBase({
+          page: basePage,
+          data: pageData,
+          html: mainDisplayedSvg,
+        })
+      }
+
+      if (preview) {
+        setTurnPreview(preview)
+      } else {
+        // لا نكسر السحب إذا كانت النسخة البصرية لم تصل بعد؛ نجهزها في الخلفية.
+        if (turnPreviewPageRef.current !== targetPage) {
           turnPreviewPageRef.current = targetPage
           void prepareTurnPreview(targetPage)
         }
       }
     },
     [
-      desktopRightPage,
-      isDesktop,
+      getMemoryTurnPreview,
       mainDisplayedSvg,
       pageData,
       pageNumber,
       pageTurnBase,
       prepareTurnPreview,
+      turnPreview,
     ],
   )
 
@@ -2970,14 +2963,13 @@ export default function MushafPage() {
 
       const deltaX = event.clientX - pointerStartX.current
       const deltaY = event.clientY - pointerStartY.current
-      const basePage = isDesktop ? desktopRightPage : pageNumber
-
+      const basePage = pageNumber
       const horizontalDistance = Math.abs(deltaX)
       const verticalDistance = Math.abs(deltaY)
-      const threshold = Math.min(120, Math.max(48, window.innerWidth * 0.12))
+      const threshold = Math.min(112, Math.max(44, window.innerWidth * 0.105))
       const isHorizontalSwipe =
         horizontalDistance >= threshold &&
-        horizontalDistance > verticalDistance * 1.12
+        horizontalDistance > verticalDistance * 1.08
 
       const pointerWasAyah = pointerStartedOnAyahRef.current
       const pointerMoved = pointerMovedRef.current
@@ -3005,28 +2997,13 @@ export default function MushafPage() {
         : clampPage(basePage - 1)
 
       if (targetPage === basePage) {
-        setPageDragX(0)
-        setIsPageDragging(false)
-        setPageTurnPhase('idle')
-        setPageTurnProgress(0)
-        setPageTurnDirection(null)
-        setPageTurnTarget(null)
+        resetPageTurnState()
         return
       }
 
-      navigateTo(
-        targetPage,
-        undefined,
-        direction,
-      )
+      navigateTo(targetPage, undefined, direction)
     },
-    [
-      desktopRightPage,
-      isDesktop,
-      navigateTo,
-      pageNumber,
-      resetPageTurnState,
-    ],
+    [navigateTo, pageNumber, resetPageTurnState],
   )
 
   const cancelPagePointer = useCallback(
@@ -3054,6 +3031,10 @@ export default function MushafPage() {
       setPageTurnDirection(null)
       setPageTurnTarget(null)
       setTurnPreview(null)
+      setPageTurnBase(null)
+      navigatingRef.current = false
+      pendingNavigationPageRef.current = null
+      pageTurnNavigationTokenRef.current += 1
     },
     [],
   )
@@ -5404,116 +5385,72 @@ export default function MushafPage() {
             {(() => {
               const hasPreview =
                 pageTurnTarget !== null &&
-                turnPreview?.page === pageTurnTarget
+                turnPreview?.page === pageTurnTarget &&
+                Boolean(turnPreview?.html)
 
               const active =
                 pageTurnPhase !== 'idle' &&
                 pageTurnDirection !== null &&
                 pageTurnTarget !== null &&
-                !!pageTurnBase &&
+                Boolean(pageTurnBase) &&
                 hasPreview
 
               const progress = active
-                ? Math.min(
-                    1,
-                    Math.max(
-                      0,
-                      pageTurnProgress,
-                    ),
-                  )
+                ? Math.min(1, Math.max(0, pageTurnProgress))
                 : 0
+              const direction = pageTurnDirection || 'next'
+              const isNext = direction === 'next'
 
-              const direction =
-                pageTurnDirection || 'next'
+              // next: الصفحة الجديدة تبدأ خارج الإطار من اليسار وتدخل نحو اليمين.
+              // prev: الصفحة الجديدة تبدأ خارج الإطار من اليمين وتدخل نحو اليسار.
+              const currentX = isNext ? progress * 100 : -progress * 100
+              const targetX = isNext ? -100 + progress * 100 : 100 - progress * 100
+              const transition = pageTurnPhase === 'dragging'
+                ? 'none'
+                : 'transform 300ms cubic-bezier(.2,.82,.2,1)'
 
-              /*
-               * الاتجاه المطلوب:
-               * سحب لليمين = الصفحة التالية.
-               * لذلك الصفحة الحالية تخرج لليمين،
-               * وتظل الصفحة التالية ثابتة أسفلها.
-               */
-              const isNext =
-                direction === 'next'
+              const basePage = pageTurnBase?.page ?? pageNumber
+              const baseData = pageTurnBase?.data ?? pageData
+              const baseHtml = pageTurnBase?.html ?? mainDisplayedSvg
+              const baseMeta = pageMeta(
+                baseData,
+                basePage,
+                baseData?.ayahs?.[0]?.surah?.number || currentSurahNumber,
+              )
 
-              const currentX =
-                isNext
-                  ? 100 * progress
-                  : -100 * progress
-
-              const transition =
-                pageTurnPhase === 'dragging'
-                  ? 'none'
-                  : 'transform 380ms cubic-bezier(.22,.75,.22,1)'
-
-              const basePage =
-                pageTurnBase?.page ??
-                pageNumber
-
-              const baseData =
-                pageTurnBase?.data ??
-                pageData
-
-              const baseHtml =
-                pageTurnBase?.html ??
-                mainDisplayedSvg
-
-              const baseMeta =
-                pageMeta(
-                  baseData,
-                  basePage,
-                  baseData?.ayahs?.[0]?.surah?.number ||
-                    currentSurahNumber,
-                )
+              const targetPage = turnPreview?.page ?? pageTurnTarget ?? pageNumber
+              const targetData = turnPreview?.data ?? null
+              const targetHtml = turnPreview?.html ?? ''
+              const targetMeta = pageMeta(
+                targetData,
+                targetPage,
+                targetData?.ayahs?.[0]?.surah?.number || currentSurahNumber,
+              )
 
               return (
                 <div
-                  className={`samee3-page-turn-layer ${
-                    active
-                      ? 'is-active'
-                      : ''
-                  }`}
-                  aria-hidden={
-                    active
-                      ? 'true'
-                      : undefined
-                  }
+                  className={`samee3-page-turn-layer ${active ? 'is-active' : ''}`}
+                  aria-hidden={active ? 'true' : undefined}
                 >
                   {active ? (
                     <div
                       className="samee3-turn-target"
                       aria-hidden="true"
+                      style={{
+                        transform: `translate3d(${targetX.toFixed(3)}%,0,0)`,
+                        transition,
+                        willChange: 'transform',
+                      }}
                     >
                       <MushafPageSheet
-                        page={
-                          turnPreview?.page ||
-                          pageTurnTarget ||
-                          pageNumber
-                        }
-                        data={
-                          turnPreview?.data ||
-                          null
-                        }
-                        html={
-                          turnPreview?.html ||
-                          ''
-                        }
+                        page={targetPage}
+                        data={targetData}
+                        html={targetHtml}
                         side="single"
-                        meta={pageMeta(
-                          turnPreview?.data ||
-                            null,
-                          turnPreview?.page ||
-                            pageTurnTarget ||
-                            pageNumber,
-                        )}
-                        onAyahClick={() =>
-                          undefined
-                        }
-                        onAyahPointerDown={() =>
-                          undefined
-                        }
-                        onAyahPointerUp={() =>
-                          undefined
-                        }
+                        meta={targetMeta}
+                        onAyahClick={() => undefined}
+                        onAyahPointerDown={() => undefined}
+                        onAyahPointerUp={() => undefined}
                       />
                     </div>
                   ) : null}
@@ -5521,21 +5458,10 @@ export default function MushafPage() {
                   <div
                     className="samee3-turn-current"
                     style={{
-                      pointerEvents:
-                        active
-                          ? 'none'
-                          : 'auto',
-                      transform:
-                        active
-                          ? `translate3d(${currentX.toFixed(
-                              3,
-                            )}%,0,0)`
-                          : 'translate3d(0,0,0)',
+                      pointerEvents: active ? 'none' : 'auto',
+                      transform: `translate3d(${active ? currentX.toFixed(3) : '0'}%,0,0)`,
                       transition,
-                      willChange:
-                        active
-                          ? 'transform'
-                          : 'auto',
+                      willChange: active ? 'transform' : 'auto',
                     }}
                   >
                     <MushafPageSheet
@@ -5544,15 +5470,9 @@ export default function MushafPage() {
                       html={baseHtml}
                       side="single"
                       meta={baseMeta}
-                      onAyahClick={
-                        handleAyahClick
-                      }
-                      onAyahPointerDown={
-                        handleAyahPointerDown
-                      }
-                      onAyahPointerUp={
-                        handleAyahPointerUp
-                      }
+                      onAyahClick={handleAyahClick}
+                      onAyahPointerDown={handleAyahPointerDown}
+                      onAyahPointerUp={handleAyahPointerUp}
                     />
                   </div>
                 </div>
@@ -5882,17 +5802,17 @@ export default function MushafPage() {
       <style jsx global>{`
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
         .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
-        .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; background:#f5f0e4; touch-action:pan-y; overscroll-behavior:none; }
+        .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; background:#f5f0e4; touch-action:pan-y; overscroll-behavior:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
         .samee3-book-stage { transform:none !important; filter:none !important; }
         .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform:none !important; transition:none; will-change:auto; }
         .samee3-spread.is-desktop { padding:8px 14px 14px; }
         .samee3-spread.is-mobile { padding:0; }
         .samee3-spread.is-dragging { cursor:grabbing; user-select:none; }
-        .samee3-turn-stack { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; perspective:none; }
-        .samee3-page-turn-layer { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; }
+        .samee3-turn-stack { position:relative; width:100%; height:100%; display:block; overflow:hidden; contain:paint; isolation:isolate; }
+        .samee3-page-turn-layer { position:absolute; inset:0; z-index:4; display:block; overflow:hidden; pointer-events:none; transform:none !important; perspective:none !important; }
         .samee3-page-turn-layer.is-active { pointer-events:none; }
-        .samee3-turn-target { position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; overflow:hidden; pointer-events:none; }
-        .samee3-turn-current { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+        .samee3-turn-target { position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; overflow:hidden; pointer-events:none; transform:translate3d(0,0,0); backface-visibility:visible; }
+        .samee3-turn-current { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; overflow:hidden; transform:translate3d(0,0,0); backface-visibility:visible; }
         .samee3-page-sheet { position:relative; height:100%; aspect-ratio:1000/1400; overflow:hidden; background:#fffdf7; border:1px solid rgba(177,136,79,.38); box-shadow:0 4px 16px rgba(83,63,34,.07); isolation:isolate; }
         .is-desktop .samee3-page-sheet {
           height:min(calc(100dvh - 24px), 1020px);
