@@ -1782,72 +1782,98 @@ export default function MushafPage() {
 
   const prefetchRiwayaPage = useCallback(async (targetRiwaya: Riwaya, page: number) => {
     const safePage = clampPage(page)
+    const cache = 'caches' in window
+      ? await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME).catch(() => null)
+      : null
+
+    let pageOk = false
     const pageUrl = `/api/quran?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
-    let success = true
 
     try {
-      if ('caches' in window) {
-        const existing = await caches.match(pageUrl)
-        if (!existing) {
-          const response = await fetch(pageUrl, {
-            cache: 'force-cache',
-            headers: { Accept: 'application/json' },
-          })
-          if (!response.ok) {
-            success = false
-          } else {
-            const data = await response.clone().json()
-            pageMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, {
-              ayahs: Array.isArray(data?.ayahs)
-                ? data.ayahs
-                : Array.isArray(data?.data?.ayahs)
-                  ? data.data.ayahs
-                  : [],
-            })
-            const cache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
-            await cache.put(pageUrl, response)
+      if (cache) {
+        const cached = await cache.match(pageUrl)
+        if (cached) {
+          const data = await cached.clone().json()
+          const pageDataValue = {
+            ayahs: Array.isArray(data?.ayahs)
+              ? data.ayahs
+              : Array.isArray(data?.data?.ayahs)
+                ? data.data.ayahs
+                : [],
+          } as PageData
+          if (pageDataValue.ayahs.length) {
+            pageMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, pageDataValue)
+            pageOk = true
           }
         }
-      } else {
+      }
+    } catch {
+      // نستمر إلى الشبكة.
+    }
+
+    if (!pageOk && navigator.onLine) {
+      try {
         const response = await fetch(pageUrl, {
           cache: 'force-cache',
           headers: { Accept: 'application/json' },
         })
-        if (!response.ok) success = false
+        if (response.ok) {
+          const data = await response.clone().json()
+          const pageDataValue = {
+            ayahs: Array.isArray(data?.ayahs)
+              ? data.ayahs
+              : Array.isArray(data?.data?.ayahs)
+                ? data.data.ayahs
+                : [],
+          } as PageData
+          pageMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, pageDataValue)
+          pageOk = pageDataValue.ayahs.length > 0
+          if (pageOk && cache) {
+            await cache.put(pageUrl, response).catch(() => {})
+          }
+        }
+      } catch {
+        // الصفحة قد تكون محفوظة جزئيًا فقط؛ لا نوقف بقية التسخين.
       }
-    } catch {
-      success = false
     }
 
+    let svgOk = false
     const svgUrl = `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
 
     try {
-      if ('caches' in window) {
-        const existingSvg = await caches.match(svgUrl)
-        if (!existingSvg) {
-          const response = await fetch(svgUrl, { cache: 'force-cache' })
-          if (response.ok) {
-            const data = await response.clone().json()
-            if (data?.success && data?.svg) {
-              svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
-              const cache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
-              await cache.put(svgUrl, response)
-            } else {
-              success = false
-            }
-          } else {
-            success = false
+      if (cache) {
+        const cachedSvg = await cache.match(svgUrl)
+        if (cachedSvg) {
+          const data = await cachedSvg.clone().json()
+          if (data?.success && data?.svg) {
+            svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
+            svgOk = true
           }
         }
-      } else {
-        const response = await fetch(svgUrl, { cache: 'force-cache' })
-        if (!response.ok) success = false
       }
     } catch {
-      success = false
+      // نستمر إلى الشبكة.
     }
 
-    return success
+    if (!svgOk && navigator.onLine) {
+      try {
+        const response = await fetch(svgUrl, { cache: 'force-cache' })
+        if (response.ok) {
+          const data = await response.clone().json()
+          if (data?.success && data?.svg) {
+            svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
+            svgOk = true
+            if (cache) {
+              await cache.put(svgUrl, response).catch(() => {})
+            }
+          }
+        }
+      } catch {
+        // نترك الصفحة التي تم حفظها بالفعل بدون تعطيل بقية التسخين.
+      }
+    }
+
+    return pageOk && svgOk
   }, [])
 
   // ============================================================
@@ -1905,7 +1931,10 @@ export default function MushafPage() {
       }
 
       const completed = readWarmupState()
-      if (completed.size >= tasks.length) return
+      if (completed.size >= tasks.length) {
+        mushafWarmupRunningRef.current = false
+        return
+      }
 
       try {
         if (navigator.storage?.persist) {
@@ -1917,7 +1946,7 @@ export default function MushafPage() {
 
       let cursor = 0
       let successfulSinceSave = 0
-      const workerCount = Math.min(3, tasks.length)
+      const workerCount = Math.min(2, tasks.length)
 
       const worker = async () => {
         while (!cancelled && navigator.onLine) {
@@ -1947,13 +1976,13 @@ export default function MushafPage() {
           completed.add(taskIndex)
           successfulSinceSave += 1
 
-          if (successfulSinceSave >= 8) {
+          if (successfulSinceSave >= 4) {
             successfulSinceSave = 0
             saveWarmupState(completed)
           }
 
           // Yield قصير جدًا حتى لا يشعر المستخدم بأن المصحف أو الصوت يتجمّد.
-          if (completed.size % 6 === 0) {
+          if (completed.size % 4 === 0) {
             await new Promise((resolve) => window.setTimeout(resolve, 0))
           }
         }
@@ -2616,9 +2645,10 @@ export default function MushafPage() {
       }
 
       /*
-       * الصفحة الجديدة جاهزة خلف الصفحة الحالية.
-       * بدل تحريك الصفحة ككتلة واحدة، نُبقي الصفحة ثابتة ونقلب
-       * حافتها فعليًا حول محور رأسي؛ وهذا هو شكل التقليب الظاهر في الفيديو.
+       * التقليب هنا تقليب صفحات بسيط وواضح مثل الفيديو:
+       * الصفحة الحالية تتحرك أفقيًا كاملة، والصفحة الجديدة موجودة أسفلها.
+       * لا نستخدم 3D أو clip-path أو curl حتى لا تظهر شرائح أو انحناءات
+       * غريبة على شاشات iPhone والمتصفحات المختلفة.
        */
       setTurnPreview(preview)
       setPageTurnDirection(direction)
@@ -2685,7 +2715,7 @@ export default function MushafPage() {
    * الاتجاه البصري الجديد: التقليب من اليسار إلى اليمين.
    * سحب لليمين = الصفحة التالية.
    * سحب لليسار = الصفحة السابقة.
-   * الحركة تعتمد على شريحة ورقية ضيقة مع انثناء حقيقي وظل خفيف.
+   * الحركة صفحة كاملة وبسيطة، والصفحة الهدف تكون أسفلها أثناء الحركة.
    */
   const beginPagePointer = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -5265,10 +5295,10 @@ export default function MushafPage() {
 
               const direction = pageTurnDirection || 'next'
               const isNext = direction === 'next'
-              const currentX = isNext ? -100 * progress : 100 * progress
-              const targetX = isNext
-                ? 100 * (1 - progress)
-                : -100 * (1 - progress)
+              // التقليب من اليسار إلى اليمين:
+              // التالي = الصفحة الحالية تخرج ناحية اليمين،
+              // السابق = الصفحة الحالية تخرج ناحية اليسار.
+              const currentX = isNext ? 100 * progress : -100 * progress
               const duration = '0.34s'
               const easing = 'cubic-bezier(.20,.78,.22,1)'
               const transition = pageTurnPhase === 'dragging'
