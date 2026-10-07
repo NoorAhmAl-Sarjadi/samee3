@@ -18,7 +18,6 @@ import {
   Search,
   Layers3,
   GraduationCap,
-  ChevronLeft,
   Loader2,
   RefreshCw,
   Eye,
@@ -267,24 +266,37 @@ function buildBookForm(
   }
 }
 
-function makeBookId(title: string): string {
+function makeBookId(
+  title: string
+): string {
   const normalized = title
     .trim()
     .toLowerCase()
     .replace(
-      /[^\p{L}\p{N}\s-]/gu,
+      /[^a-z0-9\u0600-\u06FF\s-]/gi,
       ''
     )
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
+    .replace(
+      /\s+/g,
+      '-'
+    )
+    .replace(
+      /-+/g,
+      '-'
+    )
+    .replace(
+      /^-|-$/g,
+      ''
+    )
 
   const suffix =
     Math.random()
       .toString(36)
       .slice(2, 7)
 
-  return `${normalized || 'book'}-${suffix}`
+  return `${
+    normalized || 'book'
+  }-${suffix}`
 }
 
 export default function IslamicLibraryAdmin() {
@@ -313,9 +325,9 @@ export default function IslamicLibraryAdmin() {
     useState('')
 
   const [levelFilter, setLevelFilter] =
-    useState<'الكل' | SunniLibraryLevel>(
-      'الكل'
-    )
+    useState<
+      'الكل' | SunniLibraryLevel
+    >('الكل')
 
   const [categoryFilter, setCategoryFilter] =
     useState<
@@ -360,7 +372,8 @@ export default function IslamicLibraryAdmin() {
     () =>
       books.find(
         (book) =>
-          book.id === selectedBookId
+          book.id ===
+          selectedBookId
       ) || null,
     [books, selectedBookId]
   )
@@ -387,7 +400,8 @@ export default function IslamicLibraryAdmin() {
 
       const matchesCategory =
         categoryFilter === 'الكل' ||
-        book.category === categoryFilter
+        book.category ===
+          categoryFilter
 
       return (
         matchesSearch &&
@@ -404,12 +418,14 @@ export default function IslamicLibraryAdmin() {
 
   const visibleBooksCount =
     books.filter(
-      (book) => !book.deleted
+      (book) =>
+        !book.deleted
     ).length
 
   const hiddenBooksCount =
     books.filter(
-      (book) => book.deleted
+      (book) =>
+        book.deleted
     ).length
 
   useEffect(() => {
@@ -422,7 +438,9 @@ export default function IslamicLibraryAdmin() {
       return
     }
 
-    void loadVideos(selectedBookId)
+    void loadVideos(
+      selectedBookId
+    )
   }, [selectedBookId])
 
   function notify(
@@ -451,12 +469,13 @@ export default function IslamicLibraryAdmin() {
       setLoadingBooks(true)
       setError('')
 
-      const snapshot = await getDocs(
-        collection(
-          db,
-          'islamicLibraryBooks'
+      const snapshot =
+        await getDocs(
+          collection(
+            db,
+            'islamicLibraryBooks'
+          )
         )
-      )
 
       const firestoreMap =
         new Map<
@@ -464,16 +483,21 @@ export default function IslamicLibraryAdmin() {
           FirestoreBookData
         >()
 
-      snapshot.docs.forEach((item) => {
-        firestoreMap.set(
-          item.id,
-          item.data() as FirestoreBookData
-        )
-      })
+      snapshot.docs.forEach(
+        (item) => {
+          firestoreMap.set(
+            item.id,
+            item.data() as FirestoreBookData
+          )
+        }
+      )
 
-      const merged: AdminBook[] = []
+      const merged: AdminBook[] =
+        []
 
-      for (const staticBook of SUNNI_LIBRARY_BOOKS) {
+      for (
+        const staticBook of SUNNI_LIBRARY_BOOKS
+      ) {
         const override =
           firestoreMap.get(
             staticBook.id
@@ -505,10 +529,12 @@ export default function IslamicLibraryAdmin() {
         )
       }
 
-      for (const [
-        id,
-        data,
-      ] of firestoreMap.entries()) {
+      for (
+        const [
+          id,
+          data,
+        ] of firestoreMap.entries()
+      ) {
         const customBook =
           createBookFromFirestore(
             id,
@@ -522,11 +548,12 @@ export default function IslamicLibraryAdmin() {
         }
       }
 
-      merged.sort((a, b) =>
-        a.title.localeCompare(
-          b.title,
-          'ar'
-        )
+      merged.sort(
+        (a, b) =>
+          a.title.localeCompare(
+            b.title,
+            'ar'
+          )
       )
 
       setBooks(merged)
@@ -561,47 +588,58 @@ export default function IslamicLibraryAdmin() {
     try {
       setLoadingVideos(true)
 
-      const snapshot = await getDocs(
-        collection(
-          db,
-          'islamicLibraryBooks',
-          bookId,
-          'videos'
+      const snapshot =
+        await getDocs(
+          collection(
+            db,
+            'islamicLibraryBooks',
+            bookId,
+            'videos'
+          )
         )
-      )
 
-      const nextVideos: VideoLesson[] =
+      const nextVideos:
+        VideoLesson[] =
         snapshot.docs
-          .map((item, index) => {
-            const data =
-              item.data() as Record<
-                string,
-                unknown
-              >
+          .map(
+            (
+              item,
+              index
+            ) => {
+              const data =
+                item.data() as Record<
+                  string,
+                  unknown
+                >
 
-            const numericOrder =
-              Number(data.order)
-
-            return {
-              id: item.id,
-              title:
-                stringValue(
-                  data.title
-                ) ||
-                `الدرس ${index + 1}`,
-              url:
-                stringValue(
-                  data.url
-                ) ||
-                '',
-              order:
-                Number.isFinite(
-                  numericOrder
+              const numericOrder =
+                Number(
+                  data.order
                 )
-                  ? numericOrder
-                  : index + 1,
+
+              return {
+                id: item.id,
+                title:
+                  stringValue(
+                    data.title
+                  ) ||
+                  `الدرس ${
+                    index + 1
+                  }`,
+                url:
+                  stringValue(
+                    data.url
+                  ) ||
+                  '',
+                order:
+                  Number.isFinite(
+                    numericOrder
+                  )
+                    ? numericOrder
+                    : index + 1,
+              }
             }
-          })
+          )
           .filter(
             (video) =>
               Boolean(
@@ -610,10 +648,13 @@ export default function IslamicLibraryAdmin() {
           )
           .sort(
             (a, b) =>
-              a.order - b.order
+              a.order -
+              b.order
           )
 
-      setVideos(nextVideos)
+      setVideos(
+        nextVideos
+      )
     } catch (loadError) {
       console.error(
         'Islamic library videos load error:',
@@ -642,7 +683,9 @@ export default function IslamicLibraryAdmin() {
   function openEditBook(
     book: AdminBook
   ) {
-    setEditingBookId(book.id)
+    setEditingBookId(
+      book.id
+    )
 
     setBookForm(
       buildBookForm(book)
@@ -843,7 +886,9 @@ export default function IslamicLibraryAdmin() {
         'تعذر تغيير حالة ظهور الكتاب.'
       )
     } finally {
-      setDeletingBookId(null)
+      setDeletingBookId(
+        null
+      )
     }
   }
 
@@ -883,7 +928,9 @@ export default function IslamicLibraryAdmin() {
         selectedBookId ===
         book.id
       ) {
-        setSelectedBookId(null)
+        setSelectedBookId(
+          null
+        )
         setVideos([])
       }
 
@@ -902,7 +949,9 @@ export default function IslamicLibraryAdmin() {
         'تعذر حذف الكتاب.'
       )
     } finally {
-      setDeletingBookId(null)
+      setDeletingBookId(
+        null
+      )
     }
   }
 
@@ -914,7 +963,31 @@ export default function IslamicLibraryAdmin() {
       return
     }
 
-    setEditingVideoId(null)
+    setEditingVideoId(
+      null
+    )
+
+    setVideoForm({
+      title: '',
+      url: '',
+      order: String(
+        videos.length + 1
+      ),
+    })
+
+    setVideoModalOpen(true)
+  }
+
+  function openCreateVideoForBook(
+    book: AdminBook
+  ) {
+    setSelectedBookId(
+      book.id
+    )
+
+    setEditingVideoId(
+      null
+    )
 
     setVideoForm({
       title: '',
@@ -952,6 +1025,7 @@ export default function IslamicLibraryAdmin() {
 
     setVideoModalOpen(false)
     setEditingVideoId(null)
+
     setVideoForm({
       ...EMPTY_VIDEO_FORM,
     })
@@ -1116,7 +1190,9 @@ export default function IslamicLibraryAdmin() {
         'تعذر حذف الدرس.'
       )
     } finally {
-      setDeletingVideoId(null)
+      setDeletingVideoId(
+        null
+      )
     }
   }
 
@@ -1126,7 +1202,8 @@ export default function IslamicLibraryAdmin() {
     return (
       SUNNI_LIBRARY_CATEGORIES.find(
         (item) =>
-          item.id === categoryId
+          item.id ===
+          categoryId
       )?.label ||
       categoryId
     )
@@ -1138,7 +1215,8 @@ export default function IslamicLibraryAdmin() {
     return (
       SUNNI_LIBRARY_LEVELS.find(
         (item) =>
-          item.id === level
+          item.id ===
+          level
       )?.label ||
       level
     )
@@ -1165,7 +1243,8 @@ export default function IslamicLibraryAdmin() {
                 كتاب ظاهر
               </span>
 
-              {hiddenBooksCount > 0 ? (
+              {hiddenBooksCount >
+              0 ? (
                 <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-black text-slate-500">
                   {hiddenBooksCount.toLocaleString(
                     'ar-EG'
@@ -1190,7 +1269,9 @@ export default function IslamicLibraryAdmin() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={openCreateBook}
+              onClick={
+                openCreateBook
+              }
               className="inline-flex h-11 items-center gap-2 rounded-2xl bg-sky-600 px-5 text-xs font-black text-white transition hover:bg-sky-700"
             >
               <Plus size={17} />
@@ -1202,7 +1283,9 @@ export default function IslamicLibraryAdmin() {
               onClick={() =>
                 void loadBooks()
               }
-              disabled={loadingBooks}
+              disabled={
+                loadingBooks
+              }
               className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
             >
               <RefreshCw
@@ -1218,7 +1301,8 @@ export default function IslamicLibraryAdmin() {
           </div>
         </div>
 
-        {(message || error) ? (
+        {message ||
+        error ? (
           <div
             className={`mt-5 rounded-2xl border px-4 py-3 text-xs font-bold leading-6 ${
               error
@@ -1226,7 +1310,8 @@ export default function IslamicLibraryAdmin() {
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700'
             }`}
           >
-            {error || message}
+            {error ||
+              message}
           </div>
         ) : null}
       </div>
@@ -1245,7 +1330,9 @@ export default function IslamicLibraryAdmin() {
                   <input
                     type="search"
                     value={search}
-                    onChange={(event) =>
+                    onChange={(
+                      event
+                    ) =>
                       setSearch(
                         event.target.value
                       )
@@ -1257,10 +1344,15 @@ export default function IslamicLibraryAdmin() {
 
                 <div className="flex flex-col gap-3 md:flex-row">
                   <select
-                    value={levelFilter}
-                    onChange={(event) =>
+                    value={
+                      levelFilter
+                    }
+                    onChange={(
+                      event
+                    ) =>
                       setLevelFilter(
-                        event.target
+                        event
+                          .target
                           .value as
                           | 'الكل'
                           | SunniLibraryLevel
@@ -1275,10 +1367,16 @@ export default function IslamicLibraryAdmin() {
                     {SUNNI_LIBRARY_LEVELS.map(
                       (level) => (
                         <option
-                          key={level.id}
-                          value={level.id}
+                          key={
+                            level.id
+                          }
+                          value={
+                            level.id
+                          }
                         >
-                          {level.label}
+                          {
+                            level.label
+                          }
                         </option>
                       )
                     )}
@@ -1288,9 +1386,12 @@ export default function IslamicLibraryAdmin() {
                     value={
                       categoryFilter
                     }
-                    onChange={(event) =>
+                    onChange={(
+                      event
+                    ) =>
                       setCategoryFilter(
-                        event.target
+                        event
+                          .target
                           .value as
                           | 'الكل'
                           | SunniLibraryCategoryId
@@ -1303,14 +1404,20 @@ export default function IslamicLibraryAdmin() {
                     </option>
 
                     {SUNNI_LIBRARY_CATEGORIES.map(
-                      (category) => (
+                      (
+                        category
+                      ) => (
                         <option
-                          key={category.id}
+                          key={
+                            category.id
+                          }
                           value={
                             category.id
                           }
                         >
-                          {category.label}
+                          {
+                            category.label
+                          }
                         </option>
                       )
                     )}
@@ -1349,14 +1456,18 @@ export default function IslamicLibraryAdmin() {
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
                   {filteredBooks.map(
-                    (book) => {
+                    (
+                      book
+                    ) => {
                       const active =
                         selectedBookId ===
                         book.id
 
                       return (
                         <article
-                          key={book.id}
+                          key={
+                            book.id
+                          }
                           className={`group rounded-[26px] border p-5 transition ${
                             active
                               ? 'border-sky-300 bg-sky-50/50 shadow-md'
@@ -1387,7 +1498,9 @@ export default function IslamicLibraryAdmin() {
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap gap-2">
                                     <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-black text-amber-700">
-                                      {book.level}
+                                      {
+                                        book.level
+                                      }
                                     </span>
 
                                     {book.isCustom ? (
@@ -1404,14 +1517,18 @@ export default function IslamicLibraryAdmin() {
                                   </div>
 
                                   <h3 className="mt-2 line-clamp-2 text-base font-black leading-7 text-slate-900">
-                                    {book.title}
+                                    {
+                                      book.title
+                                    }
                                   </h3>
 
                                   <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-slate-500">
                                     <UserRound
                                       size={13}
                                     />
-                                    {book.author}
+                                    {
+                                      book.author
+                                    }
                                   </p>
                                 </div>
                               </div>
@@ -1427,14 +1544,14 @@ export default function IslamicLibraryAdmin() {
                               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-sky-200 hover:text-sky-600"
                               title="تعديل الكتاب"
                             >
-                              <Pencil
-                                size={16}
-                              />
+                              <Pencil size={16} />
                             </button>
                           </div>
 
                           <p className="mt-4 line-clamp-2 text-xs leading-6 text-slate-500">
-                            {book.description}
+                            {
+                              book.description
+                            }
                           </p>
 
                           <div className="mt-4 grid grid-cols-2 gap-2">
@@ -1450,9 +1567,7 @@ export default function IslamicLibraryAdmin() {
                               }}
                               className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-600 transition hover:bg-slate-100"
                             >
-                              <Video
-                                size={15}
-                              />
+                              <Video size={15} />
                               إضافة درس
                             </button>
 
@@ -1465,16 +1580,12 @@ export default function IslamicLibraryAdmin() {
                                 rel="noreferrer"
                                 className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-50 px-3 text-[11px] font-black text-emerald-700 transition hover:bg-emerald-100"
                               >
-                                <Download
-                                  size={15}
-                                />
+                                <Download size={15} />
                                 التحميل
                               </a>
                             ) : (
                               <span className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-400">
-                                <Download
-                                  size={15}
-                                />
+                                <Download size={15} />
                                 لا يوجد تحميل
                               </span>
                             )}
@@ -1497,9 +1608,7 @@ export default function IslamicLibraryAdmin() {
                                 }
                                 className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-[10px] font-black text-sky-600 hover:bg-sky-50"
                               >
-                                <Video
-                                  size={13}
-                                />
+                                <Video size={13} />
                                 الدروس
                               </button>
 
@@ -1519,20 +1628,11 @@ export default function IslamicLibraryAdmin() {
                                     ? 'text-emerald-600 hover:bg-emerald-50'
                                     : 'text-slate-500 hover:bg-slate-50'
                                 }`}
-                                title={
-                                  book.deleted
-                                    ? 'إظهار'
-                                    : 'إخفاء'
-                                }
                               >
                                 {book.deleted ? (
-                                  <Eye
-                                    size={13}
-                                  />
+                                  <Eye size={13} />
                                 ) : (
-                                  <EyeOff
-                                    size={13}
-                                  />
+                                  <EyeOff size={13} />
                                 )}
 
                                 {book.deleted
@@ -1560,9 +1660,7 @@ export default function IslamicLibraryAdmin() {
                                     className="animate-spin"
                                   />
                                 ) : (
-                                  <Trash2
-                                    size={13}
-                                  />
+                                  <Trash2 size={13} />
                                 )}
 
                                 {book.isCustom
@@ -1598,7 +1696,9 @@ export default function IslamicLibraryAdmin() {
                 {selectedBook ? (
                   <button
                     type="button"
-                    onClick={openCreateVideo}
+                    onClick={
+                      openCreateVideo
+                    }
                     className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-600 text-white transition hover:bg-sky-700"
                     title="إضافة درس"
                   >
@@ -1614,11 +1714,15 @@ export default function IslamicLibraryAdmin() {
                   </p>
 
                   <p className="mt-1 text-sm font-black leading-6 text-slate-800">
-                    {selectedBook.title}
+                    {
+                      selectedBook.title
+                    }
                   </p>
 
                   <p className="mt-1 text-xs font-bold text-slate-500">
-                    {selectedBook.author}
+                    {
+                      selectedBook.author
+                    }
                   </p>
                 </div>
               ) : (
@@ -1709,7 +1813,9 @@ export default function IslamicLibraryAdmin() {
                         index
                       ) => (
                         <article
-                          key={video.id}
+                          key={
+                            video.id
+                          }
                           className="rounded-2xl border border-slate-200 bg-white p-4"
                         >
                           <div className="flex items-start gap-3">
@@ -1724,11 +1830,15 @@ export default function IslamicLibraryAdmin() {
 
                             <div className="min-w-0 flex-1">
                               <h4 className="text-sm font-black leading-6 text-slate-800">
-                                {video.title}
+                                {
+                                  video.title
+                                }
                               </h4>
 
                               <p className="mt-1 break-all text-[10px] leading-5 text-slate-400">
-                                {video.url}
+                                {
+                                  video.url
+                                }
                               </p>
                             </div>
                           </div>
@@ -1838,7 +1948,9 @@ export default function IslamicLibraryAdmin() {
                   }
                   onChange={(value) =>
                     setBookForm(
-                      (current) => ({
+                      (
+                        current
+                      ) => ({
                         ...current,
                         title: value,
                       })
@@ -1855,7 +1967,9 @@ export default function IslamicLibraryAdmin() {
                   }
                   onChange={(value) =>
                     setBookForm(
-                      (current) => ({
+                      (
+                        current
+                      ) => ({
                         ...current,
                         author: value,
                       })
@@ -1873,7 +1987,9 @@ export default function IslamicLibraryAdmin() {
                   }
                   onChange={(value) =>
                     setBookForm(
-                      (current) => ({
+                      (
+                        current
+                      ) => ({
                         ...current,
                         level:
                           value as SunniLibraryLevel,
@@ -1881,8 +1997,11 @@ export default function IslamicLibraryAdmin() {
                     )
                   }
                   options={SUNNI_LIBRARY_LEVELS.map(
-                    (level) => ({
-                      value: level.id,
+                    (
+                      level
+                    ) => ({
+                      value:
+                        level.id,
                       label:
                         level.label,
                     })
@@ -1896,7 +2015,9 @@ export default function IslamicLibraryAdmin() {
                   }
                   onChange={(value) =>
                     setBookForm(
-                      (current) => ({
+                      (
+                        current
+                      ) => ({
                         ...current,
                         category:
                           value as SunniLibraryCategoryId,
@@ -1904,7 +2025,9 @@ export default function IslamicLibraryAdmin() {
                     )
                   }
                   options={SUNNI_LIBRARY_CATEGORIES.map(
-                    (category) => ({
+                    (
+                      category
+                    ) => ({
                       value:
                         category.id,
                       label:
@@ -1922,7 +2045,9 @@ export default function IslamicLibraryAdmin() {
                 }
                 onChange={(value) =>
                   setBookForm(
-                    (current) => ({
+                    (
+                      current
+                    ) => ({
                       ...current,
                       description:
                         value,
@@ -1946,7 +2071,9 @@ export default function IslamicLibraryAdmin() {
                     }
                     onChange={(value) =>
                       setBookForm(
-                        (current) => ({
+                        (
+                          current
+                        ) => ({
                           ...current,
                           downloadUrl:
                             value,
@@ -1964,7 +2091,9 @@ export default function IslamicLibraryAdmin() {
                       }
                       onChange={(value) =>
                         setBookForm(
-                          (current) => ({
+                          (
+                            current
+                          ) => ({
                             ...current,
                             readingUrl:
                               value,
@@ -1981,7 +2110,9 @@ export default function IslamicLibraryAdmin() {
                       }
                       onChange={(value) =>
                         setBookForm(
-                          (current) => ({
+                          (
+                            current
+                          ) => ({
                             ...current,
                             readingLabel:
                               value,
@@ -1996,9 +2127,7 @@ export default function IslamicLibraryAdmin() {
 
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                 <div className="flex items-center gap-2 text-sm font-black text-amber-700">
-                  <GraduationCap
-                    size={17}
-                  />
+                  <GraduationCap size={17} />
                   بيانات الشرح
                 </div>
 
@@ -2010,7 +2139,9 @@ export default function IslamicLibraryAdmin() {
                     }
                     onChange={(value) =>
                       setBookForm(
-                        (current) => ({
+                        (
+                          current
+                        ) => ({
                           ...current,
                           sharhTitle:
                             value,
@@ -2027,7 +2158,9 @@ export default function IslamicLibraryAdmin() {
                     }
                     onChange={(value) =>
                       setBookForm(
-                        (current) => ({
+                        (
+                          current
+                        ) => ({
                           ...current,
                           sharhAuthor:
                             value,
@@ -2044,7 +2177,9 @@ export default function IslamicLibraryAdmin() {
                     }
                     onChange={(value) =>
                       setBookForm(
-                        (current) => ({
+                        (
+                          current
+                        ) => ({
                           ...current,
                           sharhUrl:
                             value,
@@ -2061,7 +2196,9 @@ export default function IslamicLibraryAdmin() {
                     }
                     onChange={(value) =>
                       setBookForm(
-                        (current) => ({
+                        (
+                          current
+                        ) => ({
                           ...current,
                           sharhLabel:
                             value,
@@ -2080,7 +2217,9 @@ export default function IslamicLibraryAdmin() {
                 onClick={
                   closeBookModal
                 }
-                disabled={savingBook}
+                disabled={
+                  savingBook
+                }
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 text-xs font-black text-slate-600"
               >
                 <X size={16} />
@@ -2092,7 +2231,9 @@ export default function IslamicLibraryAdmin() {
                 onClick={() =>
                   void saveBook()
                 }
-                disabled={savingBook}
+                disabled={
+                  savingBook
+                }
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-600 px-6 text-xs font-black text-white disabled:opacity-60"
               >
                 {savingBook ? (
@@ -2101,9 +2242,7 @@ export default function IslamicLibraryAdmin() {
                     className="animate-spin"
                   />
                 ) : (
-                  <Save
-                    size={17}
-                  />
+                  <Save size={17} />
                 )}
 
                 {editingBookId
@@ -2128,7 +2267,9 @@ export default function IslamicLibraryAdmin() {
                 </p>
 
                 <h3 className="mt-1 line-clamp-2 text-lg font-black leading-7 text-slate-900">
-                  {selectedBook.title}
+                  {
+                    selectedBook.title
+                  }
                 </h3>
               </div>
 
@@ -2152,7 +2293,9 @@ export default function IslamicLibraryAdmin() {
                 }
                 onChange={(value) =>
                   setVideoForm(
-                    (current) => ({
+                    (
+                      current
+                    ) => ({
                       ...current,
                       title: value,
                     })
@@ -2169,7 +2312,9 @@ export default function IslamicLibraryAdmin() {
                 }
                 onChange={(value) =>
                   setVideoForm(
-                    (current) => ({
+                    (
+                      current
+                    ) => ({
                       ...current,
                       url: value,
                     })
@@ -2185,7 +2330,9 @@ export default function IslamicLibraryAdmin() {
                 }
                 onChange={(value) =>
                   setVideoForm(
-                    (current) => ({
+                    (
+                      current
+                    ) => ({
                       ...current,
                       order: value,
                     })
@@ -2197,9 +2344,7 @@ export default function IslamicLibraryAdmin() {
 
               <div className="rounded-2xl bg-sky-50 p-4 text-xs font-bold leading-6 text-sky-800">
                 <div className="flex items-center gap-2 font-black">
-                  <PlayCircle
-                    size={16}
-                  />
+                  <PlayCircle size={16} />
                   تنبيه
                 </div>
 
@@ -2218,7 +2363,9 @@ export default function IslamicLibraryAdmin() {
                 onClick={
                   closeVideoModal
                 }
-                disabled={savingVideo}
+                disabled={
+                  savingVideo
+                }
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 text-xs font-black text-slate-600"
               >
                 <X size={16} />
@@ -2230,7 +2377,9 @@ export default function IslamicLibraryAdmin() {
                 onClick={() =>
                   void saveVideo()
                 }
-                disabled={savingVideo}
+                disabled={
+                  savingVideo
+                }
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-600 px-6 text-xs font-black text-white disabled:opacity-60"
               >
                 {savingVideo ? (
@@ -2239,9 +2388,7 @@ export default function IslamicLibraryAdmin() {
                     className="animate-spin"
                   />
                 ) : (
-                  <Save
-                    size={17}
-                  />
+                  <Save size={17} />
                 )}
 
                 {editingVideoId
@@ -2254,26 +2401,6 @@ export default function IslamicLibraryAdmin() {
       ) : null}
     </section>
   )
-
-  function openCreateVideoForBook(
-    book: AdminBook
-  ) {
-    setSelectedBookId(
-      book.id
-    )
-
-    setEditingVideoId(null)
-
-    setVideoForm({
-      title: '',
-      url: '',
-      order: String(
-        videos.length + 1
-      ),
-    })
-
-    setVideoModalOpen(true)
-  }
 }
 
 function FormField({
@@ -2296,6 +2423,13 @@ function FormField({
   return (
     <label className="block">
       <span className="mb-2 flex items-center gap-1 text-xs font-black text-slate-700">
+        {type === 'url' ? (
+          <LinkIcon
+            size={14}
+            className="text-sky-500"
+          />
+        ) : null}
+
         {label}
 
         {required ? (
@@ -2305,31 +2439,24 @@ function FormField({
         ) : null}
       </span>
 
-      <div className="relative">
-        {type === 'url' ? (
-          <LinkIcon
-            size={15}
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
-          />
-        ) : null}
-
-        <input
-          type={type}
-          value={value}
-          onChange={(event) =>
-            onChange(
-              event.target.value
-            )
-          }
-          placeholder={placeholder}
-          className={`h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-sky-400 ${
-            type === 'url'
-              ? 'pr-9'
-              : ''
-          }`}
-          dir="rtl"
-        />
-      </div>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) =>
+          onChange(
+            event.target.value
+          )
+        }
+        placeholder={
+          placeholder
+        }
+        className={`h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-sky-400 ${
+          type === 'url'
+            ? 'pr-9'
+            : ''
+        }`}
+        dir="rtl"
+      />
     </label>
   )
 }
@@ -2373,7 +2500,9 @@ function TextAreaField({
             event.target.value
           )
         }
-        placeholder={placeholder}
+        placeholder={
+          placeholder
+        }
         className="min-h-[120px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold leading-7 text-slate-800 outline-none transition focus:border-sky-400"
         dir="rtl"
       />
@@ -2427,7 +2556,9 @@ function SelectField({
                 option.value
               }
             >
-              {option.label}
+              {
+                option.label
+              }
             </option>
           )
         )}
