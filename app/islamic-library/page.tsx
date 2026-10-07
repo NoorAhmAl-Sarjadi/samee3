@@ -63,8 +63,6 @@ type ViewState =
       category: SunniLibraryCategoryId
     }
 
-const FALLBACK_LEVEL: SunniLibraryLevel = 'مبتدئ'
-
 function isLibraryLevel(
   value: unknown
 ): value is SunniLibraryLevel {
@@ -236,9 +234,6 @@ export default function IslamicLibraryPage() {
   const [search, setSearch] =
     useState('')
 
-  const [showAllCategories, setShowAllCategories] =
-    useState(false)
-
   useEffect(() => {
     let cancelled = false
 
@@ -354,7 +349,7 @@ export default function IslamicLibraryPage() {
           existingCategories.has(category.id)
       )
     }, [
-      currentLevel,
+      currentLevelBooks,
       selectedLevel,
     ])
 
@@ -473,8 +468,6 @@ export default function IslamicLibraryPage() {
       setView({
         kind: 'levels',
       })
-
-      return
     }
   }
 
@@ -517,9 +510,7 @@ export default function IslamicLibraryPage() {
                     className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[rgba(2,132,199,0.15)] bg-[rgba(2,132,199,0.05)] text-[var(--royal-blue)] transition hover:bg-[rgba(2,132,199,0.1)]"
                     aria-label="العودة"
                   >
-                    <ArrowRight
-                      size={20}
-                    />
+                    <ArrowRight size={20} />
                   </button>
                 ) : (
                   <Link
@@ -527,18 +518,14 @@ export default function IslamicLibraryPage() {
                     className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[rgba(2,132,199,0.15)] bg-[rgba(2,132,199,0.05)] text-[var(--royal-blue)] transition hover:bg-[rgba(2,132,199,0.1)]"
                     aria-label="الرئيسية"
                   >
-                    <ArrowRight
-                      size={20}
-                    />
+                    <ArrowRight size={20} />
                   </Link>
                 )}
 
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-2 rounded-full bg-[rgba(2,132,199,0.08)] px-3 py-1.5 text-[11px] font-black text-[var(--royal-blue)]">
-                      <LibraryBig
-                        size={14}
-                      />
+                      <LibraryBig size={14} />
                       المكتبة الشرعية
                     </span>
 
@@ -576,9 +563,7 @@ export default function IslamicLibraryPage() {
                     }
                     className="inline-flex h-11 items-center gap-2 rounded-xl border border-[rgba(2,132,199,0.15)] bg-white px-4 text-xs font-black text-[var(--royal-blue)] transition hover:bg-slate-50"
                   >
-                    <Layers3
-                      size={16}
-                    />
+                    <Layers3 size={16} />
                     كل المستويات
                   </button>
                 ) : null}
@@ -588,9 +573,7 @@ export default function IslamicLibraryPage() {
                   onClick={refreshLibrary}
                   className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50"
                 >
-                  <RefreshCw
-                    size={16}
-                  />
+                  <RefreshCw size={16} />
                   تحديث
                 </button>
               </div>
@@ -648,9 +631,11 @@ export default function IslamicLibraryPage() {
               <p className="text-xs font-black text-amber-600">
                 منهج متدرج
               </p>
+
               <h2 className="mt-1 text-xl font-black text-[var(--text-main)] sm:text-2xl">
                 اختر المستوى العلمي
               </h2>
+
               <p className="mt-2 text-sm leading-7 text-slate-500">
                 ابدأ من المستوى المناسب لك، ثم اختر التخصص، وبعدها اختر الكتاب المطلوب.
               </p>
@@ -674,9 +659,7 @@ export default function IslamicLibraryPage() {
                     <div className="relative">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[rgba(2,132,199,0.08)] text-[var(--royal-blue)]">
-                          <GraduationCap
-                            size={28}
-                          />
+                          <GraduationCap size={28} />
                         </div>
 
                         <span className="rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-500">
@@ -705,9 +688,7 @@ export default function IslamicLibraryPage() {
                         </span>
 
                         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-[var(--royal-blue)] shadow-sm">
-                          <ArrowLeft
-                            size={17}
-                          />
+                          <ArrowLeft size={17} />
                         </span>
                       </div>
                     </div>
@@ -777,9 +758,7 @@ export default function IslamicLibraryPage() {
                       >
                         <div className="flex items-center gap-4">
                           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[rgba(2,132,199,0.08)] text-[var(--royal-blue)]">
-                            <BookOpen
-                              size={25}
-                            />
+                            <BookOpen size={25} />
                           </div>
 
                           <div className="min-w-0 flex-1">
@@ -843,6 +822,7 @@ export default function IslamicLibraryPage() {
                     'ar-EG'
                   )}
                 </div>
+
                 <div className="mt-1 text-[10px] font-black text-slate-500">
                   كتاب
                 </div>
@@ -883,14 +863,25 @@ function LibraryBookCard({
 }: {
   book: SunniLibraryBook
 }) {
+  const categoryLabel =
+    book.category === 'aqidah'
+      ? 'العقيدة'
+      : book.category === 'fiqh'
+        ? 'الفقه'
+        : book.category === 'seerah'
+          ? 'السيرة'
+          : book.category === 'usul-tafsir'
+            ? 'أصول التفسير'
+            : book.category === 'usul-fiqh'
+              ? 'أصول الفقه'
+              : 'أصول الحديث'
+
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:border-[rgba(2,132,199,0.2)] hover:shadow-xl">
       <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-white to-[rgba(2,132,199,0.05)] p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[rgba(2,132,199,0.09)] text-[var(--royal-blue)] shadow-sm">
-            <BookOpen
-              size={30}
-            />
+            <BookOpen size={30} />
           </div>
 
           <span className="rounded-full bg-amber-50 px-3 py-1.5 text-[11px] font-black text-amber-700">
@@ -900,17 +891,7 @@ function LibraryBookCard({
 
         <div className="mt-6">
           <p className="text-[10px] font-black text-[var(--royal-blue)]">
-            {book.category === 'aqidah'
-              ? 'العقيدة'
-              : book.category === 'fiqh'
-                ? 'الفقه'
-                : book.category === 'seerah'
-                  ? 'السيرة'
-                  : book.category === 'usul-tafsir'
-                    ? 'أصول التفسير'
-                    : book.category === 'usul-fiqh'
-                      ? 'أصول الفقه'
-                      : 'أصول الحديث'}
+            {categoryLabel}
           </p>
 
           <h3 className="mt-1 text-xl font-black leading-8 text-[var(--text-main)]">
@@ -922,6 +903,7 @@ function LibraryBookCard({
               size={15}
               className="text-[var(--royal-blue)]"
             />
+
             <span>
               {book.author}
             </span>
@@ -941,9 +923,7 @@ function LibraryBookCard({
             )}`}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--royal-blue)] px-3 text-xs font-black text-white transition hover:opacity-90"
           >
-            <BookOpen
-              size={16}
-            />
+            <BookOpen size={16} />
             فتح الكتاب
           </Link>
 
@@ -954,9 +934,7 @@ function LibraryBookCard({
               rel="noreferrer"
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[rgba(2,132,199,0.15)] bg-[rgba(2,132,199,0.05)] px-3 text-xs font-black text-[var(--royal-blue)] transition hover:bg-[rgba(2,132,199,0.09)]"
             >
-              <Download
-                size={16}
-              />
+              <Download size={16} />
               تنزيل
             </a>
           ) : (
@@ -966,9 +944,7 @@ function LibraryBookCard({
               )}`}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 transition hover:bg-slate-50"
             >
-              <Layers3
-                size={16}
-              />
+              <Layers3 size={16} />
               التفاصيل
             </Link>
           )}
@@ -981,9 +957,7 @@ function LibraryBookCard({
             )}`}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] font-black text-slate-600 transition hover:bg-slate-100"
           >
-            <PlayCircle
-              size={15}
-            />
+            <PlayCircle size={15} />
             الشرح والدروس
           </Link>
 
@@ -994,16 +968,12 @@ function LibraryBookCard({
               rel="noreferrer"
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] font-black text-slate-600 transition hover:bg-slate-100"
             >
-              <ArrowLeft
-                size={15}
-              />
+              <ArrowLeft size={15} />
               المصدر
             </a>
           ) : (
             <span className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] font-black text-slate-400">
-              <Layers3
-                size={15}
-              />
+              <Layers3 size={15} />
               قيد التجهيز
             </span>
           )}
@@ -1055,9 +1025,7 @@ function EmptyState({
   return (
     <div className="rounded-[30px] border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-sm">
       <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
-        <Search
-          size={28}
-        />
+        <Search size={28} />
       </div>
 
       <h3 className="mt-5 text-lg font-black text-[var(--text-main)]">
@@ -1073,9 +1041,7 @@ function EmptyState({
         onClick={onClear}
         className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-[var(--royal-blue)] px-5 py-3 text-xs font-black text-white"
       >
-        <RefreshCw
-          size={15}
-        />
+        <RefreshCw size={15} />
         مسح البحث
       </button>
     </div>
