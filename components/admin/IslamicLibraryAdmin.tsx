@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
 } from 'react'
+
 import {
   BookOpen,
   Plus,
@@ -14,7 +15,6 @@ import {
   X,
   Video,
   Download,
-  Link as LinkIcon,
   Search,
   Layers3,
   GraduationCap,
@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 
 import { db } from '@/lib/firebase'
+
 import {
   collection,
   deleteDoc,
@@ -70,8 +71,6 @@ interface FirestoreBookData {
   downloadUrl?: unknown
   quranpediaBookId?: unknown
   deleted?: unknown
-  createdAt?: unknown
-  updatedAt?: unknown
 }
 
 interface AdminBook extends SunniLibraryBook {
@@ -79,7 +78,7 @@ interface AdminBook extends SunniLibraryBook {
   deleted: boolean
 }
 
-type BookFormState = {
+interface BookFormState {
   title: string
   author: string
   category: SunniLibraryCategoryId
@@ -94,7 +93,7 @@ type BookFormState = {
   sharhLabel: string
 }
 
-type VideoFormState = {
+interface VideoFormState {
   title: string
   url: string
   order: string
@@ -121,17 +120,19 @@ const EMPTY_VIDEO_FORM: VideoFormState = {
   order: '1',
 }
 
-function stringValue(
+function toStringValue(
   value: unknown,
-  fallback = ''
+  fallback = '',
 ): string {
-  return typeof value === 'string'
-    ? value
-    : fallback
+  if (typeof value === 'string') {
+    return value
+  }
+
+  return fallback
 }
 
-function isLevel(
-  value: unknown
+function isLibraryLevel(
+  value: unknown,
 ): value is SunniLibraryLevel {
   return (
     value === 'مبتدئ' ||
@@ -140,8 +141,8 @@ function isLevel(
   )
 }
 
-function isCategory(
-  value: unknown
+function isLibraryCategory(
+  value: unknown,
 ): value is SunniLibraryCategoryId {
   return (
     value === 'aqidah' ||
@@ -156,10 +157,10 @@ function isCategory(
 function createBookFromFirestore(
   id: string,
   data: FirestoreBookData,
-  fallback?: SunniLibraryBook
+  fallback?: SunniLibraryBook,
 ): AdminBook | null {
   const title =
-    stringValue(data.title) ||
+    toStringValue(data.title) ||
     fallback?.title ||
     ''
 
@@ -168,134 +169,97 @@ function createBookFromFirestore(
   }
 
   const author =
-    stringValue(data.author) ||
+    toStringValue(data.author) ||
     fallback?.author ||
     'غير محدد'
 
-  const category =
-    isCategory(data.category)
-      ? data.category
-      : fallback?.category ||
-        'aqidah'
+  const category = isLibraryCategory(data.category)
+    ? data.category
+    : fallback?.category || 'aqidah'
 
-  const level =
-    isLevel(data.level)
-      ? data.level
-      : fallback?.level ||
-        'مبتدئ'
+  const level = isLibraryLevel(data.level)
+    ? data.level
+    : fallback?.level || 'مبتدئ'
 
   const description =
-    stringValue(data.description) ||
+    toStringValue(data.description) ||
     fallback?.description ||
     ''
 
   const readingUrl =
-    stringValue(data.readingUrl) ||
+    toStringValue(data.readingUrl) ||
     fallback?.readingUrl
 
   const readingLabel =
-    stringValue(data.readingLabel) ||
+    toStringValue(data.readingLabel) ||
     fallback?.readingLabel
 
   const sharhTitle =
-    stringValue(data.sharhTitle) ||
+    toStringValue(data.sharhTitle) ||
     fallback?.sharhTitle
 
   const sharhAuthor =
-    stringValue(data.sharhAuthor) ||
+    toStringValue(data.sharhAuthor) ||
     fallback?.sharhAuthor
 
   const sharhUrl =
-    stringValue(data.sharhUrl) ||
+    toStringValue(data.sharhUrl) ||
     fallback?.sharhUrl
 
   const sharhLabel =
-    stringValue(data.sharhLabel) ||
+    toStringValue(data.sharhLabel) ||
     fallback?.sharhLabel
 
   const downloadUrl =
-    stringValue(data.downloadUrl) ||
+    toStringValue(data.downloadUrl) ||
     fallback?.downloadUrl
+
+  const quranpediaBookId =
+    typeof data.quranpediaBookId === 'number'
+      ? data.quranpediaBookId
+      : fallback?.quranpediaBookId
 
   return {
     id,
-    category,
     title,
     author,
+    category,
     level,
     description,
     readingUrl,
     readingLabel,
+    downloadUrl,
     sharhTitle,
     sharhAuthor,
     sharhUrl,
     sharhLabel,
-    downloadUrl,
-    quranpediaBookId:
-      typeof data.quranpediaBookId ===
-      'number'
-        ? data.quranpediaBookId
-        : fallback?.quranpediaBookId,
+    quranpediaBookId,
     isCustom: !fallback,
-    deleted:
-      data.deleted === true,
-  }
-}
-
-function buildBookForm(
-  book: SunniLibraryBook
-): BookFormState {
-  return {
-    title: book.title || '',
-    author: book.author || '',
-    category: book.category,
-    level: book.level,
-    description:
-      book.description || '',
-    readingUrl:
-      book.readingUrl || '',
-    readingLabel:
-      book.readingLabel ||
-      'قراءة الكتاب',
-    downloadUrl:
-      book.downloadUrl ||
-      '',
-    sharhTitle:
-      book.sharhTitle ||
-      '',
-    sharhAuthor:
-      book.sharhAuthor ||
-      '',
-    sharhUrl:
-      book.sharhUrl ||
-      '',
-    sharhLabel:
-      book.sharhLabel ||
-      'فتح الشرح',
+    deleted: data.deleted === true,
   }
 }
 
 function makeBookId(
-  title: string
+  title: string,
 ): string {
-  const normalized = title
+  const cleaned = title
     .trim()
     .toLowerCase()
     .replace(
-      /[^a-z0-9\u0600-\u06FF\s-]/gi,
-      ''
+      /[^a-z0-9\u0600-\u06ff\s-]/gi,
+      '',
     )
     .replace(
       /\s+/g,
-      '-'
+      '-',
     )
     .replace(
       /-+/g,
-      '-'
+      '-',
     )
     .replace(
-      /^-|-$/g,
-      ''
+      /^-+|-+$/g,
+      '',
     )
 
   const suffix =
@@ -303,17 +267,45 @@ function makeBookId(
       .toString(36)
       .slice(2, 7)
 
-  return `${
-    normalized || 'book'
-  }-${suffix}`
+  return `${cleaned || 'book'}-${suffix}`
+}
+
+function makeVideoId(): string {
+  return `video-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`
+}
+
+function buildBookForm(
+  book: SunniLibraryBook,
+): BookFormState {
+  return {
+    title: book.title || '',
+    author: book.author || '',
+    category: book.category,
+    level: book.level,
+    description: book.description || '',
+    readingUrl: book.readingUrl || '',
+    readingLabel:
+      book.readingLabel || 'قراءة الكتاب',
+    downloadUrl: book.downloadUrl || '',
+    sharhTitle: book.sharhTitle || '',
+    sharhAuthor: book.sharhAuthor || '',
+    sharhUrl: book.sharhUrl || '',
+    sharhLabel:
+      book.sharhLabel || 'فتح الشرح',
+  }
 }
 
 export default function IslamicLibraryAdmin() {
-  const [books, setBooks] =
-    useState<AdminBook[]>([])
+  const [books, setBooks] = useState<AdminBook[]>([])
+  const [videos, setVideos] = useState<VideoLesson[]>([])
 
   const [loadingBooks, setLoadingBooks] =
     useState(true)
+
+  const [loadingVideos, setLoadingVideos] =
+    useState(false)
 
   const [savingBook, setSavingBook] =
     useState(false)
@@ -321,27 +313,18 @@ export default function IslamicLibraryAdmin() {
   const [savingVideo, setSavingVideo] =
     useState(false)
 
-  const [deletingBookId, setDeletingBookId] =
-    useState<string | null>(null)
-
-  const [deletingVideoId, setDeletingVideoId] =
-    useState<string | null>(null)
-
-  const [selectedBookId, setSelectedBookId] =
-    useState<string | null>(null)
-
-  const [search, setSearch] =
-    useState('')
+  const [search, setSearch] = useState('')
 
   const [levelFilter, setLevelFilter] =
-    useState<
-      'الكل' | SunniLibraryLevel
-    >('الكل')
+    useState<'الكل' | SunniLibraryLevel>('الكل')
 
   const [categoryFilter, setCategoryFilter] =
     useState<
       'الكل' | SunniLibraryCategoryId
     >('الكل')
+
+  const [selectedBookId, setSelectedBookId] =
+    useState<string | null>(null)
 
   const [bookModalOpen, setBookModalOpen] =
     useState(false)
@@ -355,95 +338,91 @@ export default function IslamicLibraryAdmin() {
   const [editingVideoId, setEditingVideoId] =
     useState<string | null>(null)
 
+  const [deletingBookId, setDeletingBookId] =
+    useState<string | null>(null)
+
+  const [deletingVideoId, setDeletingVideoId] =
+    useState<string | null>(null)
+
   const [bookForm, setBookForm] =
-    useState<BookFormState>(
-      EMPTY_BOOK_FORM
-    )
+    useState<BookFormState>({
+      ...EMPTY_BOOK_FORM,
+    })
 
   const [videoForm, setVideoForm] =
-    useState<VideoFormState>(
-      EMPTY_VIDEO_FORM
-    )
+    useState<VideoFormState>({
+      ...EMPTY_VIDEO_FORM,
+    })
 
-  const [videos, setVideos] =
-    useState<VideoLesson[]>([])
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
 
-  const [loadingVideos, setLoadingVideos] =
-    useState(false)
+  const selectedBook = useMemo(() => {
+    if (!selectedBookId) {
+      return null
+    }
 
-  const [message, setMessage] =
-    useState('')
-
-  const [error, setError] =
-    useState('')
-
-  const selectedBook = useMemo(
-    () =>
+    return (
       books.find(
         (book) =>
-          book.id ===
-          selectedBookId
-      ) || null,
-    [books, selectedBookId]
+          book.id === selectedBookId,
+      ) || null
+    )
+  }, [books, selectedBookId])
+
+  const filteredBooks = useMemo(() => {
+    const normalizedSearch =
+      search.trim().toLowerCase()
+
+    return books.filter((book) => {
+      const matchesSearch =
+        !normalizedSearch ||
+        book.title
+          .toLowerCase()
+          .includes(normalizedSearch) ||
+        book.author
+          .toLowerCase()
+          .includes(normalizedSearch) ||
+        book.description
+          .toLowerCase()
+          .includes(normalizedSearch)
+
+      const matchesLevel =
+        levelFilter === 'الكل' ||
+        book.level === levelFilter
+
+      const matchesCategory =
+        categoryFilter === 'الكل' ||
+        book.category === categoryFilter
+
+      return (
+        matchesSearch &&
+        matchesLevel &&
+        matchesCategory
+      )
+    })
+  }, [
+    books,
+    search,
+    levelFilter,
+    categoryFilter,
+  ])
+
+  const visibleBooksCount = useMemo(
+    () =>
+      books.filter(
+        (book) => !book.deleted,
+      ).length,
+    [books],
   )
 
-  const filteredBooks =
-    useMemo(() => {
-      const query =
-        search
-          .trim()
-          .toLowerCase()
-
-      return books.filter(
-        (book) => {
-          const matchesSearch =
-            !query ||
-            [
-              book.title,
-              book.author,
-              book.description,
-            ]
-              .join(' ')
-              .toLowerCase()
-              .includes(query)
-
-          const matchesLevel =
-            levelFilter ===
-              'الكل' ||
-            book.level ===
-              levelFilter
-
-          const matchesCategory =
-            categoryFilter ===
-              'الكل' ||
-            book.category ===
-              categoryFilter
-
-          return (
-            matchesSearch &&
-            matchesLevel &&
-            matchesCategory
-          )
-        }
-      )
-    }, [
-      books,
-      search,
-      levelFilter,
-      categoryFilter,
-    ])
-
-  const visibleBooksCount =
-    books.filter(
-      (book) =>
-        !book.deleted
-    ).length
-
-  const hiddenBooksCount =
-    books.filter(
-      (book) =>
-        book.deleted
-    ).length
+  const hiddenBooksCount = useMemo(
+    () =>
+      books.filter(
+        (book) => book.deleted,
+      ).length,
+    [books],
+  )
 
   useEffect(() => {
     void loadBooks()
@@ -455,14 +434,12 @@ export default function IslamicLibraryAdmin() {
       return
     }
 
-    void loadVideos(
-      selectedBookId
-    )
+    void loadVideos(selectedBookId)
   }, [selectedBookId])
 
-  function notify(
-    text: string
-  ) {
+  function showMessage(
+    text: string,
+  ): void {
     setMessage(text)
     setError('')
 
@@ -472,139 +449,140 @@ export default function IslamicLibraryAdmin() {
   }
 
   function showError(
-    text: string
-  ) {
+    text: string,
+  ): void {
     setError(text)
+    setMessage('')
 
     window.setTimeout(() => {
       setError('')
     }, 5000)
   }
 
-  async function loadBooks() {
+  async function loadBooks(): Promise<void> {
     try {
       setLoadingBooks(true)
       setError('')
 
-      const snapshot =
-        await getDocs(
-          collection(
-            db,
-            'islamicLibraryBooks'
-          )
-        )
-
-      const firestoreMap =
-        new Map<
-          string,
-          FirestoreBookData
-        >()
-
-      snapshot.docs.forEach(
-        (item) => {
-          firestoreMap.set(
-            item.id,
-            item.data() as FirestoreBookData
-          )
-        }
+      const snapshot = await getDocs(
+        collection(
+          db,
+          'islamicLibraryBooks',
+        ),
       )
 
-      const merged: AdminBook[] =
-        []
+      const firestoreBooks =
+        snapshot.docs.map((item) => ({
+          id: item.id,
+          data: item.data() as FirestoreBookData,
+        }))
+
+      const mergedBooks: AdminBook[] = []
+
+      SUNNI_LIBRARY_BOOKS.forEach(
+        (staticBook) => {
+          let firestoreData: FirestoreBookData | null =
+            null
+
+          for (
+            let i = 0;
+            i < firestoreBooks.length;
+            i += 1
+          ) {
+            if (
+              firestoreBooks[i].id ===
+              staticBook.id
+            ) {
+              firestoreData =
+                firestoreBooks[i].data
+              break
+            }
+          }
+
+          if (firestoreData) {
+            const mergedBook =
+              createBookFromFirestore(
+                staticBook.id,
+                firestoreData,
+                staticBook,
+              )
+
+            if (mergedBook) {
+              mergedBooks.push(
+                mergedBook,
+              )
+            }
+          } else {
+            mergedBooks.push({
+              ...staticBook,
+              isCustom: false,
+              deleted: false,
+            })
+          }
+        },
+      )
 
       for (
-        let index = 0;
-        index <
-        SUNNI_LIBRARY_BOOKS.length;
-        index += 1
+        let i = 0;
+        i < firestoreBooks.length;
+        i += 1
       ) {
-        const staticBook =
-          SUNNI_LIBRARY_BOOKS[
-            index
-          ]
+        const firestoreBook =
+          firestoreBooks[i]
 
-        const override =
-          firestoreMap.get(
-            staticBook.id
+        const existsInStatic =
+          SUNNI_LIBRARY_BOOKS.some(
+            (book) =>
+              book.id ===
+              firestoreBook.id,
           )
 
-        if (override) {
-          const mergedBook =
-            createBookFromFirestore(
-              staticBook.id,
-              override,
-              staticBook
-            )
-
-          if (mergedBook) {
-            merged.push(
-              mergedBook
-            )
-          }
-        } else {
-          merged.push({
-            ...staticBook,
-            isCustom: false,
-            deleted: false,
-          })
+        if (existsInStatic) {
+          continue
         }
 
-        firestoreMap.delete(
-          staticBook.id
-        )
+        const customBook =
+          createBookFromFirestore(
+            firestoreBook.id,
+            firestoreBook.data,
+          )
+
+        if (customBook) {
+          mergedBooks.push(
+            customBook,
+          )
+        }
       }
 
-      firestoreMap.forEach(
-        (
-          data,
-          id
-        ) => {
-          const customBook =
-            createBookFromFirestore(
-              id,
-              data
-            )
-
-          if (customBook) {
-            merged.push(
-              customBook
-            )
-          }
-        }
-      )
-
-      merged.sort(
+      mergedBooks.sort(
         (a, b) =>
           a.title.localeCompare(
             b.title,
-            'ar'
-          )
+            'ar',
+          ),
       )
 
       setBooks(
-        merged
+        mergedBooks,
       )
 
       if (
         selectedBookId &&
-        !merged.some(
+        !mergedBooks.some(
           (book) =>
-            book.id ===
-            selectedBookId
+            book.id === selectedBookId,
         )
       ) {
-        setSelectedBookId(
-          null
-        )
+        setSelectedBookId(null)
       }
     } catch (loadError) {
       console.error(
         'Islamic library admin load error:',
-        loadError
+        loadError,
       )
 
       showError(
-        'تعذر تحميل كتب المكتبة من Firestore.'
+        'تعذر تحميل كتب المكتبة من Firestore.',
       )
     } finally {
       setLoadingBooks(false)
@@ -612,29 +590,24 @@ export default function IslamicLibraryAdmin() {
   }
 
   async function loadVideos(
-    bookId: string
-  ) {
+    bookId: string,
+  ): Promise<void> {
     try {
       setLoadingVideos(true)
 
-      const snapshot =
-        await getDocs(
-          collection(
-            db,
-            'islamicLibraryBooks',
-            bookId,
-            'videos'
-          )
-        )
+      const snapshot = await getDocs(
+        collection(
+          db,
+          'islamicLibraryBooks',
+          bookId,
+          'videos',
+        ),
+      )
 
-      const nextVideos:
-        VideoLesson[] =
+      const nextVideos =
         snapshot.docs
           .map(
-            (
-              item,
-              index
-            ) => {
+            (item, index) => {
               const data =
                 item.data() as Record<
                   string,
@@ -642,70 +615,57 @@ export default function IslamicLibraryAdmin() {
                 >
 
               const numericOrder =
-                Number(
-                  data.order
-                )
+                Number(data.order)
 
               return {
                 id: item.id,
                 title:
-                  stringValue(
-                    data.title
+                  toStringValue(
+                    data.title,
                   ) ||
-                  `الدرس ${
-                    index +
-                    1
-                  }`,
+                  `الدرس ${index + 1}`,
                 url:
-                  stringValue(
-                    data.url
-                  ) ||
-                  '',
+                  toStringValue(
+                    data.url,
+                  ),
                 order:
                   Number.isFinite(
-                    numericOrder
-                  )
+                    numericOrder,
+                  ) &&
+                  numericOrder > 0
                     ? numericOrder
-                    : index +
-                      1,
+                    : index + 1,
               }
-            }
+            },
           )
           .filter(
             (video) =>
-              Boolean(
-                video.url
-              )
+              video.url.trim().length > 0,
           )
           .sort(
             (a, b) =>
-              a.order -
-              b.order
+              a.order - b.order,
           )
 
-      setVideos(
-        nextVideos
-      )
+      setVideos(nextVideos)
     } catch (loadError) {
       console.error(
         'Islamic library videos load error:',
-        loadError
+        loadError,
       )
 
       setVideos([])
 
       showError(
-        'تعذر تحميل دروس الكتاب.'
+        'تعذر تحميل دروس الكتاب.',
       )
     } finally {
       setLoadingVideos(false)
     }
   }
 
-  function openCreateBook() {
-    setEditingBookId(
-      null
-    )
+  function openCreateBook(): void {
+    setEditingBookId(null)
 
     setBookForm({
       ...EMPTY_BOOK_FORM,
@@ -715,35 +675,31 @@ export default function IslamicLibraryAdmin() {
   }
 
   function openEditBook(
-    book: AdminBook
-  ) {
-    setEditingBookId(
-      book.id
-    )
+    book: AdminBook,
+  ): void {
+    setEditingBookId(book.id)
 
     setBookForm(
-      buildBookForm(book)
+      buildBookForm(book),
     )
 
     setBookModalOpen(true)
   }
 
-  function closeBookModal() {
+  function closeBookModal(): void {
     if (savingBook) {
       return
     }
 
     setBookModalOpen(false)
-    setEditingBookId(
-      null
-    )
+    setEditingBookId(null)
 
     setBookForm({
       ...EMPTY_BOOK_FORM,
     })
   }
 
-  async function saveBook() {
+  async function saveBook(): Promise<void> {
     const title =
       bookForm.title.trim()
 
@@ -755,21 +711,21 @@ export default function IslamicLibraryAdmin() {
 
     if (!title) {
       showError(
-        'اكتب اسم الكتاب كاملًا.'
+        'اكتب اسم الكتاب كاملًا.',
       )
       return
     }
 
     if (!author) {
       showError(
-        'اكتب اسم المؤلف.'
+        'اكتب اسم المؤلف.',
       )
       return
     }
 
     if (!description) {
       showError(
-        'اكتب وصف الكتاب.'
+        'اكتب وصف الكتاب.',
       )
       return
     }
@@ -782,18 +738,17 @@ export default function IslamicLibraryAdmin() {
         editingBookId ||
         makeBookId(title)
 
-      const existingBook =
+      const currentBook =
         books.find(
           (book) =>
-            book.id ===
-            editingBookId
+            book.id === editingBookId,
         )
 
       await setDoc(
         doc(
           db,
           'islamicLibraryBooks',
-          bookId
+          bookId,
         ),
         {
           id: bookId,
@@ -804,42 +759,32 @@ export default function IslamicLibraryAdmin() {
           level:
             bookForm.level,
           description,
-
           readingUrl:
             bookForm.readingUrl.trim() ||
             null,
-
           readingLabel:
             bookForm.readingLabel.trim() ||
             null,
-
           downloadUrl:
             bookForm.downloadUrl.trim() ||
             null,
-
           sharhTitle:
             bookForm.sharhTitle.trim() ||
             null,
-
           sharhAuthor:
             bookForm.sharhAuthor.trim() ||
             null,
-
           sharhUrl:
             bookForm.sharhUrl.trim() ||
             null,
-
           sharhLabel:
             bookForm.sharhLabel.trim() ||
             null,
-
           deleted:
-            existingBook?.deleted ||
+            currentBook?.deleted ||
             false,
-
           updatedAt:
             serverTimestamp(),
-
           ...(editingBookId
             ? {}
             : {
@@ -849,52 +794,45 @@ export default function IslamicLibraryAdmin() {
         },
         {
           merge: true,
-        }
+        },
       )
 
       await loadBooks()
 
-      setSelectedBookId(
-        bookId
-      )
+      setSelectedBookId(bookId)
 
       closeBookModal()
 
-      notify(
+      showMessage(
         editingBookId
-          ? 'تم تحديث بيانات الكتاب بنجاح.'
-          : 'تمت إضافة الكتاب بنجاح.'
+          ? 'تم تحديث الكتاب بنجاح.'
+          : 'تمت إضافة الكتاب بنجاح.',
       )
     } catch (saveError) {
       console.error(
         'Islamic library book save error:',
-        saveError
+        saveError,
       )
 
       showError(
-        'تعذر حفظ الكتاب. تأكد من صلاحيات حساب الإدارة.'
+        'تعذر حفظ الكتاب. تأكد من صلاحيات حساب الإدارة.',
       )
     } finally {
-      setSavingBook(
-        false
-      )
+      setSavingBook(false)
     }
   }
 
   async function toggleBookVisibility(
-    book: AdminBook
-  ) {
+    book: AdminBook,
+  ): Promise<void> {
     try {
-      setDeletingBookId(
-        book.id
-      )
-      setError('')
+      setDeletingBookId(book.id)
 
       await setDoc(
         doc(
           db,
           'islamicLibraryBooks',
-          book.id
+          book.id,
         ),
         {
           id: book.id,
@@ -905,45 +843,43 @@ export default function IslamicLibraryAdmin() {
         },
         {
           merge: true,
-        }
+        },
       )
 
       await loadBooks()
 
-      notify(
+      showMessage(
         book.deleted
-          ? 'تم إظهار الكتاب مرة أخرى.'
-          : 'تم إخفاء الكتاب من المكتبة.'
+          ? 'تم إظهار الكتاب.'
+          : 'تم إخفاء الكتاب.',
       )
     } catch (toggleError) {
       console.error(
         'Islamic library visibility error:',
-        toggleError
+        toggleError,
       )
 
       showError(
-        'تعذر تغيير حالة ظهور الكتاب.'
+        'تعذر تغيير حالة ظهور الكتاب.',
       )
     } finally {
-      setDeletingBookId(
-        null
-      )
+      setDeletingBookId(null)
     }
   }
 
   async function deleteCustomBook(
-    book: AdminBook
-  ) {
+    book: AdminBook,
+  ): Promise<void> {
     if (!book.isCustom) {
       await toggleBookVisibility(
-        book
+        book,
       )
       return
     }
 
     const confirmed =
       window.confirm(
-        `هل تريد حذف الكتاب نهائيًا؟\n\n${book.title}`
+        `هل تريد حذف الكتاب نهائيًا؟\n\n${book.title}`,
       )
 
     if (!confirmed) {
@@ -951,142 +887,115 @@ export default function IslamicLibraryAdmin() {
     }
 
     try {
-      setDeletingBookId(
-        book.id
-      )
+      setDeletingBookId(book.id)
 
       await deleteDoc(
         doc(
           db,
           'islamicLibraryBooks',
-          book.id
-        )
+          book.id,
+        ),
       )
 
       if (
         selectedBookId ===
         book.id
       ) {
-        setSelectedBookId(
-          null
-        )
+        setSelectedBookId(null)
         setVideos([])
       }
 
       await loadBooks()
 
-      notify(
-        'تم حذف الكتاب المضاف من لوحة الإدارة.'
+      showMessage(
+        'تم حذف الكتاب بنجاح.',
       )
     } catch (deleteError) {
       console.error(
-        'Islamic library book delete error:',
-        deleteError
+        'Islamic library delete error:',
+        deleteError,
       )
 
       showError(
-        'تعذر حذف الكتاب.'
+        'تعذر حذف الكتاب.',
       )
     } finally {
-      setDeletingBookId(
-        null
-      )
+      setDeletingBookId(null)
     }
   }
 
-  function openCreateVideo() {
+  function openCreateVideo(): void {
     if (!selectedBook) {
       showError(
-        'اختر كتابًا أولًا لإضافة الدرس.'
+        'اختر كتابًا أولًا.',
       )
       return
     }
 
-    setEditingVideoId(
-      null
-    )
+    setEditingVideoId(null)
 
     setVideoForm({
       title: '',
       url: '',
       order: String(
-        videos.length +
-          1
+        videos.length + 1,
       ),
     })
 
-    setVideoModalOpen(
-      true
-    )
+    setVideoModalOpen(true)
   }
 
   function openCreateVideoForBook(
-    book: AdminBook
-  ) {
-    setSelectedBookId(
-      book.id
-    )
+    book: AdminBook,
+  ): void {
+    setSelectedBookId(book.id)
 
-    setEditingVideoId(
-      null
-    )
+    setEditingVideoId(null)
 
     setVideoForm({
       title: '',
       url: '',
-      order: String(
-        videos.length +
-          1
-      ),
+      order: '1',
     })
 
-    setVideoModalOpen(
-      true
-    )
+    setVideoModalOpen(true)
   }
 
   function openEditVideo(
-    video: VideoLesson
-  ) {
+    video: VideoLesson,
+  ): void {
     setEditingVideoId(
-      video.id
+      video.id,
     )
 
     setVideoForm({
       title: video.title,
       url: video.url,
       order: String(
-        video.order
+        video.order,
       ),
     })
 
-    setVideoModalOpen(
-      true
-    )
+    setVideoModalOpen(true)
   }
 
-  function closeVideoModal() {
+  function closeVideoModal(): void {
     if (savingVideo) {
       return
     }
 
-    setVideoModalOpen(
-      false
-    )
-
-    setEditingVideoId(
-      null
-    )
+    setVideoModalOpen(false)
+    setEditingVideoId(null)
 
     setVideoForm({
       ...EMPTY_VIDEO_FORM,
     })
   }
 
-  async function saveVideo() {
+  async function saveVideo(): Promise<void> {
     if (!selectedBook) {
       showError(
-        'اختر الكتاب أولًا.'
+        'اختر كتابًا أولًا.',
       )
       return
     }
@@ -1097,49 +1006,44 @@ export default function IslamicLibraryAdmin() {
     const url =
       videoForm.url.trim()
 
-    const parsedOrder =
+    const orderNumber =
       Number(
-        videoForm.order
+        videoForm.order,
       )
 
     if (!title) {
       showError(
-        'اكتب اسم الدرس.'
+        'اكتب اسم الدرس.',
       )
       return
     }
 
     if (!url) {
       showError(
-        'أدخل رابط الفيديو.'
+        'أدخل رابط الفيديو.',
       )
       return
     }
 
     if (
       !Number.isFinite(
-        parsedOrder
+        orderNumber,
       ) ||
-      parsedOrder < 1
+      orderNumber < 1
     ) {
       showError(
-        'رقم ترتيب الدرس غير صحيح.'
+        'أدخل ترتيبًا صحيحًا للدرس.',
       )
       return
     }
 
     try {
-      setSavingVideo(
-        true
-      )
-
+      setSavingVideo(true)
       setError('')
 
       const videoId =
         editingVideoId ||
-        `${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2, 7)}`
+        makeVideoId()
 
       await setDoc(
         doc(
@@ -1147,7 +1051,7 @@ export default function IslamicLibraryAdmin() {
           'islamicLibraryBooks',
           selectedBook.id,
           'videos',
-          videoId
+          videoId,
         ),
         {
           id: videoId,
@@ -1155,11 +1059,10 @@ export default function IslamicLibraryAdmin() {
           url,
           order:
             Math.floor(
-              parsedOrder
+              orderNumber,
             ),
           updatedAt:
             serverTimestamp(),
-
           ...(editingVideoId
             ? {}
             : {
@@ -1169,46 +1072,44 @@ export default function IslamicLibraryAdmin() {
         },
         {
           merge: true,
-        }
+        },
       )
 
       await loadVideos(
-        selectedBook.id
+        selectedBook.id,
       )
 
       closeVideoModal()
 
-      notify(
+      showMessage(
         editingVideoId
-          ? 'تم تحديث الدرس بنجاح.'
-          : 'تمت إضافة الدرس بنجاح.'
+          ? 'تم تحديث الدرس.'
+          : 'تمت إضافة الدرس.',
       )
     } catch (saveError) {
       console.error(
         'Islamic library video save error:',
-        saveError
+        saveError,
       )
 
       showError(
-        'تعذر حفظ الدرس. تأكد من صلاحيات حساب الإدارة.'
+        'تعذر حفظ الدرس. تأكد من صلاحيات حساب الإدارة.',
       )
     } finally {
-      setSavingVideo(
-        false
-      )
+      setSavingVideo(false)
     }
   }
 
   async function deleteVideo(
-    video: VideoLesson
-  ) {
+    video: VideoLesson,
+  ): Promise<void> {
     if (!selectedBook) {
       return
     }
 
     const confirmed =
       window.confirm(
-        `هل تريد حذف هذا الدرس؟\n\n${video.title}`
+        `هل تريد حذف الدرس؟\n\n${video.title}`,
       )
 
     if (!confirmed) {
@@ -1217,7 +1118,7 @@ export default function IslamicLibraryAdmin() {
 
     try {
       setDeletingVideoId(
-        video.id
+        video.id,
       )
 
       await deleteDoc(
@@ -1226,56 +1127,43 @@ export default function IslamicLibraryAdmin() {
           'islamicLibraryBooks',
           selectedBook.id,
           'videos',
-          video.id
-        )
+          video.id,
+        ),
       )
 
       await loadVideos(
-        selectedBook.id
+        selectedBook.id,
       )
 
-      notify(
-        'تم حذف الدرس بنجاح.'
+      showMessage(
+        'تم حذف الدرس.',
       )
     } catch (deleteError) {
       console.error(
         'Islamic library video delete error:',
-        deleteError
+        deleteError,
       )
 
       showError(
-        'تعذر حذف الدرس.'
+        'تعذر حذف الدرس.',
       )
     } finally {
-      setDeletingVideoId(
-        null
-      )
+      setDeletingVideoId(null)
     }
   }
 
   function getCategoryLabel(
-    categoryId: SunniLibraryCategoryId
-  ) {
-    return (
+    categoryId: SunniLibraryCategoryId,
+  ): string {
+    const category =
       SUNNI_LIBRARY_CATEGORIES.find(
         (item) =>
-          item.id ===
-          categoryId
-      )?.label ||
-      categoryId
-    )
-  }
+          item.id === categoryId,
+      )
 
-  function getLevelLabel(
-    level: SunniLibraryLevel
-  ) {
     return (
-      SUNNI_LIBRARY_LEVELS.find(
-        (item) =>
-          item.id ===
-          level
-      )?.label ||
-      level
+      category?.label ||
+      'تصنيف'
     )
   }
 
@@ -1295,16 +1183,15 @@ export default function IslamicLibraryAdmin() {
 
               <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-black text-emerald-700">
                 {visibleBooksCount.toLocaleString(
-                  'ar-EG'
+                  'ar-EG',
                 )}{' '}
                 كتاب ظاهر
               </span>
 
-              {hiddenBooksCount >
-              0 ? (
+              {hiddenBooksCount > 0 ? (
                 <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-black text-slate-500">
                   {hiddenBooksCount.toLocaleString(
-                    'ar-EG'
+                    'ar-EG',
                   )}{' '}
                   مخفي
                 </span>
@@ -1316,10 +1203,9 @@ export default function IslamicLibraryAdmin() {
             </h2>
 
             <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-500">
-              من هنا تستطيع إضافة الكتب أو تعديل بياناتها، ووضع رابط
-              التحميل، ثم إضافة جميع دروس الشرح الخاصة بكل كتاب مع
-              ترتيبها. الروابط النصية فقط تكفي؛ الفيديو يفتح لاحقًا
-              داخل المنصة.
+              أضف الكتب وعدّل بياناتها وأدخل رابط التحميل وروابط
+              القراءة والشرح، ثم أضف دروس الفيديو بالترتيب الذي
+              تريده.
             </p>
           </div>
 
@@ -1358,8 +1244,7 @@ export default function IslamicLibraryAdmin() {
           </div>
         </div>
 
-        {message ||
-        error ? (
+        {message || error ? (
           <div
             className={`mt-5 rounded-2xl border px-4 py-3 text-xs font-bold leading-6 ${
               error
@@ -1367,8 +1252,7 @@ export default function IslamicLibraryAdmin() {
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700'
             }`}
           >
-            {error ||
-              message}
+            {error || message}
           </div>
         ) : null}
       </div>
@@ -1377,7 +1261,7 @@ export default function IslamicLibraryAdmin() {
         <div className="min-w-0">
           <div className="rounded-[30px] border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 p-5 sm:p-6">
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3">
                 <div className="relative">
                   <Search
                     size={18}
@@ -1386,12 +1270,14 @@ export default function IslamicLibraryAdmin() {
 
                   <input
                     type="search"
-                    value={search}
+                    value={
+                      search
+                    }
                     onChange={(
-                      event
+                      event,
                     ) =>
                       setSearch(
-                        event.target.value
+                        event.target.value,
                       )
                     }
                     placeholder="ابحث باسم الكتاب أو المؤلف..."
@@ -1399,20 +1285,18 @@ export default function IslamicLibraryAdmin() {
                   />
                 </div>
 
-                <div className="flex flex-col gap-3 md:flex-row">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <select
                     value={
                       levelFilter
                     }
                     onChange={(
-                      event
+                      event,
                     ) =>
                       setLevelFilter(
-                        event
-                          .target
-                          .value as
+                        event.target.value as
                           | 'الكل'
-                          | SunniLibraryLevel
+                          | SunniLibraryLevel,
                       )
                     }
                     className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 outline-none"
@@ -1423,7 +1307,7 @@ export default function IslamicLibraryAdmin() {
 
                     {SUNNI_LIBRARY_LEVELS.map(
                       (
-                        level
+                        level,
                       ) => (
                         <option
                           key={
@@ -1437,7 +1321,7 @@ export default function IslamicLibraryAdmin() {
                             level.label
                           }
                         </option>
-                      )
+                      ),
                     )}
                   </select>
 
@@ -1446,14 +1330,13 @@ export default function IslamicLibraryAdmin() {
                       categoryFilter
                     }
                     onChange={(
-                      event
+                      event,
                     ) =>
                       setCategoryFilter(
-                        event
-                          .target
+                        event.target
                           .value as
                           | 'الكل'
-                          | SunniLibraryCategoryId
+                          | SunniLibraryCategoryId,
                       )
                     }
                     className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 outline-none"
@@ -1464,7 +1347,7 @@ export default function IslamicLibraryAdmin() {
 
                     {SUNNI_LIBRARY_CATEGORIES.map(
                       (
-                        category
+                        category,
                       ) => (
                         <option
                           key={
@@ -1478,7 +1361,7 @@ export default function IslamicLibraryAdmin() {
                             category.label
                           }
                         </option>
-                      )
+                      ),
                     )}
                   </select>
                 </div>
@@ -1494,31 +1377,28 @@ export default function IslamicLibraryAdmin() {
                   />
 
                   <p className="text-sm font-black">
-                    جاري تحميل كتب المكتبة...
+                    جاري تحميل الكتب...
                   </p>
                 </div>
-              ) : filteredBooks.length ===
-                0 ? (
+              ) : filteredBooks.length === 0 ? (
                 <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
                   <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
-                    <Search size={27} />
+                    <Search size={28} />
                   </div>
 
                   <h3 className="mt-4 text-lg font-black text-slate-800">
-                    لا توجد كتب مطابقة
+                    لا توجد نتائج
                   </h3>
 
                   <p className="mt-2 text-sm text-slate-500">
-                    غيّر كلمات البحث أو الفلاتر المستخدمة.
+                    جرّب تغيير البحث أو الفلاتر.
                   </p>
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
                   {filteredBooks.map(
-                    (
-                      book
-                    ) => {
-                      const active =
+                    (book) => {
+                      const selected =
                         selectedBookId ===
                         book.id
 
@@ -1527,8 +1407,8 @@ export default function IslamicLibraryAdmin() {
                           key={
                             book.id
                           }
-                          className={`group rounded-[26px] border p-5 transition ${
-                            active
+                          className={`rounded-[26px] border p-5 transition ${
+                            selected
                               ? 'border-sky-300 bg-sky-50/50 shadow-md'
                               : 'border-slate-200 bg-white hover:border-sky-200 hover:shadow-md'
                           } ${
@@ -1537,19 +1417,21 @@ export default function IslamicLibraryAdmin() {
                               : ''
                           }`}
                         >
-                          <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3">
                             <button
                               type="button"
                               onClick={() =>
                                 setSelectedBookId(
-                                  book.id
+                                  book.id,
                                 )
                               }
                               className="min-w-0 flex-1 text-right"
                             >
                               <div className="flex items-center gap-3">
                                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sky-600">
-                                  <BookOpen size={23} />
+                                  <BookOpen
+                                    size={23}
+                                  />
                                 </div>
 
                                 <div className="min-w-0">
@@ -1583,6 +1465,7 @@ export default function IslamicLibraryAdmin() {
                                     <UserRound
                                       size={13}
                                     />
+
                                     {
                                       book.author
                                     }
@@ -1595,11 +1478,11 @@ export default function IslamicLibraryAdmin() {
                               type="button"
                               onClick={() =>
                                 openEditBook(
-                                  book
+                                  book,
                                 )
                               }
-                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-sky-200 hover:text-sky-600"
-                              title="تعديل الكتاب"
+                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:border-sky-200 hover:text-sky-600"
+                              title="تعديل"
                             >
                               <Pencil
                                 size={16}
@@ -1616,17 +1499,16 @@ export default function IslamicLibraryAdmin() {
                           <div className="mt-4 grid grid-cols-2 gap-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                setSelectedBookId(
-                                  book.id
-                                )
+                              onClick={() =>
                                 openCreateVideoForBook(
-                                  book
+                                  book,
                                 )
-                              }}
+                              }
                               className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-600 transition hover:bg-slate-100"
                             >
-                              <Video size={15} />
+                              <Video
+                                size={15}
+                              />
                               إضافة درس
                             </button>
 
@@ -1639,12 +1521,16 @@ export default function IslamicLibraryAdmin() {
                                 rel="noreferrer"
                                 className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-50 px-3 text-[11px] font-black text-emerald-700 transition hover:bg-emerald-100"
                               >
-                                <Download size={15} />
+                                <Download
+                                  size={15}
+                                />
                                 التحميل
                               </a>
                             ) : (
                               <span className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-400">
-                                <Download size={15} />
+                                <Download
+                                  size={15}
+                                />
                                 لا يوجد تحميل
                               </span>
                             )}
@@ -1653,21 +1539,23 @@ export default function IslamicLibraryAdmin() {
                           <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
                             <span className="text-[10px] font-bold text-slate-400">
                               {getCategoryLabel(
-                                book.category
+                                book.category,
                               )}
                             </span>
 
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1">
                               <button
                                 type="button"
                                 onClick={() =>
                                   setSelectedBookId(
-                                    book.id
+                                    book.id,
                                   )
                                 }
                                 className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-[10px] font-black text-sky-600 hover:bg-sky-50"
                               >
-                                <Video size={13} />
+                                <Video
+                                  size={13}
+                                />
                                 الدروس
                               </button>
 
@@ -1675,23 +1563,23 @@ export default function IslamicLibraryAdmin() {
                                 type="button"
                                 onClick={() =>
                                   void toggleBookVisibility(
-                                    book
+                                    book,
                                   )
                                 }
                                 disabled={
                                   deletingBookId ===
                                   book.id
                                 }
-                                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-[10px] font-black ${
-                                  book.deleted
-                                    ? 'text-emerald-600 hover:bg-emerald-50'
-                                    : 'text-slate-500 hover:bg-slate-50'
-                                }`}
+                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-[10px] font-black text-slate-500 hover:bg-slate-50"
                               >
                                 {book.deleted ? (
-                                  <Eye size={13} />
+                                  <Eye
+                                    size={13}
+                                  />
                                 ) : (
-                                  <EyeOff size={13} />
+                                  <EyeOff
+                                    size={13}
+                                  />
                                 )}
 
                                 {book.deleted
@@ -1703,7 +1591,7 @@ export default function IslamicLibraryAdmin() {
                                 type="button"
                                 onClick={() =>
                                   void deleteCustomBook(
-                                    book
+                                    book,
                                   )
                                 }
                                 disabled={
@@ -1724,15 +1612,17 @@ export default function IslamicLibraryAdmin() {
                                   />
                                 )}
 
-                                {book.isCustom
-                                  ? 'حذف'
-                                  : 'إخفاء'}
+                                {
+                                  book.isCustom
+                                    ? 'حذف'
+                                    : 'إخفاء'
+                                }
                               </button>
                             </div>
                           </div>
                         </article>
                       )
-                    }
+                    },
                   )}
                 </div>
               )}
@@ -1746,7 +1636,7 @@ export default function IslamicLibraryAdmin() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-black text-sky-600">
-                    إدارة الدروس
+                    إدارة دروس الكتاب
                   </p>
 
                   <h3 className="mt-1 text-lg font-black text-slate-900">
@@ -1760,7 +1650,7 @@ export default function IslamicLibraryAdmin() {
                     onClick={
                       openCreateVideo
                     }
-                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-600 text-white transition hover:bg-sky-700"
+                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-600 text-white"
                     title="إضافة درس"
                   >
                     <Plus size={18} />
@@ -1787,14 +1677,14 @@ export default function IslamicLibraryAdmin() {
                   </p>
                 </div>
               ) : (
-                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-7 text-center">
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center">
                   <Video
                     size={25}
                     className="mx-auto text-slate-300"
                   />
 
                   <p className="mt-3 text-xs font-black text-slate-500">
-                    اختر كتابًا من القائمة لإدارة دروسه.
+                    اختر كتابًا لإدارة دروسه.
                   </p>
                 </div>
               )}
@@ -1805,9 +1695,11 @@ export default function IslamicLibraryAdmin() {
                 <div className="mb-4 grid grid-cols-2 gap-2">
                   <div className="rounded-2xl bg-sky-50 p-3 text-center">
                     <div className="text-xl font-black text-sky-700">
-                      {videos.length.toLocaleString(
-                        'ar-EG'
-                      )}
+                      {
+                        videos.length.toLocaleString(
+                          'ar-EG',
+                        )
+                      }
                     </div>
 
                     <div className="mt-1 text-[10px] font-black text-slate-500">
@@ -1817,9 +1709,9 @@ export default function IslamicLibraryAdmin() {
 
                   <div className="rounded-2xl bg-amber-50 p-3 text-center">
                     <div className="text-sm font-black text-amber-700">
-                      {getLevelLabel(
+                      {
                         selectedBook.level
-                      )}
+                      }
                     </div>
 
                     <div className="mt-1 text-[10px] font-black text-slate-500">
@@ -1839,8 +1731,7 @@ export default function IslamicLibraryAdmin() {
                       جاري تحميل الدروس...
                     </p>
                   </div>
-                ) : videos.length ===
-                  0 ? (
+                ) : videos.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center">
                     <Video
                       size={27}
@@ -1848,11 +1739,11 @@ export default function IslamicLibraryAdmin() {
                     />
 
                     <p className="mt-3 text-sm font-black text-slate-700">
-                      لا توجد دروس لهذا الكتاب
+                      لا توجد دروس
                     </p>
 
                     <p className="mt-2 text-xs leading-6 text-slate-400">
-                      أضف اسم الدرس والرابط، وسيظهر للمستخدم داخل المنصة.
+                      أضف اسم الدرس والرابط وسيظهر للمستخدم داخل المنصة.
                     </p>
 
                     <button
@@ -1862,7 +1753,9 @@ export default function IslamicLibraryAdmin() {
                       }
                       className="mt-5 inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-black text-white"
                     >
-                      <Plus size={15} />
+                      <Plus
+                        size={15}
+                      />
                       إضافة أول درس
                     </button>
                   </div>
@@ -1871,13 +1764,13 @@ export default function IslamicLibraryAdmin() {
                     {videos.map(
                       (
                         video,
-                        index
+                        index,
                       ) => (
                         <article
                           key={
                             video.id
                           }
-                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                          className="rounded-2xl border border-slate-200 p-4"
                         >
                           <div className="flex items-start gap-3">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-[11px] font-black text-sky-700">
@@ -1885,7 +1778,7 @@ export default function IslamicLibraryAdmin() {
                                 index +
                                 1
                               ).toLocaleString(
-                                'ar-EG'
+                                'ar-EG',
                               )}
                             </div>
 
@@ -1911,23 +1804,22 @@ export default function IslamicLibraryAdmin() {
                               }
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-50 py-2.5 text-[10px] font-black text-slate-600 transition hover:bg-slate-100"
+                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-50 py-2.5 text-[10px] font-black text-slate-600"
                             >
                               <ExternalLink
                                 size={14}
                               />
-                              اختبار الرابط
+                              اختبار
                             </a>
 
                             <button
                               type="button"
                               onClick={() =>
                                 openEditVideo(
-                                  video
+                                  video,
                                 )
                               }
-                              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:border-sky-200 hover:text-sky-600"
-                              title="تعديل"
+                              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
                             >
                               <Pencil
                                 size={14}
@@ -1938,15 +1830,14 @@ export default function IslamicLibraryAdmin() {
                               type="button"
                               onClick={() =>
                                 void deleteVideo(
-                                  video
+                                  video,
                                 )
                               }
                               disabled={
                                 deletingVideoId ===
                                 video.id
                               }
-                              className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-100 text-red-500 transition hover:bg-red-50"
-                              title="حذف"
+                              className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-100 text-red-500"
                             >
                               {deletingVideoId ===
                               video.id ? (
@@ -1962,7 +1853,7 @@ export default function IslamicLibraryAdmin() {
                             </button>
                           </div>
                         </article>
-                      )
+                      ),
                     )}
                   </div>
                 )}
@@ -1993,7 +1884,7 @@ export default function IslamicLibraryAdmin() {
                 onClick={
                   closeBookModal
                 }
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-slate-500 transition hover:bg-slate-100"
+                className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-slate-500"
               >
                 <X size={18} />
               </button>
@@ -2001,7 +1892,7 @@ export default function IslamicLibraryAdmin() {
 
             <div className="space-y-5 p-5 sm:p-6">
               <div className="grid gap-4 md:grid-cols-2">
-                <FormField
+                <AdminInput
                   label="اسم الكتاب كاملًا"
                   required
                   value={
@@ -2010,17 +1901,18 @@ export default function IslamicLibraryAdmin() {
                   onChange={(value) =>
                     setBookForm(
                       (
-                        current
+                        current,
                       ) => ({
                         ...current,
-                        title: value,
-                      })
+                        title:
+                          value,
+                      }),
                     )
                   }
-                  placeholder="مثال: العقيدة الواسطية"
+                  placeholder="اسم الكتاب كاملًا"
                 />
 
-                <FormField
+                <AdminInput
                   label="المؤلف"
                   required
                   value={
@@ -2029,19 +1921,20 @@ export default function IslamicLibraryAdmin() {
                   onChange={(value) =>
                     setBookForm(
                       (
-                        current
+                        current,
                       ) => ({
                         ...current,
-                        author: value,
-                      })
+                        author:
+                          value,
+                      }),
                     )
                   }
-                  placeholder="مثال: شيخ الإسلام ابن تيمية"
+                  placeholder="اسم المؤلف"
                 />
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <SelectField
+                <AdminSelect
                   label="المستوى"
                   value={
                     bookForm.level
@@ -2049,27 +1942,27 @@ export default function IslamicLibraryAdmin() {
                   onChange={(value) =>
                     setBookForm(
                       (
-                        current
+                        current,
                       ) => ({
                         ...current,
                         level:
                           value as SunniLibraryLevel,
-                      })
+                      }),
                     )
                   }
                   options={SUNNI_LIBRARY_LEVELS.map(
                     (
-                      level
+                      level,
                     ) => ({
                       value:
                         level.id,
                       label:
                         level.label,
-                    })
+                    }),
                   )}
                 />
 
-                <SelectField
+                <AdminSelect
                   label="التصنيف"
                   value={
                     bookForm.category
@@ -2077,28 +1970,28 @@ export default function IslamicLibraryAdmin() {
                   onChange={(value) =>
                     setBookForm(
                       (
-                        current
+                        current,
                       ) => ({
                         ...current,
                         category:
                           value as SunniLibraryCategoryId,
-                      })
+                      }),
                     )
                   }
                   options={SUNNI_LIBRARY_CATEGORIES.map(
                     (
-                      category
+                      category,
                     ) => ({
                       value:
                         category.id,
                       label:
                         category.label,
-                    })
+                    }),
                   )}
                 />
               </div>
 
-              <TextAreaField
+              <AdminTextArea
                 label="وصف الكتاب"
                 required
                 value={
@@ -2107,15 +2000,15 @@ export default function IslamicLibraryAdmin() {
                 onChange={(value) =>
                   setBookForm(
                     (
-                      current
+                      current,
                     ) => ({
                       ...current,
                       description:
                         value,
-                    })
+                    }),
                   )
                 }
-                placeholder="اكتب وصفًا واضحًا ومختصرًا للكتاب..."
+                placeholder="وصف الكتاب..."
               />
 
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
@@ -2125,7 +2018,7 @@ export default function IslamicLibraryAdmin() {
                 </div>
 
                 <div className="mt-4 space-y-4">
-                  <FormField
+                  <AdminInput
                     label="رابط تحميل الكتاب"
                     value={
                       bookForm.downloadUrl
@@ -2133,19 +2026,19 @@ export default function IslamicLibraryAdmin() {
                     onChange={(value) =>
                       setBookForm(
                         (
-                          current
+                          current,
                         ) => ({
                           ...current,
                           downloadUrl:
                             value,
-                        })
+                        }),
                       )
                     }
                     placeholder="https://..."
                   />
 
                   <div className="grid gap-4 md:grid-cols-2">
-                    <FormField
+                    <AdminInput
                       label="رابط القراءة"
                       value={
                         bookForm.readingUrl
@@ -2153,18 +2046,18 @@ export default function IslamicLibraryAdmin() {
                       onChange={(value) =>
                         setBookForm(
                           (
-                            current
+                            current,
                           ) => ({
                             ...current,
                             readingUrl:
                               value,
-                          })
+                          }),
                         )
                       }
                       placeholder="https://..."
                     />
 
-                    <FormField
+                    <AdminInput
                       label="اسم زر القراءة"
                       value={
                         bookForm.readingLabel
@@ -2172,12 +2065,13 @@ export default function IslamicLibraryAdmin() {
                       onChange={(value) =>
                         setBookForm(
                           (
-                            current
+                            current,
                           ) => ({
                             ...current,
                             readingLabel:
                               value,
-                          })
+                          }),
+                        )
                       }
                       placeholder="قراءة الكتاب"
                     />
@@ -2187,12 +2081,14 @@ export default function IslamicLibraryAdmin() {
 
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                 <div className="flex items-center gap-2 text-sm font-black text-amber-700">
-                  <GraduationCap size={17} />
+                  <GraduationCap
+                    size={17}
+                  />
                   بيانات الشرح
                 </div>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <FormField
+                  <AdminInput
                     label="اسم الشرح"
                     value={
                       bookForm.sharhTitle
@@ -2200,37 +2096,37 @@ export default function IslamicLibraryAdmin() {
                     onChange={(value) =>
                       setBookForm(
                         (
-                          current
+                          current,
                         ) => ({
                           ...current,
                           sharhTitle:
                             value,
-                        })
+                        }),
                       )
                     }
-                    placeholder="شرح الكتاب"
+                    placeholder="اسم الشرح"
                   />
 
-                  <FormField
-                    label="شارح الكتاب"
+                  <AdminInput
+                    label="اسم الشارح"
                     value={
                       bookForm.sharhAuthor
                     }
                     onChange={(value) =>
                       setBookForm(
                         (
-                          current
+                          current,
                         ) => ({
                           ...current,
                           sharhAuthor:
                             value,
-                        })
+                        }),
                       )
                     }
                     placeholder="اسم الشيخ أو المدرس"
                   />
 
-                  <FormField
+                  <AdminInput
                     label="رابط الشرح"
                     value={
                       bookForm.sharhUrl
@@ -2238,18 +2134,18 @@ export default function IslamicLibraryAdmin() {
                     onChange={(value) =>
                       setBookForm(
                         (
-                          current
+                          current,
                         ) => ({
                           ...current,
                           sharhUrl:
                             value,
-                        })
+                        }),
                       )
                     }
                     placeholder="https://..."
                   />
 
-                  <FormField
+                  <AdminInput
                     label="اسم زر الشرح"
                     value={
                       bookForm.sharhLabel
@@ -2257,12 +2153,12 @@ export default function IslamicLibraryAdmin() {
                     onChange={(value) =>
                       setBookForm(
                         (
-                          current
+                          current,
                         ) => ({
                           ...current,
                           sharhLabel:
                             value,
-                        })
+                        }),
                       )
                     }
                     placeholder="فتح الشرح"
@@ -2271,7 +2167,7 @@ export default function IslamicLibraryAdmin() {
               </div>
             </div>
 
-            <div className="sticky bottom-0 flex flex-col-reverse gap-2 border-t border-slate-100 bg-white p-5 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-white p-5 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={
@@ -2345,7 +2241,7 @@ export default function IslamicLibraryAdmin() {
             </div>
 
             <div className="space-y-4 p-5 sm:p-6">
-              <FormField
+              <AdminInput
                 label="اسم الدرس"
                 required
                 value={
@@ -2354,17 +2250,18 @@ export default function IslamicLibraryAdmin() {
                 onChange={(value) =>
                   setVideoForm(
                     (
-                      current
+                      current,
                     ) => ({
                       ...current,
-                      title: value,
-                    })
+                      title:
+                        value,
+                    }),
                   )
                 }
-                placeholder="مثال: الدرس الأول — مقدمة الكتاب"
+                placeholder="الدرس الأول — مقدمة الكتاب"
               />
 
-              <FormField
+              <AdminInput
                 label="رابط الفيديو"
                 required
                 value={
@@ -2373,18 +2270,19 @@ export default function IslamicLibraryAdmin() {
                 onChange={(value) =>
                   setVideoForm(
                     (
-                      current
+                      current,
                     ) => ({
                       ...current,
-                      url: value,
-                    })
+                      url:
+                        value,
+                    }),
                   )
                 }
-                placeholder="رابط YouTube أو رابط ملف فيديو مباشر"
+                placeholder="https://youtube.com/..."
                 type="url"
               />
 
-              <FormField
+              <AdminInput
                 label="ترتيب الدرس"
                 value={
                   videoForm.order
@@ -2392,11 +2290,12 @@ export default function IslamicLibraryAdmin() {
                 onChange={(value) =>
                   setVideoForm(
                     (
-                      current
+                      current,
                     ) => ({
                       ...current,
-                      order: value,
-                    })
+                      order:
+                        value,
+                    }),
                   )
                 }
                 placeholder="1"
@@ -2406,14 +2305,12 @@ export default function IslamicLibraryAdmin() {
               <div className="rounded-2xl bg-sky-50 p-4 text-xs font-bold leading-6 text-sky-800">
                 <div className="flex items-center gap-2 font-black">
                   <PlayCircle size={16} />
-                  تنبيه
+                  ملاحظة
                 </div>
 
                 <p className="mt-2">
-                  لا تحتاج إلى رفع الفيديو إلى
-                  الموقع. أدخل الرابط فقط، وسيظهر
-                  الدرس للمستخدم ليتم تشغيله داخل
-                  المنصة.
+                  أدخل الرابط فقط. المستخدم سيشاهد
+                  الفيديو من داخل منصة مصحف سميع.
                 </p>
               </div>
             </div>
@@ -2464,7 +2361,7 @@ export default function IslamicLibraryAdmin() {
   )
 }
 
-function FormField({
+function AdminInput({
   label,
   required,
   value,
@@ -2476,7 +2373,7 @@ function FormField({
   required?: boolean
   value: string
   onChange: (
-    value: string
+    value: string,
   ) => void
   placeholder?: string
   type?: string
@@ -2485,10 +2382,7 @@ function FormField({
     <label className="block">
       <span className="mb-2 flex items-center gap-1 text-xs font-black text-slate-700">
         {type === 'url' ? (
-          <LinkIcon
-            size={14}
-            className="text-sky-500"
-          />
+          <LinkIconSmall />
         ) : null}
 
         {label}
@@ -2505,7 +2399,7 @@ function FormField({
         value={value}
         onChange={(event) =>
           onChange(
-            event.target.value
+            event.target.value,
           )
         }
         placeholder={
@@ -2522,7 +2416,7 @@ function FormField({
   )
 }
 
-function TextAreaField({
+function AdminTextArea({
   label,
   required,
   value,
@@ -2533,7 +2427,7 @@ function TextAreaField({
   required?: boolean
   value: string
   onChange: (
-    value: string
+    value: string,
   ) => void
   placeholder?: string
 }) {
@@ -2558,7 +2452,7 @@ function TextAreaField({
         value={value}
         onChange={(event) =>
           onChange(
-            event.target.value
+            event.target.value,
           )
         }
         placeholder={
@@ -2571,7 +2465,7 @@ function TextAreaField({
   )
 }
 
-function SelectField({
+function AdminSelect({
   label,
   value,
   onChange,
@@ -2580,7 +2474,7 @@ function SelectField({
   label: string
   value: string
   onChange: (
-    value: string
+    value: string,
   ) => void
   options: Array<{
     value: string
@@ -2602,7 +2496,7 @@ function SelectField({
         value={value}
         onChange={(event) =>
           onChange(
-            event.target.value
+            event.target.value,
           )
         }
         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-black text-slate-800 outline-none transition focus:border-sky-400"
@@ -2621,9 +2515,19 @@ function SelectField({
                 option.label
               }
             </option>
-          )
+          ),
         )}
       </select>
     </label>
+  )
+}
+
+function LinkIconSmall() {
+  return (
+    <span className="text-sky-500">
+      <ExternalLink
+        size={14}
+      />
+    </span>
   )
 }
