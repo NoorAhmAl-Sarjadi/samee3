@@ -1476,7 +1476,6 @@ export default function MushafPage() {
   const pendingNavigationPageRef = useRef<number | null>(null)
   const pageTurnNavigationTokenRef = useRef(0)
   const [openPicker, setOpenPicker] = useState<'riwaya' | 'reciter' | 'surah' | 'juz' | null>(null)
-  const pageTurnAudioContextRef = useRef<AudioContext | null>(null)
   const audioRestoreAttemptedRef = useRef(false)
   const readingRestoreAttemptedRef = useRef(false)
   const audioOperationRef = useRef(0)
@@ -2355,22 +2354,16 @@ export default function MushafPage() {
 
 
   const mainDisplayedSvg = useMemo(() => {
-    // السوسي والبزي لا نعرض لهما الـSVG النصي القديم الذي كان يحتوي
-    // على إطار داخلي وعنوان مكرر وتوزيعًا ضيقًا للنص. نرسمهما داخل
-    // نفس مساحة طبقة الـSVG الخاصة بالمصحف، وبنفس مقاس صفحة القراءة.
-    if ((riwaya === 'sousi' || riwaya === 'bazzi') && pageData?.ayahs?.length) {
-      return buildTextMushafSvg(pageData, riwaya)
-    }
+    // كل الروايات تستخدم SVG القادم من المسار الموحد.
+    // السوسي والبزي يرجعان صورة الصفحة الحقيقية مع طبقة آيات شفافة،
+    // لذلك نعرضهما كما هما بدل إعادة بنائهما بتنسيق نصي مختلف.
     return svg
-  }, [pageData, riwaya, svg])
+  }, [svg])
 
   const leftDisplayedSvg = useMemo(() => {
     if (!isDesktop || !leftPageData) return ''
-    if ((riwaya === 'sousi' || riwaya === 'bazzi') && leftPageData.ayahs?.length) {
-      return buildTextMushafSvg(leftPageData, riwaya)
-    }
     return leftSvg
-  }, [isDesktop, leftPageData, leftSvg, riwaya])
+  }, [isDesktop, leftPageData, leftSvg])
 
 
   const resolveSelectedAyahFromElement = useCallback((element: Element, sourceData: PageData | null) => {
@@ -2533,44 +2526,6 @@ export default function MushafPage() {
     setPressedAyahNumber(null)
   }, [])
 
-  const playPageTurnSound = useCallback(() => {
-    try {
-      const win = window as Window & { webkitAudioContext?: typeof AudioContext }
-      const ContextCtor = window.AudioContext || win.webkitAudioContext
-      if (!ContextCtor) return
-
-      const context = pageTurnAudioContextRef.current || new ContextCtor()
-      pageTurnAudioContextRef.current = context
-      if (context.state === 'suspended') void context.resume().catch(() => {})
-
-      const now = context.currentTime
-      const buffer = context.createBuffer(1, Math.floor(context.sampleRate * 0.16), context.sampleRate)
-      const data = buffer.getChannelData(0)
-      for (let i = 0; i < data.length; i += 1) {
-        const envelope = Math.pow(1 - i / data.length, 2.2)
-        data[i] = (Math.random() * 2 - 1) * envelope * 0.11
-      }
-
-      const source = context.createBufferSource()
-      const filter = context.createBiquadFilter()
-      const gain = context.createGain()
-      source.buffer = buffer
-      filter.type = 'bandpass'
-      filter.frequency.setValueAtTime(1700, now)
-      filter.Q.setValueAtTime(0.65, now)
-      gain.gain.setValueAtTime(0.0001, now)
-      gain.gain.exponentialRampToValueAtTime(0.22, now + 0.018)
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15)
-      source.connect(filter)
-      filter.connect(gain)
-      gain.connect(context.destination)
-      source.start(now)
-      source.stop(now + 0.16)
-    } catch {
-      // صوت التقليب تجميلي ولا يوقف التقليب.
-    }
-  }, [])
-
   const getMemoryTurnPreview = useCallback((targetPage: number) => {
     const safePage = clampPage(targetPage)
     const key = `${riwaya}:${safePage}`
@@ -2582,10 +2537,7 @@ export default function MushafPage() {
 
     if (!data?.ayahs?.length || !rawSvg) return null
 
-    const html =
-      (riwaya === 'sousi' || riwaya === 'bazzi')
-        ? buildTextMushafSvg(data, riwaya)
-        : rawSvg
+    const html = rawSvg
 
     if (!html) return null
 
@@ -2612,10 +2564,7 @@ export default function MushafPage() {
 
       if (requestId !== turnPreviewRequestRef.current) return null
 
-      const html =
-        (riwaya === 'sousi' || riwaya === 'bazzi') && data?.ayahs?.length
-          ? buildTextMushafSvg(data, riwaya)
-          : rawSvg
+      const html = rawSvg
 
       if (!html) return null
 
@@ -2731,7 +2680,6 @@ export default function MushafPage() {
       const currentProgress = 0
       setPageTurnProgress(currentProgress)
       setPageTurnPhase('committing')
-      playPageTurnSound()
 
       window.requestAnimationFrame(() => {
         if (token !== pageTurnNavigationTokenRef.current) return
@@ -2792,7 +2740,6 @@ export default function MushafPage() {
     mainDisplayedSvg,
     pageData,
     pageNumber,
-    playPageTurnSound,
     prepareTurnPreview,
     resetPageTurnState,
     router,
@@ -2888,11 +2835,17 @@ export default function MushafPage() {
       }
 
       const basePage = pageNumber
-      const targetPage = deltaX > 0
-        ? clampPage(basePage + 1)
-        : clampPage(basePage - 1)
+      const rawTargetPage = deltaX > 0
+        ? basePage + 1
+        : basePage - 1
 
-      if (targetPage === basePage) return
+      // عند حدود المصحف لا نسمح للسحبة الأفقية أن تتحول إلى Back/Forward gesture.
+      if (rawTargetPage < 1 || rawTargetPage > 604) {
+        event.preventDefault()
+        return
+      }
+
+      const targetPage = clampPage(rawTargetPage)
 
       // مهم: لا نحرك الصفحة بصريًا أثناء سحب الإصبع.
       // السحب هنا مجرد إشارة لاختيار الاتجاه، والحركة الفعلية تبدأ مرة واحدة
@@ -2958,16 +2911,19 @@ export default function MushafPage() {
       suppressNextAyahClickRef.current = pointerWasAyah && pointerMoved
 
       const direction = deltaX > 0 ? 'next' : 'prev'
-      const targetPage = deltaX > 0
-        ? clampPage(basePage + 1)
-        : clampPage(basePage - 1)
+      const rawTargetPage = deltaX > 0
+        ? basePage + 1
+        : basePage - 1
 
-      if (targetPage === basePage) {
+      // الصفحة الأولى/الأخيرة لا تسمح بأي انتقال خارج المصحف.
+      // هذا يمنع سحبة اليمين ← اليسار في الصفحة الأولى من فتح الصفحة الرئيسية
+      // عبر إيماءة رجوع من النظام/المتصفح.
+      if (rawTargetPage < 1 || rawTargetPage > 604) {
         resetPageTurnState()
         return
       }
 
-      navigateTo(targetPage, undefined, direction)
+      navigateTo(clampPage(rawTargetPage), undefined, direction)
     },
     [navigateTo, pageNumber, resetPageTurnState],
   )
@@ -4082,13 +4038,6 @@ export default function MushafPage() {
     }
   }, [])
 
-  useEffect(() => {
-    return () => {
-      const context = pageTurnAudioContextRef.current
-      pageTurnAudioContextRef.current = null
-      if (context) void context.close().catch(() => {})
-    }
-  }, [])
 
   useEffect(() => {
     const win = window as Window & {
@@ -5769,7 +5718,7 @@ export default function MushafPage() {
       <style jsx global>{`
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
         .samee3-reader { font-family: 'Tajawal', system-ui, sans-serif; color:#1a2534; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
-        .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; background:#f5f0e4; touch-action:pan-y; overscroll-behavior:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+        .samee3-book-stage { position:relative; width:100%; height:100dvh; overflow:hidden; background:#f5f0e4; touch-action:none; overscroll-behavior:none; overscroll-behavior-x:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
         .samee3-book-stage { transform:none !important; filter:none !important; }
         .samee3-spread { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; padding:0; transform:none !important; transition:none; will-change:auto; }
         .samee3-spread.is-desktop { padding:8px 14px 14px; }
