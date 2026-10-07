@@ -1883,7 +1883,39 @@ export default function MushafPage() {
       }
     }
 
-    return pageOk && svgOk
+    // السوسي والبزي يستخدمان صورة صفحة فعلية عبر مسار SAMEE3 المحلي.
+    // نحفظ الصورة أيضًا حتى تصبح الصفحة قابلة للفتح Offline، ولا نكتفي
+    // بتخزين SVG الذي يحتوي على رابط الصورة فقط.
+    let imageOk = true
+    if (targetRiwaya === 'sousi' || targetRiwaya === 'bazzi') {
+      imageOk = false
+      const imageUrl = `/api/mushaf-riwaya-image?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
+
+      try {
+        if (cache) {
+          const cachedImage = await cache.match(imageUrl)
+          if (cachedImage && cachedImage.ok) imageOk = true
+        }
+      } catch {
+        // ننتقل إلى الشبكة.
+      }
+
+      if (!imageOk && navigator.onLine) {
+        try {
+          const response = await fetch(imageUrl, { cache: 'force-cache' })
+          if (response.ok) {
+            imageOk = true
+            if (cache) {
+              await cache.put(imageUrl, response).catch(() => {})
+            }
+          }
+        } catch {
+          // محاولة التسخين التالية ستعيد المحاولة تلقائيًا.
+        }
+      }
+    }
+
+    return pageOk && svgOk && imageOk
   }, [])
 
   // ============================================================
@@ -2354,9 +2386,8 @@ export default function MushafPage() {
 
 
   const mainDisplayedSvg = useMemo(() => {
-    // كل الروايات تستخدم SVG القادم من المسار الموحد.
-    // السوسي والبزي يرجعان صورة الصفحة الحقيقية مع طبقة آيات شفافة،
-    // لذلك نعرضهما كما هما بدل إعادة بنائهما بتنسيق نصي مختلف.
+    // لا نعيد بناء السوسي أو البزي داخل المتصفح. المسار /api/mushaf-svg
+    // يرجع SVG الصفحة الفعلية، لذلك نعرضه كما هو دون أي تخطيط نصي بديل.
     return svg
   }, [svg])
 
@@ -5782,6 +5813,12 @@ export default function MushafPage() {
         .samee3-text-line-svg .samee3-ayah-number { fill:#b78945; }
         .samee3-page-art { position:absolute; inset:94px 7px 88px; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; }
         .samee3-page-art > svg { position:relative; z-index:2; width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+        .samee3-real-riwaya-page { background:#fff; }
+        .samee3-real-riwaya-page .samee3-page-meta,
+        .samee3-real-riwaya-page .samee3-surah-frame,
+        .samee3-real-riwaya-page .samee3-page-footer { display:none; }
+        .samee3-real-riwaya-page .samee3-page-art { inset:0; }
+        .samee3-real-riwaya-page .samee3-page-art > svg { width:100% !important; height:100% !important; max-width:none; max-height:none; }
         .samee3-live-ayah-highlight {
           position:absolute;
           z-index:3;
@@ -6153,9 +6190,11 @@ function buildTextMushafSvg(data: PageData | null, riwaya: 'sousi' | 'bazzi') {
 }
 
 function MushafPageSheet({ page, data, html, side, meta, onAyahClick, onAyahPointerDown, onAyahPointerUp }: MushafPageSheetProps) {
+  const isRealRiwayaImagePage = html.includes('data-samee3-real-riwaya="true"')
+
   return (
     <section
-      className={`samee3-page-sheet ${side}`}
+      className={`samee3-page-sheet ${side} ${isRealRiwayaImagePage ? 'samee3-real-riwaya-page' : ''}`}
       data-surah-number={data?.ayahs?.[0]?.surah?.number || ''}
       onClick={(event) => onAyahClick(event, data)}
       onPointerDown={(event) => onAyahPointerDown(event, data)}
