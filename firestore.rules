@@ -3,54 +3,108 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // المستخدم لازم يكون مسجل دخول.
     function signedIn() {
       return request.auth != null;
     }
 
-    // التحقق من أن صاحب الطلب Admin.
-    // يعتمد على users/{uid}.role = "admin".
+    // حساب الإدارة يحدد فقط من خلال users/{uid}.role = "admin".
+    // لا نعتمد على الواجهة وحدها؛ هذه القاعدة هي خط الحماية الفعلي للبيانات.
     function isAdmin() {
       return signedIn()
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
+    function validMessageText() {
+      return request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 5000;
+    }
+
     match /users/{userId} {
 
-      // المستخدم يقدر يقرأ بياناته فقط، والـ Admin يقدر يقرأ كل المستخدمين.
+      // المستخدم يرى ملفه فقط، والأدمن يرى جميع المستخدمين.
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
 
-      // المستخدم ينشئ مستند حسابه بنفس UID.
-      // ممنوع إنشاء حساب يضع role = admin من الواجهة.
+      // إنشاء الملف بعد إنشاء حساب Firebase Auth.
+      // لا يمكن للمستخدم إنشاء نفسه كأدمن من الواجهة.
       allow create: if signedIn()
         && request.auth.uid == userId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.email is string
         && (
           !request.resource.data.keys().hasAny(['role'])
-          || request.resource.data.role != 'admin'
+          || request.resource.data.role == 'user'
         );
 
-      // المستخدم يعدل بياناته فقط، مع منع تغيير/إضافة role إلى admin.
-      // الـ Admin يملك صلاحية الإدارة الكاملة على مستندات المستخدمين.
+      // المستخدم يعدل بياناته دون القدرة على تغيير role.
+      // الأدمن يستطيع إدارة أي ملف مستخدم.
       allow update: if isAdmin()
         || (
           signedIn()
           && request.auth.uid == userId
-          && (
-            !request.resource.data.keys().hasAny(['role'])
-            || (
-              resource.data.keys().hasAny(['role'])
-              && request.resource.data.role == resource.data.role
-            )
-          )
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
         );
 
-      // حذف بيانات المستخدم من الواجهة غير مسموح للمستخدم العادي.
-      // الـ Admin فقط يستطيع الحذف.
+      // الحذف للإدارة فقط.
       allow delete: if isAdmin();
     }
 
-    // أي Collection أخرى تظل مغلقة افتراضيًا إلى أن نضيف لها
-    // صلاحيات محددة مع ربطها بالوظيفة المطلوبة.
+    // محادثة واحدة لكل مستخدم، ويرتبط مفتاحها مباشرة بـ UID المستخدم.
+    match /conversations/{userId} {
+
+      // المستخدم لا يرى إلا محادثته. الأدمن يرى كل المحادثات.
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+
+      // المستخدم ينشئ محادثته بنفس UID فقط.
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.userId == userId;
+
+      // المستخدم يستطيع تحديث بيانات المحادثة الخاصة به، والأدمن يستطيع إدارتها.
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.userId == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'userName',
+            'userEmail',
+            'lastMessage',
+            'lastSenderId',
+            'updatedAt',
+            'unreadForAdmin',
+            'unreadForUser'
+          ])
+        );
+
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+
+        // المستخدم والأدمن يقرآن الرسائل داخل المحادثة المسموح بها فقط.
+        allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+
+        // المستخدم يرسل لنفس محادثته فقط، والأدمن يستطيع إرسال رد للمستخدم.
+        allow create: if signedIn()
+          && validMessageText()
+          && request.resource.data.senderId == request.auth.uid
+          && (
+            request.auth.uid == userId
+            || isAdmin()
+          );
+
+        // الرسالة نفسها لا يمكن تعديل نصها بعد الإرسال؛ التعديل الوحيد هو read.
+        allow update: if signedIn()
+          && (request.auth.uid == userId || isAdmin())
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+
+        allow delete: if isAdmin();
+      }
+    }
+
+    // بقية مجموعات Firestore مغلقة حتى نضيف لها صلاحية صريحة لاحقًا.
     match /{document=**} {
       allow read, write: if false;
     }
