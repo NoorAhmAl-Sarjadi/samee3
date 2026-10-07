@@ -828,14 +828,28 @@ function buildTextMushafSvg(
       })
       .join('')
 
-    return `<text x="50%" y="${lineIndex + 1}" text-anchor="middle" direction="rtl" unicode-bidi="plaintext" class="samee3-quran-line">${content}</text>`
+    const shouldJustify = lineIndex < lineCount - 1 && lineWords.length >= 5
+    const justifyAttributes = shouldJustify
+      ? ` textLength="900" lengthAdjust="spacing"`
+      : ''
+
+    return `<text x="50%" y="${lineIndex + 1}" text-anchor="middle" direction="rtl" unicode-bidi="plaintext"${justifyAttributes} class="samee3-quran-line">${content}</text>`
   })
 
-  const viewWidth = 382.68
-  const viewHeight = 547.09
+  /*
+   * تخطيط احتياطي للمصحف النصي:
+   * - مساحة صفحة أكبر حتى لا يبدو الخط صغيرًا على الهاتف.
+   * - هوامش داخلية ضيقة.
+   * - يترك عدد السطور الذي تأتي به بيانات الرواية نفسها، وعادةً قريب من
+   *   15 سطرًا في الصفحة المطبوعة.
+   * - السطور الطويلة تُمدد أفقيًا إلى نفس نقطة البداية والنهاية لمحاكاة
+   *   الضبط الكلي في صفحات المصحف.
+   */
+  const viewWidth = 1000
+  const viewHeight = 1414
   const lineCount = Math.max(lineRanges.length, 1)
-  const textTop = lineCount <= 10 ? 86 : 78
-  const textBottom = lineCount <= 10 ? 495 : 508
+  const textTop = lineCount <= 10 ? 180 : 128
+  const textBottom = lineCount <= 10 ? 1234 : 1290
   const lineHeight =
     lineCount === 1 ? 0 : (textBottom - textTop) / (lineCount - 1)
 
@@ -876,21 +890,24 @@ function buildTextMushafSvg(
   <style>
     ${fontStyle}
     .samee3-quran-line {
-      font-family: '${escapeXml(fontFamily)}', serif;
-      font-size: 18.6px;
+      font-family: '${escapeXml(fontFamily)}', 'Amiri Quran', serif;
+      font-size: 48px;
       font-weight: 400;
       fill: #171717;
       letter-spacing: 0;
       word-spacing: 0;
+      direction: rtl;
+      unicode-bidi: plaintext;
       dominant-baseline: alphabetic;
+      text-rendering: geometricPrecision;
     }
     .samee3-ayah {
       cursor: pointer;
       pointer-events: all;
     }
     .samee3-ayah-marker {
-      font-family: '${escapeXml(fontFamily)}', serif;
-      font-size: 0.62em;
+      font-family: '${escapeXml(fontFamily)}', 'Amiri Quran', serif;
+      font-size: 0.56em;
       fill: #9a753e;
     }
   </style>
