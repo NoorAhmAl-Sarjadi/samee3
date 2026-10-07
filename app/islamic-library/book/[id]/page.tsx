@@ -49,46 +49,62 @@ interface LearningVideo {
   order?: number
 }
 
+interface ReaderBook {
+  id: string
+  title: string
+  author: string
+  category: string
+  level: string
+  description: string
+
+  readingUrl?: string | null
+  readingLabel?: string | null
+
+  sharhUrl?: string | null
+  sharhTitle?: string | null
+  sharhAuthor?: string | null
+  sharhLabel?: string | null
+
+  downloadUrl?: string | null
+  downloadLabel?: string | null
+
+  videos?: LearningVideo[]
+
+  publication?: {
+    publishYear?: string | number | null
+    edition?: string | null
+    publisher?: string | null
+    parts?: number | null
+  }
+}
+
 interface ReaderPayload {
-  source: 'quranpedia' | 'external' | 'firestore'
+  source:
+    | 'quranpedia'
+    | 'external'
+    | 'firestore'
+
   quranpediaBookId?: number
 
-  book: {
-    id: string
-    title: string
-    author: string
-    category: string
-    level: string
-    description: string
-
-    readingUrl?: string | null
-    sharhUrl?: string | null
-    sharhTitle?: string | null
-    sharhAuthor?: string | null
-
-    downloadUrl?: string | null
-
-    videos?: LearningVideo[]
-
-    publication?: {
-      publishYear?: string | number | null
-      edition?: string | null
-      publisher?: string | null
-      parts?: number | null
-    }
-  }
+  book: ReaderBook
 
   contents?: ReaderSection[]
+
   message?: string
 }
 
 function getYouTubeId(url: string) {
   try {
     const parsed = new URL(url.trim())
-    const host = parsed.hostname.replace(/^www\./, '').toLowerCase()
+    const host = parsed.hostname
+      .replace(/^www\./, '')
+      .toLowerCase()
 
     if (host === 'youtu.be') {
-      const id = parsed.pathname.split('/').filter(Boolean)[0]
+      const id = parsed.pathname
+        .split('/')
+        .filter(Boolean)[0]
+
       return id || null
     }
 
@@ -97,15 +113,17 @@ function getYouTubeId(url: string) {
       host === 'm.youtube.com' ||
       host === 'youtube-nocookie.com'
     ) {
-      const queryId = parsed.searchParams.get('v')
+      const queryId =
+        parsed.searchParams.get('v')
 
       if (queryId) {
         return queryId
       }
 
-      const match = parsed.pathname.match(
-        /\/(?:embed|shorts|live)\/([^/?#]+)/i,
-      )
+      const match =
+        parsed.pathname.match(
+          /\/(?:embed|shorts|live)\/([^/?#]+)/i,
+        )
 
       return match?.[1] || null
     }
@@ -119,13 +137,18 @@ function getYouTubeId(url: string) {
 function getVimeoId(url: string) {
   try {
     const parsed = new URL(url.trim())
-    const host = parsed.hostname.replace(/^www\./, '').toLowerCase()
+    const host = parsed.hostname
+      .replace(/^www\./, '')
+      .toLowerCase()
 
     if (!host.includes('vimeo.com')) {
       return null
     }
 
-    const match = parsed.pathname.match(/\/(?:video\/)?(\d+)/)
+    const match =
+      parsed.pathname.match(
+        /\/(?:video\/)?(\d+)/,
+      )
 
     return match?.[1] || null
   } catch {
@@ -134,13 +157,15 @@ function getVimeoId(url: string) {
 }
 
 function getVideoEmbedUrl(url: string) {
-  const youtubeId = getYouTubeId(url)
+  const youtubeId =
+    getYouTubeId(url)
 
   if (youtubeId) {
     return `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1`
   }
 
-  const vimeoId = getVimeoId(url)
+  const vimeoId =
+    getVimeoId(url)
 
   if (vimeoId) {
     return `https://player.vimeo.com/video/${vimeoId}`
@@ -150,35 +175,369 @@ function getVideoEmbedUrl(url: string) {
 }
 
 function isDirectVideoFile(url: string) {
-  return /\.(mp4|webm|ogg)(?:$|[?#])/i.test(url.trim())
+  return /\.(mp4|webm|ogg)(?:$|[?#])/i.test(
+    url.trim(),
+  )
+}
+
+function normalizeVideo(
+  value: unknown,
+  index: number,
+): LearningVideo | null {
+  if (
+    !value ||
+    typeof value !== 'object'
+  ) {
+    return null
+  }
+
+  const item =
+    value as Record<
+      string,
+      unknown
+    >
+
+  const id =
+    typeof item.id === 'string' &&
+    item.id.trim()
+      ? item.id.trim()
+      : `video-${index + 1}`
+
+  const title =
+    typeof item.title === 'string'
+      ? item.title.trim()
+      : ''
+
+  const url =
+    typeof item.url === 'string'
+      ? item.url.trim()
+      : ''
+
+  if (!title || !url) {
+    return null
+  }
+
+  const rawOrder =
+    Number(item.order)
+
+  return {
+    id,
+    title,
+    url,
+    order:
+      Number.isFinite(
+        rawOrder,
+      )
+        ? rawOrder
+        : index + 1,
+  }
+}
+
+function normalizeVideos(
+  value: unknown,
+): LearningVideo[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const videos =
+    value
+      .map((item, index) =>
+        normalizeVideo(
+          item,
+          index,
+        ),
+      )
+      .filter(
+        (
+          item,
+        ): item is LearningVideo =>
+          item !== null,
+      )
+
+  videos.sort(
+    (a, b) =>
+      Number(a.order || 0) -
+      Number(b.order || 0),
+  )
+
+  return videos
+}
+
+function normalizeReaderBook(
+  value: unknown,
+): ReaderBook | null {
+  if (
+    !value ||
+    typeof value !== 'object'
+  ) {
+    return null
+  }
+
+  const raw =
+    value as Record<
+      string,
+      unknown
+    >
+
+  const id =
+    typeof raw.id === 'string'
+      ? raw.id.trim()
+      : ''
+
+  const title =
+    typeof raw.title === 'string'
+      ? raw.title.trim()
+      : ''
+
+  if (!id || !title) {
+    return null
+  }
+
+  const publication =
+    raw.publication &&
+    typeof raw.publication ===
+      'object'
+      ? (raw.publication as Record<
+          string,
+          unknown
+        >)
+      : null
+
+  return {
+    id,
+    title,
+
+    author:
+      typeof raw.author === 'string'
+        ? raw.author.trim()
+        : 'غير محدد',
+
+    category:
+      typeof raw.category === 'string'
+        ? raw.category.trim()
+        : '',
+
+    level:
+      typeof raw.level === 'string'
+        ? raw.level.trim()
+        : 'مبتدئ',
+
+    description:
+      typeof raw.description ===
+        'string'
+        ? raw.description.trim()
+        : '',
+
+    readingUrl:
+      typeof raw.readingUrl ===
+        'string'
+        ? raw.readingUrl.trim() ||
+          null
+        : null,
+
+    readingLabel:
+      typeof raw.readingLabel ===
+        'string'
+        ? raw.readingLabel.trim() ||
+          null
+        : null,
+
+    sharhUrl:
+      typeof raw.sharhUrl === 'string'
+        ? raw.sharhUrl.trim() ||
+          null
+        : null,
+
+    sharhTitle:
+      typeof raw.sharhTitle ===
+        'string'
+        ? raw.sharhTitle.trim() ||
+          null
+        : null,
+
+    sharhAuthor:
+      typeof raw.sharhAuthor ===
+        'string'
+        ? raw.sharhAuthor.trim() ||
+          null
+        : null,
+
+    sharhLabel:
+      typeof raw.sharhLabel ===
+        'string'
+        ? raw.sharhLabel.trim() ||
+          null
+        : null,
+
+    downloadUrl:
+      typeof raw.downloadUrl ===
+        'string'
+        ? raw.downloadUrl.trim() ||
+          null
+        : null,
+
+    downloadLabel:
+      typeof raw.downloadLabel ===
+        'string'
+        ? raw.downloadLabel.trim() ||
+          null
+        : null,
+
+    videos:
+      normalizeVideos(
+        raw.videos,
+      ),
+
+    publication: publication
+      ? {
+          publishYear:
+            typeof publication.publishYear ===
+              'string' ||
+            typeof publication.publishYear ===
+              'number'
+              ? publication.publishYear
+              : null,
+
+          edition:
+            typeof publication.edition ===
+            'string'
+              ? publication.edition
+              : null,
+
+          publisher:
+            typeof publication.publisher ===
+            'string'
+              ? publication.publisher
+              : null,
+
+          parts:
+            typeof publication.parts ===
+            'number'
+              ? publication.parts
+              : null,
+        }
+      : undefined,
+  }
+}
+
+function normalizeReaderContents(
+  value: unknown,
+): ReaderSection[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item) => {
+      if (
+        !item ||
+        typeof item !== 'object'
+      ) {
+        return null
+      }
+
+      const raw =
+        item as Record<
+          string,
+          unknown
+        >
+
+      const text =
+        typeof raw.text ===
+        'string'
+          ? raw.text.trim()
+          : ''
+
+      if (!text) {
+        return null
+      }
+
+      const pageNumber =
+        Number(raw.page)
+
+      const partNumber =
+        Number(raw.part)
+
+      return {
+        text,
+
+        page:
+          Number.isFinite(
+            pageNumber,
+          ) &&
+          pageNumber > 0
+            ? pageNumber
+            : undefined,
+
+        part:
+          Number.isFinite(
+            partNumber,
+          ) &&
+          partNumber > 0
+            ? partNumber
+            : undefined,
+
+        section:
+          typeof raw.section ===
+          'string'
+            ? raw.section.trim() ||
+              undefined
+            : undefined,
+      }
+    })
+    .filter(
+      (
+        item,
+      ): item is ReaderSection =>
+        item !== null,
+    )
 }
 
 export default function IslamicBookReaderPage() {
-  const params = useParams<{ id: string }>()
+  const params =
+    useParams<{
+      id: string
+    }>()
 
-  const rawId = params?.id || ''
-  const bookId = decodeURIComponent(rawId)
+  const rawId =
+    params?.id || ''
 
-  const book = useMemo(
-    () =>
-      SUNNI_LIBRARY_BOOKS.find(
-        (item) => item.id === bookId,
-      ) || null,
-    [bookId],
-  )
+  let bookId = ''
 
-  const category = useMemo(
-    () =>
-      book
-        ? SUNNI_LIBRARY_CATEGORIES.find(
-            (item) => item.id === book.category,
-          )
-        : null,
-    [book],
-  )
+  try {
+    bookId =
+      decodeURIComponent(
+        rawId,
+      ).trim()
+  } catch {
+    bookId =
+      rawId.trim()
+  }
+
+  const staticBook =
+    useMemo(
+      () =>
+        SUNNI_LIBRARY_BOOKS.find(
+          (item) =>
+            item.id ===
+            bookId,
+        ) || null,
+      [bookId],
+    )
+
+  const [
+    remoteBook,
+    setRemoteBook,
+  ] =
+    useState<ReaderBook | null>(
+      null,
+    )
 
   const [payload, setPayload] =
-    useState<ReaderPayload | null>(null)
+    useState<ReaderPayload | null>(
+      null,
+    )
 
   const [loading, setLoading] =
     useState(true)
@@ -198,8 +557,10 @@ export default function IslamicBookReaderPage() {
   const [query, setQuery] =
     useState('')
 
-  const [activeSection, setActiveSection] =
-    useState(0)
+  const [
+    activeSection,
+    setActiveSection,
+  ] = useState(0)
 
   const [notes, setNotes] =
     useState('')
@@ -207,51 +568,186 @@ export default function IslamicBookReaderPage() {
   const [copied, setCopied] =
     useState(false)
 
-  const [selectedVideoId, setSelectedVideoId] =
-    useState('')
+  const [
+    selectedVideoId,
+    setSelectedVideoId,
+  ] = useState('')
 
-  const [showVideoList, setShowVideoList] =
-    useState(true)
+  const [
+    showVideoList,
+    setShowVideoList,
+  ] = useState(true)
+
+  /*
+   * النسخة النهائية للكتاب:
+   * - كتاب Firestore يأخذ الأولوية.
+   * - الكتاب الثابت يبقى fallback.
+   *
+   * هذا يسمح بفتح كتاب أضافه الأدمن حتى لو
+   * لم يكن موجودًا في sunniLibrary.ts.
+   */
+  const book =
+    remoteBook ||
+    staticBook
+
+  const category =
+    useMemo(
+      () =>
+        book
+          ? SUNNI_LIBRARY_CATEGORIES.find(
+              (item) =>
+                item.id ===
+                book.category,
+            ) || null
+          : null,
+      [book],
+    )
 
   useEffect(() => {
-    if (!book) return
+    if (!bookId) {
+      setLoading(false)
+      setLoadError(
+        'الكتاب غير موجود.',
+      )
+      return
+    }
 
     let cancelled = false
-
-    const currentBook = book
 
     async function load() {
       try {
         setLoading(true)
         setLoadError('')
 
-        const response = await fetch(
-          `/api/islamic-library/book/${encodeURIComponent(
-            currentBook.id,
-          )}`,
-          {
-            cache: 'no-store',
-          },
-        )
+        /*
+         * مهم:
+         * يتم الطلب باستخدام bookId مباشرة،
+         * وليس اعتمادًا على وجود الكتاب داخل
+         * SUNNI_LIBRARY_BOOKS.
+         */
+        const response =
+          await fetch(
+            `/api/islamic-library/book/${encodeURIComponent(
+              bookId,
+            )}`,
+            {
+              cache: 'no-store',
+            },
+          )
 
-        const data = await response.json()
+        let data: unknown = null
 
-        if (!response.ok || !data?.success) {
-          throw new Error('LOAD_FAILED')
+        try {
+          data =
+            await response.json()
+        } catch {
+          data = null
         }
 
+        if (
+          !response.ok ||
+          !data ||
+          typeof data !==
+            'object' ||
+          !(data as Record<string, unknown>)
+            .success
+        ) {
+          throw new Error(
+            'LOAD_FAILED',
+          )
+        }
+
+        const rawPayload =
+          data as Record<
+            string,
+            unknown
+          >
+
+        const normalizedBook =
+          normalizeReaderBook(
+            rawPayload.book,
+          )
+
+        if (!normalizedBook) {
+          throw new Error(
+            'INVALID_BOOK',
+          )
+        }
+
+        const normalizedContents =
+          normalizeReaderContents(
+            rawPayload.contents,
+          )
+
+        const source =
+          rawPayload.source ===
+            'quranpedia' ||
+          rawPayload.source ===
+            'external' ||
+          rawPayload.source ===
+            'firestore'
+            ? rawPayload.source
+            : 'external'
+
+        const rawQuranpediaId =
+          Number(
+            rawPayload.quranpediaBookId,
+          )
+
+        const normalizedPayload: ReaderPayload =
+          {
+            source,
+
+            quranpediaBookId:
+              Number.isFinite(
+                rawQuranpediaId,
+              )
+                ? rawQuranpediaId
+                : undefined,
+
+            book:
+              normalizedBook,
+
+            contents:
+              normalizedContents,
+
+            message:
+              typeof rawPayload.message ===
+              'string'
+                ? rawPayload.message
+                : undefined,
+          }
+
         if (!cancelled) {
-          setPayload(data as ReaderPayload)
+          setRemoteBook(
+            normalizedBook,
+          )
+
+          setPayload(
+            normalizedPayload,
+          )
 
           const videos =
-            Array.isArray(data?.book?.videos)
-              ? data.book.videos
-              : []
+            normalizedBook.videos ||
+            []
 
           if (videos.length > 0) {
             setSelectedVideoId(
-              String(videos[0]?.id || ''),
+              (current) => {
+                const exists =
+                  videos.some(
+                    (item) =>
+                      item.id ===
+                      current,
+                  )
+
+                return exists
+                  ? current
+                  : videos[0].id
+              },
             )
+          } else {
+            setSelectedVideoId('')
           }
         }
       } catch (error) {
@@ -261,8 +757,19 @@ export default function IslamicBookReaderPage() {
         )
 
         if (!cancelled) {
+          /*
+           * إذا كان الكتاب الثابت معروفًا محليًا،
+           * نعرضه مع رسالة بسيطة عند فشل المصدر.
+           *
+           * أما الكتاب الإداري المخصص فلا يوجد له
+           * fallback سوى بيانات API.
+           */
+          if (!staticBook) {
+            setRemoteBook(null)
+          }
+
           setLoadError(
-            'تعذر تحميل محتوى الكتاب حاليًا. يمكنك فتح المصدر الأصلي مباشرة.',
+            'تعذر تحميل محتوى الكتاب حاليًا. يمكنك إعادة المحاولة أو فتح المصدر الأصلي مباشرة.',
           )
         }
       } finally {
@@ -275,24 +782,28 @@ export default function IslamicBookReaderPage() {
     void load()
 
     try {
-      const bookmarks = JSON.parse(
-        localStorage.getItem(
-          BOOKMARKS_KEY,
-        ) || '[]',
-      )
+      const bookmarks =
+        JSON.parse(
+          localStorage.getItem(
+            BOOKMARKS_KEY,
+          ) || '[]',
+        )
 
       setSaved(
-        Array.isArray(bookmarks) &&
+        Array.isArray(
+          bookmarks,
+        ) &&
           bookmarks.includes(
-            currentBook.id,
+            bookId,
           ),
       )
 
-      const state = JSON.parse(
-        localStorage.getItem(
-          `${READING_KEY_PREFIX}${currentBook.id}`,
-        ) || '{}',
-      )
+      const state =
+        JSON.parse(
+          localStorage.getItem(
+            `${READING_KEY_PREFIX}${bookId}`,
+          ) || '{}',
+        )
 
       if (
         typeof state.fontScale ===
@@ -322,7 +833,9 @@ export default function IslamicBookReaderPage() {
         typeof state.notes ===
         'string'
       ) {
-        setNotes(state.notes)
+        setNotes(
+          state.notes,
+        )
       }
 
       if (
@@ -361,14 +874,19 @@ export default function IslamicBookReaderPage() {
     return () => {
       cancelled = true
     }
-  }, [book])
+  }, [
+    bookId,
+    staticBook,
+  ])
 
   useEffect(() => {
-    if (!book) return
+    if (!bookId) {
+      return
+    }
 
     try {
       localStorage.setItem(
-        `${READING_KEY_PREFIX}${book.id}`,
+        `${READING_KEY_PREFIX}${bookId}`,
         JSON.stringify({
           fontScale,
           darkMode,
@@ -376,14 +894,15 @@ export default function IslamicBookReaderPage() {
           activeSection,
           selectedVideoId,
           showVideoList,
-          updatedAt: Date.now(),
+          updatedAt:
+            Date.now(),
         }),
       )
     } catch {
       // تجاهل أخطاء التخزين المحلي
     }
   }, [
-    book,
+    bookId,
     fontScale,
     darkMode,
     notes,
@@ -393,32 +912,19 @@ export default function IslamicBookReaderPage() {
   ])
 
   const contents =
-    payload?.contents || []
+    useMemo(
+      () =>
+        normalizeReaderContents(
+          payload?.contents,
+        ),
+      [payload],
+    )
 
   const videos =
     useMemo(() => {
-      const source =
-        Array.isArray(payload?.book?.videos)
-          ? payload.book.videos
-          : []
-
-      return [...source]
-        .filter(
-          (item) =>
-            item &&
-            typeof item.id ===
-              'string' &&
-            typeof item.title ===
-              'string' &&
-            typeof item.url ===
-              'string' &&
-            item.url.trim(),
-        )
-        .sort(
-          (a, b) =>
-            Number(a.order || 0) -
-            Number(b.order || 0),
-        )
+      return normalizeVideos(
+        payload?.book?.videos,
+      )
     }, [payload])
 
   const selectedVideo =
@@ -435,10 +941,35 @@ export default function IslamicBookReaderPage() {
       ],
     )
 
+  useEffect(() => {
+    if (!videos.length) {
+      setSelectedVideoId('')
+      return
+    }
+
+    const exists =
+      videos.some(
+        (item) =>
+          item.id ===
+          selectedVideoId,
+      )
+
+    if (!exists) {
+      setSelectedVideoId(
+        videos[0].id,
+      )
+    }
+  }, [
+    videos,
+    selectedVideoId,
+  ])
+
   const filteredContents =
     useMemo(() => {
       const normalized =
-        query.trim().toLowerCase()
+        query
+          .trim()
+          .toLowerCase()
 
       if (!normalized) {
         return contents
@@ -452,10 +983,15 @@ export default function IslamicBookReaderPage() {
             String(
               item.page || '',
             ),
+            String(
+              item.part || '',
+            ),
           ]
             .join(' ')
             .toLowerCase()
-            .includes(normalized),
+            .includes(
+              normalized,
+            ),
       )
     }, [contents, query])
 
@@ -466,7 +1002,8 @@ export default function IslamicBookReaderPage() {
         0,
       ),
       Math.max(
-        filteredContents.length - 1,
+        filteredContents.length -
+          1,
         0,
       ),
     )
@@ -494,7 +1031,8 @@ export default function IslamicBookReaderPage() {
             JSON.stringify(
               current.filter(
                 (id) =>
-                  id !== book.id,
+                  id !==
+                  book.id,
               ),
             ),
           )
@@ -536,7 +1074,8 @@ export default function IslamicBookReaderPage() {
         setCopied(true)
 
         window.setTimeout(
-          () => setCopied(false),
+          () =>
+            setCopied(false),
           1600,
         )
       } catch {
@@ -545,12 +1084,50 @@ export default function IslamicBookReaderPage() {
     }
 
   const downloadUrl =
+    book?.downloadUrl ||
     payload?.book?.downloadUrl ||
     null
 
+  const readingUrl =
+    book?.readingUrl ||
+    payload?.book?.readingUrl ||
+    null
+
+  const readingLabel =
+    book?.readingLabel ||
+    payload?.book?.readingLabel ||
+    'فتح المصدر'
+
+  const downloadLabel =
+    book?.downloadLabel ||
+    payload?.book?.downloadLabel ||
+    'تحميل الكتاب'
+
+  const sharhUrl =
+    book?.sharhUrl ||
+    payload?.book?.sharhUrl ||
+    null
+
+  const sharhTitle =
+    book?.sharhTitle ||
+    payload?.book?.sharhTitle ||
+    null
+
+  const sharhAuthor =
+    book?.sharhAuthor ||
+    payload?.book?.sharhAuthor ||
+    null
+
+  const sharhLabel =
+    book?.sharhLabel ||
+    payload?.book?.sharhLabel ||
+    'فتح الشرح'
+
   const openNextVideo =
     () => {
-      if (!selectedVideo) return
+      if (!selectedVideo) {
+        return
+      }
 
       const index =
         videos.findIndex(
@@ -574,7 +1151,9 @@ export default function IslamicBookReaderPage() {
 
   const openPreviousVideo =
     () => {
-      if (!selectedVideo) return
+      if (!selectedVideo) {
+        return
+      }
 
       const index =
         videos.findIndex(
@@ -591,6 +1170,68 @@ export default function IslamicBookReaderPage() {
         )
       }
     }
+
+  if (
+    loading &&
+    !book
+  ) {
+    return (
+      <main
+        dir="rtl"
+        className="
+          min-h-screen
+          bg-[#FBF8F0]
+          flex
+          items-center
+          justify-center
+          px-4
+        "
+      >
+        <section
+          className="
+            w-full
+            max-w-xl
+            rounded-[32px]
+            bg-white
+            border
+            border-mushaf-border/20
+            shadow-xl
+            p-8
+            text-center
+          "
+        >
+          <div
+            className="
+              mx-auto
+              w-14
+              h-14
+              rounded-2xl
+              bg-mushaf-paper
+              text-mushaf-teal
+              flex
+              items-center
+              justify-center
+            "
+          >
+            <BookOpen size={28} />
+          </div>
+
+          <h1 className="mt-5 text-xl sm:text-2xl font-black">
+            جارٍ تجهيز الكتاب
+          </h1>
+
+          <p className="mt-2 text-sm leading-7 text-gray-500">
+            يتم تحميل بيانات الكتاب ودروسه من المكتبة الشرعية...
+          </p>
+
+          <div className="mt-5 flex items-center justify-center gap-2 text-xs font-black text-mushaf-teal">
+            <span className="w-2 h-2 rounded-full bg-mushaf-teal animate-pulse" />
+            جاري التحميل
+          </div>
+        </section>
+      </main>
+    )
+  }
 
   if (!book) {
     return (
@@ -626,6 +1267,10 @@ export default function IslamicBookReaderPage() {
           <h1 className="mt-5 text-2xl font-black">
             الكتاب غير موجود
           </h1>
+
+          <p className="mt-2 text-sm leading-7 text-gray-500">
+            لم يتم العثور على الكتاب في المكتبة الحالية.
+          </p>
 
           <Link
             href="/islamic-library"
@@ -684,6 +1329,21 @@ export default function IslamicBookReaderPage() {
           selectedVideo.url,
         )
       : false
+
+  const contentSource =
+    payload?.source ||
+    (staticBook
+      ? 'external'
+      : 'firestore')
+
+  const hasReaderContents =
+    filteredContents.length >
+      0
+
+  const contentFallbackText =
+    book.description ||
+    payload?.message ||
+    'لا يوجد محتوى نصي إضافي متاح حاليًا.'
 
   return (
     <main
@@ -754,6 +1414,7 @@ export default function IslamicBookReaderPage() {
                   text-xl
                   sm:text-2xl
                   font-black
+                  leading-8
                   ${mainText}
                 `}
               >
@@ -842,7 +1503,8 @@ export default function IslamicBookReaderPage() {
               type="button"
               onClick={() =>
                 setDarkMode(
-                  (value) => !value,
+                  (value) =>
+                    !value,
                 )
               }
               className={`
@@ -872,7 +1534,9 @@ export default function IslamicBookReaderPage() {
 
             <button
               type="button"
-              onClick={toggleBookmark}
+              onClick={
+                toggleBookmark
+              }
               className={`
                 inline-flex
                 items-center
@@ -946,7 +1610,7 @@ export default function IslamicBookReaderPage() {
                   : [
                       {
                         text:
-                          book.description,
+                          contentFallbackText,
                         section:
                           'نبذة عن الكتاب',
                       },
@@ -962,7 +1626,7 @@ export default function IslamicBookReaderPage() {
 
                     return (
                       <button
-                        key={`${item.page || 'x'}-${index}`}
+                        key={`${item.page || 'x'}-${item.part || 'y'}-${index}`}
                         type="button"
                         onClick={() => {
                           setActiveSection(
@@ -1059,7 +1723,10 @@ export default function IslamicBookReaderPage() {
                   setQuery(
                     event.target.value,
                   )
-                  setActiveSection(0)
+
+                  setActiveSection(
+                    0,
+                  )
                 }}
                 placeholder="ابحث عن كلمة أو عبارة..."
                 className={`
@@ -1093,6 +1760,152 @@ export default function IslamicBookReaderPage() {
                 موضع متاح في نتيجة البحث.
               </p>
             </section>
+
+            <section
+              className={`
+                rounded-[28px]
+                border
+                shadow-sm
+                p-5
+                ${card}
+              `}
+            >
+              <div
+                className={`
+                  flex
+                  items-center
+                  gap-2
+                  font-black
+                  text-sm
+                  ${
+                    darkMode
+                      ? 'text-mushaf-gold'
+                      : 'text-mushaf-teal'
+                  }
+                `}
+              >
+                <GraduationCap
+                  size={18}
+                />
+                روابط الكتاب
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {readingUrl && (
+                  <a
+                    href={readingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="
+                      flex
+                      items-center
+                      justify-between
+                      gap-3
+                      rounded-2xl
+                      border
+                      border-mushaf-teal/15
+                      bg-mushaf-paper
+                      px-3
+                      py-3
+                      text-xs
+                      font-black
+                      text-mushaf-teal
+                      hover:border-mushaf-teal/30
+                    "
+                  >
+                    <span className="truncate">
+                      {readingLabel}
+                    </span>
+
+                    <ExternalLink
+                      size={15}
+                      className="shrink-0"
+                    />
+                  </a>
+                )}
+
+                {downloadUrl && (
+                  <a
+                    href={downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    download
+                    className="
+                      flex
+                      items-center
+                      justify-between
+                      gap-3
+                      rounded-2xl
+                      border
+                      border-mushaf-gold/20
+                      bg-mushaf-gold/5
+                      px-3
+                      py-3
+                      text-xs
+                      font-black
+                      text-mushaf-gold
+                      hover:bg-mushaf-gold/10
+                    "
+                  >
+                    <span className="truncate">
+                      {downloadLabel}
+                    </span>
+
+                    <Download
+                      size={15}
+                      className="shrink-0"
+                    />
+                  </a>
+                )}
+
+                {sharhUrl && (
+                  <a
+                    href={sharhUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="
+                      flex
+                      items-center
+                      justify-between
+                      gap-3
+                      rounded-2xl
+                      border
+                      border-mushaf-teal/15
+                      bg-white
+                      px-3
+                      py-3
+                      text-xs
+                      font-black
+                      text-mushaf-teal
+                      hover:bg-mushaf-teal/5
+                    "
+                  >
+                    <span className="truncate">
+                      {sharhLabel}
+                    </span>
+
+                    <GraduationCap
+                      size={15}
+                      className="shrink-0"
+                    />
+                  </a>
+                )}
+
+                {!readingUrl &&
+                  !downloadUrl &&
+                  !sharhUrl && (
+                    <p
+                      className={`
+                        text-xs
+                        leading-6
+                        ${muted}
+                      `}
+                    >
+                      لم تتم إضافة روابط إضافية لهذا الكتاب حاليًا.
+                    </p>
+                  )}
+              </div>
+            </section>
           </aside>
 
           <article
@@ -1121,14 +1934,22 @@ export default function IslamicBookReaderPage() {
                     'مادة شرعية'}
                 </span>
 
-                {payload?.source ===
+                {contentSource ===
                   'quranpedia' && (
                   <span className="rounded-full bg-mushaf-teal/10 text-mushaf-teal px-3 py-1.5 text-[11px] font-black">
                     قراءة نصية داخل التطبيق
                   </span>
                 )}
 
-                {videos.length > 0 && (
+                {contentSource ===
+                  'firestore' && (
+                  <span className="rounded-full bg-emerald-50 text-emerald-700 px-3 py-1.5 text-[11px] font-black">
+                    كتاب من المكتبة الشرعية
+                  </span>
+                )}
+
+                {videos.length >
+                  0 && (
                   <span className="rounded-full bg-purple-50 text-purple-700 px-3 py-1.5 text-[11px] font-black">
                     {videos.length.toLocaleString(
                       'ar-EG',
@@ -1173,13 +1994,12 @@ export default function IslamicBookReaderPage() {
                 {book.description}
               </p>
 
-              {downloadUrl && (
-                <div className="mt-6 flex flex-wrap gap-3">
+              <div className="mt-6 flex flex-wrap gap-3">
+                {readingUrl && (
                   <a
-                    href={downloadUrl}
+                    href={readingUrl}
                     target="_blank"
                     rel="noreferrer"
-                    download
                     className="
                       inline-flex
                       items-center
@@ -1197,11 +2017,71 @@ export default function IslamicBookReaderPage() {
                       hover:-translate-y-0.5
                     "
                   >
-                    <Download size={18} />
-                    تحميل الكتاب
+                    <ExternalLink
+                      size={18}
+                    />
+                    {readingLabel}
                   </a>
-                </div>
-              )}
+                )}
+
+                {downloadUrl && (
+                  <a
+                    href={downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    download
+                    className="
+                      inline-flex
+                      items-center
+                      justify-center
+                      gap-2
+                      rounded-2xl
+                      bg-mushaf-gold
+                      text-white
+                      px-5
+                      py-3.5
+                      text-sm
+                      font-black
+                      shadow-sm
+                      transition
+                      hover:-translate-y-0.5
+                    "
+                  >
+                    <Download
+                      size={18}
+                    />
+                    {downloadLabel}
+                  </a>
+                )}
+
+                {sharhUrl && (
+                  <a
+                    href={sharhUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="
+                      inline-flex
+                      items-center
+                      justify-center
+                      gap-2
+                      rounded-2xl
+                      border
+                      border-mushaf-teal/20
+                      bg-white
+                      text-mushaf-teal
+                      px-5
+                      py-3.5
+                      text-sm
+                      font-black
+                    "
+                  >
+                    <GraduationCap
+                      size={18}
+                    />
+                    {sharhLabel}
+                  </a>
+                )}
+              </div>
 
               {payload?.book.publication && (
                 <div
@@ -1262,7 +2142,8 @@ export default function IslamicBookReaderPage() {
               )}
             </div>
 
-            {videos.length > 0 && (
+            {videos.length >
+              0 && (
               <section className="border-b border-current/10 bg-black/[0.015] p-5 sm:p-7">
                 <div className="flex flex-col gap-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1293,8 +2174,7 @@ export default function IslamicBookReaderPage() {
                           ${muted}
                         `}
                       >
-                        اختر أي درس وسيعمل الفيديو
-                        داخل المنصة مباشرة.
+                        اختر أي درس وسيعمل الفيديو داخل المنصة مباشرة.
                       </p>
                     </div>
 
@@ -1302,7 +2182,8 @@ export default function IslamicBookReaderPage() {
                       type="button"
                       onClick={() =>
                         setShowVideoList(
-                          (value) => !value,
+                          (value) =>
+                            !value,
                         )
                       }
                       className={`
@@ -1351,15 +2232,7 @@ export default function IslamicBookReaderPage() {
                             }
                             className="h-full w-full"
                             loading="lazy"
-                            allow="
-                              accelerometer;
-                              autoplay;
-                              clipboard-write;
-                              encrypted-media;
-                              gyroscope;
-                              picture-in-picture;
-                              web-share
-                            "
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                             allowFullScreen
                           />
                         ) : selectedVideoIsDirect ? (
@@ -1385,8 +2258,7 @@ export default function IslamicBookReaderPage() {
                               />
 
                               <p className="text-sm font-bold">
-                                لا يمكن تضمين هذا
-                                الرابط داخل المنصة.
+                                لا يمكن تضمين هذا الرابط داخل المنصة.
                               </p>
 
                               <a
@@ -1398,7 +2270,9 @@ export default function IslamicBookReaderPage() {
                                 className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-black text-gray-900"
                               >
                                 فتح الفيديو
-                                <ExternalLink size={14} />
+                                <ExternalLink
+                                  size={14}
+                                />
                               </a>
                             </div>
                           </div>
@@ -1410,7 +2284,9 @@ export default function IslamicBookReaderPage() {
                   {selectedVideo && (
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
-                        <p className={`text-xs font-black ${muted}`}>
+                        <p
+                          className={`text-xs font-black ${muted}`}
+                        >
                           الدرس الحالي
                         </p>
 
@@ -1456,7 +2332,9 @@ export default function IslamicBookReaderPage() {
                             disabled:opacity-35
                           "
                         >
-                          <ArrowRight size={15} />
+                          <ArrowRight
+                            size={15}
+                          />
                           السابق
                         </button>
 
@@ -1471,7 +2349,8 @@ export default function IslamicBookReaderPage() {
                                 item.id ===
                                 selectedVideo.id,
                             ) >=
-                            videos.length - 1
+                            videos.length -
+                              1
                           }
                           className="
                             flex
@@ -1488,7 +2367,9 @@ export default function IslamicBookReaderPage() {
                           "
                         >
                           التالي
-                          <ArrowLeft size={15} />
+                          <ArrowLeft
+                            size={15}
+                          />
                         </button>
                       </div>
                     </div>
@@ -1625,7 +2506,8 @@ export default function IslamicBookReaderPage() {
               >
                 جارٍ تجهيز الكتاب للقراءة...
               </div>
-            ) : loadError ? (
+            ) : loadError &&
+              !staticBook ? (
               <div className="p-8 text-center">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-500">
                   <X size={24} />
@@ -1642,33 +2524,27 @@ export default function IslamicBookReaderPage() {
                   {loadError}
                 </p>
 
-                {book.readingUrl && (
-                  <a
-                    href={book.readingUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="
-                      mt-5
-                      inline-flex
-                      items-center
-                      gap-2
-                      rounded-2xl
-                      bg-mushaf-teal
-                      text-white
-                      px-5
-                      py-3
-                      text-xs
-                      font-black
-                    "
-                  >
-                    فتح المصدر الأصلي
-                    <ExternalLink size={15} />
-                  </a>
-                )}
+                <Link
+                  href="/islamic-library"
+                  className="
+                    mt-5
+                    inline-flex
+                    items-center
+                    gap-2
+                    rounded-2xl
+                    bg-mushaf-teal
+                    text-white
+                    px-5
+                    py-3
+                    text-xs
+                    font-black
+                  "
+                >
+                  العودة للمكتبة
+                  <ArrowLeft size={15} />
+                </Link>
               </div>
-            ) : payload?.source ===
-                'quranpedia' &&
-              contents.length ? (
+            ) : hasReaderContents ? (
               <div className="p-6 sm:p-10">
                 <div className="mx-auto max-w-4xl">
                   <div className="mb-6 flex items-center justify-between gap-3">
@@ -1687,12 +2563,16 @@ export default function IslamicBookReaderPage() {
                           ? `صفحة ${currentItem.page.toLocaleString(
                               'ar-EG',
                             )}`
-                          : `الموضع ${(
-                              safeActiveSection +
-                              1
-                            ).toLocaleString(
-                              'ar-EG',
-                            )}`}
+                          : currentItem?.part
+                            ? `الجزء ${currentItem.part.toLocaleString(
+                                'ar-EG',
+                              )}`
+                            : `الموضع ${(
+                                safeActiveSection +
+                                1
+                              ).toLocaleString(
+                                'ar-EG',
+                              )}`}
                       </p>
                     </div>
 
@@ -1719,9 +2599,13 @@ export default function IslamicBookReaderPage() {
                       `}
                     >
                       {copied ? (
-                        <CheckCheck size={15} />
+                        <CheckCheck
+                          size={15}
+                        />
                       ) : (
-                        <Copy size={15} />
+                        <Copy
+                          size={15}
+                        />
                       )}
 
                       {copied
@@ -1780,7 +2664,7 @@ export default function IslamicBookReaderPage() {
                       }}
                     >
                       {currentItem?.text ||
-                        book.description}
+                        contentFallbackText}
                     </p>
                   </div>
 
@@ -1831,14 +2715,20 @@ export default function IslamicBookReaderPage() {
                       {Math.min(
                         safeActiveSection +
                           1,
-                        filteredContents.length,
+                        Math.max(
+                          filteredContents.length,
+                          1,
+                        ),
                       ).toLocaleString(
                         'ar-EG',
                       )}
 
                       {' / '}
 
-                      {filteredContents.length.toLocaleString(
+                      {Math.max(
+                        filteredContents.length,
+                        1,
+                      ).toLocaleString(
                         'ar-EG',
                       )}
                     </span>
@@ -1859,9 +2749,11 @@ export default function IslamicBookReaderPage() {
                         )
                       }
                       disabled={
+                        filteredContents.length ===
+                          0 ||
                         safeActiveSection >=
-                        filteredContents.length -
-                          1
+                          filteredContents.length -
+                            1
                       }
                       className="
                         inline-flex
@@ -1898,7 +2790,11 @@ export default function IslamicBookReaderPage() {
                 >
                   <div className="flex items-center gap-2 text-mushaf-teal font-black text-sm">
                     <BookOpen size={19} />
-                    المصدر النصي غير متاح حاليًا
+
+                    {contentSource ===
+                    'firestore'
+                      ? 'بيانات الكتاب متاحة'
+                      : 'المصدر النصي غير متاح حاليًا'}
                   </div>
 
                   <p
@@ -1909,10 +2805,10 @@ export default function IslamicBookReaderPage() {
                       ${muted}
                     `}
                   >
-                    الكتاب موجود في مكتبة مصحف
-                    سميع، لكن مصدره الحالي لا
-                    يوفر محتوى نصيًا موحدًا يمكن
-                    دمجه داخل القارئ.
+                    {contentSource ===
+                    'firestore'
+                      ? 'تم تحميل بيانات الكتاب من المكتبة الشرعية. يمكنك استخدام روابط القراءة والتحميل والدروس المرتبطة به.'
+                      : 'الكتاب موجود في مكتبة مصحف سميع، لكن مصدره الحالي لا يوفر محتوى نصيًا موحدًا يمكن دمجه داخل القارئ.'}
                   </p>
 
                   {payload?.message && (
@@ -1928,9 +2824,9 @@ export default function IslamicBookReaderPage() {
                     </p>
                   )}
 
-                  {book.readingUrl && (
+                  {readingUrl && (
                     <a
-                      href={book.readingUrl}
+                      href={readingUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="
@@ -1947,8 +2843,10 @@ export default function IslamicBookReaderPage() {
                         font-black
                       "
                     >
-                      فتح الكتاب
-                      <ExternalLink size={15} />
+                      {readingLabel}
+                      <ExternalLink
+                        size={15}
+                      />
                     </a>
                   )}
                 </div>
@@ -1981,7 +2879,9 @@ export default function IslamicBookReaderPage() {
                     }
                   `}
                 >
-                  <GraduationCap size={18} />
+                  <GraduationCap
+                    size={18}
+                  />
                   الشرح
                 </div>
 
@@ -1993,17 +2893,17 @@ export default function IslamicBookReaderPage() {
                     ${mainText}
                   `}
                 >
-                  {book.sharhTitle ||
+                  {sharhTitle ||
                     'لم يتم تسجيل شرح مستقل لهذا الكتاب بعد.'}
 
-                  {book.sharhAuthor
-                    ? ` — ${book.sharhAuthor}`
+                  {sharhAuthor
+                    ? ` — ${sharhAuthor}`
                     : ''}
                 </p>
 
-                {book.sharhUrl && (
+                {sharhUrl && (
                   <a
-                    href={book.sharhUrl}
+                    href={sharhUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="
@@ -2021,8 +2921,10 @@ export default function IslamicBookReaderPage() {
                       font-black
                     "
                   >
-                    فتح الشرح
-                    <ExternalLink size={15} />
+                    {sharhLabel}
+                    <ExternalLink
+                      size={15}
+                    />
                   </a>
                 )}
               </div>
