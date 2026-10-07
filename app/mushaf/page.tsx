@@ -5772,13 +5772,13 @@ export default function MushafPage() {
         .samee3-page-sheet.left { order:1; }
         .samee3-page-sheet.right { order:2; }
         .samee3-page-sheet.single { order:1; }
-        .samee3-page-meta { position:absolute; inset:0 0 auto; z-index:8; height:48px; display:flex; align-items:center; justify-content:space-between; padding:7px 13px 0; color:#91571d; font-family:'Tajawal',sans-serif; pointer-events:none; }
-        .samee3-page-meta .meta-side { display:flex; align-items:center; gap:7px; font-weight:900; font-size:13px; }
-        .samee3-page-meta .meta-badge { display:inline-flex; min-width:28px; height:28px; padding:0 8px; align-items:center; justify-content:center; border-radius:9px; border:1px solid rgba(184,137,71,.35); background:rgba(255,250,237,.88); }
-        .samee3-surah-frame { position:absolute; left:8%; right:8%; top:47px; height:45px; z-index:8; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+        .samee3-page-meta { position:absolute; inset:0 0 auto; z-index:80; height:48px; display:flex; align-items:center; justify-content:space-between; padding:6px 13px 0; color:#7f5a2b; font-family:'Tajawal',sans-serif; pointer-events:none; background:linear-gradient(180deg,rgba(255,251,241,.96) 0%,rgba(255,251,241,.78) 68%,rgba(255,251,241,0) 100%); }
+        .samee3-page-meta .meta-side { display:flex; align-items:center; gap:7px; font-weight:900; font-size:12px; text-shadow:0 1px 0 rgba(255,255,255,.7); }
+        .samee3-page-meta .meta-badge { display:inline-flex; min-width:26px; height:26px; padding:0 7px; align-items:center; justify-content:center; border-radius:8px; border:1px solid rgba(184,137,71,.32); background:rgba(255,250,237,.92); }
+        .samee3-surah-frame { position:absolute; left:8%; right:8%; top:46px; height:41px; z-index:8; display:flex; align-items:center; justify-content:center; pointer-events:none; }
         .samee3-surah-frame::before { content:""; position:absolute; inset:0; border:1.4px solid rgba(177,126,59,.9); border-radius:8px; background:linear-gradient(180deg, rgba(255,251,240,.92), rgba(245,232,205,.70)); box-shadow:inset 0 0 0 3px rgba(255,255,255,.48); }
         .samee3-surah-frame .ornament { position:relative; z-index:2; color:#a86e2e; font-size:18px; line-height:1; }
-        .samee3-surah-frame strong { position:relative; z-index:2; min-width:180px; padding:0 18px; text-align:center; color:#392b1e; font-family:'Aref Ruqaa','Amiri',serif; font-size:22px; font-weight:700; }
+        .samee3-surah-frame strong { position:relative; z-index:2; min-width:170px; padding:0 16px; text-align:center; color:#392b1e; font-family:'Aref Ruqaa','Amiri',serif; font-size:20px; font-weight:700; }
         .samee3-page-art svg { user-select:none; }
         .samee3-page-footer {
           position:absolute;
@@ -5807,18 +5807,18 @@ export default function MushafPage() {
           box-shadow:0 2px 7px rgba(85,62,27,.08);
           backdrop-filter:blur(7px);
         }
-        .samee3-text-page { width:100%; height:100%; box-sizing:border-box; overflow:hidden; padding:24px 28px 18px; direction:rtl; background:#fffdf7; color:#171b20; font-family:'Amiri Quran','Amiri',serif; display:flex; flex-direction:column; justify-content:space-evenly; gap:0; }
-        .samee3-text-line { flex:1 1 0; min-height:0; display:flex; align-items:center; justify-content:center; direction:rtl; text-align:center; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(22px,2.05vw,36px); line-height:1.15; white-space:nowrap; letter-spacing:0; }
-        .samee3-text-line-svg { font-family:'Amiri Quran','Amiri',serif; font-size:36px; fill:#15191e; }
+        .samee3-text-page { width:100%; height:100%; box-sizing:border-box; overflow:hidden; padding:22px 26px 16px; direction:rtl; background:#fffdf7; color:#171b20; font-family:'Amiri Quran','Amiri',serif; display:flex; flex-direction:column; justify-content:space-evenly; gap:0; }
+        .samee3-text-line { flex:1 1 0; min-height:0; display:flex; align-items:center; justify-content:center; direction:rtl; text-align:center; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(20px,1.82vw,32px); line-height:1.15; white-space:nowrap; letter-spacing:0; }
+        .samee3-text-line-svg { font-family:'Amiri Quran','Amiri',serif; font-size:32px; fill:#15191e; }
         .samee3-text-line-svg .samee3-ayah-number { fill:#b78945; }
-        .samee3-page-art { position:absolute; inset:94px 7px 88px; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; background:#fffdf7; }
+        .samee3-page-art { position:absolute; inset:90px 9px 74px; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; background:#fffdf7; }
         .samee3-page-art > svg { position:relative; z-index:2; width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
         .samee3-real-riwaya-page { background:#fcfbf7; }
-        .samee3-real-riwaya-page .samee3-page-meta,
-        .samee3-real-riwaya-page .samee3-surah-frame,
-        .samee3-real-riwaya-page .samee3-page-footer { display:none; }
+        .samee3-real-riwaya-page .samee3-surah-frame { display:none; }
+        .samee3-real-riwaya-page .samee3-page-meta { display:flex; }
+        .samee3-real-riwaya-page .samee3-page-footer { display:flex; }
         .samee3-real-riwaya-page .samee3-page-art { inset:0; background:#fcfbf7; }
-        .samee3-real-riwaya-page .samee3-page-art > svg { width:100% !important; height:100% !important; max-width:none; max-height:none; flex:0 0 auto; display:block; }
+        .samee3-real-riwaya-page .samee3-page-art > svg { width:100% !important; height:100% !important; max-width:100%; max-height:100%; flex:0 0 auto; display:block; }
 
         /*
          * السوسي والبزي — نمط القراءة على الهاتف:
@@ -5829,14 +5829,14 @@ export default function MushafPage() {
         @media (max-width:767px) and (orientation:portrait) {
           .samee3-real-riwaya-page .samee3-page-art { inset:0; overflow:hidden; }
           .samee3-real-riwaya-page .samee3-page-art > svg {
-            width:auto !important;
+            width:100% !important;
             height:100% !important;
-            min-width:100%;
-            min-height:100%;
-            max-width:none;
-            max-height:none;
+            min-width:0;
+            min-height:0;
+            max-width:100%;
+            max-height:100%;
             flex:0 0 auto;
-            transform:scale(1.018);
+            transform:none;
             transform-origin:center center;
           }
         }
@@ -6050,12 +6050,12 @@ export default function MushafPage() {
         }
 
         @media (max-width:767px) {
-          .samee3-page-meta { height:44px; padding:5px 10px 0; }
-          .samee3-page-meta .meta-side { font-size:12px; }
+          .samee3-page-meta { height:46px; padding:5px 10px 0; }
+          .samee3-page-meta .meta-side { font-size:11px; }
           .samee3-page-meta .meta-badge { height:26px; min-width:26px; }
-          .samee3-surah-frame { top:43px; left:5.5%; right:5.5%; height:41px; }
-          .samee3-surah-frame strong { min-width:140px; font-size:20px; }
-          .samee3-page-art { inset:84px 2px 78px; }
+          .samee3-surah-frame { top:42px; left:6%; right:6%; height:39px; }
+          .samee3-surah-frame strong { min-width:135px; font-size:18px; }
+          .samee3-page-art { inset:82px 3px 72px; }
           .samee3-top-controls { width:calc(100% - 20px); }
           .samee3-audio-toolbar { grid-template-columns:1fr 1fr; }
           .samee3-bottom-shell {
@@ -6067,8 +6067,8 @@ export default function MushafPage() {
           .samee3-search-results-sheet { width:calc(100vw - 16px); max-height:calc(100dvh - 125px); border-radius:22px; }
           .samee3-search-results-list { max-height:calc(100dvh - 190px); padding:8px; }
           .samee3-search-result p { font-size:18px; line-height:1.85; }
-          .samee3-text-line { font-size:clamp(18px,5vw,27px); }
-          .samee3-text-line-svg { font-size:33px; }
+          .samee3-text-line { font-size:clamp(18px,4.6vw,25px); }
+          .samee3-text-line-svg { font-size:30px; }
           .samee3-page-footer { left:12px; bottom:calc(max(2px,env(safe-area-inset-bottom)) + 7px); }
           .samee3-ayah-actions-grid { grid-template-columns:repeat(2,1fr); }
           .samee3-tafsir-books { grid-template-columns:1fr; max-height:31dvh; }
