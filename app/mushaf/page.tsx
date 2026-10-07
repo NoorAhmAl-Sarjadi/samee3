@@ -5811,14 +5811,35 @@ export default function MushafPage() {
         .samee3-text-line { flex:1 1 0; min-height:0; display:flex; align-items:center; justify-content:center; direction:rtl; text-align:center; font-family:'Amiri Quran','Amiri',serif; font-size:clamp(22px,2.05vw,36px); line-height:1.15; white-space:nowrap; letter-spacing:0; }
         .samee3-text-line-svg { font-family:'Amiri Quran','Amiri',serif; font-size:36px; fill:#15191e; }
         .samee3-text-line-svg .samee3-ayah-number { fill:#b78945; }
-        .samee3-page-art { position:absolute; inset:94px 7px 88px; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; }
+        .samee3-page-art { position:absolute; inset:94px 7px 88px; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; background:#fffdf7; }
         .samee3-page-art > svg { position:relative; z-index:2; width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
-        .samee3-real-riwaya-page { background:#fff; }
+        .samee3-real-riwaya-page { background:#fcfbf7; }
         .samee3-real-riwaya-page .samee3-page-meta,
         .samee3-real-riwaya-page .samee3-surah-frame,
         .samee3-real-riwaya-page .samee3-page-footer { display:none; }
-        .samee3-real-riwaya-page .samee3-page-art { inset:0; }
-        .samee3-real-riwaya-page .samee3-page-art > svg { width:100% !important; height:100% !important; max-width:none; max-height:none; }
+        .samee3-real-riwaya-page .samee3-page-art { inset:0; background:#fcfbf7; }
+        .samee3-real-riwaya-page .samee3-page-art > svg { width:100% !important; height:100% !important; max-width:none; max-height:none; flex:0 0 auto; display:block; }
+
+        /*
+         * السوسي والبزي — نمط القراءة على الهاتف:
+         * الصفحة لا تُعرض داخل إطار يترك فراغًا أبيض أعلى وأسفل.
+         * نملأ الارتفاع بالكامل ونقص فقط الهوامش الجانبية الزائدة،
+         * مع الحفاظ على نسبة أبعاد صفحة المصحف وعدم تشويه الحروف.
+         */
+        @media (max-width:767px) and (orientation:portrait) {
+          .samee3-real-riwaya-page .samee3-page-art { inset:0; overflow:hidden; }
+          .samee3-real-riwaya-page .samee3-page-art > svg {
+            width:auto !important;
+            height:100% !important;
+            min-width:100%;
+            min-height:100%;
+            max-width:none;
+            max-height:none;
+            flex:0 0 auto;
+            transform:scale(1.018);
+            transform-origin:center center;
+          }
+        }
         .samee3-live-ayah-highlight {
           position:absolute;
           z-index:3;
