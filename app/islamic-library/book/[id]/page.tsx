@@ -35,6 +35,8 @@ import {
 const BOOKMARKS_KEY = 'samee3_islamic_bookmarks_v1'
 const READING_KEY_PREFIX = 'samee3_islamic_reader_v2:'
 
+type ReaderSource = 'quranpedia' | 'external' | 'firestore'
+
 interface ReaderSection {
   text: string
   page?: number
@@ -46,7 +48,16 @@ interface LearningVideo {
   id: string
   title: string
   url: string
-  order?: number
+  order: number
+  embedUrl?: string | null
+  provider: 'youtube' | 'vimeo' | 'file' | 'external'
+}
+
+interface PublicationInfo {
+  publishYear?: string | number | null
+  edition?: string | null
+  publisher?: string | null
+  parts?: number | null
 }
 
 interface ReaderBook {
@@ -60,386 +71,481 @@ interface ReaderBook {
   readingUrl?: string | null
   readingLabel?: string | null
 
-  sharhUrl?: string | null
-  sharhTitle?: string | null
-  sharhAuthor?: string | null
-  sharhLabel?: string | null
-
   downloadUrl?: string | null
   downloadLabel?: string | null
 
-  videos?: LearningVideo[]
+  sharhTitle?: string | null
+  sharhAuthor?: string | null
+  sharhUrl?: string | null
+  sharhLabel?: string | null
 
-  publication?: {
-    publishYear?: string | number | null
-    edition?: string | null
-    publisher?: string | null
-    parts?: number | null
-  }
+  videos: LearningVideo[]
+
+  publication?: PublicationInfo | null
+
+  quranpediaBookId?: number | null
 }
 
 interface ReaderPayload {
-  source:
-    | 'quranpedia'
-    | 'external'
-    | 'firestore'
-
-  quranpediaBookId?: number
-
+  success?: boolean
+  source: ReaderSource
+  quranpediaBookId?: number | null
   book: ReaderBook
-
   contents?: ReaderSection[]
+  message?: string | null
+}
 
-  message?: string
+interface ReaderStorageState {
+  fontScale?: number
+  darkMode?: boolean
+  notes?: string
+  activeSection?: number
+  selectedVideoId?: string | null
+}
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function asString(
+  value: unknown,
+  fallback = ''
+): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+function asNullableString(
+  value: unknown
+): string | null {
+  return typeof value === 'string' && value.trim()
+    ? value
+    : null
+}
+
+function asNumber(
+  value: unknown
+): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  return null
 }
 
 function getYouTubeId(url: string) {
   try {
-    const parsed = new URL(url.trim())
-
-    const host = parsed.hostname
-      .replace(/^www\./, '')
-      .toLowerCase()
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase()
 
     if (host === 'youtu.be') {
-      const id = parsed.pathname
-        .split('/')
-        .filter(Boolean)[0]
-
-      return id || null
+      const id = parsed.pathname.split('/').filter(Boolean)[0]
+      return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null
     }
 
     if (
       host === 'youtube.com' ||
-      host === 'm.youtube.com' ||
-      host === 'youtube-nocookie.com'
+      host.endsWith('.youtube.com') ||
+      host === 'youtube-nocookie.com' ||
+      host.endsWith('.youtube-nocookie.com')
     ) {
-      const queryId =
-        parsed.searchParams.get('v')
+      const queryId = parsed.searchParams.get('v')
 
-      if (queryId) {
+      if (
+        queryId &&
+        /^[A-Za-z0-9_-]{11}$/.test(queryId)
+      ) {
         return queryId
       }
 
-      const match =
-        parsed.pathname.match(
-          /\/(?:embed|shorts|live)\/([^/?#]+)/i,
-        )
+      const match = parsed.pathname.match(
+        /\/(?:embed|shorts|live)\/([^/?#]+)/
+      )
 
-      return match?.[1] || null
+      const pathId = match?.[1] || null
+
+      return pathId && /^[A-Za-z0-9_-]{11}$/.test(pathId)
+        ? pathId
+        : null
     }
-
-    return null
   } catch {
     return null
   }
+
+  return null
 }
 
 function getVimeoId(url: string) {
   try {
-    const parsed = new URL(url.trim())
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase()
 
-    const host = parsed.hostname
-      .replace(/^www\./, '')
-      .toLowerCase()
-
-    if (!host.includes('vimeo.com')) {
-      return null
-    }
-
-    const match =
-      parsed.pathname.match(
-        /\/(?:video\/)?(\d+)/,
+    if (
+      host === 'vimeo.com' ||
+      host.endsWith('.vimeo.com')
+    ) {
+      const match = parsed.pathname.match(
+        /\/(?:video\/)?([0-9]+)/
       )
 
-    return match?.[1] || null
+      return match?.[1] || null
+    }
   } catch {
     return null
-  }
-}
-
-function getVideoEmbedUrl(url: string) {
-  const youtubeId =
-    getYouTubeId(url)
-
-  if (youtubeId) {
-    return `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1`
-  }
-
-  const vimeoId =
-    getVimeoId(url)
-
-  if (vimeoId) {
-    return `https://player.vimeo.com/video/${vimeoId}`
   }
 
   return null
 }
 
 function isDirectVideoFile(url: string) {
-  return /\.(mp4|webm|ogg)(?:$|[?#])/i.test(
-    url.trim(),
-  )
+  return /\.(mp4|webm|ogg|mov|m4v)(?:$|[?#])/i.test(url)
+}
+
+function getVideoEmbedUrl(
+  url: string
+): {
+  embedUrl: string | null
+  provider: LearningVideo['provider']
+} {
+  const trimmed = url.trim()
+
+  const youtubeId = getYouTubeId(trimmed)
+
+  if (youtubeId) {
+    return {
+      embedUrl: `https://www.youtube-nocookie.com/embed/${youtubeId}?rel=0&modestbranding=1`,
+      provider: 'youtube',
+    }
+  }
+
+  const vimeoId = getVimeoId(trimmed)
+
+  if (vimeoId) {
+    return {
+      embedUrl: `https://player.vimeo.com/video/${vimeoId}`,
+      provider: 'vimeo',
+    }
+  }
+
+  if (isDirectVideoFile(trimmed)) {
+    return {
+      embedUrl: trimmed,
+      provider: 'file',
+    }
+  }
+
+  return {
+    embedUrl: null,
+    provider: 'external',
+  }
 }
 
 function normalizeVideo(
   value: unknown,
-  index: number,
+  index: number
 ): LearningVideo | null {
-  if (
-    !value ||
-    typeof value !== 'object'
-  ) {
+  if (!isRecord(value)) {
     return null
   }
 
-  const item =
-    value as Record<
-      string,
-      unknown
-    >
+  const url = asString(
+    value.url ??
+      value.videoUrl ??
+      value.link ??
+      value.href
+  ).trim()
 
-  const id =
-    typeof item.id === 'string' &&
-    item.id.trim()
-      ? item.id.trim()
-      : `video-${index + 1}`
+  if (!url) {
+    return null
+  }
 
   const title =
-    typeof item.title === 'string'
-      ? item.title.trim()
-      : ''
+    asString(
+      value.title ??
+        value.name ??
+        value.label,
+      `الدرس ${index + 1}`
+    ).trim() || `الدرس ${index + 1}`
 
-  const url =
-    typeof item.url === 'string'
-      ? item.url.trim()
-      : ''
+  const order =
+    asNumber(value.order) ??
+    asNumber(value.position) ??
+    index + 1
 
-  if (!title || !url) {
-    return null
-  }
-
-  const rawOrder =
-    Number(item.order)
+  const parsed = getVideoEmbedUrl(url)
 
   return {
-    id,
+    id:
+      asString(value.id).trim() ||
+      `video-${index + 1}`,
     title,
     url,
-    order:
-      Number.isFinite(
-        rawOrder,
-      )
-        ? rawOrder
-        : index + 1,
+    order,
+    embedUrl: parsed.embedUrl,
+    provider: parsed.provider,
   }
 }
 
 function normalizeVideos(
-  value: unknown,
+  value: unknown
 ): LearningVideo[] {
   if (!Array.isArray(value)) {
     return []
   }
 
-  const videos: LearningVideo[] = []
+  const result: LearningVideo[] = []
 
-  value.forEach(
-    (item, index) => {
-      const video =
-        normalizeVideo(
-          item,
-          index,
-        )
+  value.forEach((item, index) => {
+    const normalized = normalizeVideo(item, index)
 
-      if (video) {
-        videos.push(video)
-      }
-    },
+    if (normalized) {
+      result.push(normalized)
+    }
+  })
+
+  result.sort((a, b) => {
+    if (a.order !== b.order) {
+      return a.order - b.order
+    }
+
+    return a.title.localeCompare(
+      b.title,
+      'ar'
+    )
+  })
+
+  return result
+}
+
+function normalizePublication(
+  value: unknown
+): PublicationInfo | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const publishYear =
+    value.publishYear ??
+    value.year ??
+    value.publicationYear ??
+    null
+
+  const edition = asNullableString(
+    value.edition ??
+      value.print ??
+      value.editionName
   )
 
-  videos.sort(
-    (a, b) =>
-      Number(a.order || 0) -
-      Number(b.order || 0),
+  const publisher = asNullableString(
+    value.publisher ??
+      value.publisherName
   )
 
-  return videos
+  const parts = asNumber(
+    value.parts ??
+      value.volumes ??
+      value.volumeCount
+  )
+
+  if (
+    publishYear === null &&
+    edition === null &&
+    publisher === null &&
+    parts === null
+  ) {
+    return null
+  }
+
+  return {
+    publishYear:
+      typeof publishYear === 'string' ||
+      typeof publishYear === 'number'
+        ? publishYear
+        : null,
+    edition,
+    publisher,
+    parts,
+  }
 }
 
 function normalizeReaderBook(
   value: unknown,
-): ReaderBook | null {
-  if (
-    !value ||
-    typeof value !== 'object'
-  ) {
-    return null
+  fallback: ReaderBook
+): ReaderBook {
+  if (!isRecord(value)) {
+    return fallback
   }
 
-  const raw =
-    value as Record<
-      string,
-      unknown
-    >
-
-  const id =
-    typeof raw.id === 'string'
-      ? raw.id.trim()
-      : ''
-
-  const title =
-    typeof raw.title === 'string'
-      ? raw.title.trim()
-      : ''
-
-  if (!id || !title) {
-    return null
-  }
-
-  let publication:
-    | ReaderBook['publication']
-    | undefined
-
-  if (
-    raw.publication &&
-    typeof raw.publication ===
-      'object'
-  ) {
-    const source =
-      raw.publication as Record<
-        string,
-        unknown
-      >
-
-    publication = {
-      publishYear:
-        typeof source.publishYear ===
-          'string' ||
-        typeof source.publishYear ===
-          'number'
-          ? source.publishYear
-          : null,
-
-      edition:
-        typeof source.edition ===
-        'string'
-          ? source.edition
-          : null,
-
-      publisher:
-        typeof source.publisher ===
-        'string'
-          ? source.publisher
-          : null,
-
-      parts:
-        typeof source.parts ===
-        'number'
-          ? source.parts
-          : null,
-    }
-  }
+  const videos = normalizeVideos(
+    value.videos ??
+      value.lessons ??
+      value.learningVideos
+  )
 
   return {
-    id,
-    title,
+    id:
+      asString(value.id).trim() ||
+      fallback.id,
+
+    title:
+      asString(value.title).trim() ||
+      fallback.title,
 
     author:
-      typeof raw.author === 'string'
-        ? raw.author.trim()
-        : 'غير محدد',
+      asString(value.author).trim() ||
+      fallback.author,
 
     category:
-      typeof raw.category ===
-      'string'
-        ? raw.category.trim()
-        : '',
+      asString(value.category).trim() ||
+      fallback.category,
 
     level:
-      typeof raw.level === 'string'
-        ? raw.level.trim()
-        : 'مبتدئ',
+      asString(value.level).trim() ||
+      fallback.level,
 
     description:
-      typeof raw.description ===
-        'string'
-        ? raw.description.trim()
-        : '',
+      asString(value.description).trim() ||
+      fallback.description,
 
     readingUrl:
-      typeof raw.readingUrl ===
-        'string'
-        ? raw.readingUrl.trim() ||
-          null
-        : null,
+      asNullableString(
+        value.readingUrl ??
+          value.readUrl ??
+          value.sourceUrl
+      ) ?? fallback.readingUrl,
 
     readingLabel:
-      typeof raw.readingLabel ===
-        'string'
-        ? raw.readingLabel.trim() ||
-          null
-        : null,
-
-    sharhUrl:
-      typeof raw.sharhUrl === 'string'
-        ? raw.sharhUrl.trim() ||
-          null
-        : null,
-
-    sharhTitle:
-      typeof raw.sharhTitle ===
-        'string'
-        ? raw.sharhTitle.trim() ||
-          null
-        : null,
-
-    sharhAuthor:
-      typeof raw.sharhAuthor ===
-        'string'
-        ? raw.sharhAuthor.trim() ||
-          null
-        : null,
-
-    sharhLabel:
-      typeof raw.sharhLabel ===
-        'string'
-        ? raw.sharhLabel.trim() ||
-          null
-        : null,
+      asNullableString(
+        value.readingLabel ??
+          value.readLabel
+      ) ?? fallback.readingLabel,
 
     downloadUrl:
-      typeof raw.downloadUrl ===
-        'string'
-        ? raw.downloadUrl.trim() ||
-          null
-        : null,
+      asNullableString(
+        value.downloadUrl ??
+          value.downloadLink ??
+          value.fileUrl
+      ) ?? fallback.downloadUrl,
 
     downloadLabel:
-      typeof raw.downloadLabel ===
-        'string'
-        ? raw.downloadLabel.trim() ||
-          null
-        : null,
+      asNullableString(
+        value.downloadLabel ??
+          value.downloadText
+      ) ?? fallback.downloadLabel,
+
+    sharhTitle:
+      asNullableString(
+        value.sharhTitle ??
+          value.explanationTitle
+      ) ?? fallback.sharhTitle,
+
+    sharhAuthor:
+      asNullableString(
+        value.sharhAuthor ??
+          value.explanationAuthor
+      ) ?? fallback.sharhAuthor,
+
+    sharhUrl:
+      asNullableString(
+        value.sharhUrl ??
+          value.explanationUrl
+      ) ?? fallback.sharhUrl,
+
+    sharhLabel:
+      asNullableString(
+        value.sharhLabel ??
+          value.explanationLabel
+      ) ?? fallback.sharhLabel,
 
     videos:
-      normalizeVideos(
-        raw.videos,
-      ),
+      videos.length
+        ? videos
+        : fallback.videos,
 
-    publication,
+    publication:
+      normalizePublication(
+        value.publication ??
+          value.metadata ??
+          value.bookInfo
+      ) ?? fallback.publication,
+
+    quranpediaBookId:
+      asNumber(
+        value.quranpediaBookId
+      ) ?? fallback.quranpediaBookId,
   }
 }
 
-/*
- * تم إصلاح هذه الدالة بالكامل.
- *
- * بدل map(...).filter(...) الذي تسبب في ظهور null
- * داخل النوع النهائي، نبني المصفوفة النهائية
- * يدويًا ونضيف العناصر الصحيحة فقط.
- */
+function normalizeStaticBook(
+  value: (typeof SUNNI_LIBRARY_BOOKS)[number]
+): ReaderBook {
+  const raw = value as typeof value & {
+    readingLabel?: string
+    downloadUrl?: string
+    downloadLabel?: string
+    sharhLabel?: string
+    videos?: unknown
+    publication?: unknown
+  }
+
+  return {
+    id: value.id,
+    title: value.title,
+    author: value.author,
+    category: value.category,
+    level: value.level,
+    description: value.description,
+
+    readingUrl: value.readingUrl ?? null,
+    readingLabel:
+      typeof raw.readingLabel === 'string'
+        ? raw.readingLabel
+        : 'قراءة الكتاب',
+
+    downloadUrl:
+      typeof raw.downloadUrl === 'string'
+        ? raw.downloadUrl
+        : null,
+
+    downloadLabel:
+      typeof raw.downloadLabel === 'string'
+        ? raw.downloadLabel
+        : 'تحميل الكتاب',
+
+    sharhTitle: value.sharhTitle ?? null,
+    sharhAuthor: value.sharhAuthor ?? null,
+    sharhUrl: value.sharhUrl ?? null,
+
+    sharhLabel:
+      typeof raw.sharhLabel === 'string'
+        ? raw.sharhLabel
+        : 'فتح الشرح',
+
+    videos: normalizeVideos(raw.videos),
+
+    publication: normalizePublication(
+      raw.publication
+    ),
+
+    quranpediaBookId:
+      value.quranpediaBookId ?? null,
+  }
+}
+
 function normalizeReaderContents(
-  value: unknown,
+  value: unknown
 ): ReaderSection[] {
   if (!Array.isArray(value)) {
     return []
@@ -447,122 +553,89 @@ function normalizeReaderContents(
 
   const result: ReaderSection[] = []
 
-  value.forEach(
-    (item) => {
-      if (
-        !item ||
-        typeof item !== 'object'
-      ) {
-        return
+  value.forEach((item) => {
+    if (typeof item === 'string') {
+      const text = item.trim()
+
+      if (text) {
+        result.push({ text })
       }
 
-      const raw =
-        item as Record<
-          string,
-          unknown
-        >
+      return
+    }
 
-      const text =
-        typeof raw.text === 'string'
-          ? raw.text.trim()
-          : ''
+    if (!isRecord(item)) {
+      return
+    }
 
-      if (!text) {
-        return
-      }
+    const text = asString(
+      item.text ??
+        item.content ??
+        item.body ??
+        item.description
+    ).trim()
 
-      const pageNumber =
-        Number(raw.page)
+    if (!text) {
+      return
+    }
 
-      const partNumber =
-        Number(raw.part)
+    const page =
+      asNumber(
+        item.page ??
+          item.pageNumber
+      ) ?? undefined
 
-      const section =
-        typeof raw.section ===
-        'string'
-          ? raw.section.trim()
-          : ''
+    const part =
+      asNumber(
+        item.part ??
+          item.juz ??
+          item.volume
+      ) ?? undefined
 
-      const normalizedItem: ReaderSection =
-        {
-          text,
+    const section =
+      asNullableString(
+        item.section ??
+          item.heading ??
+          item.title
+      ) ?? undefined
 
-          ...(Number.isFinite(
-            pageNumber,
-          ) && pageNumber > 0
-            ? {
-                page: pageNumber,
-              }
-            : {}),
-
-          ...(Number.isFinite(
-            partNumber,
-          ) && partNumber > 0
-            ? {
-                part: partNumber,
-              }
-            : {}),
-
-          ...(section
-            ? {
-                section,
-              }
-            : {}),
-        }
-
-      result.push(
-        normalizedItem,
-      )
-    },
-  )
+    result.push({
+      text,
+      page,
+      part,
+      section,
+    })
+  })
 
   return result
 }
 
 export default function IslamicBookReaderPage() {
-  const params =
-    useParams<{
-      id: string
-    }>()
+  const params = useParams<{ id: string }>()
 
-  const rawId =
-    params?.id || ''
+  const rawId = params?.id || ''
+  const bookId = safeDecode(rawId)
 
-  let bookId = ''
+  const staticBook = useMemo<ReaderBook | null>(
+    () => {
+      const found = SUNNI_LIBRARY_BOOKS.find(
+        (item) => item.id === bookId
+      )
 
-  try {
-    bookId =
-      decodeURIComponent(
-        rawId,
-      ).trim()
-  } catch {
-    bookId =
-      rawId.trim()
-  }
-
-  const staticBook =
-    useMemo(
-      () =>
-        SUNNI_LIBRARY_BOOKS.find(
-          (item) =>
-            item.id ===
-            bookId,
-        ) || null,
-      [bookId],
-    )
+      return found
+        ? normalizeStaticBook(found)
+        : null
+    },
+    [bookId]
+  )
 
   const [
     remoteBook,
     setRemoteBook,
-  ] =
-    useState<ReaderBook | null>(
-      null,
-    )
+  ] = useState<ReaderBook | null>(null)
 
   const [payload, setPayload] =
-    useState<ReaderPayload | null>(
-      null,
-    )
+    useState<ReaderPayload | null>(null)
 
   const [loading, setLoading] =
     useState(true)
@@ -582,10 +655,8 @@ export default function IslamicBookReaderPage() {
   const [query, setQuery] =
     useState('')
 
-  const [
-    activeSection,
-    setActiveSection,
-  ] = useState(0)
+  const [activeSection, setActiveSection] =
+    useState(0)
 
   const [notes, setNotes] =
     useState('')
@@ -593,191 +664,146 @@ export default function IslamicBookReaderPage() {
   const [copied, setCopied] =
     useState(false)
 
-  const [
-    selectedVideoId,
-    setSelectedVideoId,
-  ] = useState('')
+  const [selectedVideoId, setSelectedVideoId] =
+    useState<string | null>(null)
 
-  const [
-    showVideoList,
-    setShowVideoList,
-  ] = useState(true)
+  const [showVideoList, setShowVideoList] =
+    useState(true)
 
   const book =
-    remoteBook ||
-    staticBook
+    remoteBook || staticBook
 
-  const category =
-    useMemo(
-      () =>
-        book
-          ? SUNNI_LIBRARY_CATEGORIES.find(
-              (item) =>
-                item.id ===
-                book.category,
-            ) || null
-          : null,
-      [book],
-    )
+  const category = useMemo(
+    () => {
+      if (!book) {
+        return null
+      }
+
+      return (
+        SUNNI_LIBRARY_CATEGORIES.find(
+          (item) => item.id === book.category
+        ) || null
+      )
+    },
+    [book]
+  )
 
   useEffect(() => {
-    if (!bookId) {
-      setLoading(false)
-
-      setLoadError(
-        'الكتاب غير موجود.',
-      )
-
-      return
-    }
-
     let cancelled = false
 
     async function load() {
+      setLoading(true)
+      setLoadError('')
+
       try {
-        setLoading(true)
-        setLoadError('')
-
-        const response =
-          await fetch(
-            `/api/islamic-library/book/${encodeURIComponent(
-              bookId,
-            )}`,
-            {
-              cache: 'no-store',
-            },
-          )
-
-        let data: unknown = null
-
-        try {
-          data =
-            await response.json()
-        } catch {
-          data = null
+        if (!bookId) {
+          throw new Error('INVALID_BOOK_ID')
         }
+
+        const response = await fetch(
+          `/api/islamic-library/book/${encodeURIComponent(bookId)}`,
+          {
+            cache: 'no-store',
+          }
+        )
+
+        const data: unknown =
+          await response.json()
 
         if (
           !response.ok ||
-          !data ||
-          typeof data !==
-            'object' ||
-          !(data as Record<
-            string,
-            unknown
-          >).success
+          !isRecord(data) ||
+          data.success !== true
         ) {
-          throw new Error(
-            'LOAD_FAILED',
-          )
+          throw new Error('LOAD_FAILED')
         }
 
-        const rawPayload =
-          data as Record<
-            string,
-            unknown
-          >
+        const fallbackBook =
+          staticBook ||
+          ({
+            id: bookId,
+            title: 'كتاب شرعي',
+            author: 'مكتبة مصحف سميع',
+            category: 'other',
+            level: 'غير محدد',
+            description:
+              'كتاب شرعي ضمن مكتبة مصحف سميع.',
+            readingUrl: null,
+            readingLabel: 'قراءة الكتاب',
+            downloadUrl: null,
+            downloadLabel: 'تحميل الكتاب',
+            sharhTitle: null,
+            sharhAuthor: null,
+            sharhUrl: null,
+            sharhLabel: 'فتح الشرح',
+            videos: [],
+            publication: null,
+            quranpediaBookId: null,
+          } satisfies ReaderBook)
+
+        const rawBook =
+          isRecord(data.book)
+            ? data.book
+            : null
 
         const normalizedBook =
           normalizeReaderBook(
-            rawPayload.book,
-          )
-
-        if (!normalizedBook) {
-          throw new Error(
-            'INVALID_BOOK',
-          )
-        }
-
-        const normalizedContents =
-          normalizeReaderContents(
-            rawPayload.contents,
+            rawBook,
+            fallbackBook
           )
 
         const source =
-          rawPayload.source ===
-            'quranpedia' ||
-          rawPayload.source ===
-            'external' ||
-          rawPayload.source ===
-            'firestore'
-            ? rawPayload.source
+          data.source === 'quranpedia' ||
+          data.source === 'firestore' ||
+          data.source === 'external'
+            ? data.source
             : 'external'
 
-        const rawQuranpediaId =
-          Number(
-            rawPayload.quranpediaBookId,
+        const contents =
+          normalizeReaderContents(
+            data.contents
           )
 
-        const normalizedPayload: ReaderPayload =
-          {
-            source,
-
-            quranpediaBookId:
-              Number.isFinite(
-                rawQuranpediaId,
-              )
-                ? rawQuranpediaId
-                : undefined,
-
-            book:
-              normalizedBook,
-
-            contents:
-              normalizedContents,
-
-            message:
-              typeof rawPayload.message ===
-              'string'
-                ? rawPayload.message
-                : undefined,
-          }
+        const normalizedPayload: ReaderPayload = {
+          success: true,
+          source,
+          quranpediaBookId:
+            asNumber(
+              data.quranpediaBookId
+            ) ?? normalizedBook.quranpediaBookId,
+          book: normalizedBook,
+          contents,
+          message:
+            asNullableString(
+              data.message
+            ),
+        }
 
         if (!cancelled) {
-          setRemoteBook(
-            normalizedBook,
-          )
+          setRemoteBook(normalizedBook)
+          setPayload(normalizedPayload)
 
-          setPayload(
-            normalizedPayload,
-          )
-
-          const videos =
-            normalizedBook.videos ||
-            []
-
-          if (videos.length > 0) {
+          if (
+            normalizedBook.videos.length
+          ) {
             setSelectedVideoId(
-              (current) => {
-                const exists =
-                  videos.some(
-                    (item) =>
-                      item.id ===
-                      current,
-                  )
-
-                return exists
+              (current) =>
+                current &&
+                normalizedBook.videos.some(
+                  (video) =>
+                    video.id === current
+                )
                   ? current
-                  : videos[0].id
-              },
+                  : normalizedBook.videos[0].id
             )
           } else {
-            setSelectedVideoId('')
+            setSelectedVideoId(null)
           }
         }
-      } catch (error) {
-        console.error(
-          'Islamic book load error:',
-          error,
-        )
-
+      } catch {
         if (!cancelled) {
-          if (!staticBook) {
-            setRemoteBook(null)
-          }
-
           setLoadError(
-            'تعذر تحميل محتوى الكتاب حاليًا. يمكنك إعادة المحاولة أو فتح المصدر الأصلي مباشرة.',
+            'تعذر تحميل بيانات الكتاب حاليًا. يمكنك استخدام المصادر المتاحة أسفل الصفحة.'
           )
         }
       } finally {
@@ -789,103 +815,10 @@ export default function IslamicBookReaderPage() {
 
     void load()
 
-    try {
-      const bookmarks =
-        JSON.parse(
-          localStorage.getItem(
-            BOOKMARKS_KEY,
-          ) || '[]',
-        )
-
-      setSaved(
-        Array.isArray(
-          bookmarks,
-        ) &&
-          bookmarks.includes(
-            bookId,
-          ),
-      )
-
-      const state =
-        JSON.parse(
-          localStorage.getItem(
-            `${READING_KEY_PREFIX}${bookId}`,
-          ) || '{}',
-        )
-
-      if (
-        typeof state.fontScale ===
-        'number'
-      ) {
-        setFontScale(
-          Math.min(
-            1.45,
-            Math.max(
-              0.85,
-              state.fontScale,
-            ),
-          ),
-        )
-      }
-
-      if (
-        typeof state.darkMode ===
-        'boolean'
-      ) {
-        setDarkMode(
-          state.darkMode,
-        )
-      }
-
-      if (
-        typeof state.notes ===
-        'string'
-      ) {
-        setNotes(
-          state.notes,
-        )
-      }
-
-      if (
-        typeof state.activeSection ===
-        'number'
-      ) {
-        setActiveSection(
-          Math.max(
-            0,
-            state.activeSection,
-          ),
-        )
-      }
-
-      if (
-        typeof state.selectedVideoId ===
-        'string'
-      ) {
-        setSelectedVideoId(
-          state.selectedVideoId,
-        )
-      }
-
-      if (
-        typeof state.showVideoList ===
-        'boolean'
-      ) {
-        setShowVideoList(
-          state.showVideoList,
-        )
-      }
-    } catch {
-      // تجاهل أخطاء التخزين المحلي
-    }
-
     return () => {
       cancelled = true
     }
-  }, [
-    bookId,
-    staticBook,
-  ])
+  }, [bookId, staticBook])
 
   useEffect(() => {
     if (!bookId) {
@@ -893,21 +826,112 @@ export default function IslamicBookReaderPage() {
     }
 
     try {
+      const bookmarksRaw =
+        localStorage.getItem(
+          BOOKMARKS_KEY
+        )
+
+      const bookmarks: unknown =
+        bookmarksRaw
+          ? JSON.parse(bookmarksRaw)
+          : []
+
+      setSaved(
+        Array.isArray(bookmarks) &&
+          bookmarks.includes(bookId)
+      )
+
+      const stateRaw =
+        localStorage.getItem(
+          `${READING_KEY_PREFIX}${bookId}`
+        )
+
+      if (stateRaw) {
+        const state: unknown =
+          JSON.parse(stateRaw)
+
+        if (isRecord(state)) {
+          const typedState =
+            state as ReaderStorageState
+
+          if (
+            typeof typedState.fontScale ===
+            'number'
+          ) {
+            setFontScale(
+              Math.min(
+                1.45,
+                Math.max(
+                  0.85,
+                  typedState.fontScale
+                )
+              )
+            )
+          }
+
+          if (
+            typeof typedState.darkMode ===
+            'boolean'
+          ) {
+            setDarkMode(
+              typedState.darkMode
+            )
+          }
+
+          if (
+            typeof typedState.notes ===
+            'string'
+          ) {
+            setNotes(typedState.notes)
+          }
+
+          if (
+            typeof typedState.activeSection ===
+            'number' &&
+            typedState.activeSection >= 0
+          ) {
+            setActiveSection(
+              Math.floor(
+                typedState.activeSection
+              )
+            )
+          }
+
+          if (
+            typeof typedState.selectedVideoId ===
+            'string'
+          ) {
+            setSelectedVideoId(
+              typedState.selectedVideoId
+            )
+          }
+        }
+      }
+    } catch {
+      // التخزين المحلي غير متاح أو يحتوي على بيانات غير صالحة.
+    }
+  }, [bookId])
+
+  useEffect(() => {
+    if (!bookId) {
+      return
+    }
+
+    try {
+      const state: ReaderStorageState = {
+        fontScale,
+        darkMode,
+        notes,
+        activeSection,
+        selectedVideoId,
+      }
+
       localStorage.setItem(
         `${READING_KEY_PREFIX}${bookId}`,
-        JSON.stringify({
-          fontScale,
-          darkMode,
-          notes,
-          activeSection,
-          selectedVideoId,
-          showVideoList,
-          updatedAt:
-            Date.now(),
-        }),
+        JSON.stringify(state)
       )
     } catch {
-      // تجاهل أخطاء التخزين المحلي
+      // تجاهل أخطاء التخزين المحلي.
     }
   }, [
     bookId,
@@ -916,70 +940,17 @@ export default function IslamicBookReaderPage() {
     notes,
     activeSection,
     selectedVideoId,
-    showVideoList,
   ])
 
   const contents =
-    useMemo(
-      () =>
-        normalizeReaderContents(
-          payload?.contents,
-        ),
-      [payload],
-    )
+    payload?.contents || []
 
-  const videos =
-    useMemo(() => {
-      return normalizeVideos(
-        payload?.book?.videos,
-      )
-    }, [payload])
+  const filteredContents = useMemo(
+    () => {
+      const normalizedQuery =
+        query.trim().toLowerCase()
 
-  const selectedVideo =
-    useMemo(
-      () =>
-        videos.find(
-          (item) =>
-            item.id ===
-            selectedVideoId,
-        ) || null,
-      [
-        videos,
-        selectedVideoId,
-      ],
-    )
-
-  useEffect(() => {
-    if (!videos.length) {
-      setSelectedVideoId('')
-      return
-    }
-
-    const exists =
-      videos.some(
-        (item) =>
-          item.id ===
-          selectedVideoId,
-      )
-
-    if (!exists) {
-      setSelectedVideoId(
-        videos[0].id,
-      )
-    }
-  }, [
-    videos,
-    selectedVideoId,
-  ])
-
-  const filteredContents =
-    useMemo(() => {
-      const normalized =
-        query
-          .trim()
-          .toLowerCase()
-
-      if (!normalized) {
+      if (!normalizedQuery) {
         return contents
       }
 
@@ -988,313 +959,193 @@ export default function IslamicBookReaderPage() {
           [
             item.text,
             item.section || '',
-            String(
-              item.page || '',
-            ),
-            String(
-              item.part || '',
-            ),
+            item.page
+              ? String(item.page)
+              : '',
+            item.part
+              ? String(item.part)
+              : '',
           ]
             .join(' ')
             .toLowerCase()
             .includes(
-              normalized,
-            ),
+              normalizedQuery
+            )
       )
-    }, [contents, query])
+    },
+    [contents, query]
+  )
 
-  const safeActiveSection =
-    Math.min(
-      Math.max(
-        activeSection,
-        0,
-      ),
-      Math.max(
-        filteredContents.length -
-          1,
-        0,
-      ),
+  useEffect(() => {
+    if (!filteredContents.length) {
+      setActiveSection(0)
+      return
+    }
+
+    setActiveSection((current) =>
+      Math.min(
+        Math.max(current, 0),
+        filteredContents.length - 1
+      )
     )
+  }, [filteredContents.length])
 
   const currentItem =
-    filteredContents[
-      safeActiveSection
-    ]
-
-  const toggleBookmark =
-    () => {
-      if (!book) return
-
-      try {
-        const current =
-          JSON.parse(
-            localStorage.getItem(
-              BOOKMARKS_KEY,
-            ) || '[]',
-          ) as string[]
-
-        if (saved) {
-          localStorage.setItem(
-            BOOKMARKS_KEY,
-            JSON.stringify(
-              current.filter(
-                (id) =>
-                  id !==
-                  book.id,
-              ),
-            ),
+    filteredContents.length
+      ? filteredContents[
+          Math.min(
+            activeSection,
+            filteredContents.length - 1
           )
+        ]
+      : null
 
-          setSaved(false)
-        } else {
-          localStorage.setItem(
-            BOOKMARKS_KEY,
-            JSON.stringify(
-              Array.from(
-                new Set([
-                  ...current,
-                  book.id,
-                ]),
-              ),
-            ),
+  const videos =
+    book?.videos || []
+
+  const selectedVideo =
+    videos.find(
+      (video) =>
+        video.id === selectedVideoId
+    ) || videos[0] || null
+
+  const toggleBookmark = () => {
+    if (!bookId) {
+      return
+    }
+
+    try {
+      const stored =
+        localStorage.getItem(
+          BOOKMARKS_KEY
+        )
+
+      const parsed: unknown =
+        stored
+          ? JSON.parse(stored)
+          : []
+
+      const current: string[] =
+        Array.isArray(parsed)
+          ? parsed.filter(
+              (item): item is string =>
+                typeof item === 'string'
+            )
+          : []
+
+      if (saved) {
+        localStorage.setItem(
+          BOOKMARKS_KEY,
+          JSON.stringify(
+            current.filter(
+              (id) => id !== bookId
+            )
           )
-
-          setSaved(true)
-        }
-      } catch {
-        setSaved(
-          (value) => !value,
         )
-      }
-    }
 
-  const copyCurrent =
-    async () => {
-      if (!currentItem?.text) {
+        setSaved(false)
         return
       }
 
-      try {
-        await navigator.clipboard.writeText(
-          currentItem.text,
-        )
+      const next: string[] =
+        current.includes(bookId)
+          ? current
+          : [...current, bookId]
 
-        setCopied(true)
+      localStorage.setItem(
+        BOOKMARKS_KEY,
+        JSON.stringify(next)
+      )
 
-        window.setTimeout(
-          () =>
-            setCopied(false),
-          1600,
-        )
-      } catch {
-        // Clipboard may be blocked
-      }
+      setSaved(true)
+    } catch {
+      setSaved((value) => !value)
+    }
+  }
+
+  const copyCurrent = async () => {
+    if (!currentItem?.text) {
+      return
     }
 
-  const downloadUrl =
-    book?.downloadUrl ||
-    payload?.book?.downloadUrl ||
-    null
+    try {
+      await navigator.clipboard.writeText(
+        currentItem.text
+      )
 
-  const readingUrl =
-    book?.readingUrl ||
-    payload?.book?.readingUrl ||
-    null
+      setCopied(true)
 
-  const readingLabel =
-    book?.readingLabel ||
-    payload?.book?.readingLabel ||
-    'فتح المصدر'
+      window.setTimeout(
+        () => setCopied(false),
+        1600
+      )
+    } catch {
+      // صلاحيات الحافظة قد تكون محجوبة من المتصفح.
+    }
+  }
 
-  const downloadLabel =
-    book?.downloadLabel ||
-    payload?.book?.downloadLabel ||
-    'تحميل الكتاب'
-
-  const sharhUrl =
-    book?.sharhUrl ||
-    payload?.book?.sharhUrl ||
-    null
-
-  const sharhTitle =
-    book?.sharhTitle ||
-    payload?.book?.sharhTitle ||
-    null
-
-  const sharhAuthor =
-    book?.sharhAuthor ||
-    payload?.book?.sharhAuthor ||
-    null
-
-  const sharhLabel =
-    book?.sharhLabel ||
-    payload?.book?.sharhLabel ||
-    'فتح الشرح'
-
-  const openNextVideo =
-    () => {
-      if (!selectedVideo) {
-        return
-      }
-
-      const index =
-        videos.findIndex(
-          (item) =>
-            item.id ===
-            selectedVideo.id,
-        )
-
-      if (
-        index >= 0 &&
-        index <
-          videos.length - 1
-      ) {
-        setSelectedVideoId(
-          videos[
-            index + 1
-          ].id,
-        )
-      }
+  const goToSection = (
+    index: number
+  ) => {
+    if (!filteredContents.length) {
+      return
     }
 
-  const openPreviousVideo =
-    () => {
-      if (!selectedVideo) {
-        return
-      }
-
-      const index =
-        videos.findIndex(
-          (item) =>
-            item.id ===
-            selectedVideo.id,
-        )
-
-      if (index > 0) {
-        setSelectedVideoId(
-          videos[
-            index - 1
-          ].id,
-        )
-      }
-    }
-
-  if (
-    loading &&
-    !book
-  ) {
-    return (
-      <main
-        dir="rtl"
-        className="
-          min-h-screen
-          bg-[#FBF8F0]
-          flex
-          items-center
-          justify-center
-          px-4
-        "
-      >
-        <section
-          className="
-            w-full
-            max-w-xl
-            rounded-[32px]
-            bg-white
-            border
-            border-mushaf-border/20
-            shadow-xl
-            p-8
-            text-center
-          "
-        >
-          <div
-            className="
-              mx-auto
-              w-14
-              h-14
-              rounded-2xl
-              bg-mushaf-paper
-              text-mushaf-teal
-              flex
-              items-center
-              justify-center
-            "
-          >
-            <BookOpen size={28} />
-          </div>
-
-          <h1 className="mt-5 text-xl sm:text-2xl font-black">
-            جارٍ تجهيز الكتاب
-          </h1>
-
-          <p className="mt-2 text-sm leading-7 text-gray-500">
-            يتم تحميل بيانات الكتاب ودروسه من المكتبة الشرعية...
-          </p>
-
-          <div className="mt-5 flex items-center justify-center gap-2 text-xs font-black text-mushaf-teal">
-            <span className="w-2 h-2 rounded-full bg-mushaf-teal animate-pulse" />
-            جاري التحميل
-          </div>
-        </section>
-      </main>
+    const next = Math.min(
+      Math.max(index, 0),
+      filteredContents.length - 1
     )
+
+    setActiveSection(next)
+
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    })
+  }
+
+  const openVideo = (
+    videoId: string
+  ) => {
+    setSelectedVideoId(videoId)
+
+    window.setTimeout(() => {
+      const player =
+        document.getElementById(
+          'samee3-video-player'
+        )
+
+      if (player) {
+        player.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        })
+      }
+    }, 80)
   }
 
   if (!book) {
     return (
       <main
         dir="rtl"
-        className="
-          min-h-screen
-          bg-mushaf-paper
-          flex
-          items-center
-          justify-center
-          px-4
-        "
+        className="min-h-screen bg-mushaf-paper flex items-center justify-center px-4"
       >
-        <section
-          className="
-            w-full
-            max-w-xl
-            rounded-[32px]
-            bg-white
-            border
-            border-mushaf-border/20
-            shadow-xl
-            p-8
-            text-center
-          "
-        >
-          <BookOpen
-            className="mx-auto text-mushaf-teal"
-            size={34}
-          />
+        <section className="w-full max-w-xl rounded-[32px] bg-white border border-mushaf-border/20 shadow-xl p-8 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-mushaf-teal/10 text-mushaf-teal">
+            <BookOpen size={32} />
+          </div>
 
-          <h1 className="mt-5 text-2xl font-black">
+          <h1 className="mt-5 text-2xl font-black text-mushaf-dark">
             الكتاب غير موجود
           </h1>
 
-          <p className="mt-2 text-sm leading-7 text-gray-500">
-            لم يتم العثور على الكتاب في المكتبة الحالية.
+          <p className="mt-3 text-sm leading-7 text-gray-500">
+            لم يتم العثور على هذا الكتاب في مكتبة مصحف سميع.
           </p>
 
           <Link
             href="/islamic-library"
-            className="
-              mt-6
-              inline-flex
-              items-center
-              gap-2
-              rounded-2xl
-              bg-mushaf-teal
-              text-white
-              px-5
-              py-3
-              text-sm
-              font-black
-            "
+            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-mushaf-teal text-white px-5 py-3 text-sm font-black"
           >
             العودة للمكتبة
             <ArrowLeft size={17} />
@@ -1324,117 +1175,65 @@ export default function IslamicBookReaderPage() {
       ? 'text-white/60'
       : 'text-gray-500'
 
-  const selectedVideoEmbed =
-    selectedVideo
-      ? getVideoEmbedUrl(
-          selectedVideo.url,
-        )
-      : null
+  const darkInput =
+    'bg-black/20 text-white border-white/10 placeholder:text-white/30'
 
-  const selectedVideoIsDirect =
-    selectedVideo
-      ? isDirectVideoFile(
-          selectedVideo.url,
-        )
-      : false
+  const lightInput =
+    'bg-mushaf-paper text-mushaf-dark border-gray-200'
 
-  const contentSource =
-    payload?.source ||
-    (staticBook
-      ? 'external'
-      : 'firestore')
+  const readerBackground =
+    darkMode
+      ? 'bg-[#111715] border-white/10'
+      : 'bg-[#FFFDF8] border-mushaf-gold/15'
 
-  const hasReaderContents =
-    filteredContents.length > 0
+  const downloadLabel =
+    book.downloadLabel ||
+    payload?.book.downloadLabel ||
+    'تحميل الكتاب'
 
-  const contentFallbackText =
-    book.description ||
-    payload?.message ||
-    'لا يوجد محتوى نصي إضافي متاح حاليًا.'
+  const readingLabel =
+    book.readingLabel ||
+    payload?.book.readingLabel ||
+    'قراءة الكتاب'
+
+  const sharhLabel =
+    book.sharhLabel ||
+    payload?.book.sharhLabel ||
+    'فتح الشرح'
 
   return (
     <main
       dir="rtl"
-      className={`min-h-screen ${surface} pb-32`}
+      className={`min-h-screen ${surface} pb-32 transition-colors`}
     >
-      <div
-        className="
-          mx-auto
-          max-w-7xl
-          px-4
-          sm:px-6
-          lg:px-8
-          pt-5
-          sm:pt-8
-        "
-      >
-        <header
-          className="
-            flex
-            flex-col
-            gap-4
-            xl:flex-row
-            xl:items-center
-            xl:justify-between
-          "
-        >
-          <div className="flex items-center gap-3">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-5 sm:pt-8">
+        <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-center gap-3 min-w-0">
             <Link
               href="/islamic-library"
-              className={`
-                w-11
-                h-11
-                rounded-2xl
-                ${card}
-                border
-                shadow-sm
-                flex
-                items-center
-                justify-center
-                ${mainText}
-              `}
               aria-label="العودة للمكتبة"
+              className={`shrink-0 flex h-11 w-11 items-center justify-center rounded-2xl ${card} border shadow-sm ${mainText}`}
             >
               <ArrowRight size={20} />
             </Link>
 
             <div className="min-w-0">
-              <div
-                className="
-                  flex
-                  items-center
-                  gap-2
-                  text-mushaf-teal
-                  text-xs
-                  font-black
-                "
-              >
+              <div className="flex items-center gap-2 text-xs font-black text-mushaf-teal">
                 <BookOpen size={17} />
-
-                {category?.label ||
-                  'المكتبة الشرعية'}
+                <span>
+                  {category?.label ||
+                    'المكتبة الشرعية'}
+                </span>
               </div>
 
               <h1
-                className={`
-                  mt-1
-                  text-xl
-                  sm:text-2xl
-                  font-black
-                  leading-8
-                  ${mainText}
-                `}
+                className={`mt-1 truncate text-xl sm:text-2xl font-black ${mainText}`}
               >
                 {book.title}
               </h1>
 
               <p
-                className={`
-                  mt-1
-                  text-xs
-                  sm:text-sm
-                  ${muted}
-                `}
+                className={`mt-1 text-xs sm:text-sm ${muted}`}
               >
                 {book.author}
               </p>
@@ -1445,31 +1244,20 @@ export default function IslamicBookReaderPage() {
             <button
               type="button"
               onClick={() =>
-                setFontScale(
-                  (value) =>
-                    Math.max(
-                      0.85,
-                      Number(
-                        (
-                          value -
-                          0.05
-                        ).toFixed(2),
-                      ),
-                    ),
+                setFontScale((value) =>
+                  Math.max(
+                    0.85,
+                    Number(
+                      (
+                        value - 0.05
+                      ).toFixed(2)
+                    )
+                  )
                 )
               }
-              className={`
-                h-11
-                w-11
-                rounded-xl
-                ${card}
-                border
-                flex
-                items-center
-                justify-center
-                ${mainText}
-              `}
+              className={`h-11 w-11 rounded-xl ${card} border flex items-center justify-center ${mainText}`}
               title="تصغير الخط"
+              aria-label="تصغير الخط"
             >
               <Minus size={18} />
             </button>
@@ -1477,31 +1265,20 @@ export default function IslamicBookReaderPage() {
             <button
               type="button"
               onClick={() =>
-                setFontScale(
-                  (value) =>
-                    Math.min(
-                      1.45,
-                      Number(
-                        (
-                          value +
-                          0.05
-                        ).toFixed(2),
-                      ),
-                    ),
+                setFontScale((value) =>
+                  Math.min(
+                    1.45,
+                    Number(
+                      (
+                        value + 0.05
+                      ).toFixed(2)
+                    )
+                  )
                 )
               }
-              className={`
-                h-11
-                w-11
-                rounded-xl
-                ${card}
-                border
-                flex
-                items-center
-                justify-center
-                ${mainText}
-              `}
+              className={`h-11 w-11 rounded-xl ${card} border flex items-center justify-center ${mainText}`}
               title="تكبير الخط"
+              aria-label="تكبير الخط"
             >
               <Plus size={18} />
             </button>
@@ -1510,23 +1287,10 @@ export default function IslamicBookReaderPage() {
               type="button"
               onClick={() =>
                 setDarkMode(
-                  (value) =>
-                    !value,
+                  (value) => !value
                 )
               }
-              className={`
-                inline-flex
-                items-center
-                gap-2
-                h-11
-                px-4
-                rounded-xl
-                ${card}
-                border
-                text-xs
-                font-black
-                ${mainText}
-              `}
+              className={`inline-flex items-center gap-2 h-11 px-4 rounded-xl ${card} border text-xs font-black ${mainText}`}
             >
               {darkMode ? (
                 <Sun size={17} />
@@ -1541,25 +1305,12 @@ export default function IslamicBookReaderPage() {
 
             <button
               type="button"
-              onClick={
-                toggleBookmark
-              }
-              className={`
-                inline-flex
-                items-center
-                gap-2
-                h-11
-                px-4
-                rounded-xl
-                border
-                text-xs
-                font-black
-                ${
-                  saved
-                    ? 'bg-mushaf-gold text-white border-mushaf-gold'
-                    : `${card} ${mainText}`
-                }
-              `}
+              onClick={toggleBookmark}
+              className={`inline-flex items-center gap-2 h-11 px-4 rounded-xl border text-xs font-black ${
+                saved
+                  ? 'bg-mushaf-gold text-white border-mushaf-gold'
+                  : `${card} ${mainText}`
+              }`}
             >
               {saved ? (
                 <Check size={17} />
@@ -1574,355 +1325,327 @@ export default function IslamicBookReaderPage() {
           </div>
         </header>
 
-        <section
-          className="
-            mt-6
-            grid
-            grid-cols-1
-            xl:grid-cols-[300px_1fr]
-            gap-5
-          "
-        >
+        <div className="mt-6 flex flex-wrap gap-2">
+          {book.readingUrl && (
+            <a
+              href={book.readingUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-teal px-4 py-3 text-xs font-black text-white shadow-sm"
+            >
+              <BookOpen size={16} />
+              {readingLabel}
+              <ExternalLink size={14} />
+            </a>
+          )}
+
+          {book.downloadUrl && (
+            <a
+              href={book.downloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              download
+              className="inline-flex items-center gap-2 rounded-2xl border border-mushaf-gold/20 bg-mushaf-gold/10 px-4 py-3 text-xs font-black text-mushaf-gold"
+            >
+              <Download size={16} />
+              {downloadLabel}
+            </a>
+          )}
+
+          {book.sharhUrl && (
+            <a
+              href={book.sharhUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-xs font-black ${
+                darkMode
+                  ? 'border-white/10 text-white'
+                  : 'border-mushaf-teal/20 bg-white text-mushaf-teal'
+              }`}
+            >
+              <GraduationCap size={16} />
+              {sharhLabel}
+            </a>
+          )}
+        </div>
+
+        <section className="mt-6 grid grid-cols-1 xl:grid-cols-[300px_1fr] gap-5">
           <aside className="space-y-5">
             <section
-              className={`
-                rounded-[28px]
-                border
-                shadow-sm
-                p-5
-                ${card}
-              `}
+              className={`rounded-[28px] border shadow-sm p-5 ${card}`}
             >
               <div
-                className={`
-                  flex
-                  items-center
-                  gap-2
-                  font-black
-                  text-sm
-                  ${
-                    darkMode
-                      ? 'text-mushaf-gold'
-                      : 'text-mushaf-teal'
-                  }
-                `}
+                className={`flex items-center gap-2 font-black text-sm ${
+                  darkMode
+                    ? 'text-mushaf-gold'
+                    : 'text-mushaf-teal'
+                }`}
               >
                 <List size={18} />
                 فهرس القراءة
               </div>
 
-              <div className="mt-4 max-h-[50vh] overflow-y-auto space-y-2">
-                {(contents.length
-                  ? contents
-                  : [
-                      {
-                        text:
-                          contentFallbackText,
-                        section:
-                          'نبذة عن الكتاب',
-                      },
-                    ]
-                ).map(
-                  (
-                    item,
-                    index,
-                  ) => {
-                    const active =
-                      index ===
-                      safeActiveSection
+              <div className="mt-4 max-h-[52vh] overflow-y-auto space-y-2">
+                {contents.length ? (
+                  contents.map(
+                    (item, index) => {
+                      const active =
+                        index === activeSection
 
-                    return (
-                      <button
-                        key={`${item.page || 'x'}-${item.part || 'y'}-${index}`}
-                        type="button"
-                        onClick={() => {
-                          setActiveSection(
-                            index,
-                          )
-
-                          window.scrollTo(
-                            {
-                              top: 0,
-                              behavior:
-                                'smooth',
-                            },
-                          )
-                        }}
-                        className={`
-                          w-full
-                          text-right
-                          rounded-2xl
-                          px-3
-                          py-3
-                          text-xs
-                          leading-5
-                          transition
-                          border
-                          ${
+                      return (
+                        <button
+                          key={`${item.page || 'x'}-${item.part || 'x'}-${index}`}
+                          type="button"
+                          onClick={() =>
+                            goToSection(
+                              index
+                            )
+                          }
+                          className={`w-full text-right rounded-2xl px-3 py-3 text-xs leading-5 transition border ${
                             active
                               ? 'bg-mushaf-teal text-white border-mushaf-teal'
                               : darkMode
-                                ? 'bg-white/5 text-white/75 border-white/10'
-                                : 'bg-mushaf-paper text-gray-700 border-gray-100 hover:border-mushaf-teal/20'
-                          }
-                        `}
-                      >
-                        <div className="font-black">
-                          {item.section ||
-                            `موضع ${index + 1}`}
-                        </div>
-
-                        {item.page ? (
-                          <div
-                            className={`
-                              mt-1
-                              text-[10px]
-                              ${
-                                active
-                                  ? 'text-white/65'
-                                  : muted
-                              }
-                            `}
-                          >
-                            الصفحة{' '}
-                            {item.page.toLocaleString(
-                              'ar-EG',
-                            )}
+                              ? 'bg-white/5 text-white/75 border-white/10 hover:bg-white/10'
+                              : 'bg-mushaf-paper text-gray-700 border-gray-100 hover:border-mushaf-teal/20'
+                          }`}
+                        >
+                          <div className="font-black">
+                            {item.section ||
+                              `موضع ${(
+                                index + 1
+                              ).toLocaleString(
+                                'ar-EG'
+                              )}`}
                           </div>
-                        ) : null}
-                      </button>
-                    )
-                  },
+
+                          <div
+                            className={`mt-1 text-[10px] ${
+                              active
+                                ? 'text-white/65'
+                                : muted
+                            }`}
+                          >
+                            {item.page
+                              ? `الصفحة ${item.page.toLocaleString('ar-EG')}`
+                              : item.part
+                              ? `الجزء ${item.part.toLocaleString('ar-EG')}`
+                              : `الموضع ${(
+                                  index + 1
+                                ).toLocaleString(
+                                  'ar-EG'
+                                )}`}
+                          </div>
+                        </button>
+                      )
+                    }
+                  )
+                ) : (
+                  <div
+                    className={`rounded-2xl p-4 text-xs leading-6 ${muted} ${
+                      darkMode
+                        ? 'bg-white/5'
+                        : 'bg-mushaf-paper'
+                    }`}
+                  >
+                    لا يوجد فهرس نصي متاح لهذا الكتاب حاليًا.
+                  </div>
                 )}
               </div>
             </section>
 
             <section
-              className={`
-                rounded-[28px]
-                border
-                shadow-sm
-                p-5
-                ${card}
-              `}
+              className={`rounded-[28px] border shadow-sm p-5 ${card}`}
             >
               <div
-                className={`
-                  flex
-                  items-center
-                  gap-2
-                  font-black
-                  text-sm
-                  ${
-                    darkMode
-                      ? 'text-mushaf-gold'
-                      : 'text-mushaf-teal'
-                  }
-                `}
+                className={`flex items-center gap-2 font-black text-sm ${
+                  darkMode
+                    ? 'text-mushaf-gold'
+                    : 'text-mushaf-teal'
+                }`}
               >
                 <Search size={18} />
                 بحث داخل الكتاب
               </div>
 
-              <input
-                value={query}
-                onChange={(event) => {
-                  setQuery(
-                    event.target.value,
-                  )
-
-                  setActiveSection(
-                    0,
-                  )
-                }}
-                placeholder="ابحث عن كلمة أو عبارة..."
-                className={`
-                  mt-4
-                  w-full
-                  h-11
-                  rounded-xl
-                  border
-                  px-3
-                  text-sm
-                  outline-none
-                  ${
+              <div className="relative mt-4">
+                <Search
+                  size={16}
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 ${
                     darkMode
-                      ? 'bg-black/20 text-white border-white/10 placeholder:text-white/30'
-                      : 'bg-mushaf-paper text-mushaf-dark border-gray-200'
-                  }
-                `}
-              />
+                      ? 'text-white/35'
+                      : 'text-gray-400'
+                  }`}
+                />
+
+                <input
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(
+                      event.target.value
+                    )
+                    setActiveSection(0)
+                  }}
+                  placeholder="ابحث عن كلمة أو عبارة..."
+                  className={`h-11 w-full rounded-xl border pr-9 pl-3 text-sm outline-none ${
+                    darkMode
+                      ? darkInput
+                      : lightInput
+                  }`}
+                />
+
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery('')
+                      setActiveSection(0)
+                    }}
+                    className={`absolute left-2 top-1/2 -translate-y-1/2 ${
+                      darkMode
+                        ? 'text-white/50'
+                        : 'text-gray-400'
+                    }`}
+                    aria-label="مسح البحث"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
 
               <p
-                className={`
-                  mt-3
-                  text-[11px]
-                  leading-5
-                  ${muted}
-                `}
+                className={`mt-3 text-[11px] leading-5 ${muted}`}
               >
                 {filteredContents.length.toLocaleString(
-                  'ar-EG',
+                  'ar-EG'
                 )}{' '}
                 موضع متاح في نتيجة البحث.
               </p>
             </section>
 
-            <section
-              className={`
-                rounded-[28px]
-                border
-                shadow-sm
-                p-5
-                ${card}
-              `}
-            >
-              <div
-                className={`
-                  flex
-                  items-center
-                  gap-2
-                  font-black
-                  text-sm
-                  ${
+            {book.publication && (
+              <section
+                className={`rounded-[28px] border shadow-sm p-5 ${card}`}
+              >
+                <div
+                  className={`flex items-center gap-2 font-black text-sm ${
                     darkMode
                       ? 'text-mushaf-gold'
                       : 'text-mushaf-teal'
-                  }
-                `}
-              >
-                <GraduationCap
-                  size={18}
-                />
-                روابط الكتاب
-              </div>
+                  }`}
+                >
+                  <BookOpen size={18} />
+                  بيانات الكتاب
+                </div>
 
-              <div className="mt-4 space-y-2">
-                {readingUrl && (
-                  <a
-                    href={readingUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="
-                      flex
-                      items-center
-                      justify-between
-                      gap-3
-                      rounded-2xl
-                      border
-                      border-mushaf-teal/15
-                      bg-mushaf-paper
-                      px-3
-                      py-3
-                      text-xs
-                      font-black
-                      text-mushaf-teal
-                      hover:border-mushaf-teal/30
-                    "
-                  >
-                    <span className="truncate">
-                      {readingLabel}
-                    </span>
-
-                    <ExternalLink
-                      size={15}
-                      className="shrink-0"
-                    />
-                  </a>
-                )}
-
-                {downloadUrl && (
-                  <a
-                    href={downloadUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    download
-                    className="
-                      flex
-                      items-center
-                      justify-between
-                      gap-3
-                      rounded-2xl
-                      border
-                      border-mushaf-gold/20
-                      bg-mushaf-gold/5
-                      px-3
-                      py-3
-                      text-xs
-                      font-black
-                      text-mushaf-gold
-                      hover:bg-mushaf-gold/10
-                    "
-                  >
-                    <span className="truncate">
-                      {downloadLabel}
-                    </span>
-
-                    <Download
-                      size={15}
-                      className="shrink-0"
-                    />
-                  </a>
-                )}
-
-                {sharhUrl && (
-                  <a
-                    href={sharhUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="
-                      flex
-                      items-center
-                      justify-between
-                      gap-3
-                      rounded-2xl
-                      border
-                      border-mushaf-teal/15
-                      bg-white
-                      px-3
-                      py-3
-                      text-xs
-                      font-black
-                      text-mushaf-teal
-                      hover:bg-mushaf-teal/5
-                    "
-                  >
-                    <span className="truncate">
-                      {sharhLabel}
-                    </span>
-
-                    <GraduationCap
-                      size={15}
-                      className="shrink-0"
-                    />
-                  </a>
-                )}
-
-                {!readingUrl &&
-                  !downloadUrl &&
-                  !sharhUrl && (
-                    <p
-                      className={`
-                        text-xs
-                        leading-6
-                        ${muted}
-                      `}
+                <div className="mt-4 space-y-2 text-xs">
+                  {book.publication.publisher && (
+                    <div
+                      className={`rounded-2xl px-3 py-3 ${
+                        darkMode
+                          ? 'bg-white/5'
+                          : 'bg-mushaf-paper'
+                      }`}
                     >
-                      لم تتم إضافة روابط إضافية لهذا الكتاب حاليًا.
-                    </p>
+                      <span
+                        className={`block font-black ${
+                          darkMode
+                            ? 'text-mushaf-gold'
+                            : 'text-mushaf-teal'
+                        }`}
+                      >
+                        الناشر
+                      </span>
+                      <span
+                        className={`mt-1 block ${muted}`}
+                      >
+                        {book.publication.publisher}
+                      </span>
+                    </div>
                   )}
-              </div>
-            </section>
+
+                  {book.publication.publishYear && (
+                    <div
+                      className={`rounded-2xl px-3 py-3 ${
+                        darkMode
+                          ? 'bg-white/5'
+                          : 'bg-mushaf-paper'
+                      }`}
+                    >
+                      <span
+                        className={`block font-black ${
+                          darkMode
+                            ? 'text-mushaf-gold'
+                            : 'text-mushaf-teal'
+                        }`}
+                      >
+                        سنة النشر
+                      </span>
+                      <span
+                        className={`mt-1 block ${muted}`}
+                      >
+                        {book.publication.publishYear}
+                      </span>
+                    </div>
+                  )}
+
+                  {book.publication.edition && (
+                    <div
+                      className={`rounded-2xl px-3 py-3 ${
+                        darkMode
+                          ? 'bg-white/5'
+                          : 'bg-mushaf-paper'
+                      }`}
+                    >
+                      <span
+                        className={`block font-black ${
+                          darkMode
+                            ? 'text-mushaf-gold'
+                            : 'text-mushaf-teal'
+                        }`}
+                      >
+                        الطبعة
+                      </span>
+                      <span
+                        className={`mt-1 block ${muted}`}
+                      >
+                        {book.publication.edition}
+                      </span>
+                    </div>
+                  )}
+
+                  {book.publication.parts && (
+                    <div
+                      className={`rounded-2xl px-3 py-3 ${
+                        darkMode
+                          ? 'bg-white/5'
+                          : 'bg-mushaf-paper'
+                      }`}
+                    >
+                      <span
+                        className={`block font-black ${
+                          darkMode
+                            ? 'text-mushaf-gold'
+                            : 'text-mushaf-teal'
+                        }`}
+                      >
+                        عدد الأجزاء
+                      </span>
+                      <span
+                        className={`mt-1 block ${muted}`}
+                      >
+                        {book.publication.parts.toLocaleString(
+                          'ar-EG'
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
           </aside>
 
           <article
-            className={`
-              rounded-[32px]
-              border
-              shadow-sm
-              overflow-hidden
-              ${card}
-            `}
+            className={`rounded-[32px] border shadow-sm overflow-hidden ${card}`}
           >
             <div className="p-5 sm:p-7 border-b border-current/10">
               <div className="flex flex-wrap items-center gap-2">
@@ -1931,627 +1654,340 @@ export default function IslamicBookReaderPage() {
                 </span>
 
                 <span
-                  className={`
-                    text-xs
-                    font-bold
-                    ${muted}
-                  `}
+                  className={`text-xs font-bold ${muted}`}
                 >
                   {category?.short ||
                     'مادة شرعية'}
                 </span>
 
-                {contentSource ===
+                {payload?.source ===
                   'quranpedia' && (
                   <span className="rounded-full bg-mushaf-teal/10 text-mushaf-teal px-3 py-1.5 text-[11px] font-black">
                     قراءة نصية داخل التطبيق
                   </span>
                 )}
 
-                {contentSource ===
+                {payload?.source ===
                   'firestore' && (
-                  <span className="rounded-full bg-emerald-50 text-emerald-700 px-3 py-1.5 text-[11px] font-black">
-                    كتاب من المكتبة الشرعية
-                  </span>
-                )}
-
-                {videos.length >
-                  0 && (
-                  <span className="rounded-full bg-purple-50 text-purple-700 px-3 py-1.5 text-[11px] font-black">
-                    {videos.length.toLocaleString(
-                      'ar-EG',
-                    )}{' '}
-                    درس مرئي
+                  <span className="rounded-full bg-emerald-500/10 text-emerald-600 px-3 py-1.5 text-[11px] font-black">
+                    مضاف من إدارة المكتبة
                   </span>
                 )}
               </div>
 
               <h2
-                className={`
-                  mt-5
-                  text-2xl
-                  sm:text-3xl
-                  font-black
-                  leading-relaxed
-                  ${mainText}
-                `}
+                className={`mt-4 text-2xl sm:text-3xl font-black ${mainText}`}
               >
                 {book.title}
               </h2>
 
               <p
-                className={`
-                  mt-2
-                  text-sm
-                  ${muted}
-                `}
+                className={`mt-2 text-sm font-bold ${muted}`}
               >
                 تأليف: {book.author}
               </p>
 
               <p
-                className={`
-                  mt-5
-                  text-sm
-                  sm:text-base
-                  leading-8
-                  ${mainText}
-                `}
+                className={`mt-5 text-sm sm:text-base leading-8 ${mainText}`}
               >
                 {book.description}
               </p>
-
-              <div className="mt-6 flex flex-wrap gap-3">
-                {readingUrl && (
-                  <a
-                    href={readingUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="
-                      inline-flex
-                      items-center
-                      justify-center
-                      gap-2
-                      rounded-2xl
-                      bg-mushaf-teal
-                      text-white
-                      px-5
-                      py-3.5
-                      text-sm
-                      font-black
-                      shadow-sm
-                      transition
-                      hover:-translate-y-0.5
-                    "
-                  >
-                    <ExternalLink
-                      size={18}
-                    />
-                    {readingLabel}
-                  </a>
-                )}
-
-                {downloadUrl && (
-                  <a
-                    href={downloadUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    download
-                    className="
-                      inline-flex
-                      items-center
-                      justify-center
-                      gap-2
-                      rounded-2xl
-                      bg-mushaf-gold
-                      text-white
-                      px-5
-                      py-3.5
-                      text-sm
-                      font-black
-                      shadow-sm
-                      transition
-                      hover:-translate-y-0.5
-                    "
-                  >
-                    <Download
-                      size={18}
-                    />
-                    {downloadLabel}
-                  </a>
-                )}
-
-                {sharhUrl && (
-                  <a
-                    href={sharhUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="
-                      inline-flex
-                      items-center
-                      justify-center
-                      gap-2
-                      rounded-2xl
-                      border
-                      border-mushaf-teal/20
-                      bg-white
-                      text-mushaf-teal
-                      px-5
-                      py-3.5
-                      text-sm
-                      font-black
-                    "
-                  >
-                    <GraduationCap
-                      size={18}
-                    />
-                    {sharhLabel}
-                  </a>
-                )}
-              </div>
-
-              {payload?.book.publication && (
-                <div
-                  className={`
-                    mt-5
-                    grid
-                    grid-cols-2
-                    sm:grid-cols-4
-                    gap-2
-                    text-[11px]
-                    ${muted}
-                  `}
-                >
-                  <div className="rounded-xl bg-mushaf-paper px-3 py-2">
-                    <span className="block font-black text-mushaf-teal">
-                      الناشر
-                    </span>
-                    <span>
-                      {payload.book.publication
-                        .publisher ||
-                        '—'}
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl bg-mushaf-paper px-3 py-2">
-                    <span className="block font-black text-mushaf-teal">
-                      السنة
-                    </span>
-                    <span>
-                      {payload.book.publication
-                        .publishYear ||
-                        '—'}
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl bg-mushaf-paper px-3 py-2">
-                    <span className="block font-black text-mushaf-teal">
-                      الطبعة
-                    </span>
-                    <span>
-                      {payload.book.publication
-                        .edition ||
-                        '—'}
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl bg-mushaf-paper px-3 py-2">
-                    <span className="block font-black text-mushaf-teal">
-                      الأجزاء
-                    </span>
-                    <span>
-                      {payload.book.publication
-                        .parts ||
-                        '—'}
-                    </span>
-                  </div>
-                </div>
-              )}
             </div>
 
-            {videos.length >
-              0 && (
-              <section className="border-b border-current/10 bg-black/[0.015] p-5 sm:p-7">
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Video
-                          size={20}
-                          className="text-mushaf-gold"
-                        />
+            {videos.length > 0 && (
+              <section className="border-b border-current/10">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowVideoList(
+                      (value) => !value
+                    )
+                  }
+                  className={`flex w-full items-center justify-between gap-4 px-5 py-4 sm:px-7 ${
+                    darkMode
+                      ? 'hover:bg-white/5'
+                      : 'hover:bg-mushaf-paper'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-mushaf-teal/10 text-mushaf-teal">
+                      <Video size={20} />
+                    </div>
 
-                        <h2
-                          className={`
-                            text-lg
-                            sm:text-xl
-                            font-black
-                            ${mainText}
-                          `}
-                        >
-                          دروس شرح الكتاب
-                        </h2>
-                      </div>
+                    <div className="text-right">
+                      <h3
+                        className={`text-sm font-black ${mainText}`}
+                      >
+                        دروس وشروحات الكتاب
+                      </h3>
 
                       <p
-                        className={`
-                          mt-1
-                          text-xs
-                          leading-6
-                          ${muted}
-                        `}
+                        className={`mt-1 text-[11px] ${muted}`}
                       >
-                        اختر أي درس وسيعمل الفيديو داخل المنصة مباشرة.
+                        {videos.length.toLocaleString(
+                          'ar-EG'
+                        )}{' '}
+                        درس متاح
                       </p>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShowVideoList(
-                          (value) =>
-                            !value,
-                        )
-                      }
-                      className={`
-                        inline-flex
-                        items-center
-                        justify-center
-                        gap-2
-                        rounded-xl
-                        border
-                        px-4
-                        py-2.5
-                        text-xs
-                        font-black
-                        ${
-                          darkMode
-                            ? 'border-white/10 text-white'
-                            : 'border-mushaf-teal/15 text-mushaf-teal'
-                        }
-                      `}
-                    >
-                      {showVideoList
-                        ? 'إخفاء الدروس'
-                        : 'عرض الدروس'}
-
-                      <ChevronDown
-                        size={16}
-                        className={
-                          showVideoList
-                            ? 'rotate-180 transition'
-                            : 'transition'
-                        }
-                      />
-                    </button>
                   </div>
 
-                  {selectedVideo && (
-                    <div className="overflow-hidden rounded-[28px] border border-black/5 bg-black">
-                      <div className="aspect-video w-full">
-                        {selectedVideoEmbed ? (
-                          <iframe
-                            src={
-                              selectedVideoEmbed
-                            }
-                            title={
-                              selectedVideo.title
-                            }
-                            className="h-full w-full"
-                            loading="lazy"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            allowFullScreen
-                          />
-                        ) : selectedVideoIsDirect ? (
-                          <video
-                            key={
-                              selectedVideo.url
-                            }
-                            src={
-                              selectedVideo.url
-                            }
-                            controls
-                            playsInline
-                            className="h-full w-full bg-black object-contain"
-                          >
-                            متصفحك لا يدعم تشغيل الفيديو.
-                          </video>
-                        ) : (
-                          <div className="flex h-full items-center justify-center p-8 text-center text-white">
-                            <div>
-                              <Video
-                                size={35}
-                                className="mx-auto mb-4 text-white/50"
-                              />
+                  <ChevronDown
+                    size={19}
+                    className={`transition-transform ${
+                      showVideoList
+                        ? 'rotate-180'
+                        : ''
+                    } ${muted}`}
+                  />
+                </button>
 
-                              <p className="text-sm font-bold">
-                                لا يمكن تضمين هذا الرابط داخل المنصة.
-                              </p>
-
-                              <a
-                                href={
-                                  selectedVideo.url
+                {showVideoList && (
+                  <div className="px-5 pb-5 sm:px-7 sm:pb-7">
+                    {selectedVideo && (
+                      <div
+                        id="samee3-video-player"
+                        className={`overflow-hidden rounded-[26px] border ${
+                          darkMode
+                            ? 'bg-black/30 border-white/10'
+                            : 'bg-black border-black/10'
+                        }`}
+                      >
+                        {selectedVideo.provider ===
+                          'youtube' &&
+                          selectedVideo.embedUrl && (
+                            <div className="aspect-video w-full">
+                              <iframe
+                                src={
+                                  selectedVideo.embedUrl
                                 }
-                                target="_blank"
-                                rel="noreferrer"
-                                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-black text-gray-900"
-                              >
-                                فتح الفيديو
-                                <ExternalLink
-                                  size={14}
-                                />
-                              </a>
+                                title={
+                                  selectedVideo.title
+                                }
+                                className="h-full w-full border-0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allowFullScreen
+                              />
                             </div>
+                          )}
+
+                        {selectedVideo.provider ===
+                          'vimeo' &&
+                          selectedVideo.embedUrl && (
+                            <div className="aspect-video w-full">
+                              <iframe
+                                src={
+                                  selectedVideo.embedUrl
+                                }
+                                title={
+                                  selectedVideo.title
+                                }
+                                className="h-full w-full border-0"
+                                allow="autoplay; fullscreen; picture-in-picture"
+                                allowFullScreen
+                              />
+                            </div>
+                          )}
+
+                        {selectedVideo.provider ===
+                          'file' &&
+                          selectedVideo.embedUrl && (
+                            <video
+                              className="block aspect-video w-full bg-black object-contain"
+                              controls
+                              playsInline
+                              preload="metadata"
+                              src={
+                                selectedVideo.embedUrl
+                              }
+                            />
+                          )}
+
+                        {selectedVideo.provider ===
+                          'external' && (
+                          <div className="flex min-h-[280px] flex-col items-center justify-center bg-gradient-to-br from-[#102C2F] to-[#173F44] px-6 text-center text-white">
+                            <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-white/10">
+                              <Play size={28} />
+                            </div>
+
+                            <h4 className="mt-5 text-lg font-black">
+                              {selectedVideo.title}
+                            </h4>
+
+                            <p className="mt-2 max-w-lg text-xs leading-6 text-white/65">
+                              هذا الرابط لا يدعم العرض المضمّن داخل المنصة.
+                            </p>
+
+                            <a
+                              href={
+                                selectedVideo.url
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-xs font-black text-mushaf-teal"
+                            >
+                              فتح الدرس
+                              <ExternalLink
+                                size={15}
+                              />
+                            </a>
                           </div>
                         )}
+
+                        <div className="flex items-center justify-between gap-3 px-4 py-3 bg-black/80 text-white">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black">
+                              {
+                                selectedVideo.title
+                              }
+                            </p>
+
+                            <p className="mt-1 text-[10px] text-white/50">
+                              الدرس{' '}
+                              {selectedVideo.order.toLocaleString(
+                                'ar-EG'
+                              )}
+                            </p>
+                          </div>
+
+                          <a
+                            href={
+                              selectedVideo.url
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-[11px] font-black text-white hover:bg-white/15"
+                          >
+                            المصدر
+                            <ExternalLink
+                              size={14}
+                            />
+                          </a>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {selectedVideo && (
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p
-                          className={`text-xs font-black ${muted}`}
-                        >
-                          الدرس الحالي
-                        </p>
-
-                        <h3
-                          className={`
-                            mt-1
-                            text-base
-                            sm:text-lg
-                            font-black
-                            ${mainText}
-                          `}
-                        >
-                          {selectedVideo.title}
-                        </h3>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={
-                            openPreviousVideo
-                          }
-                          disabled={
-                            videos.findIndex(
-                              (item) =>
-                                item.id ===
-                                selectedVideo.id,
-                            ) <= 0
-                          }
-                          className="
-                            flex
-                            items-center
-                            gap-2
-                            rounded-xl
-                            border
-                            border-gray-200
-                            bg-white
-                            px-3
-                            py-2.5
-                            text-xs
-                            font-black
-                            text-gray-600
-                            disabled:opacity-35
-                          "
-                        >
-                          <ArrowRight
-                            size={15}
-                          />
-                          السابق
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={
-                            openNextVideo
-                          }
-                          disabled={
-                            videos.findIndex(
-                              (item) =>
-                                item.id ===
-                                selectedVideo.id,
-                            ) >=
-                            videos.length -
-                              1
-                          }
-                          className="
-                            flex
-                            items-center
-                            gap-2
-                            rounded-xl
-                            bg-mushaf-teal
-                            px-3
-                            py-2.5
-                            text-xs
-                            font-black
-                            text-white
-                            disabled:opacity-35
-                          "
-                        >
-                          التالي
-                          <ArrowLeft
-                            size={15}
-                          />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {showVideoList && (
-                    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
                       {videos.map(
-                        (
-                          video,
-                          index,
-                        ) => {
+                        (video, index) => {
                           const active =
                             video.id ===
-                            selectedVideoId
+                            selectedVideo?.id
 
                           return (
                             <button
-                              key={
-                                video.id
-                              }
+                              key={video.id}
                               type="button"
                               onClick={() =>
-                                setSelectedVideoId(
-                                  video.id,
+                                openVideo(
+                                  video.id
                                 )
                               }
-                              className={`
-                                group
-                                flex
-                                items-center
-                                gap-3
-                                rounded-2xl
-                                border
-                                p-3
-                                text-right
-                                transition
-                                ${
-                                  active
-                                    ? 'border-mushaf-teal/30 bg-mushaf-teal/5'
-                                    : 'border-gray-100 bg-white hover:border-mushaf-gold/20 hover:bg-mushaf-paper'
-                                }
-                              `}
+                              className={`flex items-center gap-3 rounded-2xl border p-3 text-right transition ${
+                                active
+                                  ? 'border-mushaf-teal bg-mushaf-teal text-white'
+                                  : darkMode
+                                  ? 'border-white/10 bg-white/5 text-white/80 hover:bg-white/10'
+                                  : 'border-gray-100 bg-mushaf-paper text-gray-700 hover:border-mushaf-teal/20'
+                              }`}
                             >
-                              <span
-                                className={`
-                                  flex
-                                  h-11
-                                  w-11
-                                  shrink-0
-                                  items-center
-                                  justify-center
-                                  rounded-xl
-                                  ${
-                                    active
-                                      ? 'bg-mushaf-teal text-white'
-                                      : 'bg-mushaf-paper text-mushaf-teal'
-                                  }
-                                `}
+                              <div
+                                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                                  active
+                                    ? 'bg-white/15'
+                                    : 'bg-mushaf-teal/10 text-mushaf-teal'
+                                }`}
                               >
-                                {active ? (
-                                  <Play
-                                    size={16}
-                                    fill="currentColor"
-                                  />
-                                ) : (
-                                  <span className="text-xs font-black">
-                                    {(
-                                      index +
-                                      1
-                                    ).toLocaleString(
-                                      'ar-EG',
-                                    )}
-                                  </span>
-                                )}
-                              </span>
-
-                              <span className="min-w-0 flex-1">
-                                <span
-                                  className={`
-                                    block
-                                    truncate
-                                    text-sm
-                                    font-black
-                                    ${
-                                      active
-                                        ? 'text-mushaf-teal'
-                                        : 'text-gray-800'
-                                    }
-                                  `}
-                                >
-                                  {video.title}
-                                </span>
-
-                                <span className="mt-1 block text-[10px] text-gray-400">
-                                  درس رقم{' '}
-                                  {(
-                                    index +
-                                    1
-                                  ).toLocaleString(
-                                    'ar-EG',
-                                  )}
-                                </span>
-                              </span>
-
-                              <Play
-                                size={15}
-                                className={`
-                                  shrink-0
-                                  ${
+                                <Play
+                                  size={17}
+                                  fill={
                                     active
-                                      ? 'text-mushaf-teal'
-                                      : 'text-gray-300 group-hover:text-mushaf-gold'
+                                      ? 'currentColor'
+                                      : 'none'
                                   }
-                                `}
-                              />
+                                />
+                              </div>
+
+                              <div className="min-w-0">
+                                <div className="font-black text-xs line-clamp-2">
+                                  {video.title}
+                                </div>
+
+                                <div
+                                  className={`mt-1 text-[10px] ${
+                                    active
+                                      ? 'text-white/60'
+                                      : muted
+                                  }`}
+                                >
+                                  الدرس{' '}
+                                  {(
+                                    video.order ||
+                                    index + 1
+                                  ).toLocaleString(
+                                    'ar-EG'
+                                  )}
+                                </div>
+                              </div>
                             </button>
                           )
-                        },
+                        }
                       )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </section>
             )}
 
             {loading ? (
               <div
-                className={`
-                  p-12
-                  text-center
-                  ${muted}
-                `}
+                className={`flex min-h-[360px] items-center justify-center p-12 text-center ${muted}`}
               >
-                جارٍ تجهيز الكتاب للقراءة...
+                <div>
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-mushaf-teal/10 text-mushaf-teal">
+                    <BookOpen
+                      size={30}
+                      className="animate-pulse"
+                    />
+                  </div>
+
+                  <p className="mt-5 text-sm font-black">
+                    جارٍ تجهيز الكتاب للقراءة...
+                  </p>
+                </div>
               </div>
             ) : loadError &&
-              !staticBook ? (
-              <div className="p-8 text-center">
+              !contents.length ? (
+              <div className="p-8 sm:p-10 text-center">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-500">
                   <X size={24} />
                 </div>
 
                 <p
-                  className={`
-                    mt-4
-                    text-sm
-                    leading-6
-                    ${mainText}
-                  `}
+                  className={`mt-4 text-sm leading-7 ${mainText}`}
                 >
                   {loadError}
                 </p>
 
-                <Link
-                  href="/islamic-library"
-                  className="
-                    mt-5
-                    inline-flex
-                    items-center
-                    gap-2
-                    rounded-2xl
-                    bg-mushaf-teal
-                    text-white
-                    px-5
-                    py-3
-                    text-xs
-                    font-black
-                  "
-                >
-                  العودة للمكتبة
-                  <ArrowLeft size={15} />
-                </Link>
+                {book.readingUrl && (
+                  <a
+                    href={
+                      book.readingUrl
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-mushaf-teal px-5 py-3 text-xs font-black text-white"
+                  >
+                    فتح المصدر الأصلي
+                    <ExternalLink
+                      size={15}
+                    />
+                  </a>
+                )}
               </div>
-            ) : hasReaderContents ? (
+            ) : payload?.source ===
+                'quranpedia' &&
+              contents.length ? (
               <div className="p-6 sm:p-10">
                 <div className="mx-auto max-w-4xl">
                   <div className="mb-6 flex items-center justify-between gap-3">
@@ -2561,25 +1997,19 @@ export default function IslamicBookReaderPage() {
                       </p>
 
                       <p
-                        className={`
-                          text-xs
-                          ${muted}
-                        `}
+                        className={`mt-1 text-xs ${muted}`}
                       >
                         {currentItem?.page
                           ? `صفحة ${currentItem.page.toLocaleString(
-                              'ar-EG',
+                              'ar-EG'
                             )}`
-                          : currentItem?.part
-                            ? `الجزء ${currentItem.part.toLocaleString(
-                                'ar-EG',
-                              )}`
-                            : `الموضع ${(
-                                safeActiveSection +
-                                1
-                              ).toLocaleString(
-                                'ar-EG',
-                              )}`}
+                          : `الموضع ${Math.min(
+                              activeSection +
+                                1,
+                              filteredContents.length
+                            ).toLocaleString(
+                              'ar-EG'
+                            )}`}
                       </p>
                     </div>
 
@@ -2588,31 +2018,18 @@ export default function IslamicBookReaderPage() {
                       onClick={() =>
                         void copyCurrent()
                       }
-                      className={`
-                        inline-flex
-                        items-center
-                        gap-2
-                        rounded-xl
-                        border
-                        px-3
-                        py-2
-                        text-xs
-                        font-black
-                        ${
-                          darkMode
-                            ? 'border-white/10 text-white'
-                            : 'border-mushaf-teal/15 text-mushaf-teal'
-                        }
-                      `}
+                      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black ${
+                        darkMode
+                          ? 'border-white/10 text-white'
+                          : 'border-mushaf-teal/15 text-mushaf-teal'
+                      }`}
                     >
                       {copied ? (
                         <CheckCheck
                           size={15}
                         />
                       ) : (
-                        <Copy
-                          size={15}
-                        />
+                        <Copy size={15} />
                       )}
 
                       {copied
@@ -2622,56 +2039,42 @@ export default function IslamicBookReaderPage() {
                   </div>
 
                   <div
-                    className={`
-                      rounded-[28px]
-                      px-6
-                      sm:px-10
-                      py-8
-                      sm:py-12
-                      border
-                      ${
-                        darkMode
-                          ? 'bg-[#111715] border-white/10'
-                          : 'bg-[#FFFDF8] border-mushaf-gold/15'
-                      }
-                    `}
+                    className={`rounded-[30px] border px-6 py-9 sm:px-10 sm:py-12 ${readerBackground}`}
                   >
                     {currentItem?.section && (
-                      <h2
-                        className={`
-                          text-center
-                          font-black
-                          text-lg
-                          sm:text-xl
-                          ${mainText}
-                        `}
+                      <h3
+                        className={`text-center text-lg sm:text-xl font-black ${mainText}`}
                       >
-                        {currentItem.section}
-                      </h2>
+                        {
+                          currentItem.section
+                        }
+                      </h3>
+                    )}
+
+                    {currentItem?.part && (
+                      <div className="mt-3 text-center text-[11px] font-black text-mushaf-gold">
+                        الجزء{' '}
+                        {currentItem.part.toLocaleString(
+                          'ar-EG'
+                        )}
+                      </div>
                     )}
 
                     <p
-                      className={`
-                        mt-7
-                        whitespace-pre-wrap
-                        leading-[2.35]
-                        sm:leading-[2.5]
-                        text-center
-                        ${
-                          darkMode
-                            ? 'text-[#F4EFE2]'
-                            : 'text-[#27231D]'
-                        }
-                      `}
+                      className={`mt-7 whitespace-pre-wrap text-center leading-[2.4] sm:leading-[2.55] ${
+                        darkMode
+                          ? 'text-[#F4EFE2]'
+                          : 'text-[#27231D]'
+                      }`}
                       style={{
                         fontSize: `${
-                          1.25 *
+                          1.24 *
                           fontScale
                         }rem`,
                       }}
                     >
                       {currentItem?.text ||
-                        contentFallbackText}
+                        book.description}
                     </p>
                   </div>
 
@@ -2679,105 +2082,54 @@ export default function IslamicBookReaderPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        setActiveSection(
-                          (
-                            value,
-                          ) =>
-                            Math.max(
-                              0,
-                              value -
-                                1,
-                            ),
+                        goToSection(
+                          activeSection - 1
                         )
                       }
                       disabled={
-                        safeActiveSection <=
-                        0
+                        activeSection <= 0
                       }
-                      className="
-                        inline-flex
-                        items-center
-                        gap-2
-                        rounded-2xl
-                        bg-mushaf-teal
-                        text-white
-                        px-4
-                        py-3
-                        text-xs
-                        font-black
-                        disabled:opacity-35
-                      "
+                      className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-teal px-4 py-3 text-xs font-black text-white disabled:opacity-35"
                     >
-                      <ArrowRight size={16} />
+                      <ArrowRight
+                        size={16}
+                      />
                       السابق
                     </button>
 
                     <span
-                      className={`
-                        text-xs
-                        font-bold
-                        ${muted}
-                      `}
+                      className={`text-xs font-bold ${muted}`}
                     >
                       {Math.min(
-                        safeActiveSection +
-                          1,
-                        Math.max(
-                          filteredContents.length,
-                          1,
-                        ),
+                        activeSection + 1,
+                        filteredContents.length
                       ).toLocaleString(
-                        'ar-EG',
+                        'ar-EG'
                       )}
-
                       {' / '}
-
-                      {Math.max(
-                        filteredContents.length,
-                        1,
-                      ).toLocaleString(
-                        'ar-EG',
+                      {filteredContents.length.toLocaleString(
+                        'ar-EG'
                       )}
                     </span>
 
                     <button
                       type="button"
                       onClick={() =>
-                        setActiveSection(
-                          (
-                            value,
-                          ) =>
-                            Math.min(
-                              filteredContents.length -
-                                1,
-                              value +
-                                1,
-                            ),
+                        goToSection(
+                          activeSection + 1
                         )
                       }
                       disabled={
-                        filteredContents.length ===
-                          0 ||
-                        safeActiveSection >=
-                          filteredContents.length -
-                            1
+                        activeSection >=
+                        filteredContents.length -
+                          1
                       }
-                      className="
-                        inline-flex
-                        items-center
-                        gap-2
-                        rounded-2xl
-                        bg-mushaf-teal
-                        text-white
-                        px-4
-                        py-3
-                        text-xs
-                        font-black
-                        disabled:opacity-35
-                      "
+                      className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-teal px-4 py-3 text-xs font-black text-white disabled:opacity-35"
                     >
                       التالي
-                      <ArrowLeft size={16} />
+                      <ArrowLeft
+                        size={16}
+                      />
                     </button>
                   </div>
                 </div>
@@ -2785,106 +2137,86 @@ export default function IslamicBookReaderPage() {
             ) : (
               <div className="p-8 sm:p-10">
                 <div
-                  className={`
-                    rounded-[28px]
-                    p-6
-                    ${
-                      darkMode
-                        ? 'bg-white/5'
-                        : 'bg-mushaf-paper'
-                    }
-                  `}
+                  className={`rounded-[28px] p-6 ${
+                    darkMode
+                      ? 'bg-white/5'
+                      : 'bg-mushaf-paper'
+                  }`}
                 >
                   <div className="flex items-center gap-2 text-mushaf-teal font-black text-sm">
                     <BookOpen size={19} />
-
-                    {contentSource ===
-                    'firestore'
-                      ? 'بيانات الكتاب متاحة'
-                      : 'المصدر النصي غير متاح حاليًا'}
+                    الكتاب متاح عبر مصدر القراءة
                   </div>
 
                   <p
-                    className={`
-                      mt-3
-                      text-sm
-                      leading-7
-                      ${muted}
-                    `}
+                    className={`mt-3 text-sm leading-7 ${muted}`}
                   >
-                    {contentSource ===
-                    'firestore'
-                      ? 'تم تحميل بيانات الكتاب من المكتبة الشرعية. يمكنك استخدام روابط القراءة والتحميل والدروس المرتبطة به.'
-                      : 'الكتاب موجود في مكتبة مصحف سميع، لكن مصدره الحالي لا يوفر محتوى نصيًا موحدًا يمكن دمجه داخل القارئ.'}
+                    لا يوفر المصدر الحالي محتوى نصيًا موحدًا للعرض الكامل داخل قارئ سميع. يمكنك استخدام زر القراءة أو التحميل أو الشرح المتاح لهذا الكتاب.
                   </p>
 
                   {payload?.message && (
                     <p
-                      className={`
-                        mt-3
-                        text-xs
-                        leading-6
-                        ${muted}
-                      `}
+                      className={`mt-3 text-xs leading-6 ${muted}`}
                     >
                       {payload.message}
                     </p>
                   )}
 
-                  {readingUrl && (
-                    <a
-                      href={readingUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="
-                        mt-5
-                        inline-flex
-                        items-center
-                        gap-2
-                        rounded-2xl
-                        bg-mushaf-teal
-                        text-white
-                        px-5
-                        py-3
-                        text-xs
-                        font-black
-                      "
-                    >
-                      {readingLabel}
-                      <ExternalLink
-                        size={15}
-                      />
-                    </a>
-                  )}
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {book.readingUrl && (
+                      <a
+                        href={
+                          book.readingUrl
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-teal px-5 py-3 text-xs font-black text-white"
+                      >
+                        <BookOpen
+                          size={15}
+                        />
+                        {readingLabel}
+                        <ExternalLink
+                          size={14}
+                        />
+                      </a>
+                    )}
+
+                    {book.downloadUrl && (
+                      <a
+                        href={
+                          book.downloadUrl
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                        download
+                        className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-gold px-5 py-3 text-xs font-black text-white"
+                      >
+                        <Download
+                          size={15}
+                        />
+                        {downloadLabel}
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
 
             <div className="p-5 sm:p-7 border-t border-current/10">
               <div
-                className={`
-                  rounded-[24px]
-                  p-5
-                  ${
-                    darkMode
-                      ? 'bg-white/5'
-                      : 'bg-mushaf-paper'
-                  }
-                `}
+                className={`rounded-[24px] p-5 ${
+                  darkMode
+                    ? 'bg-white/5'
+                    : 'bg-mushaf-paper'
+                }`}
               >
                 <div
-                  className={`
-                    flex
-                    items-center
-                    gap-2
-                    text-sm
-                    font-black
-                    ${
-                      darkMode
-                        ? 'text-mushaf-gold'
-                        : 'text-mushaf-teal'
-                    }
-                  `}
+                  className={`flex items-center gap-2 text-sm font-black ${
+                    darkMode
+                      ? 'text-mushaf-gold'
+                      : 'text-mushaf-teal'
+                  }`}
                 >
                   <GraduationCap
                     size={18}
@@ -2893,41 +2225,28 @@ export default function IslamicBookReaderPage() {
                 </div>
 
                 <p
-                  className={`
-                    mt-3
-                    text-sm
-                    leading-7
-                    ${mainText}
-                  `}
+                  className={`mt-3 text-sm leading-7 ${mainText}`}
                 >
-                  {sharhTitle ||
+                  {book.sharhTitle ||
                     'لم يتم تسجيل شرح مستقل لهذا الكتاب بعد.'}
 
-                  {sharhAuthor
-                    ? ` — ${sharhAuthor}`
+                  {book.sharhAuthor
+                    ? ` — ${book.sharhAuthor}`
                     : ''}
                 </p>
 
-                {sharhUrl && (
+                {book.sharhUrl && (
                   <a
-                    href={sharhUrl}
+                    href={
+                      book.sharhUrl
+                    }
                     target="_blank"
                     rel="noreferrer"
-                    className="
-                      mt-4
-                      inline-flex
-                      items-center
-                      gap-2
-                      rounded-xl
-                      border
-                      border-mushaf-teal/20
-                      text-mushaf-teal
-                      px-4
-                      py-2.5
-                      text-xs
-                      font-black
-                    "
+                    className="mt-4 inline-flex items-center gap-2 rounded-xl border border-mushaf-teal/20 px-4 py-2.5 text-xs font-black text-mushaf-teal"
                   >
+                    <GraduationCap
+                      size={15}
+                    />
                     {sharhLabel}
                     <ExternalLink
                       size={15}
@@ -2938,18 +2257,11 @@ export default function IslamicBookReaderPage() {
 
               <div className="mt-5">
                 <div
-                  className={`
-                    flex
-                    items-center
-                    gap-2
-                    text-sm
-                    font-black
-                    ${
-                      darkMode
-                        ? 'text-mushaf-gold'
-                        : 'text-mushaf-teal'
-                    }
-                  `}
+                  className={`flex items-center gap-2 text-sm font-black ${
+                    darkMode
+                      ? 'text-mushaf-gold'
+                      : 'text-mushaf-teal'
+                  }`}
                 >
                   <Bookmark size={18} />
                   ملاحظاتك
@@ -2959,28 +2271,22 @@ export default function IslamicBookReaderPage() {
                   value={notes}
                   onChange={(event) =>
                     setNotes(
-                      event.target.value,
+                      event.target.value
                     )
                   }
                   placeholder="دوّن الفوائد أو الملاحظات هنا..."
-                  className={`
-                    mt-3
-                    w-full
-                    min-h-[120px]
-                    rounded-2xl
-                    border
-                    px-4
-                    py-3
-                    text-sm
-                    leading-7
-                    outline-none
-                    ${
-                      darkMode
-                        ? 'bg-black/20 text-white border-white/10 placeholder:text-white/30'
-                        : 'bg-mushaf-paper border-gray-200 text-mushaf-dark'
-                    }
-                  `}
+                  className={`mt-3 min-h-[130px] w-full rounded-2xl border px-4 py-3 text-sm leading-7 outline-none ${
+                    darkMode
+                      ? darkInput
+                      : lightInput
+                  }`}
                 />
+
+                <p
+                  className={`mt-2 text-[10px] ${muted}`}
+                >
+                  تحفظ الملاحظات تلقائيًا على هذا الجهاز.
+                </p>
               </div>
             </div>
           </article>
@@ -2989,45 +2295,23 @@ export default function IslamicBookReaderPage() {
         <div className="mt-5 flex flex-wrap gap-3">
           <Link
             href="/islamic-library"
-            className={`
-              inline-flex
-              items-center
-              gap-2
-              rounded-2xl
-              border
-              px-4
-              py-3
-              text-xs
-              font-black
-              ${
-                darkMode
-                  ? 'border-white/10 text-white'
-                  : 'bg-white border-mushaf-border/20 text-mushaf-teal'
-              }
-            `}
+            className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-xs font-black ${
+              darkMode
+                ? 'border-white/10 text-white'
+                : 'bg-white border-mushaf-border/20 text-mushaf-teal'
+            }`}
           >
-            <Home size={15} />
+            <ArrowRight size={15} />
             المكتبة الشرعية
           </Link>
 
           <Link
             href="/"
-            className={`
-              inline-flex
-              items-center
-              gap-2
-              rounded-2xl
-              border
-              px-4
-              py-3
-              text-xs
-              font-black
-              ${
-                darkMode
-                  ? 'border-white/10 text-white'
-                  : 'bg-white border-mushaf-border/20 text-mushaf-teal'
-              }
-            `}
+            className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-xs font-black ${
+              darkMode
+                ? 'border-white/10 text-white'
+                : 'bg-white border-mushaf-border/20 text-mushaf-teal'
+            }`}
           >
             الرئيسية
             <Home size={15} />
