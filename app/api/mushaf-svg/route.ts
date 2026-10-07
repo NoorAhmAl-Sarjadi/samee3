@@ -848,8 +848,8 @@ function buildTextMushafSvg(
   const viewWidth = 1000
   const viewHeight = 1414
   const lineCount = Math.max(lineRanges.length, 1)
-  const textTop = lineCount <= 10 ? 180 : 128
-  const textBottom = lineCount <= 10 ? 1234 : 1290
+  const textTop = lineCount <= 10 ? 168 : 112
+  const textBottom = lineCount <= 10 ? 1246 : 1298
   const lineHeight =
     lineCount === 1 ? 0 : (textBottom - textTop) / (lineCount - 1)
 
@@ -891,7 +891,7 @@ function buildTextMushafSvg(
     ${fontStyle}
     .samee3-quran-line {
       font-family: '${escapeXml(fontFamily)}', 'Amiri Quran', serif;
-      font-size: 48px;
+      font-size: 42px;
       font-weight: 400;
       fill: #171717;
       letter-spacing: 0;
@@ -907,7 +907,7 @@ function buildTextMushafSvg(
     }
     .samee3-ayah-marker {
       font-family: '${escapeXml(fontFamily)}', 'Amiri Quran', serif;
-      font-size: 0.56em;
+      font-size: 0.58em;
       fill: #9a753e;
     }
   </style>
