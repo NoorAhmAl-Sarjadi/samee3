@@ -4,243 +4,245 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowRight,
-  ArrowLeft,
   BookOpen,
-  GraduationCap,
-  Search,
   Download,
-  PlayCircle,
-  UserRound,
-  Layers3,
-  ChevronLeft,
+  ExternalLink,
+  GraduationCap,
   LibraryBig,
-  RefreshCw,
-  X,
+  Loader2,
+  PlayCircle,
+  Search,
 } from 'lucide-react'
-import { db } from '@/lib/firebase'
 import {
   collection,
   getDocs,
 } from 'firebase/firestore'
 
+import { db } from '@/lib/firebase'
+
 import {
   SUNNI_LIBRARY_BOOKS,
   SUNNI_LIBRARY_CATEGORIES,
-  SUNNI_LIBRARY_LEVELS,
-  type SunniLibraryBook,
   type SunniLibraryCategoryId,
-  type SunniLibraryLevel,
 } from '@/lib/islamic/sunniLibrary'
 
-interface DynamicLibraryBook {
-  id?: unknown
-  category?: unknown
-  title?: unknown
-  author?: unknown
-  level?: unknown
-  description?: unknown
-  readingUrl?: unknown
-  readingLabel?: unknown
-  sharhTitle?: unknown
-  sharhAuthor?: unknown
-  sharhUrl?: unknown
-  sharhLabel?: unknown
-  downloadUrl?: unknown
-  quranpediaBookId?: unknown
+type LibraryLevel =
+  | 'الكل'
+  | 'مبتدئ'
+  | 'متوسط'
+  | 'متقدم'
+
+type DynamicLibraryVideo = {
+  id?: string
+  title?: string
+  url?: string
+  order?: number
 }
 
-type ViewState =
-  | {
-      kind: 'levels'
-    }
-  | {
-      kind: 'categories'
-      level: SunniLibraryLevel
-    }
-  | {
-      kind: 'books'
-      level: SunniLibraryLevel
-      category: SunniLibraryCategoryId
-    }
+type FirestoreLibraryBook = {
+  id?: string
+  title?: string
+  author?: string
+  category?: string
+  level?: string
+  description?: string
 
-function isLibraryLevel(
-  value: unknown
-): value is SunniLibraryLevel {
-  return (
-    value === 'مبتدئ' ||
-    value === 'متوسط' ||
-    value === 'متقدم'
-  )
+  readingUrl?: string | null
+  readingLabel?: string | null
+
+  downloadUrl?: string | null
+  downloadLabel?: string | null
+
+  sharhTitle?: string | null
+  sharhAuthor?: string | null
+  sharhUrl?: string | null
+  sharhLabel?: string | null
+
+  deleted?: boolean
+
+  videos?: DynamicLibraryVideo[]
 }
 
-function isLibraryCategory(
-  value: unknown
-): value is SunniLibraryCategoryId {
-  return (
-    value === 'aqidah' ||
-    value === 'fiqh' ||
-    value === 'seerah' ||
-    value === 'usul-tafsir' ||
-    value === 'usul-fiqh' ||
-    value === 'usul-hadith'
-  )
+type LibraryBook = {
+  id: string
+  title: string
+  author: string
+  category: string
+  level: string
+  description: string
+
+  readingUrl?: string | null
+  readingLabel?: string | null
+
+  downloadUrl?: string | null
+  downloadLabel?: string | null
+
+  sharhTitle?: string | null
+  sharhAuthor?: string | null
+  sharhUrl?: string | null
+  sharhLabel?: string | null
+
+  videos: DynamicLibraryVideo[]
+
+  source: 'static' | 'firestore'
 }
 
-function toOptionalString(
-  value: unknown
-): string | undefined {
+const LEVELS: Array<{
+  id: LibraryLevel
+  label: string
+  short: string
+}> = [
+  {
+    id: 'الكل',
+    label: 'جميع المستويات',
+    short: 'كل الكتب والمواد',
+  },
+  {
+    id: 'مبتدئ',
+    label: 'المستوى التمهيدي',
+    short: 'بداية التدرج العلمي',
+  },
+  {
+    id: 'متوسط',
+    label: 'المستوى المتوسط',
+    short: 'بناء العلم والتوسع',
+  },
+  {
+    id: 'متقدم',
+    label: 'المستوى المتقدم',
+    short: 'الدراسة والتخصص',
+  },
+]
+
+function normalizeText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[ًٌٍَُِّْـ]/g, '')
+    .replace(/[إأآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+}
+
+function normalizeLevel(value?: string | null): string {
+  const text = (value || '').trim()
+
   if (
-    typeof value !== 'string' ||
-    !value.trim()
+    text === 'مبتدئ' ||
+    text === 'المستوى التمهيدي'
   ) {
-    return undefined
+    return 'مبتدئ'
   }
-
-  return value.trim()
-}
-
-function normalizeDynamicBook(
-  rawId: string,
-  data: DynamicLibraryBook
-): SunniLibraryBook | null {
-  const title = toOptionalString(data.title)
-  const author =
-    toOptionalString(data.author) ||
-    'غير محدد'
-
-  const category = isLibraryCategory(
-    data.category
-  )
-    ? data.category
-    : null
-
-  const level = isLibraryLevel(data.level)
-    ? data.level
-    : null
 
   if (
-    !title ||
-    !category ||
-    !level
+    text === 'متوسط' ||
+    text === 'المستوى المتوسط'
   ) {
-    return null
+    return 'متوسط'
   }
 
-  const description =
-    toOptionalString(data.description) ||
-    'كتاب شرعي متاح ضمن مكتبة مصحف سميع.'
-
-  const numericQuranpediaId = Number(
-    data.quranpediaBookId
-  )
-
-  return {
-    id:
-      toOptionalString(data.id) ||
-      rawId,
-
-    category,
-    title,
-    author,
-    level,
-    description,
-
-    readingUrl:
-      toOptionalString(data.readingUrl),
-
-    readingLabel:
-      toOptionalString(data.readingLabel),
-
-    sharhTitle:
-      toOptionalString(data.sharhTitle),
-
-    sharhAuthor:
-      toOptionalString(data.sharhAuthor),
-
-    sharhUrl:
-      toOptionalString(data.sharhUrl),
-
-    sharhLabel:
-      toOptionalString(data.sharhLabel),
-
-    downloadUrl:
-      toOptionalString(data.downloadUrl),
-
-    quranpediaBookId:
-      Number.isFinite(numericQuranpediaId)
-        ? numericQuranpediaId
-        : undefined,
+  if (
+    text === 'متقدم' ||
+    text === 'المستوى المتقدم'
+  ) {
+    return 'متقدم'
   }
+
+  return text || 'مبتدئ'
 }
 
-function mergeLibraryBooks(
-  staticBooks: SunniLibraryBook[],
-  dynamicBooks: SunniLibraryBook[]
-): SunniLibraryBook[] {
-  const map = new Map<
-    string,
-    SunniLibraryBook
-  >()
+function normalizeCategory(
+  value?: string | null
+): string {
+  return (value || '').trim()
+}
 
-  for (const book of staticBooks) {
-    map.set(book.id, book)
-  }
+function normalizeDynamicVideos(
+  value?: DynamicLibraryVideo[]
+): DynamicLibraryVideo[] {
+  if (!Array.isArray(value)) return []
 
-  for (const book of dynamicBooks) {
-    const previous = map.get(book.id)
-
-    if (!previous) {
-      map.set(book.id, book)
-      continue
-    }
-
-    map.set(book.id, {
-      ...previous,
-      ...book,
+  const videos = value
+    .map((video, index) => ({
+      id:
+        typeof video?.id === 'string' &&
+        video.id.trim()
+          ? video.id
+          : `video-${index + 1}`,
       title:
-        book.title || previous.title,
-      author:
-        book.author || previous.author,
-      category:
-        book.category || previous.category,
-      level:
-        book.level || previous.level,
-      description:
-        book.description ||
-        previous.description,
-    })
-  }
+        typeof video?.title === 'string'
+          ? video.title.trim()
+          : '',
+      url:
+        typeof video?.url === 'string'
+          ? video.url.trim()
+          : '',
+      order:
+        typeof video?.order === 'number'
+          ? video.order
+          : index,
+    }))
+    .filter(
+      (video) =>
+        video.title.length > 0 &&
+        video.url.length > 0
+    )
 
-  return Array.from(map.values())
+  videos.sort((a, b) => {
+    const aOrder =
+      typeof a.order === 'number'
+        ? a.order
+        : 0
+
+    const bOrder =
+      typeof b.order === 'number'
+        ? b.order
+        : 0
+
+    return aOrder - bOrder
+  })
+
+  return videos
+}
+
+function getCategoryMeta(
+  categoryId: string
+) {
+  return SUNNI_LIBRARY_CATEGORIES.find(
+    (category) =>
+      category.id === categoryId
+  )
 }
 
 export default function IslamicLibraryPage() {
-  const [view, setView] =
-    useState<ViewState>({
-      kind: 'levels',
-    })
+  const [activeLevel, setActiveLevel] =
+    useState<LibraryLevel>('الكل')
 
-  const [books, setBooks] =
-    useState<SunniLibraryBook[]>(
-      SUNNI_LIBRARY_BOOKS
-    )
+  const [
+    activeCategory,
+    setActiveCategory,
+  ] =
+    useState<SunniLibraryCategoryId>('aqidah')
+
+  const [query, setQuery] =
+    useState('')
+
+  const [firestoreBooks, setFirestoreBooks] =
+    useState<LibraryBook[]>([])
 
   const [loadingBooks, setLoadingBooks] =
     useState(true)
 
-  const [booksError, setBooksError] =
-    useState('')
-
-  const [search, setSearch] =
+  const [loadError, setLoadError] =
     useState('')
 
   useEffect(() => {
     let cancelled = false
 
-    async function loadDynamicBooks() {
+    async function loadBooks() {
       try {
         setLoadingBooks(true)
-        setBooksError('')
+        setLoadError('')
 
         const snapshot = await getDocs(
           collection(
@@ -249,43 +251,128 @@ export default function IslamicLibraryPage() {
           )
         )
 
-        if (cancelled) {
-          return
-        }
+        const result: LibraryBook[] = []
 
-        const dynamicBooks: SunniLibraryBook[] =
-          snapshot.docs
-            .map((item) =>
-              normalizeDynamicBook(
-                item.id,
-                item.data() as DynamicLibraryBook
-              )
-            )
-            .filter(
-              (
-                item
-              ): item is SunniLibraryBook =>
-                Boolean(item)
-            )
+        snapshot.forEach((item) => {
+          const data =
+            item.data() as FirestoreLibraryBook
 
-        setBooks(
-          mergeLibraryBooks(
-            SUNNI_LIBRARY_BOOKS,
-            dynamicBooks
-          )
-        )
-      } catch (error) {
-        console.error(
-          'Islamic library loading error:',
-          error
-        )
+          /*
+           * الكتاب المحذوف/المخفي لا يظهر للمستخدم.
+           */
+          if (data.deleted === true) {
+            return
+          }
+
+          const title =
+            typeof data.title === 'string'
+              ? data.title.trim()
+              : ''
+
+          if (!title) {
+            return
+          }
+
+          const id =
+            typeof data.id === 'string' &&
+            data.id.trim()
+              ? data.id.trim()
+              : item.id
+
+          result.push({
+            id,
+            title,
+            author:
+              typeof data.author === 'string' &&
+              data.author.trim()
+                ? data.author.trim()
+                : 'غير محدد',
+
+            category:
+              normalizeCategory(
+                data.category
+              ),
+
+            level:
+              normalizeLevel(
+                data.level
+              ),
+
+            description:
+              typeof data.description === 'string'
+                ? data.description.trim()
+                : '',
+
+            readingUrl:
+              typeof data.readingUrl === 'string' &&
+              data.readingUrl.trim()
+                ? data.readingUrl.trim()
+                : null,
+
+            readingLabel:
+              typeof data.readingLabel === 'string' &&
+              data.readingLabel.trim()
+                ? data.readingLabel.trim()
+                : null,
+
+            downloadUrl:
+              typeof data.downloadUrl === 'string' &&
+              data.downloadUrl.trim()
+                ? data.downloadUrl.trim()
+                : null,
+
+            downloadLabel:
+              typeof data.downloadLabel === 'string' &&
+              data.downloadLabel.trim()
+                ? data.downloadLabel.trim()
+                : null,
+
+            sharhTitle:
+              typeof data.sharhTitle === 'string' &&
+              data.sharhTitle.trim()
+                ? data.sharhTitle.trim()
+                : null,
+
+            sharhAuthor:
+              typeof data.sharhAuthor === 'string' &&
+              data.sharhAuthor.trim()
+                ? data.sharhAuthor.trim()
+                : null,
+
+            sharhUrl:
+              typeof data.sharhUrl === 'string' &&
+              data.sharhUrl.trim()
+                ? data.sharhUrl.trim()
+                : null,
+
+            sharhLabel:
+              typeof data.sharhLabel === 'string' &&
+              data.sharhLabel.trim()
+                ? data.sharhLabel.trim()
+                : null,
+
+            videos:
+              normalizeDynamicVideos(
+                data.videos
+              ),
+
+            source: 'firestore',
+          })
+        })
 
         if (!cancelled) {
-          setBooksError(
-            'تعذر تحديث الكتب المضافة من لوحة الإدارة، وسيتم عرض المكتبة الأساسية.'
+          setFirestoreBooks(result)
+        }
+      } catch {
+        if (!cancelled) {
+          /*
+           * الكتب الثابتة ستستمر في الظهور حتى
+           * إذا تعذر تحميل Firestore.
+           */
+          setLoadError(
+            'تعذر تحديث الكتب المضافة من لوحة الإدارة حاليًا، وتم عرض المكتبة الأساسية.'
           )
-
-          setBooks(SUNNI_LIBRARY_BOOKS)
+          setFirestoreBooks([])
         }
       } finally {
         if (!cancelled) {
@@ -294,756 +381,885 @@ export default function IslamicLibraryPage() {
       }
     }
 
-    void loadDynamicBooks()
+    void loadBooks()
 
     return () => {
       cancelled = true
     }
   }, [])
 
-  const selectedLevel =
-    view.kind === 'categories' ||
-    view.kind === 'books'
-      ? view.level
-      : null
+  const allBooks = useMemo<LibraryBook[]>(
+    () => {
+      const staticBooks: LibraryBook[] =
+        SUNNI_LIBRARY_BOOKS.map(
+          (book) => ({
+            id: book.id,
+            title: book.title,
+            author: book.author,
+            category: book.category,
+            level:
+              normalizeLevel(
+                book.level
+              ),
+            description:
+              book.description,
 
-  const selectedCategory =
-    view.kind === 'books'
-      ? SUNNI_LIBRARY_CATEGORIES.find(
-          (item) =>
-            item.id === view.category
-        ) || null
-      : null
+            readingUrl:
+              book.readingUrl ||
+              null,
 
-  const selectedLevelInfo =
-    selectedLevel
-      ? SUNNI_LIBRARY_LEVELS.find(
-          (item) =>
-            item.id === selectedLevel
-        ) || null
-      : null
+            readingLabel:
+              book.readingLabel ||
+              null,
 
-  const currentLevelBooks =
-    selectedLevel
-      ? books.filter(
-          (book) =>
-            book.level === selectedLevel
+            downloadUrl: null,
+            downloadLabel: null,
+
+            sharhTitle:
+              book.sharhTitle ||
+              null,
+
+            sharhAuthor:
+              book.sharhAuthor ||
+              null,
+
+            sharhUrl:
+              book.sharhUrl ||
+              null,
+
+            sharhLabel:
+              book.sharhLabel ||
+              null,
+
+            videos: [],
+
+            source: 'static',
+          })
         )
-      : []
 
-  const categoriesInLevel =
-    useMemo(() => {
-      if (!selectedLevel) {
-        return []
-      }
-
-      const existingCategories =
+      /*
+       * Firestore له الأولوية عند تكرار الـ id.
+       * بهذه الطريقة يستطيع الأدمن تعديل بيانات
+       * كتاب معروف بدون ظهور نسخة مكررة.
+       */
+      const firestoreIds =
         new Set(
-          currentLevelBooks.map(
-            (book) => book.category
+          firestoreBooks.map(
+            (book) => book.id
           )
         )
 
-      return SUNNI_LIBRARY_CATEGORIES.filter(
-        (category) =>
-          existingCategories.has(category.id)
-      )
-    }, [
-      currentLevelBooks,
-      selectedLevel,
-    ])
-
-  const filteredCategories =
-    useMemo(() => {
-      const normalized =
-        search.trim().toLowerCase()
-
-      if (!normalized) {
-        return categoriesInLevel
-      }
-
-      return categoriesInLevel.filter(
-        (category) =>
-          [
-            category.label,
-            category.short,
-          ]
-            .join(' ')
-            .toLowerCase()
-            .includes(normalized)
-      )
-    }, [
-      categoriesInLevel,
-      search,
-    ])
-
-  const categoryBooks = useMemo(() => {
-    if (view.kind !== 'books') {
-      return []
-    }
-
-    const normalized =
-      search.trim().toLowerCase()
-
-    const filtered = books.filter(
-      (book) =>
-        book.level === view.level &&
-        book.category === view.category
-    )
-
-    if (!normalized) {
-      return filtered
-    }
-
-    return filtered.filter((book) =>
-      [
-        book.title,
-        book.author,
-        book.description,
+      const merged = [
+        ...staticBooks.filter(
+          (book) =>
+            !firestoreIds.has(
+              book.id
+            )
+        ),
+        ...firestoreBooks,
       ]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalized)
+
+      return merged
+    },
+    [firestoreBooks]
+  )
+
+  const categoryCounts = useMemo(
+    () => {
+      const counts: Record<
+        string,
+        number
+      > = {}
+
+      SUNNI_LIBRARY_CATEGORIES.forEach(
+        (category) => {
+          counts[category.id] = 0
+        }
+      )
+
+      allBooks.forEach((book) => {
+        const key =
+          normalizeCategory(
+            book.category
+          )
+
+        if (
+          Object.prototype.hasOwnProperty.call(
+            counts,
+            key
+          )
+        ) {
+          counts[key] += 1
+        }
+      })
+
+      return counts
+    },
+    [allBooks]
+  )
+
+  const levelCounts = useMemo(
+    () => ({
+      مبتدئ: allBooks.filter(
+        (book) =>
+          normalizeLevel(
+            book.level
+          ) === 'مبتدئ'
+      ).length,
+
+      متوسط: allBooks.filter(
+        (book) =>
+          normalizeLevel(
+            book.level
+          ) === 'متوسط'
+      ).length,
+
+      متقدم: allBooks.filter(
+        (book) =>
+          normalizeLevel(
+            book.level
+          ) === 'متقدم'
+      ).length,
+
+      الكل: allBooks.length,
+    }),
+    [allBooks]
+  )
+
+  const visibleCategories =
+    useMemo(
+      () =>
+        SUNNI_LIBRARY_CATEGORIES.filter(
+          (category) => {
+            if (
+              activeLevel ===
+              'الكل'
+            ) {
+              return true
+            }
+
+            return allBooks.some(
+              (book) =>
+                normalizeLevel(
+                  book.level
+                ) === activeLevel &&
+                book.category ===
+                  category.id
+            )
+          }
+        ),
+      [activeLevel, allBooks]
     )
+
+  useEffect(() => {
+    const stillVisible =
+      visibleCategories.some(
+        (category) =>
+          category.id ===
+          activeCategory
+      )
+
+    if (!stillVisible) {
+      const first =
+        visibleCategories[0]
+
+      if (first) {
+        setActiveCategory(
+          first.id
+        )
+      }
+    }
   }, [
-    books,
-    search,
-    view,
+    activeCategory,
+    visibleCategories,
   ])
 
-  const levelCounts = useMemo(() => {
-    return SUNNI_LIBRARY_LEVELS.map(
-      (level) => ({
-        ...level,
-        count: books.filter(
-          (book) =>
-            book.level === level.id
-        ).length,
-      })
+  const activeCategoryMeta =
+    SUNNI_LIBRARY_CATEGORIES.find(
+      (category) =>
+        category.id ===
+        activeCategory
     )
-  }, [books])
 
-  function openLevel(
-    level: SunniLibraryLevel
-  ) {
-    setSearch('')
+  const books = useMemo(
+    () => {
+      const normalizedQuery =
+        normalizeText(query)
 
-    setView({
-      kind: 'categories',
-      level,
-    })
-  }
+      return allBooks.filter(
+        (book) => {
+          if (
+            activeLevel !==
+              'الكل' &&
+            normalizeLevel(
+              book.level
+            ) !== activeLevel
+          ) {
+            return false
+          }
 
-  function openCategory(
-    category: SunniLibraryCategoryId
-  ) {
-    if (view.kind !== 'categories') {
-      return
-    }
+          if (
+            book.category !==
+            activeCategory
+          ) {
+            return false
+          }
 
-    setSearch('')
+          if (!normalizedQuery) {
+            return true
+          }
 
-    setView({
-      kind: 'books',
-      level: view.level,
-      category,
-    })
-  }
+          const searchable = normalizeText(
+            [
+              book.title,
+              book.author,
+              book.description,
+              book.category,
+              book.sharhTitle ||
+                '',
+              book.sharhAuthor ||
+                '',
+              book.sharhLabel ||
+                '',
+            ].join(' ')
+          )
 
-  function goBack() {
-    if (view.kind === 'books') {
-      setSearch('')
+          return searchable.includes(
+            normalizedQuery
+          )
+        }
+      )
+    },
+    [
+      activeCategory,
+      activeLevel,
+      allBooks,
+      query,
+    ]
+  )
 
-      setView({
-        kind: 'categories',
-        level: view.level,
-      })
+  const currentLevelMeta =
+    LEVELS.find(
+      (level) =>
+        level.id ===
+        activeLevel
+    )
 
-      return
-    }
-
-    if (view.kind === 'categories') {
-      setSearch('')
-
-      setView({
-        kind: 'levels',
-      })
-    }
-  }
-
-  function refreshLibrary() {
-    window.location.reload()
-  }
-
-  const currentTitle =
-    view.kind === 'levels'
-      ? 'المكتبة الشرعية'
-      : view.kind === 'categories'
-        ? selectedLevelInfo?.label ||
-          'المستوى'
-        : selectedCategory?.label ||
-          'الكتب'
-
-  const currentSubtitle =
-    view.kind === 'levels'
-      ? 'مناهج علمية مرتبة من التأسيس إلى التعمق'
-      : view.kind === 'categories'
-        ? selectedLevelInfo?.description ||
-          ''
-        : selectedCategory?.short ||
-          ''
+  const allCategoriesCount =
+    useMemo(
+      () =>
+        visibleCategories.reduce(
+          (sum, category) =>
+            sum +
+            (
+              activeLevel ===
+              'الكل'
+                ? categoryCounts[
+                    category.id
+                  ] || 0
+                : allBooks.filter(
+                    (book) =>
+                      normalizeLevel(
+                        book.level
+                      ) ===
+                        activeLevel &&
+                      book.category ===
+                        category.id
+                  ).length
+            ),
+          0
+        ),
+      [
+        activeLevel,
+        allBooks,
+        categoryCounts,
+        visibleCategories,
+      ]
+    )
 
   return (
     <main
       dir="rtl"
-      className="min-h-screen bg-[var(--bg-main)] pb-24"
+      className="min-h-screen bg-mushaf-paper px-4 sm:px-6 lg:px-8 pb-32"
     >
-      <div className="mx-auto w-full max-w-7xl px-4 pb-16 pt-5 sm:px-6 lg:px-8">
-        <header className="mb-6">
-          <div className="flex flex-col gap-4 rounded-[30px] border border-[rgba(14,165,233,0.12)] bg-white p-5 shadow-sm sm:p-7">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-start gap-3">
-                {view.kind !== 'levels' ? (
-                  <button
-                    type="button"
-                    onClick={goBack}
-                    className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[rgba(2,132,199,0.15)] bg-[rgba(2,132,199,0.05)] text-[var(--royal-blue)] transition hover:bg-[rgba(2,132,199,0.1)]"
-                    aria-label="العودة"
-                  >
-                    <ArrowRight size={20} />
-                  </button>
-                ) : (
-                  <Link
-                    href="/"
-                    className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[rgba(2,132,199,0.15)] bg-[rgba(2,132,199,0.05)] text-[var(--royal-blue)] transition hover:bg-[rgba(2,132,199,0.1)]"
-                    aria-label="الرئيسية"
-                  >
-                    <ArrowRight size={20} />
-                  </Link>
-                )}
+      <div className="mx-auto max-w-7xl pt-5 sm:pt-8">
 
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-2 rounded-full bg-[rgba(2,132,199,0.08)] px-3 py-1.5 text-[11px] font-black text-[var(--royal-blue)]">
-                      <LibraryBig size={14} />
-                      المكتبة الشرعية
-                    </span>
+        <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="w-11 h-11 rounded-2xl bg-white border border-mushaf-gold/25 shadow-sm text-mushaf-teal flex items-center justify-center hover:bg-mushaf-teal hover:text-white transition"
+              aria-label="العودة للرئيسية"
+            >
+              <ArrowRight size={20} />
+            </Link>
 
-                    {selectedLevel ? (
-                      <span className="rounded-full bg-amber-50 px-3 py-1.5 text-[11px] font-black text-amber-700">
-                        {selectedLevel}
-                      </span>
-                    ) : null}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-mushaf-teal">
+                <LibraryBig
+                  size={22}
+                />
 
-                    {selectedCategory ? (
-                      <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-black text-emerald-700">
-                        {selectedCategory.label}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <h1 className="mt-3 text-2xl font-black text-[var(--text-main)] sm:text-3xl">
-                    {currentTitle}
-                  </h1>
-
-                  <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-500">
-                    {currentSubtitle}
-                  </p>
-                </div>
+                <h1 className="text-xl sm:text-2xl font-black">
+                  المكتبة الشرعية
+                </h1>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {view.kind !== 'levels' ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setView({
-                        kind: 'levels',
-                      })
-                    }
-                    className="inline-flex h-11 items-center gap-2 rounded-xl border border-[rgba(2,132,199,0.15)] bg-white px-4 text-xs font-black text-[var(--royal-blue)] transition hover:bg-slate-50"
-                  >
-                    <Layers3 size={16} />
-                    كل المستويات
-                  </button>
-                ) : null}
-
-                <button
-                  type="button"
-                  onClick={refreshLibrary}
-                  className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50"
-                >
-                  <RefreshCw size={16} />
-                  تحديث
-                </button>
-              </div>
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
+                مكتبة منظمة للعلوم الشرعية مع
+                الكتب والشرح والدروس المرئية.
+              </p>
             </div>
+          </div>
 
-            {view.kind !== 'levels' ? (
-              <div className="relative">
-                <Search
-                  size={18}
-                  className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-
-                <input
-                  type="search"
-                  value={search}
-                  onChange={(event) =>
-                    setSearch(
-                      event.target.value
-                    )
-                  }
-                  placeholder={
-                    view.kind === 'categories'
-                      ? 'ابحث عن تصنيف...'
-                      : 'ابحث باسم الكتاب أو المؤلف...'
-                  }
-                  className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-11 pl-12 text-sm font-bold text-slate-800 outline-none transition focus:border-[var(--royal-blue)] focus:bg-white"
-                />
-
-                {search ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSearch('')
-                    }
-                    className="absolute left-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white hover:text-slate-700"
-                    aria-label="مسح البحث"
-                  >
-                    <X size={16} />
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-
-            {booksError ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold leading-6 text-amber-800">
-                {booksError}
-              </div>
-            ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/mushaf"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-mushaf-teal text-white px-5 py-3 text-sm font-black shadow-sm hover:opacity-95"
+            >
+              العودة للمصحف
+              <BookOpen size={17} />
+            </Link>
           </div>
         </header>
 
-        {view.kind === 'levels' ? (
-          <section>
-            <div className="mb-5">
-              <p className="text-xs font-black text-amber-600">
-                منهج متدرج
-              </p>
+        <section className="mt-6 rounded-[30px] bg-gradient-to-br from-mushaf-teal to-[#11464D] text-white p-6 sm:p-8 shadow-xl relative overflow-hidden">
+          <div className="absolute -top-20 -left-10 w-64 h-64 rounded-full bg-white/5 blur-2xl" />
 
-              <h2 className="mt-1 text-xl font-black text-[var(--text-main)] sm:text-2xl">
-                اختر المستوى العلمي
-              </h2>
+          <div className="absolute -bottom-24 -right-20 w-72 h-72 rounded-full bg-mushaf-gold/10 blur-3xl" />
 
-              <p className="mt-2 text-sm leading-7 text-slate-500">
-                ابدأ من المستوى المناسب لك، ثم اختر التخصص، وبعدها اختر الكتاب المطلوب.
-              </p>
+          <div className="relative z-10 max-w-4xl">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/10 px-3 py-1.5 text-[11px] font-black text-mushaf-gold">
+              <GraduationCap
+                size={15}
+              />
+              المنصة القرآنية الشاملة
             </div>
 
-            <div className="grid gap-5 lg:grid-cols-3">
-              {levelCounts.map(
-                (level) => (
+            <h2 className="mt-4 text-2xl sm:text-3xl font-black leading-tight">
+              طريقك إلى القراءة المنهجية في العلوم الشرعية
+            </h2>
+
+            <p className="mt-3 text-sm sm:text-base leading-7 text-white/80 max-w-3xl">
+              اختر المستوى ثم المجال، وتصفح الكتب
+              والمواد التعليمية. كل كتاب يعرض عنوانه
+              الكامل ومؤلفه ومصادر القراءة والتحميل
+              والشرح والدروس المتاحة داخل المنصة.
+            </p>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              <span className="rounded-full bg-white/10 border border-white/10 px-3 py-2 text-[11px] font-black">
+                {allBooks.length.toLocaleString(
+                  'ar-EG'
+                )}{' '}
+                كتاب ومادة
+              </span>
+
+              <span className="rounded-full bg-white/10 border border-white/10 px-3 py-2 text-[11px] font-black">
+                {levelCounts.مبتدئ.toLocaleString(
+                  'ar-EG'
+                )}{' '}
+                تمهيدي
+              </span>
+
+              <span className="rounded-full bg-white/10 border border-white/10 px-3 py-2 text-[11px] font-black">
+                {levelCounts.متوسط.toLocaleString(
+                  'ar-EG'
+                )}{' '}
+                متوسط
+              </span>
+
+              <span className="rounded-full bg-white/10 border border-white/10 px-3 py-2 text-[11px] font-black">
+                {levelCounts.متقدم.toLocaleString(
+                  'ar-EG'
+                )}{' '}
+                متقدم
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {loadError && (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-800">
+            {loadError}
+          </div>
+        )}
+
+        <section className="mt-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-black text-mushaf-teal">
+                المسار العلمي
+              </p>
+
+              <h3 className="mt-1 text-xl sm:text-2xl font-black text-mushaf-dark">
+                مستويات التعلم
+              </h3>
+            </div>
+
+            {loadingBooks && (
+              <div className="inline-flex items-center gap-2 text-xs font-bold text-gray-500">
+                <Loader2
+                  size={15}
+                  className="animate-spin"
+                />
+                تحديث المكتبة
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            {LEVELS.map(
+              (level) => {
+                const active =
+                  level.id ===
+                  activeLevel
+
+                const count =
+                  levelCounts[
+                    level.id
+                  ]
+
+                return (
                   <button
                     key={level.id}
                     type="button"
                     onClick={() =>
-                      openLevel(
+                      setActiveLevel(
                         level.id
-                      )
-                    }
-                    className="group relative overflow-hidden rounded-[30px] border border-[rgba(14,165,233,0.12)] bg-white p-6 text-right shadow-sm transition duration-300 hover:-translate-y-1 hover:border-[rgba(2,132,199,0.25)] hover:shadow-xl"
+                      )}
+                    className={`text-right rounded-[24px] border p-4 sm:p-5 transition min-h-[118px] ${
+                      active
+                        ? 'bg-mushaf-teal text-white border-mushaf-teal shadow-lg'
+                        : 'bg-white text-mushaf-dark border-mushaf-border/30 hover:border-mushaf-teal/40 hover:shadow-sm'
+                    }`}
                   >
-                    <div className="absolute -left-12 -top-12 h-32 w-32 rounded-full bg-[rgba(2,132,199,0.05)] transition duration-500 group-hover:scale-125" />
-
-                    <div className="relative">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[rgba(2,132,199,0.08)] text-[var(--royal-blue)]">
-                          <GraduationCap size={28} />
-                        </div>
-
-                        <span className="rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-500">
-                          {level.count.toLocaleString(
-                            'ar-EG'
-                          )}{' '}
-                          كتاب
-                        </span>
+                    <div className="flex items-center justify-between gap-3">
+                      <div
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                          active
+                            ? 'bg-white/10'
+                            : 'bg-mushaf-paper text-mushaf-teal'
+                        }`}
+                      >
+                        <GraduationCap
+                          size={19}
+                        />
                       </div>
 
-                      <p className="mt-7 text-xs font-black text-amber-600">
-                        {level.id}
-                      </p>
+                      <span
+                        className={`text-[10px] font-black rounded-full px-2.5 py-1.5 ${
+                          active
+                            ? 'bg-white/10'
+                            : 'bg-mushaf-paper text-gray-500'
+                        }`}
+                      >
+                        {count.toLocaleString(
+                          'ar-EG'
+                        )}
+                      </span>
+                    </div>
 
-                      <h3 className="mt-1 text-2xl font-black text-[var(--text-main)]">
-                        {level.label}
-                      </h3>
+                    <div className="mt-4 text-sm font-black">
+                      {level.label}
+                    </div>
 
-                      <p className="mt-2 text-sm leading-7 text-slate-500">
-                        {level.description}
-                      </p>
-
-                      <div className="mt-6 flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
-                        <span className="text-xs font-black text-slate-600">
-                          استعراض التصنيفات
-                        </span>
-
-                        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-[var(--royal-blue)] shadow-sm">
-                          <ArrowLeft size={17} />
-                        </span>
-                      </div>
+                    <div
+                      className={`mt-1 text-[11px] leading-5 ${
+                        active
+                          ? 'text-white/70'
+                          : 'text-gray-500'
+                      }`}
+                    >
+                      {level.short}
                     </div>
                   </button>
                 )
-              )}
-            </div>
-          </section>
-        ) : null}
+              }
+            )}
+          </div>
+        </section>
 
-        {view.kind === 'categories' ? (
-          <section>
-            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-xs font-black text-amber-600">
-                  {selectedLevel}
-                </p>
+        <section className="mt-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[11px] font-black text-mushaf-teal">
+                {currentLevelMeta?.label ||
+                  'المكتبة'}
+              </p>
 
-                <h2 className="mt-1 text-xl font-black text-[var(--text-main)] sm:text-2xl">
-                  اختر القسم الشرعي
-                </h2>
-
-                <p className="mt-2 text-sm leading-7 text-slate-500">
-                  تظهر هنا التصنيفات التي تحتوي على كتب في المستوى المختار.
-                </p>
-              </div>
-
-              <span className="rounded-full bg-white px-4 py-2 text-xs font-black text-slate-500 shadow-sm">
-                {filteredCategories.length.toLocaleString(
-                  'ar-EG'
-                )}{' '}
-                تصنيفات
-              </span>
+              <h3 className="text-xl font-black text-mushaf-dark mt-1">
+                المجالات العلمية
+              </h3>
             </div>
 
-            {loadingBooks ? (
-              <LibraryLoading />
-            ) : filteredCategories.length === 0 ? (
-              <EmptyState
-                title="لا توجد تصنيفات مطابقة"
-                description="جرّب تغيير كلمة البحث أو اختيار مستوى آخر."
-                onClear={() =>
-                  setSearch('')
-                }
-              />
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {filteredCategories.map(
-                  (category) => {
-                    const count =
-                      currentLevelBooks.filter(
+            <p className="text-xs text-gray-500">
+              {allCategoriesCount.toLocaleString(
+                'ar-EG'
+              )}{' '}
+              مادة ضمن المستوى المحدد
+            </p>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {visibleCategories.map(
+              (category) => {
+                const active =
+                  category.id ===
+                  activeCategory
+
+                const count =
+                  activeLevel ===
+                  'الكل'
+                    ? categoryCounts[
+                        category.id
+                      ] || 0
+                    : allBooks.filter(
                         (book) =>
+                          normalizeLevel(
+                            book.level
+                          ) ===
+                            activeLevel &&
                           book.category ===
-                          category.id
+                            category.id
                       ).length
 
-                    return (
-                      <button
-                        key={category.id}
-                        type="button"
-                        onClick={() =>
-                          openCategory(
-                            category.id
-                          )
-                        }
-                        className="group rounded-[28px] border border-slate-200 bg-white p-5 text-right shadow-sm transition duration-300 hover:-translate-y-1 hover:border-[rgba(2,132,199,0.2)] hover:shadow-lg"
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() =>
+                      setActiveCategory(
+                        category.id
+                      )}
+                    className={`text-right rounded-2xl border p-4 transition min-h-[112px] ${
+                      active
+                        ? 'bg-mushaf-teal text-white border-mushaf-teal shadow-lg'
+                        : 'bg-white text-mushaf-dark border-mushaf-border/30 hover:border-mushaf-teal/40'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <BookOpen
+                        size={18}
+                      />
+
+                      <span
+                        className={`text-[10px] font-black rounded-full px-2 py-1 ${
+                          active
+                            ? 'bg-white/15'
+                            : 'bg-mushaf-paper text-gray-500'
+                        }`}
                       >
-                        <div className="flex items-center gap-4">
-                          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[rgba(2,132,199,0.08)] text-[var(--royal-blue)]">
-                            <BookOpen size={25} />
-                          </div>
+                        {count.toLocaleString(
+                          'ar-EG'
+                        )}
+                      </span>
+                    </div>
 
-                          <div className="min-w-0 flex-1">
-                            <h3 className="truncate text-lg font-black text-[var(--text-main)]">
-                              {category.label}
-                            </h3>
+                    <div className="mt-5 text-sm font-black">
+                      {category.label}
+                    </div>
 
-                            <p className="mt-1 text-xs text-slate-500">
-                              {category.short}
-                            </p>
-                          </div>
-
-                          <ChevronLeft
-                            size={19}
-                            className="shrink-0 text-slate-300 transition group-hover:-translate-x-1 group-hover:text-[var(--royal-blue)]"
-                          />
-                        </div>
-
-                        <div className="mt-5 flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
-                          <span className="text-xs font-bold text-slate-500">
-                            الكتب المتاحة
-                          </span>
-
-                          <span className="text-sm font-black text-[var(--royal-blue)]">
-                            {count.toLocaleString(
-                              'ar-EG'
-                            )}
-                          </span>
-                        </div>
-                      </button>
-                    )
-                  }
-                )}
-              </div>
+                    <div
+                      className={`mt-1 text-[11px] leading-5 ${
+                        active
+                          ? 'text-white/70'
+                          : 'text-gray-500'
+                      }`}
+                    >
+                      {category.short}
+                    </div>
+                  </button>
+                )
+              }
             )}
-          </section>
-        ) : null}
+          </div>
+        </section>
 
-        {view.kind === 'books' ? (
-          <section>
-            <div className="mb-5 flex flex-col gap-4 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
-              <div>
-                <p className="text-xs font-black text-amber-600">
-                  {selectedLevel}
-                  {' • '}
-                  {selectedCategory?.label}
-                </p>
+        <section className="mt-6 rounded-3xl border border-mushaf-border/20 bg-white p-4 sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-black text-mushaf-teal">
+                {activeCategoryMeta?.label ||
+                  'المكتبة'}
+              </p>
 
-                <h2 className="mt-1 text-xl font-black text-[var(--text-main)] sm:text-2xl">
-                  كتب {selectedCategory?.label}
-                </h2>
+              <h3 className="text-xl font-black text-mushaf-dark mt-1">
+                {books.length.toLocaleString(
+                  'ar-EG'
+                )}{' '}
+                كتاب/مادة
+              </h3>
 
-                <p className="mt-2 text-sm leading-7 text-slate-500">
-                  اختر أي كتاب لفتح صفحته الكاملة ومحتواه وشروحه ودروسه.
-                </p>
-              </div>
-
-              <div className="rounded-2xl bg-[rgba(2,132,199,0.06)] px-4 py-3 text-center">
-                <div className="text-2xl font-black text-[var(--royal-blue)]">
-                  {categoryBooks.length.toLocaleString(
-                    'ar-EG'
-                  )}
-                </div>
-
-                <div className="mt-1 text-[10px] font-black text-slate-500">
-                  كتاب
-                </div>
-              </div>
+              <p className="mt-1 text-[11px] text-gray-500">
+                {activeLevel ===
+                'الكل'
+                  ? 'جميع المستويات'
+                  : currentLevelMeta?.label}
+              </p>
             </div>
 
-            {loadingBooks ? (
-              <LibraryLoading />
-            ) : categoryBooks.length === 0 ? (
-              <EmptyState
-                title="لا توجد كتب مطابقة"
-                description="جرّب تغيير البحث أو العودة إلى الأقسام الأخرى."
-                onClear={() =>
-                  setSearch('')
-                }
+            <label className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-mushaf-paper px-4 h-12 w-full lg:max-w-xl">
+              <Search
+                size={18}
+                className="text-gray-400 shrink-0"
               />
-            ) : (
-              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-                {categoryBooks.map(
-                  (book) => (
-                    <LibraryBookCard
-                      key={book.id}
-                      book={book}
-                    />
+
+              <input
+                value={query}
+                onChange={(event) =>
+                  setQuery(
+                    event.target
+                      .value
                   )
-                )}
-              </div>
+                }
+                placeholder="ابحث باسم الكتاب أو المؤلف أو الشرح..."
+                className="w-full outline-none bg-transparent text-sm text-gray-800"
+              />
+            </label>
+          </div>
+        </section>
+
+        <section className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-5">
+          {books.map(
+            (book) => {
+              const category =
+                getCategoryMeta(
+                  book.category
+                )
+
+              const hasVideos =
+                book.videos.length >
+                0
+
+              return (
+                <article
+                  key={book.id}
+                  className="rounded-[28px] bg-white border border-mushaf-border/15 shadow-sm p-5 sm:p-6 hover:shadow-md transition"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-12 h-12 rounded-2xl bg-mushaf-paper text-mushaf-teal flex items-center justify-center shrink-0">
+                        <BookOpen
+                          size={21}
+                        />
+                      </div>
+
+                      <div className="min-w-0">
+                        <h4 className="text-base sm:text-lg font-black text-mushaf-dark leading-7">
+                          {book.title}
+                        </h4>
+
+                        <p className="text-xs text-gray-500 mt-1">
+                          المؤلف:{' '}
+                          {book.author}
+                        </p>
+
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <span className="inline-flex items-center rounded-full bg-mushaf-gold/10 text-mushaf-gold px-2.5 py-1 text-[10px] font-black">
+                            {book.level}
+                          </span>
+
+                          {category && (
+                            <span className="inline-flex items-center rounded-full bg-mushaf-teal/10 text-mushaf-teal px-2.5 py-1 text-[10px] font-black">
+                              {category.label}
+                            </span>
+                          )}
+
+                          {book.source ===
+                            'firestore' && (
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2.5 py-1 text-[10px] font-black">
+                              مضاف من الإدارة
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="mt-5 text-sm leading-7 text-gray-600">
+                    {book.description ||
+                      'كتاب علمي ضمن المكتبة الشرعية في مصحف سميع.'}
+                  </p>
+
+                  <div className="mt-5 rounded-2xl bg-mushaf-paper border border-mushaf-gold/15 p-4">
+                    <div className="flex items-center gap-2 text-mushaf-teal text-xs font-black">
+                      <GraduationCap
+                        size={16}
+                      />
+                      الشرح والدروس
+                    </div>
+
+                    <p className="mt-2 text-sm leading-6 text-gray-700">
+                      {book.sharhTitle ||
+                        'تتوفر مصادر شرح مرتبطة بالكتاب'}
+                      {book.sharhAuthor
+                        ? ` — ${book.sharhAuthor}`
+                        : ''}
+                    </p>
+
+                    {hasVideos && (
+                      <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-mushaf-teal/10 text-mushaf-teal px-3 py-1.5 text-[10px] font-black">
+                        <PlayCircle
+                          size={14}
+                        />
+                        {book.videos.length.toLocaleString(
+                          'ar-EG'
+                        )}{' '}
+                        درس مرئي
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <Link
+                      href={`/islamic-library/book/${encodeURIComponent(
+                        book.id
+                      )}`}
+                      className="inline-flex items-center gap-2 rounded-xl bg-mushaf-teal text-white px-4 py-2.5 text-xs font-black hover:opacity-90"
+                    >
+                      قراءة الكتاب
+                      <BookOpen
+                        size={14}
+                      />
+                    </Link>
+
+                    {book.downloadUrl && (
+                      <a
+                        href={
+                          book.downloadUrl
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                        download
+                        className="inline-flex items-center gap-2 rounded-xl bg-mushaf-gold text-white px-4 py-2.5 text-xs font-black hover:opacity-90"
+                      >
+                        {book.downloadLabel ||
+                          'تحميل الكتاب'}
+                        <Download
+                          size={14}
+                        />
+                      </a>
+                    )}
+
+                    {book.readingUrl && (
+                      <a
+                        href={
+                          book.readingUrl
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-xl bg-white text-mushaf-teal border border-mushaf-teal/20 px-4 py-2.5 text-xs font-black hover:bg-mushaf-teal/5"
+                      >
+                        {book.readingLabel ||
+                          'المصدر'}
+                        <ExternalLink
+                          size={14}
+                        />
+                      </a>
+                    )}
+
+                    {book.sharhUrl && (
+                      <a
+                        href={
+                          book.sharhUrl
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-xl bg-white text-mushaf-teal border border-mushaf-teal/20 px-4 py-2.5 text-xs font-black hover:bg-mushaf-teal/5"
+                      >
+                        {book.sharhLabel ||
+                          'فتح الشرح'}
+                        <GraduationCap
+                          size={14}
+                        />
+                      </a>
+                    )}
+
+                    {hasVideos && (
+                      <Link
+                        href={`/islamic-library/book/${encodeURIComponent(
+                          book.id
+                        )}`}
+                        className="inline-flex items-center gap-2 rounded-xl bg-mushaf-paper text-mushaf-teal border border-mushaf-border/20 px-4 py-2.5 text-xs font-black hover:border-mushaf-teal/40"
+                      >
+                        مشاهدة الدروس
+                        <PlayCircle
+                          size={14}
+                        />
+                      </Link>
+                    )}
+                  </div>
+                </article>
+              )
+            }
+          )}
+        </section>
+
+        {!books.length && (
+          <section className="mt-5 rounded-[28px] bg-white border border-dashed border-gray-300 py-16 px-6 text-center">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-mushaf-paper text-mushaf-teal flex items-center justify-center">
+              <Search size={24} />
+            </div>
+
+            <h3 className="mt-5 text-lg font-black text-mushaf-dark">
+              لا توجد نتائج
+            </h3>
+
+            <p className="mt-2 text-sm leading-7 text-gray-500">
+              لا توجد كتب مطابقة للبحث داخل
+              المجال والمستوى المحددين حاليًا.
+            </p>
+
+            {query && (
+              <button
+                type="button"
+                onClick={() =>
+                  setQuery('')
+                }
+                className="mt-4 inline-flex items-center rounded-xl bg-mushaf-teal text-white px-4 py-2.5 text-xs font-black"
+              >
+                إلغاء البحث
+              </button>
             )}
           </section>
-        ) : null}
+        )}
+
+        <section className="mt-6 rounded-[28px] border border-mushaf-border/15 bg-white p-5 sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-mushaf-teal">
+                <LibraryBig
+                  size={19}
+                />
+
+                <h3 className="text-sm font-black">
+                  عن المكتبة الشرعية
+                </h3>
+              </div>
+
+              <p className="mt-2 text-xs leading-6 text-gray-500 max-w-3xl">
+                المكتبة تجمع المواد الشرعية في مستويات
+                متدرجة، وتدعم الكتب الأساسية والكتب التي
+                تتم إضافتها من لوحة الإدارة، مع إمكانية
+                ربط الشرح والدروس وملفات التحميل بكل كتاب.
+              </p>
+            </div>
+
+            <div className="shrink-0">
+              <Link
+                href="/admin?tab=library"
+                className="inline-flex items-center gap-2 rounded-xl border border-mushaf-gold/20 bg-mushaf-gold/5 text-mushaf-gold px-4 py-2.5 text-xs font-black"
+              >
+                إدارة المكتبة
+                <GraduationCap
+                  size={14}
+                />
+              </Link>
+            </div>
+          </div>
+        </section>
       </div>
     </main>
-  )
-}
-
-function LibraryBookCard({
-  book,
-}: {
-  book: SunniLibraryBook
-}) {
-  const categoryLabel =
-    book.category === 'aqidah'
-      ? 'العقيدة'
-      : book.category === 'fiqh'
-        ? 'الفقه'
-        : book.category === 'seerah'
-          ? 'السيرة'
-          : book.category === 'usul-tafsir'
-            ? 'أصول التفسير'
-            : book.category === 'usul-fiqh'
-              ? 'أصول الفقه'
-              : 'أصول الحديث'
-
-  return (
-    <article className="group flex h-full flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:border-[rgba(2,132,199,0.2)] hover:shadow-xl">
-      <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-white to-[rgba(2,132,199,0.05)] p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[rgba(2,132,199,0.09)] text-[var(--royal-blue)] shadow-sm">
-            <BookOpen size={30} />
-          </div>
-
-          <span className="rounded-full bg-amber-50 px-3 py-1.5 text-[11px] font-black text-amber-700">
-            {book.level}
-          </span>
-        </div>
-
-        <div className="mt-6">
-          <p className="text-[10px] font-black text-[var(--royal-blue)]">
-            {categoryLabel}
-          </p>
-
-          <h3 className="mt-1 text-xl font-black leading-8 text-[var(--text-main)]">
-            {book.title}
-          </h3>
-
-          <div className="mt-3 flex items-center gap-2 text-xs font-bold text-slate-500">
-            <UserRound
-              size={15}
-              className="text-[var(--royal-blue)]"
-            />
-
-            <span>
-              {book.author}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-1 flex-col p-5">
-        <p className="line-clamp-3 text-sm leading-7 text-slate-500">
-          {book.description}
-        </p>
-
-        <div className="mt-5 grid grid-cols-2 gap-2">
-          <Link
-            href={`/islamic-library/book/${encodeURIComponent(
-              book.id
-            )}`}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--royal-blue)] px-3 text-xs font-black text-white transition hover:opacity-90"
-          >
-            <BookOpen size={16} />
-            فتح الكتاب
-          </Link>
-
-          {book.downloadUrl ? (
-            <a
-              href={book.downloadUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[rgba(2,132,199,0.15)] bg-[rgba(2,132,199,0.05)] px-3 text-xs font-black text-[var(--royal-blue)] transition hover:bg-[rgba(2,132,199,0.09)]"
-            >
-              <Download size={16} />
-              تنزيل
-            </a>
-          ) : (
-            <Link
-              href={`/islamic-library/book/${encodeURIComponent(
-                book.id
-              )}`}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 transition hover:bg-slate-50"
-            >
-              <Layers3 size={16} />
-              التفاصيل
-            </Link>
-          )}
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <Link
-            href={`/islamic-library/book/${encodeURIComponent(
-              book.id
-            )}`}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] font-black text-slate-600 transition hover:bg-slate-100"
-          >
-            <PlayCircle size={15} />
-            الشرح والدروس
-          </Link>
-
-          {book.readingUrl ? (
-            <a
-              href={book.readingUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] font-black text-slate-600 transition hover:bg-slate-100"
-            >
-              <ArrowLeft size={15} />
-              المصدر
-            </a>
-          ) : (
-            <span className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] font-black text-slate-400">
-              <Layers3 size={15} />
-              قيد التجهيز
-            </span>
-          )}
-        </div>
-      </div>
-    </article>
-  )
-}
-
-function LibraryLoading() {
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {Array.from({
-        length: 6,
-      }).map((_, index) => (
-        <div
-          key={index}
-          className="animate-pulse rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm"
-        >
-          <div className="h-14 w-14 rounded-2xl bg-slate-100" />
-
-          <div className="mt-6 h-4 w-24 rounded bg-slate-100" />
-
-          <div className="mt-3 h-7 w-3/4 rounded bg-slate-100" />
-
-          <div className="mt-3 h-4 w-1/2 rounded bg-slate-100" />
-
-          <div className="mt-6 h-20 rounded-2xl bg-slate-50" />
-
-          <div className="mt-5 grid grid-cols-2 gap-2">
-            <div className="h-11 rounded-xl bg-slate-100" />
-            <div className="h-11 rounded-xl bg-slate-100" />
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function EmptyState({
-  title,
-  description,
-  onClear,
-}: {
-  title: string
-  description: string
-  onClear: () => void
-}) {
-  return (
-    <div className="rounded-[30px] border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-sm">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
-        <Search size={28} />
-      </div>
-
-      <h3 className="mt-5 text-lg font-black text-[var(--text-main)]">
-        {title}
-      </h3>
-
-      <p className="mx-auto mt-2 max-w-lg text-sm leading-7 text-slate-500">
-        {description}
-      </p>
-
-      <button
-        type="button"
-        onClick={onClear}
-        className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-[var(--royal-blue)] px-5 py-3 text-xs font-black text-white"
-      >
-        <RefreshCw size={15} />
-        مسح البحث
-      </button>
-    </div>
   )
 }
