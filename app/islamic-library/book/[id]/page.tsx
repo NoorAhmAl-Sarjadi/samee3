@@ -96,6 +96,7 @@ interface ReaderPayload {
 function getYouTubeId(url: string) {
   try {
     const parsed = new URL(url.trim())
+
     const host = parsed.hostname
       .replace(/^www\./, '')
       .toLowerCase()
@@ -137,6 +138,7 @@ function getYouTubeId(url: string) {
 function getVimeoId(url: string) {
   try {
     const parsed = new URL(url.trim())
+
     const host = parsed.hostname
       .replace(/^www\./, '')
       .toLowerCase()
@@ -240,20 +242,21 @@ function normalizeVideos(
     return []
   }
 
-  const videos =
-    value
-      .map((item, index) =>
+  const videos: LearningVideo[] = []
+
+  value.forEach(
+    (item, index) => {
+      const video =
         normalizeVideo(
           item,
           index,
-        ),
-      )
-      .filter(
-        (
-          item,
-        ): item is LearningVideo =>
-          item !== null,
-      )
+        )
+
+      if (video) {
+        videos.push(video)
+      }
+    },
+  )
 
   videos.sort(
     (a, b) =>
@@ -294,15 +297,49 @@ function normalizeReaderBook(
     return null
   }
 
-  const publication =
+  let publication:
+    | ReaderBook['publication']
+    | undefined
+
+  if (
     raw.publication &&
     typeof raw.publication ===
       'object'
-      ? (raw.publication as Record<
-          string,
-          unknown
-        >)
-      : null
+  ) {
+    const source =
+      raw.publication as Record<
+        string,
+        unknown
+      >
+
+    publication = {
+      publishYear:
+        typeof source.publishYear ===
+          'string' ||
+        typeof source.publishYear ===
+          'number'
+          ? source.publishYear
+          : null,
+
+      edition:
+        typeof source.edition ===
+        'string'
+          ? source.edition
+          : null,
+
+      publisher:
+        typeof source.publisher ===
+        'string'
+          ? source.publisher
+          : null,
+
+      parts:
+        typeof source.parts ===
+        'number'
+          ? source.parts
+          : null,
+    }
+  }
 
   return {
     id,
@@ -314,7 +351,8 @@ function normalizeReaderBook(
         : 'غير محدد',
 
     category:
-      typeof raw.category === 'string'
+      typeof raw.category ===
+      'string'
         ? raw.category.trim()
         : '',
 
@@ -389,38 +427,17 @@ function normalizeReaderBook(
         raw.videos,
       ),
 
-    publication: publication
-      ? {
-          publishYear:
-            typeof publication.publishYear ===
-              'string' ||
-            typeof publication.publishYear ===
-              'number'
-              ? publication.publishYear
-              : null,
-
-          edition:
-            typeof publication.edition ===
-            'string'
-              ? publication.edition
-              : null,
-
-          publisher:
-            typeof publication.publisher ===
-            'string'
-              ? publication.publisher
-              : null,
-
-          parts:
-            typeof publication.parts ===
-            'number'
-              ? publication.parts
-              : null,
-        }
-      : undefined,
+    publication,
   }
 }
 
+/*
+ * تم إصلاح هذه الدالة بالكامل.
+ *
+ * بدل map(...).filter(...) الذي تسبب في ظهور null
+ * داخل النوع النهائي، نبني المصفوفة النهائية
+ * يدويًا ونضيف العناصر الصحيحة فقط.
+ */
 function normalizeReaderContents(
   value: unknown,
 ): ReaderSection[] {
@@ -428,13 +445,15 @@ function normalizeReaderContents(
     return []
   }
 
-  return value
-    .map((item) => {
+  const result: ReaderSection[] = []
+
+  value.forEach(
+    (item) => {
       if (
         !item ||
         typeof item !== 'object'
       ) {
-        return null
+        return
       }
 
       const raw =
@@ -444,13 +463,12 @@ function normalizeReaderContents(
         >
 
       const text =
-        typeof raw.text ===
-        'string'
+        typeof raw.text === 'string'
           ? raw.text.trim()
           : ''
 
       if (!text) {
-        return null
+        return
       }
 
       const pageNumber =
@@ -459,39 +477,46 @@ function normalizeReaderContents(
       const partNumber =
         Number(raw.part)
 
-      return {
-        text,
+      const section =
+        typeof raw.section ===
+        'string'
+          ? raw.section.trim()
+          : ''
 
-        page:
-          Number.isFinite(
+      const normalizedItem: ReaderSection =
+        {
+          text,
+
+          ...(Number.isFinite(
             pageNumber,
-          ) &&
-          pageNumber > 0
-            ? pageNumber
-            : undefined,
+          ) && pageNumber > 0
+            ? {
+                page: pageNumber,
+              }
+            : {}),
 
-        part:
-          Number.isFinite(
+          ...(Number.isFinite(
             partNumber,
-          ) &&
-          partNumber > 0
-            ? partNumber
-            : undefined,
+          ) && partNumber > 0
+            ? {
+                part: partNumber,
+              }
+            : {}),
 
-        section:
-          typeof raw.section ===
-          'string'
-            ? raw.section.trim() ||
-              undefined
-            : undefined,
-      }
-    })
-    .filter(
-      (
-        item,
-      ): item is ReaderSection =>
-        item !== null,
-    )
+          ...(section
+            ? {
+                section,
+              }
+            : {}),
+        }
+
+      result.push(
+        normalizedItem,
+      )
+    },
+  )
+
+  return result
 }
 
 export default function IslamicBookReaderPage() {
@@ -578,14 +603,6 @@ export default function IslamicBookReaderPage() {
     setShowVideoList,
   ] = useState(true)
 
-  /*
-   * النسخة النهائية للكتاب:
-   * - كتاب Firestore يأخذ الأولوية.
-   * - الكتاب الثابت يبقى fallback.
-   *
-   * هذا يسمح بفتح كتاب أضافه الأدمن حتى لو
-   * لم يكن موجودًا في sunniLibrary.ts.
-   */
   const book =
     remoteBook ||
     staticBook
@@ -606,9 +623,11 @@ export default function IslamicBookReaderPage() {
   useEffect(() => {
     if (!bookId) {
       setLoading(false)
+
       setLoadError(
         'الكتاب غير موجود.',
       )
+
       return
     }
 
@@ -619,12 +638,6 @@ export default function IslamicBookReaderPage() {
         setLoading(true)
         setLoadError('')
 
-        /*
-         * مهم:
-         * يتم الطلب باستخدام bookId مباشرة،
-         * وليس اعتمادًا على وجود الكتاب داخل
-         * SUNNI_LIBRARY_BOOKS.
-         */
         const response =
           await fetch(
             `/api/islamic-library/book/${encodeURIComponent(
@@ -649,8 +662,10 @@ export default function IslamicBookReaderPage() {
           !data ||
           typeof data !==
             'object' ||
-          !(data as Record<string, unknown>)
-            .success
+          !(data as Record<
+            string,
+            unknown
+          >).success
         ) {
           throw new Error(
             'LOAD_FAILED',
@@ -757,13 +772,6 @@ export default function IslamicBookReaderPage() {
         )
 
         if (!cancelled) {
-          /*
-           * إذا كان الكتاب الثابت معروفًا محليًا،
-           * نعرضه مع رسالة بسيطة عند فشل المصدر.
-           *
-           * أما الكتاب الإداري المخصص فلا يوجد له
-           * fallback سوى بيانات API.
-           */
           if (!staticBook) {
             setRemoteBook(null)
           }
@@ -1337,8 +1345,7 @@ export default function IslamicBookReaderPage() {
       : 'firestore')
 
   const hasReaderContents =
-    filteredContents.length >
-      0
+    filteredContents.length > 0
 
   const contentFallbackText =
     book.description ||
