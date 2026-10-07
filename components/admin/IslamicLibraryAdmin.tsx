@@ -175,12 +175,14 @@ function createBookFromFirestore(
   const category =
     isCategory(data.category)
       ? data.category
-      : fallback?.category || 'aqidah'
+      : fallback?.category ||
+        'aqidah'
 
   const level =
     isLevel(data.level)
       ? data.level
-      : fallback?.level || 'مبتدئ'
+      : fallback?.level ||
+        'مبتدئ'
 
   const description =
     stringValue(data.description) ||
@@ -235,7 +237,8 @@ function createBookFromFirestore(
         ? data.quranpediaBookId
         : fallback?.quranpediaBookId,
     isCustom: !fallback,
-    deleted: data.deleted === true,
+    deleted:
+      data.deleted === true,
   }
 }
 
@@ -247,19 +250,25 @@ function buildBookForm(
     author: book.author || '',
     category: book.category,
     level: book.level,
-    description: book.description || '',
-    readingUrl: book.readingUrl || '',
+    description:
+      book.description || '',
+    readingUrl:
+      book.readingUrl || '',
     readingLabel:
       book.readingLabel ||
       'قراءة الكتاب',
     downloadUrl:
-      book.downloadUrl || '',
+      book.downloadUrl ||
+      '',
     sharhTitle:
-      book.sharhTitle || '',
+      book.sharhTitle ||
+      '',
     sharhAuthor:
-      book.sharhAuthor || '',
+      book.sharhAuthor ||
+      '',
     sharhUrl:
-      book.sharhUrl || '',
+      book.sharhUrl ||
+      '',
     sharhLabel:
       book.sharhLabel ||
       'فتح الشرح',
@@ -378,43 +387,51 @@ export default function IslamicLibraryAdmin() {
     [books, selectedBookId]
   )
 
-  const filteredBooks = useMemo(() => {
-    const query =
-      search.trim().toLowerCase()
-
-    return books.filter((book) => {
-      const matchesSearch =
-        !query ||
-        [
-          book.title,
-          book.author,
-          book.description,
-        ]
-          .join(' ')
+  const filteredBooks =
+    useMemo(() => {
+      const query =
+        search
+          .trim()
           .toLowerCase()
-          .includes(query)
 
-      const matchesLevel =
-        levelFilter === 'الكل' ||
-        book.level === levelFilter
+      return books.filter(
+        (book) => {
+          const matchesSearch =
+            !query ||
+            [
+              book.title,
+              book.author,
+              book.description,
+            ]
+              .join(' ')
+              .toLowerCase()
+              .includes(query)
 
-      const matchesCategory =
-        categoryFilter === 'الكل' ||
-        book.category ===
-          categoryFilter
+          const matchesLevel =
+            levelFilter ===
+              'الكل' ||
+            book.level ===
+              levelFilter
 
-      return (
-        matchesSearch &&
-        matchesLevel &&
-        matchesCategory
+          const matchesCategory =
+            categoryFilter ===
+              'الكل' ||
+            book.category ===
+              categoryFilter
+
+          return (
+            matchesSearch &&
+            matchesLevel &&
+            matchesCategory
+          )
+        }
       )
-    })
-  }, [
-    books,
-    search,
-    levelFilter,
-    categoryFilter,
-  ])
+    }, [
+      books,
+      search,
+      levelFilter,
+      categoryFilter,
+    ])
 
   const visibleBooksCount =
     books.filter(
@@ -496,8 +513,16 @@ export default function IslamicLibraryAdmin() {
         []
 
       for (
-        const staticBook of SUNNI_LIBRARY_BOOKS
+        let index = 0;
+        index <
+        SUNNI_LIBRARY_BOOKS.length;
+        index += 1
       ) {
+        const staticBook =
+          SUNNI_LIBRARY_BOOKS[
+            index
+          ]
+
         const override =
           firestoreMap.get(
             staticBook.id
@@ -529,24 +554,24 @@ export default function IslamicLibraryAdmin() {
         )
       }
 
-      for (
-        const [
-          id,
+      firestoreMap.forEach(
+        (
           data,
-        ] of firestoreMap.entries()
-      ) {
-        const customBook =
-          createBookFromFirestore(
-            id,
-            data
-          )
+          id
+        ) => {
+          const customBook =
+            createBookFromFirestore(
+              id,
+              data
+            )
 
-        if (customBook) {
-          merged.push(
-            customBook
-          )
+          if (customBook) {
+            merged.push(
+              customBook
+            )
+          }
         }
-      }
+      )
 
       merged.sort(
         (a, b) =>
@@ -556,7 +581,9 @@ export default function IslamicLibraryAdmin() {
           )
       )
 
-      setBooks(merged)
+      setBooks(
+        merged
+      )
 
       if (
         selectedBookId &&
@@ -566,7 +593,9 @@ export default function IslamicLibraryAdmin() {
             selectedBookId
         )
       ) {
-        setSelectedBookId(null)
+        setSelectedBookId(
+          null
+        )
       }
     } catch (loadError) {
       console.error(
@@ -624,7 +653,8 @@ export default function IslamicLibraryAdmin() {
                     data.title
                   ) ||
                   `الدرس ${
-                    index + 1
+                    index +
+                    1
                   }`,
                 url:
                   stringValue(
@@ -636,7 +666,8 @@ export default function IslamicLibraryAdmin() {
                     numericOrder
                   )
                     ? numericOrder
-                    : index + 1,
+                    : index +
+                      1,
               }
             }
           )
@@ -662,6 +693,7 @@ export default function IslamicLibraryAdmin() {
       )
 
       setVideos([])
+
       showError(
         'تعذر تحميل دروس الكتاب.'
       )
@@ -671,7 +703,9 @@ export default function IslamicLibraryAdmin() {
   }
 
   function openCreateBook() {
-    setEditingBookId(null)
+    setEditingBookId(
+      null
+    )
 
     setBookForm({
       ...EMPTY_BOOK_FORM,
@@ -700,7 +734,10 @@ export default function IslamicLibraryAdmin() {
     }
 
     setBookModalOpen(false)
-    setEditingBookId(null)
+    setEditingBookId(
+      null
+    )
+
     setBookForm({
       ...EMPTY_BOOK_FORM,
     })
@@ -838,7 +875,9 @@ export default function IslamicLibraryAdmin() {
         'تعذر حفظ الكتاب. تأكد من صلاحيات حساب الإدارة.'
       )
     } finally {
-      setSavingBook(false)
+      setSavingBook(
+        false
+      )
     }
   }
 
@@ -971,11 +1010,14 @@ export default function IslamicLibraryAdmin() {
       title: '',
       url: '',
       order: String(
-        videos.length + 1
+        videos.length +
+          1
       ),
     })
 
-    setVideoModalOpen(true)
+    setVideoModalOpen(
+      true
+    )
   }
 
   function openCreateVideoForBook(
@@ -993,11 +1035,14 @@ export default function IslamicLibraryAdmin() {
       title: '',
       url: '',
       order: String(
-        videos.length + 1
+        videos.length +
+          1
       ),
     })
 
-    setVideoModalOpen(true)
+    setVideoModalOpen(
+      true
+    )
   }
 
   function openEditVideo(
@@ -1015,7 +1060,9 @@ export default function IslamicLibraryAdmin() {
       ),
     })
 
-    setVideoModalOpen(true)
+    setVideoModalOpen(
+      true
+    )
   }
 
   function closeVideoModal() {
@@ -1023,8 +1070,13 @@ export default function IslamicLibraryAdmin() {
       return
     }
 
-    setVideoModalOpen(false)
-    setEditingVideoId(null)
+    setVideoModalOpen(
+      false
+    )
+
+    setEditingVideoId(
+      null
+    )
 
     setVideoForm({
       ...EMPTY_VIDEO_FORM,
@@ -1077,7 +1129,10 @@ export default function IslamicLibraryAdmin() {
     }
 
     try {
-      setSavingVideo(true)
+      setSavingVideo(
+        true
+      )
+
       setError('')
 
       const videoId =
@@ -1138,7 +1193,9 @@ export default function IslamicLibraryAdmin() {
         'تعذر حفظ الدرس. تأكد من صلاحيات حساب الإدارة.'
       )
     } finally {
-      setSavingVideo(false)
+      setSavingVideo(
+        false
+      )
     }
   }
 
@@ -1365,7 +1422,9 @@ export default function IslamicLibraryAdmin() {
                     </option>
 
                     {SUNNI_LIBRARY_LEVELS.map(
-                      (level) => (
+                      (
+                        level
+                      ) => (
                         <option
                           key={
                             level.id
@@ -1490,9 +1549,7 @@ export default function IslamicLibraryAdmin() {
                             >
                               <div className="flex items-center gap-3">
                                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sky-600">
-                                  <BookOpen
-                                    size={23}
-                                  />
+                                  <BookOpen size={23} />
                                 </div>
 
                                 <div className="min-w-0">
@@ -1544,7 +1601,9 @@ export default function IslamicLibraryAdmin() {
                               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-sky-200 hover:text-sky-600"
                               title="تعديل الكتاب"
                             >
-                              <Pencil size={16} />
+                              <Pencil
+                                size={16}
+                              />
                             </button>
                           </div>
 
@@ -1660,7 +1719,9 @@ export default function IslamicLibraryAdmin() {
                                     className="animate-spin"
                                   />
                                 ) : (
-                                  <Trash2 size={13} />
+                                  <Trash2
+                                    size={13}
+                                  />
                                 )}
 
                                 {book.isCustom
@@ -2117,7 +2178,6 @@ export default function IslamicLibraryAdmin() {
                             readingLabel:
                               value,
                           })
-                        )
                       }
                       placeholder="قراءة الكتاب"
                     />
@@ -2321,6 +2381,7 @@ export default function IslamicLibraryAdmin() {
                   )
                 }
                 placeholder="رابط YouTube أو رابط ملف فيديو مباشر"
+                type="url"
               />
 
               <FormField
