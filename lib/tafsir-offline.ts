@@ -1,9 +1,3 @@
-
-/**
- * SAMEE3 — Offline Tafsir Library
- * Path: lib/tafsir-offline.ts
- */
-
 export const OFFLINE_TAFSIR_BOOKS = [
   2012, 136, 4, 2, 3, 1469, 27796, 54,
 ] as const
@@ -23,63 +17,25 @@ type OfflineVerse = {
 const DB_NAME = 'samee3-tafsir-library-v1'
 const DB_VERSION = 1
 
-function asObject(
+const MAX_TRANSFER_BYTES = 30 * 1024 * 1024
+const MAX_DECOMPRESSED_BYTES = 120 * 1024 * 1024
+const MIN_IMPORTED_ENTRIES = 100
+const MAX_VISITED_NODES = 500000
+const MAX_TEXT_LENGTH = 300000
+
+function objectOf(
   value: unknown,
 ): Record<string, unknown> | null {
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    Array.isArray(value)
-  ) {
-    return null
-  }
-
-  return value as Record<string, unknown>
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  )
+    ? value as Record<string, unknown>
+    : null
 }
 
-function cleanHtml(value: string): string {
-  return value
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|div|li|blockquote)>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\r/g, '')
-    .trim()
-}
-
-function unpackText(value: unknown): string {
-  if (typeof value === 'string') {
-    return cleanHtml(value)
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .map(unpackText)
-      .filter(Boolean)
-      .join('\n\n')
-  }
-
-  const data = asObject(value)
-
-  if (!data) return ''
-
-  if (typeof data.text === 'string') {
-    return cleanHtml(data.text)
-  }
-
-  if (data.content) {
-    return unpackText(data.content)
-  }
-
-  return ''
-}
-
-function asNumber(value: unknown): number {
+function positiveInteger(value: unknown): number {
   if (
     typeof value !== 'string' &&
     typeof value !== 'number'
@@ -87,162 +43,254 @@ function asNumber(value: unknown): number {
     return 0
   }
 
+  if (
+    typeof value === 'string' &&
+    !/^\d+$/.test(value)
+  ) {
+    return 0
+  }
+
   const number = Number(value)
 
-  return Number.isInteger(number) && number > 0
+  return Number.isSafeInteger(number) && number > 0
     ? number
     : 0
 }
 
-function parseOfficialDump(
-  raw: unknown,
-  book: number,
+function textOnly(value: string): string {
+  return value
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(
+      /<\/(?:p|div|li|blockquote)>/gi,
+      '\n',
+    )
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\r/g, '')
+    .trim()
+}
+
+function contentText(value: unknown): string {
+  if (typeof value === 'string') {
+    return textOnly(value)
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map(contentText)
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
+  const item = objectOf(value)
+
+  if (!item) return ''
+
+  return contentText(
+    item.text ??
+    item.content ??
+    item.tafsir,
+  )
+}
+
+function parseBookDump(
+  source: unknown,
+  bookId: number,
 ): OfflineVerse[] {
-  const entries = new Map<string, string>()
+  const output = new Map<string, string>()
+  const endpointKeys = new Set<string>()
+
   let visited = 0
 
-  function visit(
-    value: unknown,
+  const store = (
+    surah: number,
+    ayah: number,
+    text: string,
+  ) => {
+    if (
+      surah < 1 ||
+      surah > 114 ||
+      ayah < 1 ||
+      ayah > 286 ||
+      !text
+    ) {
+      return
+    }
+
+    if (text.length > MAX_TEXT_LENGTH) {
+      return
+    }
+
+    output.set(
+      `${bookId}:${surah}:${ayah}`,
+      text,
+    )
+  }
+
+  const storeRange = (
+    range: unknown,
+    text: string,
+  ) => {
+    if (
+      typeof range !== 'string' ||
+      !text
+    ) {
+      return
+    }
+
+    const match = range.match(
+      /^(\d{1,3}):(\d{1,3})(?:-(?:(\d{1,3}):)?(\d{1,3}))?$/,
+    )
+
+    if (!match) return
+
+    const surah = Number(match[1])
+
+    const lastSurah = match[3]
+      ? Number(match[3])
+      : surah
+
+    const start = Number(match[2])
+
+    const end = match[4]
+      ? Number(match[4])
+      : start
+
+    if (
+      surah !== lastSurah ||
+      start > end ||
+      end - start > 285
+    ) {
+      return
+    }
+
+    for (
+      let ayah = start;
+      ayah <= end;
+      ayah += 1
+    ) {
+      store(surah, ayah, text)
+    }
+  }
+
+  const visit = (
+    node: unknown,
     surahHint = 0,
     ayahHint = 0,
     depth = 0,
-  ): void {
+  ): void => {
     visited += 1
 
-    if (depth > 9 || visited > 350000) return
-
-    if (typeof value === 'string') {
-      if (
-        surahHint >= 1 &&
-        surahHint <= 114 &&
-        ayahHint >= 1 &&
-        ayahHint <= 286
-      ) {
-        const content = cleanHtml(value)
-
-        if (content) {
-          entries.set(
-            `${book}:${surahHint}:${ayahHint}`,
-            content,
-          )
-        }
-      }
-
+    if (
+      depth > 16 ||
+      visited > MAX_VISITED_NODES
+    ) {
       return
     }
 
-    if (Array.isArray(value)) {
-      value.forEach((item) => {
-        visit(item, surahHint, ayahHint, depth + 1)
+    if (typeof node === 'string') {
+      store(
+        surahHint,
+        ayahHint,
+        textOnly(node),
+      )
+      return
+    }
+
+    if (Array.isArray(node)) {
+      node.forEach((entry) => {
+        visit(
+          entry,
+          surahHint,
+          ayahHint,
+          depth + 1,
+        )
       })
-
       return
     }
 
-    const data = asObject(value)
-    if (!data) return
+    const item = objectOf(node)
 
-    const surah = asNumber(
-      data.surah_id ??
-      data.surah_number ??
-      data.surah ??
+    if (!item) return
+
+    const surah = positiveInteger(
+      item.surah_id ??
+      item.surah_number ??
+      item.surah ??
       surahHint,
     )
 
-    const ayah = asNumber(
-      data.ayah_number ??
-      data.ayah_id ??
-      data.ayah ??
-      data.number ??
+    const ayah = positiveInteger(
+      item.ayah_number ??
+      item.ayah_id ??
+      item.ayah ??
+      item.number ??
       ayahHint,
     )
 
-    const bookId = asNumber(
-      data.book_id ?? data.book,
+    const rawBook = objectOf(item.book)
+
+    const itemBook = positiveInteger(
+      item.book_id ??
+      rawBook?.id ??
+      item.book,
     )
 
-    const content = unpackText(
-      data.content ?? data.text ?? data.tafsir,
+    const value = contentText(
+      item.content ??
+      item.text ??
+      item.tafsir,
     )
 
     if (
-      surah >= 1 &&
-      surah <= 114 &&
-      ayah >= 1 &&
-      ayah <= 286 &&
-      (!bookId || bookId === book) &&
-      content
+      !itemBook ||
+      itemBook === bookId
     ) {
-      entries.set(
-        `${book}:${surah}:${ayah}`,
-        content,
-      )
+      store(surah, ayah, value)
+      storeRange(item.ayahs, value)
     }
 
-    if (
-      content &&
-      !ayah &&
-      typeof data.ayahs === 'string'
-    ) {
-      const single = data.ayahs.match(
-        /^(\d{1,3}):(\d{1,3})$/,
-      )
+    if (Array.isArray(item.content)) {
+      item.content.forEach((part) => {
+        const data = objectOf(part)
 
-      if (single) {
-        entries.set(
-          `${book}:${Number(single[1])}:${Number(single[2])}`,
-          content,
-        )
-      }
-
-      const range = data.ayahs.match(
-        /^(\d{1,3}):(\d{1,3})-(?:(\d{1,3}):)?(\d{1,3})$/,
-      )
-
-      if (range) {
-        const firstSurah = Number(range[1])
-        const lastSurah = range[3]
-          ? Number(range[3])
-          : firstSurah
-
-        const start = Number(range[2])
-        const end = Number(range[4])
-
-        if (
-          firstSurah === lastSurah &&
-          firstSurah >= 1 &&
-          firstSurah <= 114 &&
-          start >= 1 &&
-          end <= 286 &&
-          end >= start &&
-          end - start < 40
-        ) {
-          for (let n = start; n <= end; n += 1) {
-            entries.set(
-              `${book}:${firstSurah}:${n}`,
-              content,
-            )
-          }
+        if (data) {
+          storeRange(
+            data.ayahs,
+            contentText(
+              data.text ?? data.content,
+            ),
+          )
         }
-      }
+      })
     }
 
-    const nestedFields = [
+    const nested = [
       'data',
       'items',
       'records',
-      'ayahs',
       'verses',
       'entries',
       'results',
       'payload',
       'response',
+      'ayahs',
     ]
 
-    nestedFields.forEach((field) => {
-      if (data[field]) {
+    nested.forEach((key) => {
+      const child = item[key]
+
+      if (
+        child &&
+        typeof child === 'object'
+      ) {
         visit(
-          data[field],
+          child,
           surah,
           0,
           depth + 1,
@@ -250,48 +298,65 @@ function parseOfficialDump(
       }
     })
 
-    Object.keys(data).forEach((key) => {
-      const apiPath = key.match(
-        /\/ayah\/(\d{1,3})\/(\d{1,3})\/book\/(\d+)/,
+    Object.keys(item).forEach((key) => {
+      const endpoint = key.match(
+        /(?:^|\/)ayah\/(\d{1,3})\/(\d{1,3})\/book\/(\d+)/,
       )
 
-      if (
-        apiPath &&
-        Number(apiPath[3]) === book
-      ) {
-        visit(
-          {
-            surah: Number(apiPath[1]),
-            ayah: Number(apiPath[2]),
-            content: data[key],
-          },
-          0,
-          0,
-          depth + 1,
-        )
-      } else if (/^\d{1,3}:\d{1,3}$/.test(key)) {
-        const numbers = key.split(':').map(Number)
+      if (endpoint) {
+        if (
+          Number(endpoint[3]) !== bookId
+        ) {
+          return
+        }
+
+        endpointKeys.add(key)
 
         visit(
-          {
-            surah: numbers[0],
-            ayah: numbers[1],
-            content: data[key],
-          },
-          0,
-          0,
+          item[key],
+          Number(endpoint[1]),
+          Number(endpoint[2]),
           depth + 1,
         )
-      } else if (/^\d{1,3}$/.test(key)) {
-        const n = Number(key)
 
-        if (surahHint === 0 && n <= 114) {
-          visit(data[key], n, 0, depth + 1)
-        } else if (surahHint > 0 && n <= 286) {
+        return
+      }
+
+      const pair = key.match(
+        /^(\d{1,3}):(\d{1,3})$/,
+      )
+
+      if (pair) {
+        visit(
+          item[key],
+          Number(pair[1]),
+          Number(pair[2]),
+          depth + 1,
+        )
+        return
+      }
+
+      if (/^\d{1,3}$/.test(key)) {
+        const number = Number(key)
+
+        if (
+          !surahHint &&
+          number <= 114
+        ) {
           visit(
-            data[key],
+            item[key],
+            number,
+            0,
+            depth + 1,
+          )
+        } else if (
+          surahHint &&
+          number <= 286
+        ) {
+          visit(
+            item[key],
             surahHint,
-            n,
+            number,
             depth + 1,
           )
         }
@@ -299,21 +364,46 @@ function parseOfficialDump(
     })
   }
 
-  visit(raw)
+  visit(source)
 
-  return Array.from(entries).map(
-    ([key, value]) => ({
-      key,
-      text: value,
-    }),
-  )
+  const result = Array.from(
+    output.entries(),
+  ).map(([key, text]) => ({
+    key,
+    text,
+  }))
+
+  if (
+    visited > MAX_VISITED_NODES ||
+    result.length < MIN_IMPORTED_ENTRIES
+  ) {
+    throw new Error(
+      'الملف لا يحتوي على بيانات تفسير كافية؛ لم يتم تغيير الكتاب المحفوظ.',
+    )
+  }
+
+  if (
+    endpointKeys.size >= 500 &&
+    result.length <
+      Math.floor(endpointKeys.size * 0.5)
+  ) {
+    throw new Error(
+      'تعذر فهرسة معظم محتوى الكتاب؛ لم يتم تغيير النسخة السابقة.',
+    )
+  }
+
+  return result
 }
 
 function openLibrary(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
+    if (
+      typeof indexedDB === 'undefined'
+    ) {
       reject(
-        new Error('التخزين المحلي غير متاح.'),
+        new Error(
+          'التخزين المحلي غير متاح في هذا المتصفح.',
+        ),
       )
       return
     }
@@ -324,32 +414,65 @@ function openLibrary(): Promise<IDBDatabase> {
     )
 
     request.onupgradeneeded = () => {
-      const database = request.result
+      const db = request.result
 
-      if (!database.objectStoreNames.contains('verses')) {
-        database.createObjectStore('verses', {
+      if (
+        !db.objectStoreNames.contains(
+          'verses',
+        )
+      ) {
+        db.createObjectStore('verses', {
           keyPath: 'key',
         })
       }
 
-      if (!database.objectStoreNames.contains('books')) {
-        database.createObjectStore('books', {
+      if (
+        !db.objectStoreNames.contains(
+          'books',
+        )
+      ) {
+        db.createObjectStore('books', {
           keyPath: 'id',
         })
       }
     }
 
-    request.onsuccess = () => {
-      resolve(request.result)
+    request.onblocked = () => {
+      reject(
+        new Error(
+          'أغلق تبويبات مصحف سميع الأخرى وأعد المحاولة.',
+        ),
+      )
     }
 
     request.onerror = () => {
       reject(
         request.error ||
-        new Error('تعذر فتح المكتبة المحلية.'),
+        new Error(
+          'تعذر فتح التخزين المحلي.',
+        ),
       )
     }
+
+    request.onsuccess = () => {
+      const db = request.result
+
+      db.onversionchange = () => {
+        db.close()
+      }
+
+      resolve(db)
+    }
   })
+}
+
+function rangeForBook(
+  book: number,
+): IDBKeyRange {
+  return IDBKeyRange.bound(
+    `${book}:`,
+    `${book}:\uffff`,
+  )
 }
 
 export async function getOfflineTafsir(
@@ -357,130 +480,356 @@ export async function getOfflineTafsir(
   surah: number,
   ayah: number,
 ): Promise<string | null> {
-  const database = await openLibrary()
+  const db = await openLibrary()
 
   try {
-    return await new Promise((resolve, reject) => {
-      const transaction = database.transaction(
-        'verses',
+    return await new Promise<
+      string | null
+    >((resolve, reject) => {
+      const tx = db.transaction(
+        ['books', 'verses'],
         'readonly',
       )
 
-      const request = transaction
-        .objectStore('verses')
-        .get(`${book}:${surah}:${ayah}`)
+      let metadata:
+        | OfflineBook
+        | undefined
 
-      request.onsuccess = () => {
+      let verse:
+        | OfflineVerse
+        | undefined
+
+      const bookRequest = tx
+        .objectStore('books')
+        .get(book)
+
+      const verseRequest = tx
+        .objectStore('verses')
+        .get(
+          `${book}:${surah}:${ayah}`,
+        )
+
+      bookRequest.onsuccess = () => {
+        metadata = bookRequest.result as
+          | OfflineBook
+          | undefined
+      }
+
+      verseRequest.onsuccess = () => {
+        verse = verseRequest.result as
+          | OfflineVerse
+          | undefined
+      }
+
+      tx.oncomplete = () => {
         resolve(
-          typeof request.result?.text === 'string'
-            ? request.result.text
+          metadata &&
+          metadata.entries >=
+            MIN_IMPORTED_ENTRIES &&
+          typeof verse?.text === 'string'
+            ? verse.text
             : null,
         )
       }
 
-      request.onerror = () => {
-        reject(request.error)
+      tx.onerror = () => {
+        reject(
+          tx.error ||
+          new Error(
+            'تعذر قراءة التفسير المحفوظ.',
+          ),
+        )
+      }
+
+      tx.onabort = () => {
+        reject(
+          tx.error ||
+          new Error(
+            'تعذر قراءة التفسير المحفوظ.',
+          ),
+        )
       }
     })
   } finally {
-    database.close()
+    db.close()
   }
 }
 
-export async function listOfflineTafsirs(): Promise<
-  OfflineBook[]
-> {
-  const database = await openLibrary()
+export async function listOfflineTafsirs():
+  Promise<OfflineBook[]> {
+  const db = await openLibrary()
 
   try {
-    return await new Promise((resolve, reject) => {
-      const transaction = database.transaction(
-        'books',
+    return await new Promise<
+      OfflineBook[]
+    >((resolve, reject) => {
+      const tx = db.transaction(
+        ['books', 'verses'],
         'readonly',
       )
 
-      const request = transaction
+      const books = tx
         .objectStore('books')
         .getAll()
 
-      request.onsuccess = () => {
-        resolve(request.result as OfflineBook[])
+      const checked: OfflineBook[] = []
+
+      books.onsuccess = () => {
+        const values =
+          books.result as OfflineBook[]
+
+        values.forEach((item) => {
+          if (
+            !item ||
+            !Number.isInteger(item.id) ||
+            item.entries <
+              MIN_IMPORTED_ENTRIES
+          ) {
+            return
+          }
+
+          const count = tx
+            .objectStore('verses')
+            .count(
+              rangeForBook(item.id),
+            )
+
+          count.onsuccess = () => {
+            if (
+              count.result === item.entries
+            ) {
+              checked.push(item)
+            }
+          }
+        })
       }
 
-      request.onerror = () => {
-        reject(request.error)
+      tx.oncomplete = () => {
+        resolve(
+          checked.sort(
+            (a, b) => a.id - b.id,
+          ),
+        )
+      }
+
+      tx.onerror = () => {
+        reject(
+          tx.error ||
+          new Error(
+            'تعذر فحص الكتب المحفوظة.',
+          ),
+        )
+      }
+
+      tx.onabort = () => {
+        reject(
+          tx.error ||
+          new Error(
+            'تعذر فحص الكتب المحفوظة.',
+          ),
+        )
       }
     })
   } finally {
-    database.close()
+    db.close()
   }
 }
 
 export async function removeOfflineTafsir(
   book: number,
 ): Promise<void> {
-  const database = await openLibrary()
+  const db = await openLibrary()
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(
-        ['books', 'verses'],
-        'readwrite',
-      )
+    await new Promise<void>(
+      (resolve, reject) => {
+        const tx = db.transaction(
+          ['books', 'verses'],
+          'readwrite',
+        )
 
-      transaction
-        .objectStore('books')
-        .delete(book)
+        const cursorRequest = tx
+          .objectStore('verses')
+          .openCursor(
+            rangeForBook(book),
+          )
 
-      const range = IDBKeyRange.bound(
-        `${book}:`,
-        `${book}:\uffff`,
-      )
+        cursorRequest.onsuccess = () => {
+          const cursor =
+            cursorRequest.result
 
-      const cursorRequest = transaction
-        .objectStore('verses')
-        .openCursor(range)
-
-      cursorRequest.onsuccess = () => {
-        const cursor = cursorRequest.result
-
-        if (cursor) {
-          cursor.delete()
-          cursor.continue()
+          if (cursor) {
+            cursor.delete()
+            cursor.continue()
+          } else {
+            tx
+              .objectStore('books')
+              .delete(book)
+          }
         }
+
+        tx.oncomplete = () => {
+          resolve()
+        }
+
+        tx.onerror = () => {
+          reject(
+            tx.error ||
+            new Error(
+              'تعذر حذف الكتاب.',
+            ),
+          )
+        }
+
+        tx.onabort = () => {
+          reject(
+            tx.error ||
+            new Error(
+              'تعذر حذف الكتاب.',
+            ),
+          )
+        }
+      },
+    )
+  } finally {
+    db.close()
+  }
+}
+
+async function readStreamAsText(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const reader = stream.getReader()
+
+  const decoder = new TextDecoder(
+    'utf-8',
+    { fatal: true },
+  )
+
+  const parts: string[] = []
+
+  let size = 0
+
+  try {
+    for (;;) {
+      if (signal.aborted) {
+        throw new Error(
+          'تم إيقاف التنزيل.',
+        )
       }
 
-      transaction.oncomplete = () => resolve()
-      transaction.onerror = () =>
-        reject(transaction.error)
-      transaction.onabort = () =>
-        reject(transaction.error)
-    })
+      const chunk = await reader.read()
+
+      if (chunk.done) break
+      if (!chunk.value) continue
+
+      size += chunk.value.byteLength
+
+      if (size > maxBytes) {
+        throw new Error(
+          'الكتاب أكبر من سعة المعالجة الآمنة لهذا الجهاز.',
+        )
+      }
+
+      parts.push(
+        decoder.decode(
+          chunk.value,
+          { stream: true },
+        ),
+      )
+    }
+
+    parts.push(
+      decoder.decode(),
+    )
+
+    return parts.join('')
   } finally {
-    database.close()
+    if (
+      signal.aborted ||
+      size > maxBytes
+    ) {
+      void reader
+        .cancel()
+        .catch(() => undefined)
+    }
+
+    reader.releaseLock()
   }
+}
+
+async function decodeDownload(
+  blob: Blob,
+  signal: AbortSignal,
+): Promise<string> {
+  const signature = new Uint8Array(
+    await blob
+      .slice(0, 2)
+      .arrayBuffer(),
+  )
+
+  const gzipped =
+    signature[0] === 0x1f &&
+    signature[1] === 0x8b
+
+  if (gzipped) {
+    if (
+      typeof DecompressionStream ===
+      'undefined'
+    ) {
+      throw new Error(
+        'المتصفح لا يدعم فك ضغط التفسير. جرّب تحديث المتصفح.',
+      )
+    }
+
+    return readStreamAsText(
+      blob
+        .stream()
+        .pipeThrough(
+          new DecompressionStream(
+            'gzip',
+          ),
+        ),
+      MAX_DECOMPRESSED_BYTES,
+      signal,
+    )
+  }
+
+  return readStreamAsText(
+    blob.stream(),
+    MAX_DECOMPRESSED_BYTES,
+    signal,
+  )
 }
 
 export async function downloadOfflineTafsir(
   book: number,
   signal: AbortSignal,
-  onProgress: (message: string) => void,
+  onProgress: (
+    message: string,
+  ) => void,
 ): Promise<OfflineBook> {
   if (
     !OFFLINE_TAFSIR_BOOKS.includes(
       book as typeof OFFLINE_TAFSIR_BOOKS[number],
     )
   ) {
-    throw new Error('كتاب التفسير غير مدعوم.')
-  }
-
-  if (typeof DecompressionStream === 'undefined') {
     throw new Error(
-      'متصفحك لا يدعم فك ضغط كتب التفسير.',
+      'هذا الكتاب غير متاح للتنزيل.',
     )
   }
 
-  onProgress('جارٍ تنزيل التفسير…')
+  if (signal.aborted) {
+    throw new Error(
+      'تم إيقاف التنزيل.',
+    )
+  }
+
+  onProgress(
+    'جارٍ تنزيل كتاب التفسير…',
+  )
 
   const response = await fetch(
     `/api/tafsir-download?book=${book}`,
@@ -490,98 +839,160 @@ export async function downloadOfflineTafsir(
     },
   )
 
-  if (!response.ok || !response.body) {
+  if (
+    !response.ok ||
+    !response.body
+  ) {
     throw new Error(
-      'تعذر تنزيل التفسير من المصدر.',
+      'تعذر تنزيل كتاب التفسير. تحقق من اتصال الإنترنت ومسار التنزيل.',
     )
   }
 
-  const expected = Number(
-    response.headers.get('content-length') || 0,
+  const declared = Number(
+    response.headers.get(
+      'content-length',
+    ) || 0,
   )
 
-  const maximum = 30 * 1024 * 1024
-
-  if (expected > maximum) {
-    throw new Error('حجم الملف كبير جدًا.')
+  if (
+    declared >
+    MAX_TRANSFER_BYTES
+  ) {
+    throw new Error(
+      'حجم الملف تجاوز الحد المسموح.',
+    )
   }
 
+  const reader =
+    response.body.getReader()
+
   const chunks: Uint8Array[] = []
-  const reader = response.body.getReader()
 
   let received = 0
 
-  for (;;) {
-    if (signal.aborted) {
-      throw new Error('تم إيقاف التنزيل.')
-    }
+  try {
+    for (;;) {
+      if (signal.aborted) {
+        throw new Error(
+          'تم إيقاف التنزيل.',
+        )
+      }
 
-    const result = await reader.read()
+      const packet =
+        await reader.read()
 
-    if (result.done) break
-    if (!result.value) continue
+      if (packet.done) break
+      if (!packet.value) continue
 
-    received += result.value.byteLength
+      received +=
+        packet.value.byteLength
 
-    if (received > maximum) {
-      throw new Error(
-        'حجم الملف تجاوز الحد المسموح.',
+      if (
+        received >
+        MAX_TRANSFER_BYTES
+      ) {
+        throw new Error(
+          'الملف أكبر من الحد المسموح.',
+        )
+      }
+
+      chunks.push(packet.value)
+
+      onProgress(
+        declared
+          ? `جارٍ التنزيل: ${Math.min(
+              100,
+              Math.floor(
+                (received / declared) *
+                  100,
+              ),
+            )}%`
+          : `تم استقبال ${(
+              received / 1048576
+            ).toFixed(1)} م.ب`,
       )
     }
+  } catch (error) {
+    void reader
+      .cancel()
+      .catch(() => undefined)
 
-    chunks.push(result.value)
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
 
-    onProgress(
-      expected
-        ? `جارٍ التنزيل: ${Math.min(
-            100,
-            Math.round(
-              (received / expected) * 100,
-            ),
-          )}%`
-        : `تم استقبال ${(
-            received / 1048576
-          ).toFixed(1)} ميجابايت`,
+  if (
+    !received ||
+    signal.aborted
+  ) {
+    throw new Error(
+      'لم يكتمل تنزيل الكتاب.',
     )
   }
 
-  onProgress('جارٍ معالجة كتاب التفسير…')
+  if (
+    declared &&
+    received !== declared
+  ) {
+    throw new Error(
+      'انقطع التنزيل قبل اكتمال الملف. الكتاب السابق لم يتغير.',
+    )
+  }
 
-  const blob = new Blob(
+  onProgress(
+    'جارٍ فك الضغط والتحقق من بيانات الكتاب…',
+  )
+
+  const archive = new Blob(
     chunks as BlobPart[],
-    { type: 'application/gzip' },
+    {
+      type:
+        'application/octet-stream',
+    },
   )
 
-  const signature = new Uint8Array(
-    await blob.slice(0, 2).arrayBuffer(),
+  const text = await decodeDownload(
+    archive,
+    signal,
   )
-
-  const text =
-    signature[0] === 0x1f &&
-    signature[1] === 0x8b
-      ? await new Response(
-          blob.stream().pipeThrough(
-            new DecompressionStream('gzip'),
-          ),
-        ).text()
-      : await blob.text()
 
   if (signal.aborted) {
-    throw new Error('تم إيقاف التنزيل.')
-  }
-
-  const parsed: unknown = JSON.parse(text)
-  const verses = parseOfficialDump(parsed, book)
-
-  if (verses.length < 100) {
     throw new Error(
-      'تعذر التعرف على تنسيق بيانات التفسير.',
+      'تم إيقاف التنزيل.',
     )
   }
 
-  onProgress('جارٍ حفظ التفسير على الجهاز…')
+  let parsed: unknown
 
-  const database = await openLibrary()
+  try {
+    parsed = JSON.parse(
+      text,
+    ) as unknown
+  } catch {
+    throw new Error(
+      'ملف التفسير غير صالح أو غير مكتمل؛ لم يتم تغيير النسخة السابقة.',
+    )
+  }
+
+  const verses = parseBookDump(
+    parsed,
+    book,
+  )
+
+  if (signal.aborted) {
+    throw new Error(
+      'تم إيقاف التنزيل.',
+    )
+  }
+
+  onProgress(
+    `جارٍ حفظ ${verses.length.toLocaleString(
+      'ar-EG',
+    )} تفسير آية…`,
+  )
+
+  const db = await openLibrary()
 
   const metadata: OfflineBook = {
     id: book,
@@ -591,57 +1002,79 @@ export async function downloadOfflineTafsir(
   }
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(
-        ['verses', 'books'],
-        'readwrite',
-      )
+    await new Promise<void>(
+      (resolve, reject) => {
+        const tx = db.transaction(
+          ['verses', 'books'],
+          'readwrite',
+        )
 
-      const store = transaction.objectStore('verses')
+        const versesStore =
+          tx.objectStore(
+            'verses',
+          )
 
-      const cursorRequest = store.openCursor(
-        IDBKeyRange.bound(
-          `${book}:`,
-          `${book}:\uffff`,
-        ),
-      )
+        const oldCursor =
+          versesStore.openCursor(
+            rangeForBook(book),
+          )
 
-      cursorRequest.onsuccess = () => {
-        const cursor = cursorRequest.result
+        oldCursor.onsuccess = () => {
+          const cursor =
+            oldCursor.result
 
-        if (cursor) {
-          cursor.delete()
-          cursor.continue()
-        } else {
+          if (cursor) {
+            cursor.delete()
+            cursor.continue()
+            return
+          }
+
+          // One atomic transaction.
           verses.forEach((verse) => {
-            store.put(verse)
+            versesStore.put(
+              verse,
+            )
           })
 
-          transaction
+          tx
             .objectStore('books')
             .put(metadata)
         }
-      }
 
-      transaction.oncomplete = () => resolve()
+        tx.oncomplete = () => {
+          resolve()
+        }
 
-      transaction.onerror = () => {
-        reject(
-          transaction.error ||
-          new Error('تعذر حفظ التفسير.'),
-        )
-      }
+        tx.onerror = () => {
+          reject(
+            tx.error ||
+            new Error(
+              'تعذر حفظ التفسير.',
+            ),
+          )
+        }
 
-      transaction.onabort = () => {
-        reject(
-          transaction.error ||
-          new Error('مساحة التخزين غير كافية.'),
-        )
-      }
-    })
+        tx.onabort = () => {
+          reject(
+            tx.error ||
+            new Error(
+              'تعذر الحفظ؛ ربما امتلأت مساحة التخزين.',
+            ),
+          )
+        }
+
+        if (signal.aborted) {
+          tx.abort()
+        }
+      },
+    )
+
+    onProgress(
+      'تم حفظ كتاب التفسير بنجاح وهو جاهز للقراءة دون نت.',
+    )
 
     return metadata
   } finally {
-    database.close()
+    db.close()
   }
 }
