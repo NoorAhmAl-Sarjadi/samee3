@@ -202,7 +202,6 @@ const ALL_MUSHAF_RIWAYAT: Riwaya[] = [
 ]
 
 const SAMEE3_MUSHAF_PAGE_CACHE_NAME = 'samee3-mushaf-pages-v2'
-const SAMEE3_MUSHAF_WARMUP_STATE_KEY = 'samee3_mushaf_full_warmup_v2'
 
 const RIWAYA_NAMES: Record<Riwaya, string> = {
   hafs: 'حفص عن عاصم',
@@ -1350,6 +1349,366 @@ function getMoshafForRiwaya(
   return null
 }
 
+/**
+ * شاشة الاختيار الأولي لقراءة المصحف.
+ * تراجع Cache Storage الخاص بالرواية المختارة، وتحمّل 604 صفحة
+ * (النص + SVG + صورة الصفحة للسوسي والبزي) بناءً على موافقة المستخدم.
+ * تحافظ على التنزيلات السابقة وتستكمل الناقص فقط.
+ */
+type MushafDownloadChoice = 'checking' | 'choose' | 'downloading' | 'ready'
+type MushafDownloadMode = 'hafs' | 'single' | 'all'
+
+type MushafCacheSummary = {
+  completed: Record<Riwaya, Set<number>>
+  supported: boolean
+}
+
+const MUSHAF_TOTAL_PAGES = 604
+const MUSHAF_ONLINE_SESSION_PREFIX = 'samee3_mushaf_online_choice_v1:'
+
+function emptyMushafCache(): Record<Riwaya, Set<number>> {
+  return {
+    hafs: new Set<number>(), warsh: new Set<number>(), qalun: new Set<number>(),
+    douri: new Set<number>(), shubah: new Set<number>(),
+    sousi: new Set<number>(), bazzi: new Set<number>(),
+  }
+}
+
+// Read every relevant Cache Storage index once; 7 separate scans get expensive
+// after thousands of pages have been downloaded.
+async function inspectAllMushafCaches(): Promise<MushafCacheSummary> {
+  const completed = emptyMushafCache()
+  if (typeof window === 'undefined' || !('caches' in window)) {
+    return { completed, supported: false }
+  }
+
+  const flags: Record<Riwaya, Uint8Array> = {
+    hafs: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
+    warsh: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
+    qalun: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
+    douri: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
+    shubah: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
+    sousi: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
+    bazzi: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
+  }
+
+  const names = await caches.keys()
+  const matching = [SAMEE3_MUSHAF_PAGE_CACHE_NAME, 'samee3-v3-riwaya-images']
+    .filter((name) => names.includes(name))
+
+  await Promise.all(matching.map(async (name) => {
+    const cache = await caches.open(name)
+    const keys = await cache.keys()
+    keys.forEach((request) => {
+      try {
+        const url = new URL(request.url)
+        if (url.origin !== location.origin) return
+        const id = url.searchParams.get('riwaya')
+        if (!isRiwaya(id)) return
+        const page = Number(url.searchParams.get('page'))
+        if (!Number.isInteger(page) || page < 1 || page > MUSHAF_TOTAL_PAGES) return
+        if (url.pathname === '/api/quran') flags[id][page] |= 1
+        else if (url.pathname === '/api/mushaf-svg') flags[id][page] |= 2
+        else if (url.pathname === '/api/mushaf-riwaya-image') flags[id][page] |= 4
+      } catch {
+        // Ignore legacy cache entries with unexpected request keys.
+      }
+    })
+  }))
+
+  ALL_MUSHAF_RIWAYAT.forEach((id) => {
+    const needed = id === 'sousi' || id === 'bazzi' ? 7 : 3
+    for (let page = 1; page <= MUSHAF_TOTAL_PAGES; page += 1) {
+      if ((flags[id][page] & needed) === needed) completed[id].add(page)
+    }
+  })
+
+  return { completed, supported: true }
+}
+
+function MushafDownloadStartup({
+  riwaya,
+  prefetchPage,
+  reopenCount,
+}: {
+  riwaya: Riwaya
+  prefetchPage: (riwaya: Riwaya, page: number) => Promise<boolean>
+  reopenCount: number
+}) {
+  const [choice, setChoice] = useState<MushafDownloadChoice>('checking')
+  const [mode, setMode] = useState<MushafDownloadMode>('hafs')
+  const [pickedRiwaya, setPickedRiwaya] = useState<Riwaya>(riwaya)
+  const [counts, setCounts] = useState<Record<Riwaya, number>>({
+    hafs: 0, warsh: 0, qalun: 0, douri: 0, shubah: 0, sousi: 0, bazzi: 0,
+  })
+  const [message, setMessage] = useState('')
+  const [storageSupported, setStorageSupported] = useState(true)
+  const [currentRiwaya, setCurrentRiwaya] = useState<Riwaya | null>(null)
+  const [failedCount, setFailedCount] = useState(0)
+  const generationRef = useRef(0)
+  const runningRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  useEffect(() => {
+    const generation = ++generationRef.current
+    runningRef.current = false
+    setChoice('checking')
+    setMode('hafs')
+    setPickedRiwaya(riwaya)
+    setMessage('')
+    setFailedCount(0)
+
+    void (async () => {
+      try {
+        const summary = await inspectAllMushafCaches()
+        if (generation !== generationRef.current || !mountedRef.current) return
+        setStorageSupported(summary.supported)
+        const next = {} as Record<Riwaya, number>
+        ALL_MUSHAF_RIWAYAT.forEach((id) => { next[id] = summary.completed[id].size })
+        setCounts(next)
+        let choseOnline = false
+        try {
+          choseOnline = sessionStorage.getItem(MUSHAF_ONLINE_SESSION_PREFIX + riwaya) === '1'
+        } catch { /* Session Storage may be disabled. */ }
+        setChoice(reopenCount === 0 && (next[riwaya] === MUSHAF_TOTAL_PAGES || choseOnline)
+          ? 'ready' : 'choose')
+      } catch {
+        if (generation !== generationRef.current || !mountedRef.current) return
+        setMessage('تعذر فحص الصفحات المحفوظة. يمكن القراءة عبر الإنترنت.')
+        setChoice('choose')
+      }
+    })()
+
+    return () => { generationRef.current += 1 }
+  }, [riwaya, reopenCount])
+
+  const targets: Riwaya[] = mode === 'all'
+    ? ALL_MUSHAF_RIWAYAT
+    : [mode === 'hafs' ? 'hafs' : pickedRiwaya]
+  const alreadySaved = targets.reduce((sum, id) => sum + counts[id], 0)
+  const total = targets.length * MUSHAF_TOTAL_PAGES
+  const percent = Math.floor((alreadySaved / total) * 100)
+  const everythingSaved = ALL_MUSHAF_RIWAYAT.every((id) => counts[id] === MUSHAF_TOTAL_PAGES)
+
+  const finishSelection = () => {
+    generationRef.current += 1
+    runningRef.current = false
+    setCurrentRiwaya(null)
+    try { sessionStorage.setItem(MUSHAF_ONLINE_SESSION_PREFIX + riwaya, '1') } catch { /* fine */ }
+    setChoice('ready')
+  }
+
+  const download = async () => {
+    if (runningRef.current || !storageSupported) return
+    if (!navigator.onLine) {
+      setMessage('وصل الإنترنت أولًا لتحميل الصفحات الناقصة.')
+      return
+    }
+
+    const generation = generationRef.current
+    runningRef.current = true
+    setChoice('downloading')
+    setFailedCount(0)
+    setMessage('جارٍ فحص الملفات السابقة؛ سيتم تنزيل الناقص فقط. اترك نافذة المصحف مفتوحة أثناء التحميل.')
+
+    try {
+      const summary = await inspectAllMushafCaches()
+      if (generation !== generationRef.current) return
+      if (!summary.supported) throw new Error('المتصفح لا يدعم حفظ الصفحات محليًا.')
+      const latest = {} as Record<Riwaya, number>
+      ALL_MUSHAF_RIWAYAT.forEach((id) => { latest[id] = summary.completed[id].size })
+      setCounts(latest)
+      const queue: Array<{ id: Riwaya; page: number }> = []
+      targets.forEach((id) => {
+        for (let page = 1; page <= MUSHAF_TOTAL_PAGES; page += 1) {
+          if (!summary.completed[id].has(page)) queue.push({ id, page })
+        }
+      })
+
+      if (queue.length && navigator.storage?.persist) {
+        void navigator.storage.persist().catch(() => false)
+      }
+
+      let nextIndex = 0
+      let failed = 0
+      let failedInARow = 0
+      let abortForFailures = false
+      const worker = async () => {
+        while (
+          generation === generationRef.current &&
+          !abortForFailures && navigator.onLine && nextIndex < queue.length
+        ) {
+          const task = queue[nextIndex]
+          nextIndex += 1
+          setCurrentRiwaya(task.id)
+          let saved = false
+          try { saved = await prefetchPage(task.id, task.page) } catch { saved = false }
+          if (generation !== generationRef.current) return
+          if (saved) {
+            failedInARow = 0
+            setCounts((previous) => ({ ...previous, [task.id]: Math.min(MUSHAF_TOTAL_PAGES, previous[task.id] + 1) }))
+          } else {
+            failed += 1
+            failedInARow += 1
+            setFailedCount(failed)
+            // Avoid thousands of failed requests if source is temporarily unavailable.
+            if (failedInARow >= 12) abortForFailures = true
+          }
+        }
+      }
+      await Promise.all([worker(), worker()])
+      if (generation !== generationRef.current) return
+      const verified = await inspectAllMushafCaches()
+      if (generation !== generationRef.current) return
+      const final = {} as Record<Riwaya, number>
+      ALL_MUSHAF_RIWAYAT.forEach((id) => { final[id] = verified.completed[id].size })
+      setCounts(final)
+      const complete = targets.every((id) => final[id] === MUSHAF_TOTAL_PAGES)
+      setChoice('choose')
+      setCurrentRiwaya(null)
+      setMessage(complete
+        ? 'اكتمل حفظ اختيارك. يمكنك الآن القراءة من الصفحات المحفوظة، أو تنزيل رواية أخرى.'
+        : navigator.onLine
+          ? 'لم تكتمل بعض الصفحات؛ قد يكون السبب المصدر أو سعة التخزين. اضغط استكمال لاحقًا لتنزيل الناقص فقط.'
+          : 'انقطع الاتصال. الصفحات التي اكتمل تنزيلها محفوظة؛ استكمل عند عودة الإنترنت.')
+    } catch (error) {
+      if (generation !== generationRef.current) return
+      setChoice('choose')
+      setMessage(error instanceof Error ? error.message : 'تعذر تحميل الصفحات.')
+    } finally {
+      if (generation === generationRef.current) runningRef.current = false
+      if (generation === generationRef.current) setCurrentRiwaya(null)
+    }
+  }
+
+  const pauseDownload = () => {
+    generationRef.current += 1
+    runningRef.current = false
+    setChoice('choose')
+    setCurrentRiwaya(null)
+    setMessage('تم إيقاف متابعة التحميل. ستظل الصفحات المحفوظة كما هي، ويمكن استكمال الناقص في أي وقت.')
+    // In-flight requests may still finish; rescan before resuming.
+    void inspectAllMushafCaches().then((summary) => {
+      const next = {} as Record<Riwaya, number>
+      ALL_MUSHAF_RIWAYAT.forEach((id) => { next[id] = summary.completed[id].size })
+      if (mountedRef.current) setCounts(next)
+    }).catch(() => undefined)
+  }
+
+  if (choice === 'ready') return null
+
+  return (
+    <div role="presentation" className="fixed inset-0 z-[300] flex items-center justify-center overflow-y-auto bg-[#0b2535]/80 px-3 py-5 backdrop-blur-sm"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerMove={(event) => event.stopPropagation()}
+      onPointerUp={(event) => event.stopPropagation()}
+      onPointerCancel={(event) => event.stopPropagation()}>
+      <section role="dialog" aria-modal="true" aria-labelledby="samee3-download-title" dir="rtl"
+        className="max-h-[94dvh] w-full max-w-lg overflow-y-auto rounded-[30px] border border-[#dac299] bg-[#fffdf8] p-5 text-right shadow-2xl sm:p-7">
+        <div className="mb-3 flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f5e8cf] text-[#98723c]"><BookOpen size={24} /></div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-[#aa8144]">مصحف سميع · SAMEE3</p>
+            <h2 id="samee3-download-title" className="mt-1 text-xl font-extrabold text-[#173c51]">تنزيل صفحات المصحف</h2>
+          </div>
+          {reopenCount > 0 && choice !== 'downloading' ? (
+            <button type="button" onClick={finishSelection} aria-label="إغلاق مدير التنزيلات" className="rounded-xl p-2 text-[#15566b]"><X size={19}/></button>
+          ) : null}
+        </div>
+        <p className="text-sm leading-7 text-slate-600">
+          اختر تنزيل حفص، أو رواية معينة، أو الروايات السبع كاملة. تظل كلمات كل رواية ورسمها من مصادرها الأصلية؛ والتحميل للصفحات فقط دون تلاوات صوتية.
+        </p>
+
+        {choice === 'checking' ? (
+          <div className="mt-6 flex items-center justify-center gap-2 py-10 text-sm font-bold text-[#16546c]"><Loader2 size={19} className="animate-spin" /> جارٍ فحص الصفحات الموجودة…</div>
+        ) : (
+          <>
+            <div className="mt-4 grid gap-2">
+              {([
+                { id: 'hafs' as MushafDownloadMode, title: 'تحميل حفص كاملة', detail: '٦٠٤ صفحات من رواية حفص عن عاصم' },
+                { id: 'single' as MushafDownloadMode, title: 'اختيار رواية محددة', detail: 'حدد الرواية التي تريد تنزيلها' },
+                { id: 'all' as MushafDownloadMode, title: 'تحميل الروايات السبع كاملة', detail: '٤٬٢٢٨ صفحة؛ قد يتطلب مساحة ووقتًا كبيرين' },
+              ]).map((item) => (
+                <button type="button" key={item.id} disabled={choice === 'downloading'} onClick={() => { setMode(item.id); setMessage('') }}
+                  aria-pressed={mode === item.id}
+                  className={`w-full rounded-2xl border px-4 py-3 text-right transition disabled:opacity-60 ${mode === item.id ? 'border-[#c09a59] bg-[#fff5e5] text-[#173c51]' : 'border-[#e8dfd0] bg-white text-[#173c51]'}`}>
+                  <span className="flex items-center gap-2 text-sm font-extrabold">{mode === item.id ? <Check size={17} className="text-[#a47a38]"/> : <BookOpen size={17} className="text-[#a47a38]"/>}{item.title}</span>
+                  <span className="mt-1 block pr-6 text-xs leading-5 text-slate-500">{item.detail}</span>
+                </button>
+              ))}
+              {mode === 'single' ? (
+                <label className="mt-1 block text-xs font-bold text-[#15566b]">
+                  الرواية
+                  <select value={pickedRiwaya} disabled={choice === 'downloading'}
+                    onChange={(event) => setPickedRiwaya(event.target.value as Riwaya)}
+                    className="mt-2 w-full rounded-xl border border-[#e4d3b5] bg-white px-3 py-3 text-sm font-bold outline-none">
+                    {ALL_MUSHAF_RIWAYAT.map((id) => <option value={id} key={id}>{RIWAYA_NAMES[id]}</option>)}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-[#e6d7bd] bg-white p-4">
+              <div className="mb-2 flex justify-between gap-2 text-sm">
+                <strong className="text-[#164b61]">الصفحات المحفوظة للاختيار</strong>
+                <span className="font-extrabold tabular-nums text-[#a27b3e]">{alreadySaved.toLocaleString('ar-EG')} / {total.toLocaleString('ar-EG')}</span>
+              </div>
+              <div role="progressbar" aria-valuenow={alreadySaved} aria-valuemin={0} aria-valuemax={total}
+                aria-label="تقدم تنزيل صفحات المصحف" className="h-2.5 overflow-hidden rounded-full bg-[#edf0f3]">
+                <div className="h-full rounded-full bg-gradient-to-l from-[#c39a59] to-[#ead3a8] transition-all" style={{ width: `${percent}%` }}/>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                {choice === 'downloading'
+                  ? `جارٍ تنزيل ${currentRiwaya ? RIWAYA_NAMES[currentRiwaya] : 'الصفحات'} — ${percent}%${failedCount ? ` · تعذّر ${failedCount} طلب` : ''}`
+                  : alreadySaved === total ? 'هذا الاختيار محفوظ بالكامل على الجهاز.' : `المتبقي ${(total - alreadySaved).toLocaleString('ar-EG')} صفحة.`}
+              </p>
+            </div>
+
+            {mode === 'all' ? (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {ALL_MUSHAF_RIWAYAT.map((id) => (
+                  <div key={id} className="rounded-xl border border-[#eee3cf] bg-white px-3 py-2">
+                    <div className="truncate text-[11px] font-bold text-[#164b61]">{RIWAYA_NAMES[id]}</div>
+                    <div className="mt-1 text-[11px] tabular-nums text-slate-500">{counts[id].toLocaleString('ar-EG')} / ٦٠٤</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {message ? <p role="status" className="mt-3 rounded-xl bg-[#fff5e5] p-3 text-xs leading-6 text-[#805d2b]">{message}</p> : null}
+            {mode === 'all' && !everythingSaved ? (
+              <p className="mt-3 text-xs leading-6 text-amber-800">تنزيل السبع روايات ينتج عنه آلاف الطلبات وقد تتجاوز الملفات مساحة التخزين المسموحة من المتصفح. التحميل قابل للاستكمال ولا يحذف ما سبق.</p>
+            ) : null}
+
+            <div className="mt-4 grid gap-2">
+              {choice === 'downloading' ? (
+                <button type="button" onClick={pauseDownload} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#cba465] bg-[#fff3df] px-5 py-3.5 text-sm font-extrabold text-[#805d2b]"><Pause size={18}/> إيقاف التحميل مؤقتًا</button>
+              ) : (
+                <button type="button" onClick={() => void download()} disabled={!storageSupported || alreadySaved === total}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#15566b] px-5 py-3.5 text-sm font-extrabold text-white disabled:opacity-50">
+                  {alreadySaved === total ? <Check size={19}/> : <Download size={19}/>} {alreadySaved === total ? 'الاختيار محفوظ بالكامل' : alreadySaved > 0 ? 'استكمال تحميل الصفحات الناقصة' : 'بدء تحميل الصفحات'}
+                </button>
+              )}
+              <button type="button" onClick={finishSelection} className="w-full rounded-2xl border border-[#d9c49e] bg-white px-5 py-3.5 text-sm font-extrabold text-[#15566b]">
+                {navigator.onLine ? 'القراءة الآن (أونلاين أو من المحفوظ)' : 'فتح الصفحات المحفوظة'}
+              </button>
+            </div>
+            <p className="mt-3 text-center text-[11px] leading-6 text-slate-500">
+              لا يُحذف أي تنزيل سابق. الاحتفاظ الدائم بالصفحات يعتمد على مساحة جهازك وسياسة المتصفح. للتحقق من العمل دون اتصال جرّب صفحات متعددة في وضع الطيران.
+            </p>
+          </>
+        )}
+      </section>
+    </div>
+  )
+}
+
 export default function MushafPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -1476,11 +1835,11 @@ export default function MushafPage() {
   const pendingNavigationPageRef = useRef<number | null>(null)
   const pageTurnNavigationTokenRef = useRef(0)
   const [openPicker, setOpenPicker] = useState<'riwaya' | 'reciter' | 'surah' | 'juz' | null>(null)
+  const [mushafDownloadOpenCount, setMushafDownloadOpenCount] = useState(0)
   const audioRestoreAttemptedRef = useRef(false)
   const readingRestoreAttemptedRef = useRef(false)
   const audioOperationRef = useRef(0)
   const audioToggleBusyRef = useRef(false)
-  const mushafWarmupRunningRef = useRef(false)
 
 
   // إبقاء شاشة الجهاز مضاءة أثناء قراءة صفحات المصحف.
@@ -1887,11 +2246,24 @@ export default function MushafPage() {
     return value
   }, [riwaya])
 
+  // A single broken CDN request must not freeze a 604/4228-page download.
+  const downloadFetch = useCallback(async (url: string, init: RequestInit = {}) => {
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 22000)
+    try {
+      return await fetch(url, { ...init, signal: controller.signal })
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  }, [])
+
   const prefetchRiwayaPage = useCallback(async (targetRiwaya: Riwaya, page: number) => {
     const safePage = clampPage(page)
     const cache = 'caches' in window
       ? await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME).catch(() => null)
       : null
+
+    if (!cache) return false
 
     let pageOk = false
     const pageUrl = `/api/quran?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}`
@@ -1909,7 +2281,7 @@ export default function MushafPage() {
                 : [],
           } as PageData
           if (pageDataValue.ayahs.length) {
-            pageMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, pageDataValue)
+            // تنزيل الصفحات إلى Cache Storage دون تحميلها جميعًا داخل ذاكرة React.
             pageOk = true
           }
         }
@@ -1920,7 +2292,7 @@ export default function MushafPage() {
 
     if (!pageOk && navigator.onLine) {
       try {
-        const response = await fetch(pageUrl, {
+        const response = await downloadFetch(pageUrl, {
           cache: 'force-cache',
           headers: { Accept: 'application/json' },
         })
@@ -1933,10 +2305,10 @@ export default function MushafPage() {
                 ? data.data.ayahs
                 : [],
           } as PageData
-          pageMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, pageDataValue)
+          // تنزيل الصفحات إلى Cache Storage دون تحميلها جميعًا داخل ذاكرة React.
           pageOk = pageDataValue.ayahs.length > 0
           if (pageOk && cache) {
-            await cache.put(pageUrl, response).catch(() => {})
+            try { await cache.put(pageUrl, response) } catch { pageOk = false }
           }
         }
       } catch {
@@ -1953,7 +2325,7 @@ export default function MushafPage() {
         if (cachedSvg) {
           const data = await cachedSvg.clone().json()
           if (data?.success && data?.svg) {
-            svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
+            // تنزيل الصفحات إلى Cache Storage دون تحميلها جميعًا داخل ذاكرة React.
             svgOk = true
           }
         }
@@ -1964,14 +2336,14 @@ export default function MushafPage() {
 
     if (!svgOk && navigator.onLine) {
       try {
-        const response = await fetch(svgUrl, { cache: 'force-cache' })
+        const response = await downloadFetch(svgUrl, { cache: 'force-cache' })
         if (response.ok) {
           const data = await response.clone().json()
           if (data?.success && data?.svg) {
-            svgMemoryCacheRef.current.set(`${targetRiwaya}:${safePage}`, String(data.svg))
+            // تنزيل الصفحات إلى Cache Storage دون تحميلها جميعًا داخل ذاكرة React.
             svgOk = true
             if (cache) {
-              await cache.put(svgUrl, response).catch(() => {})
+              try { await cache.put(svgUrl, response) } catch { svgOk = false }
             }
           }
         }
@@ -1991,7 +2363,7 @@ export default function MushafPage() {
       try {
         if (cache) {
           const cachedImage = await cache.match(imageUrl)
-          if (cachedImage && cachedImage.ok) imageOk = true
+          if (cachedImage && cachedImage.ok && (cachedImage.headers.get('content-type') || '').startsWith('image/')) imageOk = true
         }
       } catch {
         // ننتقل إلى الشبكة.
@@ -1999,11 +2371,10 @@ export default function MushafPage() {
 
       if (!imageOk && navigator.onLine) {
         try {
-          const response = await fetch(imageUrl, { cache: 'force-cache' })
-          if (response.ok) {
-            imageOk = true
+          const response = await downloadFetch(imageUrl, { cache: 'force-cache' })
+          if (response.ok && (response.headers.get('content-type') || '').startsWith('image/')) {
             if (cache) {
-              await cache.put(imageUrl, response).catch(() => {})
+              await cache.put(imageUrl, response).then(() => { imageOk = true }).catch(() => {})
             }
           }
         } catch {
@@ -2013,146 +2384,10 @@ export default function MushafPage() {
     }
 
     return pageOk && svgOk && imageOk
-  }, [])
+  }, [downloadFetch])
 
-  // ============================================================
-  // تسخين كامل للمصحف في الخلفية: 604 صفحة × كل الروايات
-  // ============================================================
-  // لا ننتظر هذه العملية قبل فتح الصفحة، ولا نعرض واجهة تحميل لها.
-  // التخزين يتم في Cache Storage، والتقدم محفوظ لاستئناف العملية لاحقًا.
-  useEffect(() => {
-    let cancelled = false
-    let resumeTimer: number | null = null
-
-    const readWarmupState = (): Set<number> => {
-      try {
-        const raw = localStorage.getItem(SAMEE3_MUSHAF_WARMUP_STATE_KEY)
-        if (!raw) return new Set<number>()
-        const parsed = JSON.parse(raw) as { version?: number; completed?: unknown }
-        if (parsed?.version !== 2 || !Array.isArray(parsed.completed)) {
-          return new Set<number>()
-        }
-        return new Set(
-          parsed.completed
-            .map((value) => Number(value))
-            .filter((value) => Number.isInteger(value) && value >= 0),
-        )
-      } catch {
-        return new Set<number>()
-      }
-    }
-
-    const saveWarmupState = (completed: Set<number>, done = false) => {
-      try {
-        localStorage.setItem(
-          SAMEE3_MUSHAF_WARMUP_STATE_KEY,
-          JSON.stringify({
-            version: 2,
-            done,
-            completed: Array.from(completed).sort((a, b) => a - b),
-            updatedAt: Date.now(),
-          }),
-        )
-      } catch {
-        // Cache Storage هو المصدر الأساسي، فلا نوقف التحميل بسبب localStorage.
-      }
-    }
-
-    const runWarmup = async () => {
-      if (cancelled || !navigator.onLine || !('caches' in window) || mushafWarmupRunningRef.current) return
-      mushafWarmupRunningRef.current = true
-
-      const tasks: Array<{ riwaya: Riwaya; page: number }> = []
-      for (const targetRiwaya of ALL_MUSHAF_RIWAYAT) {
-        for (let page = 1; page <= 604; page += 1) {
-          tasks.push({ riwaya: targetRiwaya, page })
-        }
-      }
-
-      const completed = readWarmupState()
-      if (completed.size >= tasks.length) {
-        mushafWarmupRunningRef.current = false
-        return
-      }
-
-      try {
-        if (navigator.storage?.persist) {
-          void navigator.storage.persist().catch(() => false)
-        }
-      } catch {
-        // بعض المتصفحات لا تدعم persistent storage.
-      }
-
-      let cursor = 0
-      let successfulSinceSave = 0
-      const workerCount = Math.min(2, tasks.length)
-
-      const worker = async () => {
-        while (!cancelled && navigator.onLine) {
-          let taskIndex = -1
-
-          while (cursor < tasks.length) {
-            const candidate = cursor
-            cursor += 1
-            if (!completed.has(candidate)) {
-              taskIndex = candidate
-              break
-            }
-          }
-
-          if (taskIndex < 0) return
-
-          const task = tasks[taskIndex]
-          const ok = await prefetchRiwayaPage(task.riwaya, task.page)
-
-          if (!ok) {
-            if (navigator.onLine) {
-              await new Promise((resolve) => window.setTimeout(resolve, 1500))
-            }
-            return
-          }
-
-          completed.add(taskIndex)
-          successfulSinceSave += 1
-
-          if (successfulSinceSave >= 4) {
-            successfulSinceSave = 0
-            saveWarmupState(completed)
-          }
-
-          // Yield قصير جدًا حتى لا يشعر المستخدم بأن المصحف أو الصوت يتجمّد.
-          if (completed.size % 4 === 0) {
-            await new Promise((resolve) => window.setTimeout(resolve, 0))
-          }
-        }
-      }
-
-      await Promise.all(Array.from({ length: workerCount }, () => worker()))
-      saveWarmupState(completed, completed.size >= tasks.length)
-      mushafWarmupRunningRef.current = false
-
-      if (!cancelled && completed.size < tasks.length && navigator.onLine) {
-        resumeTimer = window.setTimeout(() => {
-          void runWarmup()
-        }, 7000)
-      }
-    }
-
-    const start = () => {
-      if (cancelled) return
-      window.setTimeout(() => void runWarmup(), 80)
-    }
-
-    window.addEventListener('online', start)
-    start()
-
-    return () => {
-      cancelled = true
-      mushafWarmupRunningRef.current = false
-      if (resumeTimer !== null) window.clearTimeout(resumeTimer)
-      window.removeEventListener('online', start)
-    }
-  }, [prefetchRiwayaPage])
+  // تنزيل المصحف الكامل يتم فقط بطلب صريح من المستخدم عبر شاشة البدء.
+  // لا نقوم بتسخين الروايات السبع تلقائيًا في الخلفية.
 
   useEffect(() => {
     let cancelled = false
@@ -5404,6 +5639,7 @@ export default function MushafPage() {
       onPointerUp={finishPagePointer}
       onPointerCancel={cancelPagePointer}
     >
+      <MushafDownloadStartup riwaya={riwaya} prefetchPage={prefetchRiwayaPage} reopenCount={mushafDownloadOpenCount} />
       <div className="samee3-book-stage" onClick={dismissChrome}>
         {error ? (
           <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
@@ -5545,6 +5781,7 @@ export default function MushafPage() {
                     <button type="button" onClick={() => setSearchInput('')} aria-label="مسح البحث"><X size={16} /></button>
                   ) : null}
                 </div>
+                <button type="button" title="تنزيل صفحات المصحف وإدارة الروايات" aria-label="تنزيل صفحات المصحف" onClick={() => setMushafDownloadOpenCount((value) => value + 1)} className="samee3-download-shortcut"><Download size={19} /></button>
                 <button type="button" onClick={() => void executeSearch()} disabled={searchLoading} className="samee3-search-submit">
                   {searchLoading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
                 </button>
@@ -5910,31 +6147,43 @@ export default function MushafPage() {
         .samee3-text-line-svg .samee3-ayah-number { fill:#b78945; }
         .samee3-page-art { position:absolute; inset:90px 9px 74px; display:flex; align-items:center; justify-content:center; overflow:hidden; isolation:isolate; background:#fffdf7; }
         .samee3-page-art > svg { position:relative; z-index:2; width:100% !important; height:100% !important; max-width:100%; max-height:100%; display:block; object-fit:contain; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
-        .samee3-real-riwaya-page { background:#fcfbf7; }
+        /* Preserve original riwaya scan and text while matching the SAMEE3 page frame. */
+        .samee3-real-riwaya-page { background:#fffdf7; }
         .samee3-real-riwaya-page .samee3-surah-frame { display:none; }
         .samee3-real-riwaya-page .samee3-page-meta { display:flex; }
         .samee3-real-riwaya-page .samee3-page-footer { display:flex; }
-        .samee3-real-riwaya-page .samee3-page-art { inset:0; background:#fcfbf7; }
-        .samee3-real-riwaya-page .samee3-page-art > svg { width:100% !important; height:100% !important; max-width:100%; max-height:100%; flex:0 0 auto; display:block; }
-
-        /*
-         * السوسي والبزي — نمط القراءة على الهاتف:
-         * الصفحة لا تُعرض داخل إطار يترك فراغًا أبيض أعلى وأسفل.
-         * نملأ الارتفاع بالكامل ونقص فقط الهوامش الجانبية الزائدة،
-         * مع الحفاظ على نسبة أبعاد صفحة المصحف وعدم تشويه الحروف.
-         */
+        .samee3-real-riwaya-page .samee3-page-art {
+          inset:53px 9px 52px;
+          overflow:hidden;
+          background:#fffdf7;
+          border:1px solid rgba(183,140,79,.43);
+          box-shadow: inset 0 0 0 3px rgba(244,230,199,.42);
+        }
+        .samee3-real-riwaya-page .samee3-page-art > svg {
+          display:block;
+          width:100% !important;
+          height:100% !important;
+          max-width:100%;
+          max-height:100%;
+          object-fit:contain;
+          transform:none !important;
+          flex:0 0 auto;
+        }
+        .samee3-real-riwaya-page .samee3-riwaya-image {
+          filter:sepia(.06) contrast(1.03);
+        }
+        .samee3-real-riwaya-page .samee3-page-art::after {
+          content:"";
+          position:absolute;
+          inset:0;
+          z-index:3;
+          border:4px double rgba(168,121,60,.24);
+          pointer-events:none;
+        }
         @media (max-width:767px) and (orientation:portrait) {
-          .samee3-real-riwaya-page .samee3-page-art { inset:0; overflow:hidden; }
+          .samee3-real-riwaya-page .samee3-page-art { inset:49px 5px 44px; }
           .samee3-real-riwaya-page .samee3-page-art > svg {
-            width:100% !important;
-            height:100% !important;
-            min-width:0;
-            min-height:0;
-            max-width:100%;
-            max-height:100%;
-            flex:0 0 auto;
-            transform:none;
-            transform-origin:center center;
+            width:100% !important; height:100% !important; max-width:100%; max-height:100%;
           }
         }
         .samee3-live-ayah-highlight {
@@ -5992,6 +6241,8 @@ export default function MushafPage() {
 
         .samee3-top-controls { position:absolute; z-index:70; top:max(10px,env(safe-area-inset-top)); left:50%; transform:translateX(-50%); width:min(94vw,900px); padding:10px; border-radius:24px; background:rgba(255,253,248,.93); border:1px solid rgba(198,177,142,.55); box-shadow:0 14px 40px rgba(75,58,33,.17); backdrop-filter:blur(16px); }
         .samee3-search-row { display:flex; gap:8px; align-items:center; }
+        .samee3-download-shortcut { width:46px; height:46px; flex:0 0 46px; display:flex; align-items:center; justify-content:center; border:1px solid #e4d3b5; border-radius:16px; background:#fff9eb; color:#956c36; cursor:pointer; }
+        .samee3-download-shortcut:hover { background:#f4e5c9; }
         .samee3-search-box { flex:1; height:46px; display:flex; align-items:center; gap:9px; padding:0 13px; border-radius:16px; border:1px solid #e4d8c1; background:#fff; color:#0e99d4; }
         .samee3-search-box input { flex:1; min-width:0; border:0; outline:0; background:transparent; font-size:16px; font-weight:800; color:#273447; }
         .samee3-search-box input::placeholder { color:#a8a1a0; }
