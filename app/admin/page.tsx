@@ -1,1132 +1,1395 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import {
-  LayoutDashboard,
-  Users,
-  Database,
-  Bell,
-  Settings,
-  LogOut,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import {
   Activity,
-  FileText,
-  ShieldCheck,
+  ArrowLeft,
   BookOpen,
+  CheckCheck,
   Headphones,
-  Moon,
-  ChevronLeft,
-  Search,
+  LayoutDashboard,
+  Loader2,
+  LogOut,
   Menu,
-  X,
-  BarChart3,
-  MessageSquare,
-  Eye,
+  MessageCircle,
   RefreshCw,
-  UserRound,
+  Search,
+  Send,
+  ShieldCheck,
+  Users,
+  X,
 } from 'lucide-react'
+import {
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  serverTimestamp,
+  updateDoc,
+  writeBatch,
+  type Timestamp,
+} from 'firebase/firestore'
+import { signOut } from 'firebase/auth'
 import AdminGate from '@/components/AdminGate'
 import IslamicLibraryAdmin from '@/components/admin/IslamicLibraryAdmin'
-import { db } from '@/lib/firebase'
-import { collection, getDocs } from 'firebase/firestore'
+import { useAuth } from '@/context/AuthContext'
+import { auth, db } from '@/lib/firebase'
 
 type Tab =
   | 'dashboard'
   | 'users'
-  | 'content'
+  | 'messages'
   | 'library'
-  | 'notifications'
-  | 'activity'
-  | 'settings'
+  | 'content'
 
-type FirestoreUser = {
+type UserRecord = {
   id: string
   name: string
   email: string
   status: string
-  progress: number
-  khatmaDays?: number
-  khatmaStartDate?: string
-  updatedAt?: unknown
+  role: string
+  lastReadPage: number
+  khatmaDays: number | null
+  fields: Record<string, unknown>
 }
 
-const demoRecentActivity = [
+type Conversation = {
+  id: string
+  userName: string
+  userEmail: string
+  lastMessage: string
+  lastSenderId: string
+  unreadForAdmin: boolean
+  updatedAt: unknown
+}
+
+type Message = {
+  id: string
+  senderId: string
+  senderName: string
+  text: string
+  read: boolean
+  createdAt: unknown
+}
+
+const MENU: {
+  id: Tab
+  label: string
+  icon: typeof Users
+}[] = [
   {
-    user: 'مستخدم جديد',
-    action: 'إنشاء حساب في مصحف سَميع',
-    time: 'بيانات تجريبية',
+    id: 'dashboard',
+    label: 'لوحة التحكم',
+    icon: LayoutDashboard,
   },
   {
-    user: 'مستخدم',
-    action: 'حفظ آية في المفضلة',
-    time: 'بيانات تجريبية',
+    id: 'users',
+    label: 'المستخدمون',
+    icon: Users,
+  },
+  {
+    id: 'messages',
+    label: 'الرسائل',
+    icon: MessageCircle,
+  },
+  {
+    id: 'library',
+    label: 'المكتبة الشرعية',
+    icon: BookOpen,
+  },
+  {
+    id: 'content',
+    label: 'أقسام التطبيق',
+    icon: Activity,
   },
 ]
 
-function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard')
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const [users, setUsers] = useState<FirestoreUser[]>([])
-  const [loadingUsers, setLoadingUsers] = useState(true)
-  const [usersError, setUsersError] = useState('')
-  const [selectedUser, setSelectedUser] = useState<FirestoreUser | null>(null)
-  const [refreshingUsers, setRefreshingUsers] = useState(false)
+function textField(
+  value: unknown,
+  fallback = '',
+): string {
+  return typeof value === 'string' && value.trim()
+    ? value.trim()
+    : fallback
+}
 
-  const loadUsers = useCallback(async (showRefreshState = false) => {
-    try {
-      if (showRefreshState) {
-        setRefreshingUsers(true)
-      } else {
-        setLoadingUsers(true)
+function toMillis(value: unknown): number {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'toMillis' in value
+  ) {
+    const fn = (
+      value as { toMillis?: unknown }
+    ).toMillis
+
+    if (typeof fn === 'function') {
+      try {
+        return (value as Timestamp).toMillis()
+      } catch {
+        return 0
       }
+    }
+  }
 
-      setUsersError('')
+  return 0
+}
 
-      const snapshot = await getDocs(collection(db, 'users'))
+function formatTime(value: unknown): string {
+  const timestamp = toMillis(value)
 
-      const nextUsers: FirestoreUser[] = snapshot.docs.map((item) => {
-        const data = item.data() as Record<string, unknown>
+  if (!timestamp) return 'الآن'
 
-        const lastReadPage =
-          typeof data.lastReadPage === 'number' ? data.lastReadPage : 0
+  return new Intl.DateTimeFormat('ar-EG', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(timestamp))
+}
 
-        const progress = Math.max(
-          0,
-          Math.min(100, Math.round((lastReadPage / 604) * 100))
-        )
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '—'
+  }
 
-        const rawName =
-          typeof data.name === 'string'
-            ? data.name
-            : typeof data.displayName === 'string'
-              ? data.displayName
-              : ''
+  if (typeof value === 'boolean') {
+    return value ? 'نعم' : 'لا'
+  }
 
-        const rawEmail =
-          typeof data.email === 'string' ? data.email : ''
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number'
+  ) {
+    return String(value)
+  }
 
-        return {
-          id: item.id,
-          name:
-            rawName ||
-            rawEmail ||
-            `مستخدم ${item.id.slice(0, 6)}`,
-          email: rawEmail || 'البريد غير محفوظ',
-          status:
-            data.disabled === true ? 'غير نشط' : 'نشط',
-          progress,
-          khatmaDays:
-            typeof data.khatmaDays === 'number'
-              ? data.khatmaDays
-              : undefined,
-          khatmaStartDate:
-            typeof data.khatmaStartDate === 'string'
-              ? data.khatmaStartDate
-              : undefined,
-          updatedAt: data.updatedAt ?? data.createdAt,
-        }
-      })
+  if (toMillis(value)) {
+    return formatTime(value)
+  }
 
-      setUsers(nextUsers)
+  if (Array.isArray(value)) {
+    return `${value.length} عناصر`
+  }
+
+  return 'بيانات مركبة'
+}
+
+function AdminDashboard() {
+  const { user } = useAuth()
+  const router = useRouter()
+
+  const [tab, setTab] = useState<Tab>('dashboard')
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const [users, setUsers] = useState<UserRecord[]>([])
+  const [usersLoading, setUsersLoading] = useState(true)
+  const [usersError, setUsersError] = useState('')
+  const [searchUsers, setSearchUsers] = useState('')
+  const [selectedUser, setSelectedUser] =
+    useState<UserRecord | null>(null)
+
+  const [threads, setThreads] = useState<Conversation[]>([])
+  const [threadsLoading, setThreadsLoading] = useState(true)
+  const [threadsError, setThreadsError] = useState('')
+  const [threadSearch, setThreadSearch] = useState('')
+  const [selectedThreadId, setSelectedThreadId] =
+    useState<string | null>(null)
+
+  const [messages, setMessages] = useState<Message[]>([])
+  const [messagesLoading, setMessagesLoading] = useState(false)
+  const [messageError, setMessageError] = useState('')
+  const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+
+  const markedInFlight = useRef<Set<string>>(new Set())
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+
+  const refreshUsers = async () => {
+    setUsersLoading(true)
+    setUsersError('')
+
+    try {
+      const snapshot = await getDocs(
+        collection(db, 'users'),
+      )
+
+      const list: UserRecord[] = snapshot.docs.map(
+        (entry) => {
+          const data = entry.data() as Record<string, unknown>
+
+          const page =
+            typeof data.lastReadPage === 'number'
+              ? Math.max(
+                  0,
+                  Math.min(604, data.lastReadPage),
+                )
+              : 0
+
+          return {
+            id: entry.id,
+            name: textField(
+              data.name,
+              textField(data.displayName, 'مستخدم'),
+            ),
+            email: textField(
+              data.email,
+              'لا يوجد بريد محفوظ',
+            ),
+            status: textField(
+              data.status,
+              'غير محدد',
+            ),
+            role: textField(data.role, 'user'),
+            lastReadPage: page,
+            khatmaDays:
+              typeof data.khatmaDays === 'number'
+                ? data.khatmaDays
+                : null,
+            fields: data,
+          }
+        },
+      )
+
+      setUsers(
+        list.sort((a, b) =>
+          a.name.localeCompare(b.name, 'ar'),
+        ),
+      )
     } catch (error) {
-      console.error(error)
-
+      console.error('Admin users load:', error)
       setUsersError(
-        'تعذر تحميل المستخدمين من Firestore. تأكد من صلاحيات القراءة في مجموعة users.'
+        'تعذر قراءة المستخدمين. تحقق من أن حسابك يحمل role = admin في Firestore.',
       )
     } finally {
-      setLoadingUsers(false)
-      setRefreshingUsers(false)
+      setUsersLoading(false)
     }
+  }
+
+  useEffect(() => {
+    void refreshUsers()
   }, [])
 
   useEffect(() => {
-    void loadUsers()
-  }, [loadUsers])
+    const unsubscribe = onSnapshot(
+      collection(db, 'conversations'),
+      (snapshot) => {
+        const next = snapshot.docs.map(
+          (entry): Conversation => {
+            const data = entry.data() as Record<string, unknown>
 
-  const filteredUsers = useMemo(() => {
-    const query = search.trim().toLowerCase()
+            return {
+              id: entry.id,
+              userName: textField(
+                data.userName,
+                'مستخدم مصحف سميع',
+              ),
+              userEmail: textField(data.userEmail),
+              lastMessage: textField(data.lastMessage),
+              lastSenderId: textField(data.lastSenderId),
+              unreadForAdmin:
+                data.unreadForAdmin === true,
+              updatedAt: data.updatedAt,
+            }
+          },
+        )
 
-    if (!query) {
-      return users
+        next.sort(
+          (a, b) =>
+            toMillis(b.updatedAt) -
+            toMillis(a.updatedAt),
+        )
+
+        setThreads(next)
+        setThreadsLoading(false)
+        setThreadsError('')
+      },
+      (error) => {
+        console.error('Admin conversations:', error)
+        setThreadsLoading(false)
+        setThreadsError(
+          'تعذر تحميل المحادثات. تحقق من صلاحيات Firestore.',
+        )
+      },
+    )
+
+    return () => unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!selectedThreadId || !user) {
+      setMessages([])
+      setMessagesLoading(false)
+      return
     }
 
-    return users.filter(
-      (user) =>
-        user.name.toLowerCase().includes(query) ||
-        user.email.toLowerCase().includes(query)
+    setMessages([])
+    setMessagesLoading(true)
+    setMessageError('')
+    markedInFlight.current.clear()
+
+    const messagesRef = collection(
+      db,
+      'conversations',
+      selectedThreadId,
+      'messages',
     )
-  }, [search, users])
 
-  const menuItems = [
-    {
-      id: 'dashboard' as const,
-      label: 'لوحة التحكم',
-      icon: LayoutDashboard,
-    },
-    {
-      id: 'users' as const,
-      label: 'المستخدمون',
-      icon: Users,
-    },
-    {
-      id: 'content' as const,
-      label: 'محتوى التطبيق',
-      icon: Database,
-    },
-    {
-      id: 'library' as const,
-      label: 'المكتبة الشرعية',
-      icon: BookOpen,
-    },
-    {
-      id: 'notifications' as const,
-      label: 'الإشعارات',
-      icon: Bell,
-    },
-    {
-      id: 'activity' as const,
-      label: 'النشاطات',
-      icon: Activity,
-    },
-    {
-      id: 'settings' as const,
-      label: 'الإعدادات',
-      icon: Settings,
-    },
-  ]
+    const unsubscribe = onSnapshot(
+      messagesRef,
+      (snapshot) => {
+        const next = snapshot.docs.map(
+          (entry): Message => {
+            const data = entry.data() as Record<string, unknown>
 
-  const khatmaUsersCount = users.filter(
-    (user) =>
-      typeof user.khatmaDays === 'number' &&
-      user.khatmaDays > 0
+            return {
+              id: entry.id,
+              senderId: textField(data.senderId),
+              senderName: textField(
+                data.senderName,
+                'مستخدم',
+              ),
+              text: textField(data.text),
+              read: data.read === true,
+              createdAt: data.createdAt,
+            }
+          },
+        )
+
+        next.sort(
+          (a, b) =>
+            toMillis(a.createdAt) -
+            toMillis(b.createdAt),
+        )
+
+        setMessages(next)
+        setMessagesLoading(false)
+
+        const unread = next.filter(
+          (item) =>
+            item.senderId !== user.uid &&
+            !item.read &&
+            !markedInFlight.current.has(item.id),
+        )
+
+        next
+          .filter((item) => item.read)
+          .forEach((item) =>
+            markedInFlight.current.delete(item.id),
+          )
+
+        if (unread.length) {
+          const batch = writeBatch(db)
+
+          unread.forEach((item) => {
+            markedInFlight.current.add(item.id)
+
+            batch.update(
+              doc(messagesRef, item.id),
+              { read: true },
+            )
+          })
+
+          void batch
+            .commit()
+            .then(async () => {
+              try {
+                await updateDoc(
+                  doc(
+                    db,
+                    'conversations',
+                    selectedThreadId,
+                  ),
+                  {
+                    unreadForAdmin: false,
+                    updatedAt: serverTimestamp(),
+                  },
+                )
+              } catch (error) {
+                console.warn(
+                  'Unread summary update:',
+                  error,
+                )
+              }
+            })
+            .catch((error) => {
+              unread.forEach((item) =>
+                markedInFlight.current.delete(item.id),
+              )
+              console.error('Admin mark read:', error)
+            })
+        }
+      },
+      (error) => {
+        console.error('Admin message listener:', error)
+        setMessagesLoading(false)
+        setMessageError(
+          'تعذر قراءة الرسائل في هذه المحادثة.',
+        )
+      },
+    )
+
+    return () => unsubscribe()
+  }, [selectedThreadId, user])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({
+      block: 'end',
+    })
+  }, [messages.length, selectedThreadId])
+
+  const filteredUsers = useMemo(() => {
+    const term = searchUsers.trim().toLowerCase()
+
+    return users.filter((item) =>
+      `${item.name} ${item.email} ${item.id}`
+        .toLowerCase()
+        .includes(term),
+    )
+  }, [users, searchUsers])
+
+  const filteredThreads = useMemo(() => {
+    const term = threadSearch.trim().toLowerCase()
+
+    return threads.filter((item) =>
+      `${item.userName} ${item.userEmail} ${item.lastMessage}`
+        .toLowerCase()
+        .includes(term),
+    )
+  }, [threads, threadSearch])
+
+  const selectedThread = threads.find(
+    (item) => item.id === selectedThreadId,
+  )
+
+  const unreadCount = threads.filter(
+    (item) => item.unreadForAdmin,
   ).length
 
-  const stats = [
-    {
-      label: 'إجمالي المستخدمين',
-      value: loadingUsers
-        ? '…'
-        : users.length.toLocaleString('ar-EG'),
-      icon: Users,
-      note: 'من Firestore',
-    },
-    {
-      label: 'خطط الختمة',
-      value: loadingUsers
-        ? '…'
-        : khatmaUsersCount.toLocaleString('ar-EG'),
-      icon: BookOpen,
-      note: 'مستخدم لديه خطة',
-    },
-    {
-      label: 'جلسات الاستماع',
-      value: '—',
-      icon: Headphones,
-      note: 'غير موصول بعد',
-    },
-    {
-      label: 'النشاط اليوم',
-      value: '—',
-      icon: BarChart3,
-      note: 'غير موصول بعد',
-    },
-  ]
+  const khatmaCount = users.filter(
+    (item) => item.khatmaDays !== null,
+  ).length
 
-  const renderDashboard = () => (
-    <>
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        {stats.map((item) => {
-          const Icon = item.icon
+  const openThread = (id: string) => {
+    setSelectedThreadId(id)
+    setTab('messages')
+    setMenuOpen(false)
+    setDraft('')
+  }
 
-          return (
-            <div
-              key={item.label}
-              className="
-                bg-white
-                rounded-3xl
-                border border-gray-100
-                shadow-sm
-                p-5
-              "
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-11 h-11 rounded-2xl bg-[#075640]/10 flex items-center justify-center">
-                  <Icon
-                    size={22}
-                    className="text-[#075640]"
-                  />
-                </div>
+  const reply = async (
+    event?: FormEvent<HTMLFormElement>,
+  ) => {
+    event?.preventDefault()
 
-                <span className="text-[11px] font-bold text-gray-400">
-                  {item.note}
-                </span>
-              </div>
+    const text = draft.trim()
 
-              <p className="text-2xl font-black text-gray-900">
-                {item.value}
-              </p>
+    if (
+      !user ||
+      !selectedThreadId ||
+      !text ||
+      sending
+    ) {
+      return
+    }
 
-              <p className="text-xs text-gray-500 mt-1">
-                {item.label}
-              </p>
-            </div>
-          )
-        })}
-      </div>
+    if (text.length > 5000) {
+      setMessageError(
+        'الرسالة لا يمكن أن تتجاوز 5000 حرف.',
+      )
+      return
+    }
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <section className="xl:col-span-2 bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="font-black text-gray-900 text-lg">
-                آخر النشاطات
-              </h2>
+    setSending(true)
+    setMessageError('')
 
-              <p className="text-xs text-gray-400 mt-1">
-                نظرة سريعة على آخر عمليات المنصة
-              </p>
-            </div>
+    try {
+      const threadRef = doc(
+        db,
+        'conversations',
+        selectedThreadId,
+      )
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('activity')}
-              className="text-xs font-bold text-[#075640] hover:underline"
-            >
-              عرض الكل
-            </button>
-          </div>
+      const messageRef = doc(
+        collection(threadRef, 'messages'),
+      )
 
-          <div className="space-y-2">
-            {demoRecentActivity.map((item, index) => (
-              <div
-                key={`${item.user}-${index}`}
-                className="
-                  flex items-center justify-between gap-4
-                  p-4 rounded-2xl
-                  bg-gray-50
-                "
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 shrink-0 rounded-xl bg-white border border-gray-100 flex items-center justify-center">
-                    <Activity
-                      size={18}
-                      className="text-[#c6a15a]"
-                    />
-                  </div>
+      const batch = writeBatch(db)
 
-                  <div className="min-w-0">
-                    <p className="font-bold text-sm text-gray-900 truncate">
-                      {item.user}
-                    </p>
-
-                    <p className="text-xs text-gray-500 mt-1 truncate">
-                      {item.action}
-                    </p>
-                  </div>
-                </div>
-
-                <span className="text-[11px] text-gray-400 shrink-0">
-                  {item.time}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="bg-[#075640] rounded-3xl shadow-sm p-6 text-white relative overflow-hidden">
-          <div className="absolute -top-16 -left-16 w-40 h-40 rounded-full bg-white/5" />
-          <div className="absolute -bottom-20 -right-14 w-48 h-48 rounded-full bg-white/5" />
-
-          <div className="relative z-10">
-            <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-5">
-              <ShieldCheck size={24} />
-            </div>
-
-            <h2 className="text-xl font-black">
-              مساحة الإدارة
-            </h2>
-
-            <p className="text-sm text-white/75 leading-7 mt-2">
-              من هنا تتابع المستخدمين والمحتوى والمكتبة
-              الشرعية والنشاطات والإشعارات وإعدادات المنصة.
-            </p>
-
-            <div className="mt-6 space-y-3">
-              <button
-                type="button"
-                onClick={() => setActiveTab('users')}
-                className="w-full rounded-2xl bg-white text-[#075640] py-3 font-black text-sm"
-              >
-                إدارة المستخدمين
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('library')}
-                className="w-full rounded-2xl border border-white/20 bg-white/10 py-3 font-black text-sm"
-              >
-                إدارة المكتبة الشرعية
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('notifications')}
-                className="w-full rounded-2xl border border-white/20 bg-white/10 py-3 font-black text-sm"
-              >
-                إرسال إشعار
-              </button>
-            </div>
-          </div>
-        </section>
-      </div>
-    </>
-  )
-
-  const renderUsers = () => (
-    <section className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
-        <div>
-          <h2 className="font-black text-gray-900 text-lg">
-            المستخدمون
-          </h2>
-
-          <p className="text-xs text-gray-400 mt-1">
-            المستخدمون المسجلون في مجموعة users داخل Firestore
-          </p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-          <button
-            type="button"
-            onClick={() => void loadUsers(true)}
-            disabled={refreshingUsers}
-            className="h-11 px-4 rounded-2xl bg-[#075640] text-white text-sm font-black flex items-center justify-center gap-2 disabled:opacity-60"
-          >
-            <RefreshCw
-              size={16}
-              className={
-                refreshingUsers ? 'animate-spin' : ''
-              }
-            />
-
-            {refreshingUsers
-              ? 'جاري التحديث...'
-              : 'تحديث'}
-          </button>
-
-          <div className="relative w-full sm:w-72">
-            <Search
-              size={18}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-            />
-
-            <input
-              value={search}
-              onChange={(event) =>
-                setSearch(event.target.value)
-              }
-              placeholder="ابحث بالاسم أو البريد..."
-              className="w-full h-11 rounded-2xl border border-gray-200 bg-gray-50 pr-10 pl-4 text-sm outline-none focus:border-[#075640]"
-            />
-          </div>
-        </div>
-      </div>
-
-      {usersError && (
-        <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-600">
-          {usersError}
-        </div>
-      )}
-
-      {loadingUsers && (
-        <div className="mb-4 rounded-2xl bg-gray-50 px-4 py-3 text-sm font-bold text-gray-500">
-          جارٍ تحميل المستخدمين...
-        </div>
-      )}
-
-      {!loadingUsers && !usersError && users.length === 0 && (
-        <div className="mb-4 rounded-2xl bg-gray-50 px-4 py-6 text-center text-sm font-bold text-gray-500">
-          لا توجد مستندات مستخدمين في مجموعة users حتى الآن.
-        </div>
-      )}
-
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[680px]">
-          <thead>
-            <tr className="text-right text-xs text-gray-400 border-b border-gray-100">
-              <th className="pb-3 font-bold">
-                المستخدم
-              </th>
-
-              <th className="pb-3 font-bold">
-                الحالة
-              </th>
-
-              <th className="pb-3 font-bold">
-                التقدم
-              </th>
-
-              <th className="pb-3 font-bold">
-                الإجراء
-              </th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {filteredUsers.map((user) => (
-              <tr
-                key={user.id}
-                className="border-b border-gray-50 last:border-0"
-              >
-                <td className="py-4">
-                  <div>
-                    <p className="font-bold text-sm text-gray-900">
-                      {user.name}
-                    </p>
-
-                    <p className="text-xs text-gray-400 mt-1 dir-ltr text-right">
-                      {user.email}
-                    </p>
-                  </div>
-                </td>
-
-                <td className="py-4">
-                  <span
-                    className={`inline-flex rounded-full px-3 py-1 text-[11px] font-bold ${
-                      user.status === 'نشط'
-                        ? 'bg-emerald-50 text-emerald-600'
-                        : 'bg-gray-100 text-gray-500'
-                    }`}
-                  >
-                    {user.status}
-                  </span>
-                </td>
-
-                <td className="py-4">
-                  <div className="w-36">
-                    <div className="flex items-center justify-between text-[11px] mb-1">
-                      <span className="text-gray-400">
-                        الختمة
-                      </span>
-
-                      <span className="font-bold text-[#075640]">
-                        {user.progress}%
-                      </span>
-                    </div>
-
-                    <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-[#075640]"
-                        style={{
-                          width: `${user.progress}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </td>
-
-                <td className="py-4">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSelectedUser(user)
-                    }
-                    className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 text-xs font-bold text-gray-600 hover:border-[#075640] hover:text-[#075640] transition flex items-center gap-2"
-                  >
-                    <Eye size={14} />
-                    عرض الحساب
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {filteredUsers.length === 0 && (
-          <div className="py-12 text-center text-sm text-gray-400">
-            لا توجد نتائج مطابقة للبحث.
-          </div>
-        )}
-      </div>
-    </section>
-  )
-
-  const renderContent = () => (
-    <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {[
+      batch.set(
+        threadRef,
         {
-          title: 'المصحف',
-          text: 'إدارة الأقسام المرتبطة بالقراءة والفهرس.',
-          icon: BookOpen,
+          userId: selectedThreadId,
+          userName:
+            selectedThread?.userName ||
+            'مستخدم مصحف سميع',
+          userEmail:
+            selectedThread?.userEmail || '',
+          lastMessage: text,
+          lastSenderId: user.uid,
+          updatedAt: serverTimestamp(),
+          unreadForAdmin: false,
+          unreadForUser: true,
         },
-        {
-          title: 'التلاوات',
-          text: 'متابعة قسم الصوتيات والقراء.',
-          icon: Headphones,
-        },
-        {
-          title: 'الأحاديث',
-          text: 'إدارة واجهة مكتبة الأحاديث.',
-          icon: FileText,
-        },
-        {
-          title: 'الأذكار',
-          text: 'إدارة واجهات الأذكار والعدادات.',
-          icon: Moon,
-        },
-      ].map((item) => {
-        const Icon = item.icon
+        { merge: true },
+      )
 
-        return (
-          <div
-            key={item.title}
-            className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-[#075640]/10 flex items-center justify-center mb-4">
-              <Icon
-                size={23}
-                className="text-[#075640]"
-              />
-            </div>
+      batch.set(messageRef, {
+        senderId: user.uid,
+        senderName: 'إدارة مصحف سميع',
+        text,
+        createdAt: serverTimestamp(),
+        read: false,
+      })
 
-            <h3 className="font-black text-gray-900">
-              {item.title}
-            </h3>
+      await batch.commit()
+      setDraft('')
+    } catch (error) {
+      console.error('Admin send:', error)
+      setMessageError(
+        'تعذر إرسال الرد. تحقق من الاتصال وصلاحيات Firebase.',
+      )
+    } finally {
+      setSending(false)
+    }
+  }
 
-            <p className="text-sm text-gray-500 leading-7 mt-2">
-              {item.text}
-            </p>
+  const logout = async () => {
+    setSigningOut(true)
 
-            <button
-              type="button"
-              className="mt-5 rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-bold text-gray-500"
-            >
-              إدارة القسم
-            </button>
-          </div>
-        )
-      })}
-
-      <div className="md:col-span-2 bg-white rounded-3xl border border-[#c6a15a]/30 shadow-sm p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-[#c6a15a]/15 flex items-center justify-center shrink-0">
-              <BookOpen
-                size={26}
-                className="text-[#c6a15a]"
-              />
-            </div>
-
-            <div>
-              <h3 className="font-black text-gray-900 text-lg">
-                المكتبة الشرعية
-              </h3>
-
-              <p className="text-sm text-gray-500 leading-7 mt-1">
-                إدارة مستويات المكتبة والكتب والمؤلفين وروابط
-                التحميل ودروس الشرح والفيديوهات من مكان واحد.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('library')}
-            className="shrink-0 rounded-2xl bg-[#075640] text-white px-6 py-3.5 text-sm font-black flex items-center justify-center gap-2 hover:bg-[#064d3b] transition"
-          >
-            فتح إدارة المكتبة
-            <ChevronLeft size={17} />
-          </button>
-        </div>
-      </div>
-    </section>
-  )
-
-  const renderLibrary = () => (
-    <div className="w-full">
-      <IslamicLibraryAdmin />
-    </div>
-  )
-
-  const renderNotifications = () => (
-    <section className="max-w-3xl bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
-      <div className="flex items-center gap-3 mb-5">
-        <div className="w-11 h-11 rounded-2xl bg-[#c6a15a]/15 flex items-center justify-center">
-          <Bell
-            size={21}
-            className="text-[#c6a15a]"
-          />
-        </div>
-
-        <div>
-          <h2 className="font-black text-gray-900 text-lg">
-            الإشعارات
-          </h2>
-
-          <p className="text-xs text-gray-400 mt-1">
-            تجهيز واجهة إنشاء إشعار جديد
-          </p>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <input
-          placeholder="عنوان الإشعار"
-          className="w-full h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#075640]"
-        />
-
-        <textarea
-          rows={5}
-          placeholder="اكتب نص الإشعار هنا..."
-          className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm outline-none resize-none focus:border-[#075640]"
-        />
-
-        <div className="flex flex-col sm:flex-row gap-3">
-          <button
-            type="button"
-            className="flex-1 rounded-2xl bg-[#075640] text-white py-3.5 font-black text-sm"
-          >
-            تجهيز الإشعار
-          </button>
-
-          <button
-            type="button"
-            className="rounded-2xl border border-gray-200 px-5 py-3.5 font-black text-sm text-gray-500"
-          >
-            حفظ كمسودة
-          </button>
-        </div>
-
-        <p className="text-xs text-gray-400 leading-6 bg-gray-50 rounded-2xl p-4">
-          الواجهة الحالية تجهيز إداري فقط؛ إرسال Push
-          Notifications فعليًا يحتاج ربط خدمة الإشعارات
-          المناسبة بالمشروع.
-        </p>
-      </div>
-    </section>
-  )
-
-  const renderActivity = () => (
-    <section className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
-      <div className="flex items-center gap-3 mb-5">
-        <div className="w-11 h-11 rounded-2xl bg-[#075640]/10 flex items-center justify-center">
-          <Activity
-            size={21}
-            className="text-[#075640]"
-          />
-        </div>
-
-        <div>
-          <h2 className="font-black text-gray-900 text-lg">
-            سجل النشاطات
-          </h2>
-
-          <p className="text-xs text-gray-400 mt-1">
-            آخر النشاطات المعروضة في لوحة الإدارة
-          </p>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {demoRecentActivity.map((item, index) => (
-          <div
-            key={index}
-            className="flex items-center justify-between gap-4 rounded-2xl bg-gray-50 p-4"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center shrink-0">
-                <MessageSquare
-                  size={17}
-                  className="text-[#c6a15a]"
-                />
-              </div>
-
-              <div className="min-w-0">
-                <p className="font-bold text-sm text-gray-900 truncate">
-                  {item.user}
-                </p>
-
-                <p className="text-xs text-gray-500 mt-1 truncate">
-                  {item.action}
-                </p>
-              </div>
-            </div>
-
-            <span className="text-[11px] text-gray-400 shrink-0">
-              {item.time}
-            </span>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-
-  const renderSettings = () => (
-    <section className="max-w-3xl bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
-      <div className="flex items-center gap-3 mb-5">
-        <div className="w-11 h-11 rounded-2xl bg-[#075640]/10 flex items-center justify-center">
-          <Settings
-            size={21}
-            className="text-[#075640]"
-          />
-        </div>
-
-        <div>
-          <h2 className="font-black text-gray-900 text-lg">
-            إعدادات المنصة
-          </h2>
-
-          <p className="text-xs text-gray-400 mt-1">
-            إعدادات أساسية لواجهة الإدارة
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <label className="block">
-          <span className="text-xs font-bold text-gray-500 mb-2 block">
-            اسم المنصة
-          </span>
-
-          <input
-            defaultValue="مصحف سَميع"
-            className="w-full h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold outline-none focus:border-[#075640]"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-xs font-bold text-gray-500 mb-2 block">
-            الرسالة الترحيبية
-          </span>
-
-          <input
-            defaultValue="السلام عليكم ورحمة الله"
-            className="w-full h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold outline-none focus:border-[#075640]"
-          />
-        </label>
-      </div>
-
-      <label className="block mt-4">
-        <span className="text-xs font-bold text-gray-500 mb-2 block">
-          وصف المنصة
-        </span>
-
-        <textarea
-          rows={4}
-          defaultValue="مساحة هادئة للقراءة والتدبر والاستماع."
-          className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm outline-none resize-none focus:border-[#075640]"
-        />
-      </label>
-
-      <button
-        type="button"
-        className="mt-5 rounded-2xl bg-[#075640] text-white px-6 py-3.5 font-black text-sm"
-      >
-        حفظ الإعدادات
-      </button>
-    </section>
-  )
-
-  const renderActiveTab = () => {
-    switch (activeTab) {
-      case 'users':
-        return renderUsers()
-
-      case 'content':
-        return renderContent()
-
-      case 'library':
-        return renderLibrary()
-
-      case 'notifications':
-        return renderNotifications()
-
-      case 'activity':
-        return renderActivity()
-
-      case 'settings':
-        return renderSettings()
-
-      case 'dashboard':
-      default:
-        return renderDashboard()
+    try {
+      await signOut(auth)
+      router.replace('/auth')
+    } catch (error) {
+      console.error('Admin sign out:', error)
+      setMessageError(
+        'تعذر تسجيل الخروج. حاول مرة أخرى.',
+      )
+    } finally {
+      setSigningOut(false)
     }
   }
 
   return (
     <div
-      className="min-h-screen bg-gray-50 text-gray-900"
       dir="rtl"
+      className="min-h-screen bg-[#f4f9fe] text-slate-900"
     >
-      {sidebarOpen && (
+      {menuOpen && (
         <button
           type="button"
           aria-label="إغلاق القائمة"
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+          onClick={() => setMenuOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/40 lg:hidden"
         />
       )}
 
       <aside
-        className={`
-          fixed top-0 right-0 bottom-0 z-50
-          w-[280px]
-          bg-[#073f30]
-          text-white
-          p-5
-          transition-transform duration-300
-          lg:translate-x-0
-          ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}
-        `}
+        className={`fixed inset-y-0 right-0 z-50 flex w-[270px] flex-col bg-[#103d4c] p-5 text-white transition-transform lg:translate-x-0 ${
+          menuOpen
+            ? 'translate-x-0'
+            : 'translate-x-full'
+        }`}
       >
-        <div className="flex items-center justify-between mb-8">
+        <div className="mb-7 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs text-white/50 font-bold">
-              لوحة الإدارة
+            <p className="text-xs font-bold text-[#e9c993]">
+              SAMEE3 · إدارة المنصة
             </p>
 
-            <h1 className="text-xl font-black mt-1">
-              مصحف سَميع
+            <h1 className="mt-1 text-xl font-extrabold">
+              مصحف سميع
             </h1>
           </div>
 
           <button
             type="button"
-            onClick={() => setSidebarOpen(false)}
-            className="lg:hidden w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"
+            onClick={() => setMenuOpen(false)}
             aria-label="إغلاق القائمة"
+            className="rounded-xl p-2 text-white/80 lg:hidden"
           >
             <X size={20} />
           </button>
         </div>
 
-        <nav className="space-y-2">
-          {menuItems.map((item) => {
+        <nav
+          aria-label="قائمة الإدارة"
+          className="flex-1 space-y-2 overflow-y-auto"
+        >
+          {MENU.map((item) => {
             const Icon = item.icon
-            const active = activeTab === item.id
 
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => {
-                  setActiveTab(item.id)
-                  setSidebarOpen(false)
+                  setTab(item.id)
+                  setMenuOpen(false)
                 }}
-                className={`
-                  w-full
-                  flex
-                  items-center
-                  gap-3
-                  rounded-2xl
-                  px-4
-                  py-3.5
-                  text-sm
-                  font-bold
-                  transition
-                  ${
-                    active
-                      ? 'bg-white text-[#075640] shadow-sm'
-                      : 'text-white/75 hover:bg-white/10 hover:text-white'
-                  }
-                `}
+                className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-right text-sm font-bold transition ${
+                  tab === item.id
+                    ? 'bg-white text-[#103d4c]'
+                    : 'text-white/75 hover:bg-white/10 hover:text-white'
+                }`}
               >
                 <Icon size={19} />
-                {item.label}
+                <span className="flex-1">
+                  {item.label}
+                </span>
+
+                {item.id === 'messages' &&
+                  unreadCount > 0 && (
+                    <span className="rounded-full bg-[#d7b576] px-2 py-0.5 text-xs text-[#183949]">
+                      {unreadCount}
+                    </span>
+                  )}
               </button>
             )
           })}
         </nav>
 
-        <div className="absolute bottom-5 left-5 right-5 space-y-2">
+        <div className="space-y-2 border-t border-white/10 pt-4">
           <Link
             href="/"
-            className="w-full flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 py-3 text-xs font-bold text-white/80 hover:bg-white/10"
+            className="flex items-center justify-center gap-2 rounded-xl border border-white/15 px-3 py-3 text-sm font-bold text-white/80"
           >
+            <ArrowLeft size={16} />
             العودة للتطبيق
-            <ChevronLeft size={15} />
           </Link>
 
           <button
             type="button"
-            className="w-full flex items-center justify-center gap-2 rounded-2xl border border-white/10 py-3 text-xs font-bold text-white/60"
+            disabled={signingOut}
+            onClick={() => void logout()}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-3 text-sm font-bold disabled:opacity-60"
           >
-            <LogOut size={16} />
+            {signingOut ? (
+              <Loader2
+                size={17}
+                className="animate-spin"
+              />
+            ) : (
+              <LogOut size={17} />
+            )}
             تسجيل الخروج
           </button>
         </div>
       </aside>
 
-      <main className="lg:mr-[280px] min-h-screen">
-        <header className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur border-b border-gray-100">
-          <div className="px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(true)}
-                className="lg:hidden w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center text-[#075640]"
-                aria-label="فتح القائمة"
-              >
-                <Menu size={20} />
-              </button>
+      <div className="min-h-screen lg:mr-[270px]">
+        <header className="sticky top-0 z-30 flex h-20 items-center justify-between gap-3 border-b border-slate-200 bg-[#f4f9fe]/95 px-4 backdrop-blur sm:px-7">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              aria-label="فتح القائمة"
+              className="rounded-xl border border-slate-200 bg-white p-2.5 lg:hidden"
+            >
+              <Menu size={21} />
+            </button>
 
-              <div className="min-w-0">
-                <p className="text-xs text-gray-400 font-bold">
-                  الإدارة
-                </p>
+            <div>
+              <p className="text-xs font-bold text-[#b18c4e]">
+                لوحة الإدارة
+              </p>
 
-                <h2 className="font-black text-gray-900 text-lg truncate">
-                  {
-                    menuItems.find(
-                      (item) => item.id === activeTab
-                    )?.label
-                  }
-                </h2>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:flex items-center gap-2 bg-white border border-gray-100 rounded-2xl px-4 py-2.5">
-                <ShieldCheck
-                  size={16}
-                  className="text-[#075640]"
-                />
-
-                <span className="text-xs font-bold text-gray-500">
-                  وضع الإدارة
-                </span>
-              </div>
+              <h2 className="text-lg font-extrabold">
+                {MENU.find(
+                  (item) => item.id === tab,
+                )?.label}
+              </h2>
             </div>
           </div>
+
+          <span className="hidden items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-bold text-[#17607b] sm:flex">
+            <ShieldCheck size={16} />
+            صلاحيات الإدارة
+          </span>
         </header>
 
-        <div className="p-4 sm:p-6 lg:p-8">
-          {renderActiveTab()}
-        </div>
-      </main>
+        <main className="mx-auto max-w-7xl p-4 sm:p-7">
+          {tab === 'dashboard' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                {[
+                  {
+                    name: 'المستخدمون',
+                    value: usersLoading
+                      ? '…'
+                      : users.length,
+                    icon: Users,
+                  },
+                  {
+                    name: 'خطط الختمة',
+                    value: usersLoading
+                      ? '…'
+                      : khatmaCount,
+                    icon: BookOpen,
+                  },
+                  {
+                    name: 'المحادثات',
+                    value: threadsLoading
+                      ? '…'
+                      : threads.length,
+                    icon: MessageCircle,
+                  },
+                  {
+                    name: 'تحتاج متابعة',
+                    value: threadsLoading
+                      ? '…'
+                      : unreadCount,
+                    icon: Headphones,
+                  },
+                ].map((stat) => {
+                  const Icon = stat.icon
+
+                  return (
+                    <div
+                      key={stat.name}
+                      className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm"
+                    >
+                      <Icon
+                        size={22}
+                        className="mb-4 text-[#b68b4a]"
+                      />
+
+                      <p className="text-3xl font-extrabold">
+                        {stat.value}
+                      </p>
+
+                      <p className="mt-2 text-sm text-slate-500">
+                        {stat.name}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-extrabold">
+                      أحدث المحادثات
+                    </h3>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      بيانات حقيقية من Firestore وليست نشاطات تجريبية
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setTab('messages')}
+                    className="text-sm font-bold text-[#17607b]"
+                  >
+                    عرض الكل
+                  </button>
+                </div>
+
+                {threadsError && (
+                  <p className="mb-3 text-sm text-red-600">
+                    {threadsError}
+                  </p>
+                )}
+
+                {threads.length === 0 ? (
+                  <p className="py-7 text-center text-sm text-slate-500">
+                    لا توجد محادثات حتى الآن.
+                  </p>
+                ) : (
+                  threads.slice(0, 6).map((thread) => (
+                    <button
+                      key={thread.id}
+                      type="button"
+                      onClick={() =>
+                        openThread(thread.id)
+                      }
+                      className="flex w-full items-center justify-between gap-3 border-b border-slate-100 py-4 text-right last:border-0 hover:bg-slate-50"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-bold">
+                          {thread.userName}
+                        </p>
+
+                        <p className="mt-1 truncate text-sm text-slate-500">
+                          {thread.lastMessage ||
+                            'محادثة جديدة'}
+                        </p>
+                      </div>
+
+                      <div className="shrink-0 text-left text-xs text-slate-400">
+                        {thread.unreadForAdmin && (
+                          <span className="mb-1 block font-bold text-[#b68b4a]">
+                            جديدة
+                          </span>
+                        )}
+
+                        {formatTime(
+                          thread.updatedAt,
+                        )}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </section>
+            </div>
+          )}
+
+          {tab === 'users' && (
+            <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-extrabold">
+                    حسابات المستخدمين
+                  </h3>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    عرض معلومات الحساب المحفوظة في Firestore
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void refreshUsers()
+                  }
+                  disabled={usersLoading}
+                  className="flex items-center gap-2 rounded-xl bg-[#115a71] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  <RefreshCw size={16} />
+                  تحديث
+                </button>
+              </div>
+
+              <div className="relative mb-5">
+                <Search
+                  className="absolute right-3 top-3 text-slate-400"
+                  size={19}
+                />
+
+                <input
+                  value={searchUsers}
+                  onChange={(event) =>
+                    setSearchUsers(
+                      event.target.value,
+                    )
+                  }
+                  placeholder="ابحث بالاسم أو البريد أو UID"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-3 pr-10 text-sm outline-none focus:border-[#b68b4a]"
+                />
+              </div>
+
+              {usersError && (
+                <p
+                  role="alert"
+                  className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700"
+                >
+                  {usersError}
+                </p>
+              )}
+
+              {usersLoading ? (
+                <p className="py-7 text-center text-sm text-slate-500">
+                  جارٍ تحميل المستخدمين…
+                </p>
+              ) : filteredUsers.length === 0 ? (
+                <p className="py-7 text-center text-sm text-slate-500">
+                  لا يوجد مستخدمون مطابقون.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[600px] text-right text-sm">
+                    <thead>
+                      <tr className="border-b text-slate-500">
+                        <th className="pb-3">
+                          المستخدم
+                        </th>
+
+                        <th className="pb-3">
+                          الحالة
+                        </th>
+
+                        <th className="pb-3">
+                          تقدم القراءة
+                        </th>
+
+                        <th className="pb-3">
+                          التفاصيل
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {filteredUsers.map((item) => (
+                        <tr
+                          key={item.id}
+                          className="border-b border-slate-100 last:border-0"
+                        >
+                          <td className="py-4">
+                            <p className="font-bold">
+                              {item.name}
+                            </p>
+
+                            <p
+                              dir="ltr"
+                              className="mt-1 text-left text-xs text-slate-500"
+                            >
+                              {item.email}
+                            </p>
+                          </td>
+
+                          <td>
+                            {item.status}
+                          </td>
+
+                          <td>
+                            {Math.round(
+                              (item.lastReadPage /
+                                604) *
+                                100,
+                            )}
+                            %
+                          </td>
+
+                          <td>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedUser(
+                                  item,
+                                )
+                              }
+                              className="rounded-xl bg-[#f2f7fa] px-4 py-2 font-bold text-[#17607b]"
+                            >
+                              عرض البيانات
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+          {tab === 'messages' && (
+            <section className="grid min-h-[610px] overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm lg:grid-cols-[300px_minmax(0,1fr)]">
+              <div className="border-b border-slate-100 lg:border-b-0 lg:border-l">
+                <div className="p-4">
+                  <h3 className="font-extrabold">
+                    محادثات المستخدمين
+                  </h3>
+
+                  <div className="relative mt-3">
+                    <Search
+                      size={17}
+                      className="absolute right-3 top-3 text-slate-400"
+                    />
+
+                    <input
+                      value={threadSearch}
+                      onChange={(event) =>
+                        setThreadSearch(
+                          event.target.value,
+                        )
+                      }
+                      placeholder="ابحث في المحادثات"
+                      className="w-full rounded-xl border border-slate-200 py-2.5 pl-3 pr-9 text-sm outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="max-h-[400px] overflow-y-auto lg:max-h-[600px]">
+                  {threadsError && (
+                    <p
+                      role="alert"
+                      className="p-3 text-sm text-red-600"
+                    >
+                      {threadsError}
+                    </p>
+                  )}
+
+                  {threadsLoading ? (
+                    <p className="p-5 text-sm text-slate-500">
+                      جارٍ تحميل المحادثات…
+                    </p>
+                  ) : filteredThreads.length ===
+                    0 ? (
+                    <p className="p-5 text-sm text-slate-500">
+                      لا توجد محادثات مطابقة.
+                    </p>
+                  ) : (
+                    filteredThreads.map(
+                      (thread) => (
+                        <button
+                          type="button"
+                          key={thread.id}
+                          onClick={() =>
+                            openThread(
+                              thread.id,
+                            )
+                          }
+                          className={`block w-full border-t border-slate-100 p-4 text-right hover:bg-[#f5f9fc] ${
+                            thread.id ===
+                            selectedThreadId
+                              ? 'bg-[#eaf4f8]'
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="truncate text-sm font-bold">
+                              {
+                                thread.userName
+                              }
+                            </p>
+
+                            {thread.unreadForAdmin && (
+                              <span className="h-2.5 w-2.5 rounded-full bg-[#bb914e]" />
+                            )}
+                          </div>
+
+                          <p className="mt-1 truncate text-xs text-slate-500">
+                            {thread.lastMessage ||
+                              'محادثة جديدة'}
+                          </p>
+
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {formatTime(
+                              thread.updatedAt,
+                            )}
+                          </p>
+                        </button>
+                      ),
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div className="flex min-h-[560px] min-w-0 flex-col bg-[#f8fafb]">
+                {selectedThreadId ? (
+                  <>
+                    <div className="border-b border-slate-100 bg-white px-5 py-4">
+                      <p className="font-extrabold">
+                        {selectedThread?.userName ||
+                          'مستخدم مصحف سميع'}
+                      </p>
+
+                      <p
+                        className="mt-1 text-xs text-slate-500"
+                        dir="ltr"
+                      >
+                        {selectedThread?.userEmail ||
+                          selectedThreadId}
+                      </p>
+                    </div>
+
+                    <div
+                      className="min-h-[340px] flex-1 space-y-3 overflow-y-auto p-4 sm:p-6"
+                      aria-live="polite"
+                    >
+                      {messagesLoading ? (
+                        <p className="text-center text-sm text-slate-500">
+                          جارٍ تحميل الرسائل…
+                        </p>
+                      ) : messages.length === 0 ? (
+                        <p className="py-14 text-center text-sm text-slate-500">
+                          لا توجد رسائل في هذه المحادثة.
+                        </p>
+                      ) : (
+                        messages.map((message) => {
+                          const mine =
+                            message.senderId ===
+                            user?.uid
+
+                          return (
+                            <div
+                              key={message.id}
+                              className={`flex ${
+                                mine
+                                  ? 'justify-start'
+                                  : 'justify-end'
+                              }`}
+                            >
+                              <div
+                                className={`max-w-[88%] rounded-2xl px-4 py-3 shadow-sm sm:max-w-[75%] ${
+                                  mine
+                                    ? 'rounded-tr-sm bg-[#155a70] text-white'
+                                    : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800'
+                                }`}
+                              >
+                                <p className="whitespace-pre-wrap break-words text-sm leading-7">
+                                  {message.text}
+                                </p>
+
+                                <div
+                                  className={`mt-2 flex items-center justify-end gap-1 text-[10px] ${
+                                    mine
+                                      ? 'text-white/70'
+                                      : 'text-slate-400'
+                                  }`}
+                                >
+                                  <span>
+                                    {formatTime(
+                                      message.createdAt,
+                                    )}
+                                  </span>
+
+                                  {mine &&
+                                    message.read && (
+                                      <CheckCheck
+                                        size={13}
+                                      />
+                                    )}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+
+                      <div ref={bottomRef} />
+                    </div>
+
+                    {messageError && (
+                      <p
+                        role="alert"
+                        className="mx-4 rounded-xl bg-red-50 p-3 text-sm text-red-700"
+                      >
+                        {messageError}
+                      </p>
+                    )}
+
+                    <form
+                      onSubmit={(event) =>
+                        void reply(event)
+                      }
+                      className="border-t border-slate-100 bg-white p-3 sm:p-4"
+                    >
+                      <div className="flex items-end gap-2">
+                        <textarea
+                          value={draft}
+                          onChange={(event) =>
+                            setDraft(
+                              event.target.value,
+                            )
+                          }
+                          rows={2}
+                          maxLength={5000}
+                          placeholder="اكتب رد الإدارة…"
+                          className="max-h-32 min-h-[50px] flex-1 resize-y rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#b68b4a]"
+                        />
+
+                        <button
+                          type="submit"
+                          disabled={
+                            sending ||
+                            !draft.trim()
+                          }
+                          className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#14596e] text-white disabled:opacity-50"
+                          aria-label="إرسال الرد"
+                        >
+                          {sending ? (
+                            <Loader2
+                              size={20}
+                              className="animate-spin"
+                            />
+                          ) : (
+                            <Send size={20} />
+                          )}
+                        </button>
+                      </div>
+
+                      <p className="mt-2 text-xs text-slate-400">
+                        رسائل نصية فقط · الحد الأقصى 5000 حرف
+                      </p>
+                    </form>
+                  </>
+                ) : (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-3 p-7 text-center">
+                    <MessageCircle
+                      size={35}
+                      className="text-[#c29b60]"
+                    />
+
+                    <p className="font-extrabold">
+                      اختر محادثة للقراءة والرد
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      تظهر محادثات المستخدمين هنا مباشرة من Firestore
+                    </p>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {tab === 'library' && (
+            <IslamicLibraryAdmin />
+          )}
+
+          {tab === 'content' && (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {[
+                {
+                  title: 'المصحف',
+                  href: '/mushaf',
+                  icon: BookOpen,
+                },
+                {
+                  title: 'المكتبة الصوتية',
+                  href: '/audio',
+                  icon: Headphones,
+                },
+                {
+                  title: 'الأحاديث',
+                  href: '/hadith',
+                  icon: BookOpen,
+                },
+                {
+                  title: 'الأذكار',
+                  href: '/adhkar',
+                  icon: Activity,
+                },
+                {
+                  title: 'صفحة التنزيلات',
+                  href: '/offline',
+                  icon: RefreshCw,
+                },
+              ].map((item) => {
+                const Icon = item.icon
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-5 font-bold shadow-sm hover:border-[#c5a16a]"
+                  >
+                    <Icon
+                      size={20}
+                      className="text-[#17607b]"
+                    />
+
+                    {item.title}
+
+                    <ArrowLeft
+                      size={15}
+                      className="mr-auto"
+                    />
+                  </Link>
+                )
+              })}
+
+              <div className="rounded-2xl border border-[#e5d6bd] bg-[#fffbf5] p-5 text-sm leading-7 text-[#856b3c]">
+                هذه روابط لفتح الأقسام ومراجعتها،
+                وليست أدوات لتعديل محتواها.
+                إدارة الكتب متاحة من تبويب
+                المكتبة الشرعية.
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
 
       {selectedUser && (
         <div
-          className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setSelectedUser(null)}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4"
+          onClick={() =>
+            setSelectedUser(null)
+          }
         >
-          <div
-            className="w-full max-w-lg rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden"
-            onClick={(event) => event.stopPropagation()}
-            dir="rtl"
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="بيانات حساب المستخدم"
+            className="max-h-[85vh] w-full max-w-xl overflow-hidden rounded-3xl bg-white shadow-2xl"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
           >
-            <div className="bg-[#075640] text-white p-6">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
-                    <UserRound size={24} />
-                  </div>
+            <div className="flex items-center justify-between bg-[#103d4c] px-5 py-5 text-white">
+              <div>
+                <p className="text-xs text-[#ebca94]">
+                  تفاصيل الحساب
+                </p>
 
-                  <div className="min-w-0">
-                    <p className="text-xs text-white/60 font-bold">
-                      بيانات المستخدم
-                    </p>
-
-                    <h3 className="font-black text-xl truncate">
-                      {selectedUser.name}
-                    </h3>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setSelectedUser(null)}
-                  className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center"
-                  aria-label="إغلاق"
-                >
-                  <X size={20} />
-                </button>
+                <h3 className="mt-1 font-extrabold">
+                  {selectedUser.name}
+                </h3>
               </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedUser(null)
+                }
+                aria-label="إغلاق"
+                className="rounded-xl p-2 hover:bg-white/10"
+              >
+                <X size={20} />
+              </button>
             </div>
 
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="rounded-2xl bg-gray-50 p-4">
-                  <p className="text-xs text-gray-400 font-bold mb-1">
-                    البريد الإلكتروني
-                  </p>
+            <div className="max-h-[60vh] space-y-2 overflow-y-auto p-5">
+              <p className="break-all text-xs text-slate-500">
+                UID: {selectedUser.id}
+              </p>
 
-                  <p
-                    className="text-sm font-bold text-gray-900 break-all"
-                    dir="ltr"
-                  >
-                    {selectedUser.email}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl bg-gray-50 p-4">
-                  <p className="text-xs text-gray-400 font-bold mb-1">
-                    الحالة
-                  </p>
-
-                  <p className="text-sm font-black text-[#075640]">
-                    {selectedUser.status}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl bg-gray-50 p-4">
-                  <p className="text-xs text-gray-400 font-bold mb-1">
-                    تقدم المصحف
-                  </p>
-
-                  <p className="text-sm font-black text-gray-900">
-                    {selectedUser.progress}%
-                  </p>
-                </div>
-
-                <div className="rounded-2xl bg-gray-50 p-4">
-                  <p className="text-xs text-gray-400 font-bold mb-1">
-                    خطة الختمة
-                  </p>
-
-                  <p className="text-sm font-black text-gray-900">
-                    {selectedUser.khatmaDays
-                      ? `${selectedUser.khatmaDays} يوم`
-                      : 'لا توجد خطة'}
-                  </p>
-                </div>
-              </div>
-
-              {selectedUser.khatmaStartDate && (
-                <div className="rounded-2xl border border-gray-100 p-4">
-                  <p className="text-xs text-gray-400 font-bold mb-1">
-                    بداية الختمة
-                  </p>
-
-                  <p
-                    className="text-sm font-black text-gray-900"
-                    dir="ltr"
-                  >
-                    {selectedUser.khatmaStartDate}
-                  </p>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between gap-3 pt-2">
-                <span className="text-xs text-gray-400">
-                  UID:{' '}
-                  <span dir="ltr">
-                    {selectedUser.id}
-                  </span>
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => setSelectedUser(null)}
-                  className="rounded-2xl bg-[#075640] text-white px-5 py-3 text-sm font-black"
+              {Object.entries(
+                selectedUser.fields,
+              ).map(([key, value]) => (
+                <div
+                  key={key}
+                  className="rounded-xl bg-slate-50 px-4 py-3"
                 >
-                  إغلاق
-                </button>
-              </div>
+                  <p
+                    className="text-[11px] font-semibold text-slate-500"
+                    dir="ltr"
+                  >
+                    {key}
+                  </p>
+
+                  <p className="mt-1 break-all text-sm font-bold text-slate-800">
+                    {displayValue(value)}
+                  </p>
+                </div>
+              ))}
             </div>
-          </div>
+
+            <div className="flex justify-end gap-2 border-t p-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedUser(null)
+                  openThread(
+                    selectedUser.id,
+                  )
+                }}
+                className="rounded-xl bg-[#14596e] px-4 py-2.5 text-sm font-bold text-white"
+              >
+                عرض المحادثة
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedUser(null)
+                }
+                className="rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </div>
