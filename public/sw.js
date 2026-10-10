@@ -1,151 +1,140 @@
+const SW_VERSION = 'samee3-sw-v4'
 
-/*
- * SAMEE3 — Service Worker
- * Path: public/sw.js
- *
- * Preserves existing Quran and audio downloads.
- * Supports offline pages, recitations and audio ranges.
- */
+const SHELL_CACHE = `${SW_VERSION}-shell`
+const NAV_CACHE = `${SW_VERSION}-navigation`
+const ASSET_CACHE = `${SW_VERSION}-assets`
+const RSC_CACHE = `${SW_VERSION}-rsc`
 
-'use strict'
-
-const WORKER_VERSION = 'samee3-sw-v4'
-
-const APP_CACHE = `${WORKER_VERSION}-app`
-const NAV_CACHE = `${WORKER_VERSION}-navigation`
-const STATIC_CACHE = `${WORKER_VERSION}-static`
-
-const MUSHAF_CACHE = 'samee3-mushaf-pages-v2'
-const IMAGE_CACHE = 'samee3-v3-riwaya-images'
+// These names are shared with the existing app.
+const MUSHAF_PAGE_CACHE = 'samee3-mushaf-pages-v2'
+const OLD_IMAGE_CACHE = 'samee3-v3-riwaya-images'
 const AUDIO_CACHE = 'samee3-audio-v2'
 
-// These names are used by existing application pages.
-// Never delete them during worker updates.
-const AUDIO_CACHES = [
-  AUDIO_CACHE,
-  'samee3-quran-audio-v1',
+const OLD_AUDIO_CACHES = [
   'samee3-v2-audio',
   'samee-audio-v2',
 ]
 
-const PRECACHE_PATHS = [
+// Only public pages are eligible for offline HTML caching.
+const PUBLIC_ROUTES = new Set([
   '/',
   '/mushaf',
-  '/audio',
-  '/surahs',
   '/offline',
   '/offline/manage',
   '/offline/test',
+  '/audio',
+  '/surahs',
+  '/hadith',
+  '/adhkar',
+  '/prayer',
+  '/islamic-library',
+  '/index',
+])
+
+const INSTALL_ROUTES = [
+  '/',
+  '/mushaf',
+  '/offline',
+  '/audio',
+  '/offline/manage',
+]
+
+const INSTALL_FILES = [
   '/manifest.json',
   '/icon.svg',
 ]
 
-const PROTECTED_PREFIXES = [
-  '/auth',
-  '/profile',
-  '/admin',
-  '/messages',
-]
+const RIWAYAT = new Set([
+  'hafs',
+  'warsh',
+  'qalun',
+  'douri',
+  'shubah',
+  'sousi',
+  'bazzi',
+])
 
-const MUSHAF_API_PATHS = [
+const MUSHAF_ENDPOINTS = new Set([
   '/api/quran',
   '/api/mushaf-svg',
-]
+  '/api/mushaf-riwaya-image',
+])
 
-function pathnameOf(request) {
-  try {
-    return new URL(request.url).pathname
-  } catch {
-    return ''
-  }
+function pathOf(url) {
+  const path = url.pathname.replace(/\/+$/, '')
+  return path || '/'
 }
 
-function sameOrigin(request) {
-  try {
-    return new URL(request.url).origin === self.location.origin
-  } catch {
-    return false
-  }
+function isSameOrigin(url) {
+  return url.origin === self.location.origin
 }
 
-function isPrivateRoute(path) {
-  return PROTECTED_PREFIXES.some(
-    (prefix) =>
-      path === prefix ||
-      path.startsWith(`${prefix}/`),
+function isPublicPath(url) {
+  return (
+    isSameOrigin(url) &&
+    PUBLIC_ROUTES.has(pathOf(url))
   )
 }
 
-function isAudioFromTrustedHost(request) {
-  if (request.method !== 'GET') {
-    return false
-  }
-
-  try {
-    const url = new URL(request.url)
-    const host = url.hostname.toLowerCase()
-
-    return (
-      url.protocol === 'https:' &&
-      (
-        host === 'mp3quran.net' ||
-        host.endsWith('.mp3quran.net')
-      ) &&
-      (
-        /\.mp3$/i.test(url.pathname) ||
-        request.destination === 'audio'
-      )
-    )
-  } catch {
-    return false
-  }
+function isRscRequest(request, url) {
+  return (
+    request.headers.get('RSC') === '1' ||
+    request.headers
+      .get('Accept')
+      ?.includes('text/x-component') ||
+    url.searchParams.has('_rsc')
+  )
 }
 
-function validDownloadUrl(value) {
-  try {
-    const url = new URL(value)
-    const host = url.hostname.toLowerCase()
+function isPrivateRequest(request, url) {
+  const path = pathOf(url)
 
-    return (
-      url.protocol === 'https:' &&
-      (
-        host === 'mp3quran.net' ||
-        host.endsWith('.mp3quran.net')
-      ) &&
-      /\.mp3$/i.test(url.pathname)
-    )
-  } catch {
-    return false
-  }
+  return (
+    request.headers.has('Authorization') ||
+    /^(\/admin|\/profile|\/messages|\/auth)(\/|$)/.test(path) ||
+    /^(\/api|\/_next\/image)(\/|$)/.test(path)
+  )
 }
 
-function shouldStoreResponse(response, kind) {
+function canStore(response, category) {
   if (
     !response ||
     !response.ok ||
-    response.status !== 200
+    response.type === 'opaque'
   ) {
     return false
   }
 
-  const cacheControl =
-    response.headers.get('cache-control') || ''
-
-  if (
-    /\b(?:no-store|private)\b/i.test(cacheControl)
-  ) {
+  if (response.headers.has('Set-Cookie')) {
     return false
   }
 
-  if (response.headers.has('set-cookie')) {
+  const control = (
+    response.headers.get('Cache-Control') || ''
+  ).toLowerCase()
+
+  if (/(?:no-store|private)/.test(control)) {
     return false
   }
 
-  if (kind === 'html') {
-    const type =
-      response.headers.get('content-type') || ''
+  const mime = (
+    response.headers.get('Content-Type') || ''
+  ).toLowerCase()
 
-    return /text\/html/i.test(type)
+  if (category === 'html') {
+    return mime.includes('text/html')
+  }
+
+  if (category === 'rsc') {
+    return mime.includes('text/x-component')
+  }
+
+  if (category === 'json') {
+    return mime.includes('json')
+  }
+
+  if (category === 'image') {
+    return mime.startsWith('image/')
   }
 
   return true
@@ -153,226 +142,399 @@ function shouldStoreResponse(response, kind) {
 
 async function storeIfSafe(
   cache,
-  request,
+  key,
   response,
-  kind,
+  category,
 ) {
-  if (!shouldStoreResponse(response, kind)) {
+  if (!canStore(response, category)) {
     return
   }
 
   try {
     await cache.put(
-      request,
+      key,
       response.clone(),
     )
   } catch (error) {
+    // Do not erase existing Quran downloads
+    // when the device is low on storage.
     console.warn(
-      'SAMEE3: cache write failed',
+      'SAMEE3: cache write skipped.',
       error,
     )
   }
 }
 
-async function findInCaches(names, request) {
-  const existing = await caches.keys()
-
-  for (const name of names) {
-    if (!existing.includes(name)) {
-      continue
-    }
-
+async function getFromCaches(
+  cacheNames,
+  key,
+) {
+  for (const name of cacheNames) {
     try {
       const cache = await caches.open(name)
-      const result = await cache.match(request)
+      const result = await cache.match(key)
 
-      if (result) {
-        return result
-      }
+      if (result) return result
     } catch {
-      // Failure in one cache must not block others.
+      // Continue looking in other caches.
     }
   }
 
   return null
 }
 
-// ----------------------------------------------------
-// Installation
-// ----------------------------------------------------
+function isQuranPageRequest(request, url) {
+  if (
+    request.method !== 'GET' ||
+    !isSameOrigin(url)
+  ) {
+    return false
+  }
 
-async function precacheApp() {
-  const cache = await caches.open(APP_CACHE)
+  if (!MUSHAF_ENDPOINTS.has(pathOf(url))) {
+    return false
+  }
 
-  await Promise.all(
-    PRECACHE_PATHS.map(async (path) => {
-      try {
-        const url = new URL(
-          path,
-          self.location.origin,
-        )
+  if (!RIWAYAT.has(url.searchParams.get('riwaya'))) {
+    return false
+  }
 
-        const request = new Request(
-          url.href,
-          {
-            method: 'GET',
-            cache: 'reload',
-            credentials: 'omit',
-          },
-        )
+  const number = Number(
+    url.searchParams.get('page'),
+  )
 
-        const response = await fetch(request)
-
-        const kind =
-          path.endsWith('.json') ||
-          path.endsWith('.svg')
-            ? 'asset'
-            : 'html'
-
-        await storeIfSafe(
-          cache,
-          request,
-          response,
-          kind,
-        )
-      } catch (error) {
-        console.warn(
-          'SAMEE3: pre-cache unavailable',
-          path,
-          error,
-        )
-      }
-    }),
+  return (
+    Number.isInteger(number) &&
+    number >= 1 &&
+    number <= 604
   )
 }
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    precacheApp().then(
-      () => self.skipWaiting(),
-    ),
+// ========================================
+// Quran page storage
+// ========================================
+
+async function serveQuranPage(request, url) {
+  const names =
+    pathOf(url) === '/api/mushaf-riwaya-image'
+      ? [MUSHAF_PAGE_CACHE, OLD_IMAGE_CACHE]
+      : [MUSHAF_PAGE_CACHE]
+
+  const saved = await getFromCaches(
+    names,
+    request,
   )
-})
 
-// ----------------------------------------------------
-// Activation
-// ----------------------------------------------------
+  if (saved) {
+    return saved
+  }
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    (async () => {
-      const names = await caches.keys()
+  const response = await fetch(request)
 
-      // Delete only older worker-owned shells.
-      // Quran and audio download caches are protected.
-      await Promise.all(
-        names
-          .filter(
-            (name) =>
-              /^samee3-sw-v\d+-(?:app|navigation|static)$/.test(
-                name,
-              ) &&
-              name !== APP_CACHE &&
-              name !== NAV_CACHE &&
-              name !== STATIC_CACHE,
-          )
-          .map(
-            (name) => caches.delete(name),
-          ),
+  const category =
+    pathOf(url) === '/api/mushaf-riwaya-image'
+      ? 'image'
+      : 'json'
+
+  const cache = await caches.open(
+    MUSHAF_PAGE_CACHE,
+  )
+
+  await storeIfSafe(
+    cache,
+    request,
+    response,
+    category,
+  )
+
+  return response
+}
+
+// ========================================
+// Quran audio storage
+// ========================================
+
+function allowAudioHost(url) {
+  const host = url.hostname.toLowerCase()
+
+  return (
+    url.protocol === 'https:' &&
+    (
+      host === 'mp3quran.net' ||
+      host.endsWith('.mp3quran.net')
+    )
+  )
+}
+
+function isQuranAudio(request, url) {
+  return (
+    request.method === 'GET' &&
+    allowAudioHost(url) &&
+    (
+      /\.mp3$/i.test(url.pathname) ||
+      request.destination === 'audio'
+    )
+  )
+}
+
+async function serveQuranAudio(request) {
+  const cached = await getFromCaches(
+    [
+      AUDIO_CACHE,
+      ...OLD_AUDIO_CACHES,
+    ],
+    request.url,
+  )
+
+  if (cached) {
+    const range = request.headers.get('Range')
+
+    // Handle supported byte-range requests
+    // for readable cached audio.
+    if (
+      range &&
+      cached.type !== 'opaque'
+    ) {
+      const match =
+        /^bytes=(\d*)-(\d*)$/i.exec(
+          range.trim(),
+        )
+
+      if (
+        match &&
+        (match[1] || match[2])
+      ) {
+        try {
+          const blob = await cached
+            .clone()
+            .blob()
+
+          if (
+            blob.size > 0 &&
+            blob.size <= 64 * 1024 * 1024
+          ) {
+            let start = match[1]
+              ? Number(match[1])
+              : 0
+
+            let end = match[2]
+              ? Number(match[2])
+              : blob.size - 1
+
+            if (
+              !match[1] &&
+              match[2]
+            ) {
+              const suffix =
+                Number(match[2])
+
+              start = Math.max(
+                0,
+                blob.size - suffix,
+              )
+
+              end = blob.size - 1
+            }
+
+            if (
+              Number.isSafeInteger(start) &&
+              Number.isSafeInteger(end) &&
+              start >= 0 &&
+              start < blob.size &&
+              end >= start
+            ) {
+              end = Math.min(
+                end,
+                blob.size - 1,
+              )
+
+              return new Response(
+                blob.slice(
+                  start,
+                  end + 1,
+                ),
+                {
+                  status: 206,
+                  headers: {
+                    'Content-Type':
+                      cached.headers.get(
+                        'Content-Type',
+                      ) || 'audio/mpeg',
+
+                    'Content-Range':
+                      `bytes ${start}-${end}/${blob.size}`,
+
+                    'Content-Length':
+                      String(end - start + 1),
+
+                    'Accept-Ranges':
+                      'bytes',
+                  },
+                },
+              )
+            }
+          }
+        } catch {
+          // The original audio is still cached.
+        }
+      }
+    }
+
+    return cached
+  }
+
+  // Only explicitly downloaded audio
+  // should be stored permanently.
+  return fetch(request)
+}
+
+async function saveAudioOnRequest(urlString) {
+  let url
+
+  try {
+    url = new URL(urlString)
+  } catch {
+    throw new Error('Invalid audio URL')
+  }
+
+  if (
+    !allowAudioHost(url) ||
+    !/\.mp3$/i.test(url.pathname)
+  ) {
+    throw new Error(
+      'رابط الصوت غير مسموح به.',
+    )
+  }
+
+  const cache = await caches.open(
+    AUDIO_CACHE,
+  )
+
+  const existing = await getFromCaches(
+    [
+      AUDIO_CACHE,
+      ...OLD_AUDIO_CACHES,
+    ],
+    url.href,
+  )
+
+  if (existing) return
+
+  try {
+    const response = await fetch(
+      url.href,
+      {
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-store',
+      },
+    )
+
+    if (
+      response.ok &&
+      response.status === 200
+    ) {
+      await cache.put(
+        url.href,
+        response,
       )
+      return
+    }
+  } catch {
+    // Some audio servers reject CORS.
+  }
 
-      await self.clients.claim()
-    })(),
+  const opaque = await fetch(
+    url.href,
+    {
+      mode: 'no-cors',
+      credentials: 'omit',
+      cache: 'no-store',
+    },
   )
-})
 
-// ----------------------------------------------------
+  if (
+    opaque.type !== 'opaque' &&
+    (
+      !opaque.ok ||
+      opaque.status !== 200
+    )
+  ) {
+    throw new Error(
+      'تعذر تنزيل الملف الصوتي كاملًا.',
+    )
+  }
+
+  await cache.put(
+    url.href,
+    opaque,
+  )
+}
+
+// ========================================
 // Offline fallback
-// ----------------------------------------------------
+// ========================================
 
-function offlinePage() {
+function offlineDocument() {
   return new Response(
     `<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#15566b">
-<title>مصحف سميع — دون إنترنت</title>
+<meta name="theme-color" content="#0284c7">
+<title>مصحف سميع — دون اتصال</title>
 <style>
-* {
-  box-sizing: border-box;
+*{box-sizing:border-box}
+body{
+  margin:0;
+  min-height:100vh;
+  display:grid;
+  place-items:center;
+  padding:20px;
+  background:#f4f9fe;
+  color:#123649;
+  font-family:Tahoma,Arial,sans-serif;
+  text-align:center
 }
-body {
-  margin: 0;
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: #f4f9fe;
-  color: #193949;
-  font: 16px Tahoma, Arial, sans-serif;
-  text-align: center;
+main{
+  max-width:470px;
+  width:100%;
+  padding:36px 25px;
+  background:#fff;
+  border:1px solid #e9d9b9;
+  border-radius:25px;
+  box-shadow:0 15px 45px #103d4c15
 }
-main {
-  max-width: 450px;
-  width: 100%;
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 28px;
-  padding: 30px 22px;
-  box-shadow: 0 16px 42px #11283c12;
+h1{
+  margin:0 0 14px;
+  font-size:25px
 }
-.mark {
-  font-size: 42px;
-  color: #b58b4b;
+p{
+  color:#526579;
+  line-height:2
 }
-h1 {
-  font-size: 25px;
-  margin: 12px 0;
-}
-p {
-  line-height: 2;
-  color: #64748b;
-  font-size: 14px;
-}
-a, button {
-  display: block;
-  width: 100%;
-  padding: 13px;
-  border-radius: 14px;
-  font: 700 14px Tahoma, Arial, sans-serif;
-  text-decoration: none;
-  margin-top: 12px;
-  cursor: pointer;
-  border: 0;
-  background: #14566b;
-  color: white;
-}
-button {
-  background: #f1f5f9;
-  color: #334155;
+a{
+  display:inline-block;
+  padding:13px 23px;
+  margin-top:14px;
+  text-decoration:none;
+  background:#145b72;
+  border-radius:14px;
+  color:white;
+  font-weight:bold
 }
 </style>
 </head>
 <body>
 <main>
-  <div class="mark">۞</div>
-  <h1>مصحف سميع</h1>
-  <p>
-    القسم المطلوب غير محفوظ للاستخدام دون اتصال.
-    اتصل بالإنترنت وافتح القسم المطلوب لتنزيل ملفاته،
-    ثم اختبر تشغيله في وضع الطيران.
-  </p>
-  <a href="/offline">
-    التنزيلات دون إنترنت
-  </a>
-  <a href="/">
-    الرئيسية
-  </a>
-  <button onclick="location.reload()">
-    إعادة المحاولة
-  </button>
+<h1>مصحف سميع</h1>
+<p>
+أنت غير متصل بالإنترنت، والصفحة المطلوبة لم تُحفظ بعد.
+افتح المصحف أثناء الاتصال وحمّل الرواية التي تريدها،
+ثم جرّب مجددًا.
+</p>
+<a href="/mushaf">فتح المصحف المحفوظ</a>
 </main>
 </body>
 </html>`,
@@ -381,88 +543,116 @@ button {
       headers: {
         'Content-Type':
           'text/html; charset=utf-8',
-        'Cache-Control': 'no-store',
+
+        'Cache-Control':
+          'no-store',
       },
     },
   )
 }
 
-// ----------------------------------------------------
-// Navigation
-// ----------------------------------------------------
+function samePathKey(url) {
+  return new URL(
+    pathOf(url),
+    self.location.origin,
+  ).href
+}
 
-async function navigate(request) {
-  const path = pathnameOf(request)
+async function shellPage(request, url) {
+  const cache = await caches.open(
+    NAV_CACHE,
+  )
 
-  // Never cache personal account pages.
-  if (isPrivateRoute(path)) {
-    try {
-      return await fetch(request)
-    } catch {
-      return offlinePage()
-    }
-  }
+  const key = samePathKey(url)
 
-  const pageCache =
-    await caches.open(NAV_CACHE)
-
-  try {
-    const networkResponse =
-      await fetch(request)
-
-    await storeIfSafe(
-      pageCache,
-      request,
-      networkResponse,
-      'html',
+  const fallback = async () => {
+    const saved = await getFromCaches(
+      [NAV_CACHE, SHELL_CACHE],
+      key,
     )
 
-    return networkResponse
-  } catch {
-    const page =
-      (await pageCache.match(request)) ||
-      (await pageCache.match(
-        request,
-        { ignoreSearch: true },
-      ))
+    return saved || offlineDocument()
+  }
 
-    if (page) {
-      return page
-    }
+  try {
+    const response = await fetch(request)
 
-    const appCache =
-      await caches.open(APP_CACHE)
-
-    const cachedAppPage =
-      await appCache.match(
-        new URL(
-          path,
-          self.location.origin,
-        ).href,
+    if (response.ok) {
+      await storeIfSafe(
+        cache,
+        key,
+        response,
+        'html',
       )
 
-    return cachedAppPage || offlinePage()
+      return response
+    }
+
+    if (response.status >= 500) {
+      return fallback()
+    }
+
+    return response
+  } catch {
+    return fallback()
   }
 }
 
-// ----------------------------------------------------
-// Static resources
-// ----------------------------------------------------
+// ========================================
+// Next.js App Router support
+// ========================================
+
+async function publicRsc(request) {
+  const cache = await caches.open(
+    RSC_CACHE,
+  )
+
+  try {
+    const response = await fetch(request)
+
+    await storeIfSafe(
+      cache,
+      request,
+      response,
+      'rsc',
+    )
+
+    return response
+  } catch {
+    const saved = await cache.match(
+      request,
+    )
+
+    return (
+      saved ||
+      new Response(
+        'Offline RSC data unavailable',
+        {
+          status: 503,
+          headers: {
+            'Content-Type':
+              'text/plain; charset=utf-8',
+          },
+        },
+      )
+    )
+  }
+}
+
+// ========================================
+// Static assets
+// ========================================
 
 async function staticAsset(request) {
-  const cache =
-    await caches.open(STATIC_CACHE)
+  const cache = await caches.open(
+    ASSET_CACHE,
+  )
 
-  const saved =
-    (await cache.match(request)) ||
-    (await findInCaches(
-      [APP_CACHE],
-      request,
-    ))
+  const cached = await cache.match(
+    request,
+  )
 
-  if (saved) {
-    return saved
-  }
+  if (cached) return cached
 
   const response = await fetch(request)
 
@@ -476,494 +666,399 @@ async function staticAsset(request) {
   return response
 }
 
-// ----------------------------------------------------
-// Quran page APIs
-// ----------------------------------------------------
-
-async function quranApi(request) {
-  // Shared with app/mushaf/page.tsx.
-  const cache =
-    await caches.open(MUSHAF_CACHE)
-
-  const cached =
-    await cache.match(request)
-
-  if (cached) {
-    return cached
-  }
-
-  const response = await fetch(request)
-
-  const contentType =
-    response.headers.get('content-type') || ''
-
-  if (/application\/json/i.test(contentType)) {
-    await storeIfSafe(
-      cache,
-      request,
-      response,
-      'asset',
+function isStaticAsset(url) {
+  return (
+    url.pathname.startsWith('/_next/static/') ||
+    /\.(?:js|css|woff2?|ttf|otf|png|jpe?g|webp|svg|ico|avif)$/i.test(
+      url.pathname,
     )
-  }
-
-  return response
-}
-
-// ----------------------------------------------------
-// Riwaya images
-// ----------------------------------------------------
-
-async function riwayaImage(request) {
-  // Images downloaded by the mushaf may be stored
-  // in the main mushaf cache, not only IMAGE_CACHE.
-  const existing = await findInCaches(
-    [IMAGE_CACHE, MUSHAF_CACHE],
-    request,
-  )
-
-  if (existing) {
-    return existing
-  }
-
-  const response = await fetch(request)
-
-  const contentType =
-    response.headers.get('content-type') || ''
-
-  if (/^image\//i.test(contentType)) {
-    const cache =
-      await caches.open(IMAGE_CACHE)
-
-    await storeIfSafe(
-      cache,
-      request,
-      response,
-      'asset',
-    )
-  }
-
-  return response
-}
-
-// ----------------------------------------------------
-// Quran audio
-// ----------------------------------------------------
-
-async function cachedAudio(url) {
-  return findInCaches(
-    AUDIO_CACHES,
-    url,
   )
 }
 
-/*
- * Serve HTTP byte ranges from a complete cached MP3.
- *
- * Important for seeking and playback on mobile browsers.
- * Opaque responses cannot be inspected or sliced.
- */
+// ========================================
+// Install application shell
+// ========================================
 
-async function applyRange(response, request) {
-  const range =
-    request.headers.get('range')
+async function prepareShell() {
+  const shell = await caches.open(
+    SHELL_CACHE,
+  )
 
-  if (
-    !range ||
-    response.type === 'opaque' ||
-    response.type === 'opaqueredirect'
-  ) {
-    return response
-  }
+  const assets = new Set()
 
-  const match =
-    /^bytes=(\d*)-(\d*)$/i.exec(
-      range.trim(),
-    )
+  for (const route of INSTALL_ROUTES) {
+    try {
+      const key = new URL(
+        route,
+        self.location.origin,
+      ).href
 
-  if (
-    !match ||
-    (!match[1] && !match[2])
-  ) {
-    return response
-  }
-
-  try {
-    const blob =
-      await response.clone().blob()
-
-    const length = blob.size
-
-    if (!length) {
-      return response
-    }
-
-    let first = match[1]
-      ? Number(match[1])
-      : 0
-
-    let last = match[2]
-      ? Number(match[2])
-      : length - 1
-
-    if (!match[1]) {
-      // Suffix example: bytes=-512.
-      const suffix = Number(match[2])
-
-      first = Math.max(
-        0,
-        length - suffix,
+      const response = await fetch(
+        key,
+        {
+          credentials: 'omit',
+          cache: 'reload',
+          redirect: 'follow',
+        },
       )
 
-      last = length - 1
-    }
+      const returned = new URL(
+        response.url,
+      )
 
-    if (
-      !Number.isSafeInteger(first) ||
-      !Number.isSafeInteger(last) ||
-      first >= length ||
-      first < 0 ||
-      last < first
-    ) {
-      return new Response(null, {
-        status: 416,
-        headers: {
-          'Content-Range':
-            `bytes */${length}`,
-          'Accept-Ranges': 'bytes',
-        },
-      })
-    }
+      if (
+        !response.ok ||
+        pathOf(returned) !== route ||
+        !(
+          response.headers.get(
+            'Content-Type',
+          ) || ''
+        ).includes('text/html') ||
+        response.headers.has(
+          'Set-Cookie',
+        )
+      ) {
+        continue
+      }
 
-    last = Math.min(
-      last,
-      length - 1,
-    )
-
-    return new Response(
-      blob.slice(
-        first,
-        last + 1,
-      ),
-      {
-        status: 206,
-        headers: {
-          'Content-Type':
-            response.headers.get(
-              'content-type',
-            ) || 'audio/mpeg',
-
-          'Content-Range':
-            `bytes ${first}-${last}/${length}`,
-
-          'Content-Length':
-            String(last - first + 1),
-
-          'Accept-Ranges': 'bytes',
-
-          'Cache-Control': 'no-store',
-        },
-      },
-    )
-  } catch {
-    return response
-  }
-}
-
-async function serveAudio(request) {
-  const saved =
-    await cachedAudio(request.url)
-
-  if (saved) {
-    return applyRange(
-      saved,
-      request,
-    )
-  }
-
-  /*
-   * Do not cache a partial 206 response as
-   * though it were a complete MP3 file.
-   */
-  const response = await fetch(request)
-
-  if (
-    !request.headers.has('range') &&
-    (
-      (
-        response.ok &&
-        response.status === 200
-      ) ||
-      response.type === 'opaque'
-    )
-  ) {
-    try {
-      const cache =
-        await caches.open(AUDIO_CACHE)
-
-      await cache.put(
-        request.url,
+      await shell.put(
+        key,
         response.clone(),
       )
+
+      const html = await response.text()
+
+      const matches =
+        html.match(
+          /\/_next\/static\/[^"'<>\s]+/g,
+        ) || []
+
+      matches.forEach((path) => {
+        assets.add(
+          path.replace(
+            /&amp;/g,
+            '&',
+          ),
+        )
+      })
     } catch (error) {
       console.warn(
-        'SAMEE3: audio save failed',
+        'SAMEE3: app shell route not cached.',
+        route,
         error,
       )
     }
   }
 
-  return response
-}
-
-// ----------------------------------------------------
-// Fetch routing
-// ----------------------------------------------------
-
-self.addEventListener('fetch', (event) => {
-  const request = event.request
-
-  if (
-    !request ||
-    request.method !== 'GET'
-  ) {
-    return
-  }
-
-  // External Quran audio must be checked first.
-  if (isAudioFromTrustedHost(request)) {
-    event.respondWith(
-      serveAudio(request),
-    )
-    return
-  }
-
-  if (!sameOrigin(request)) {
-    return
-  }
-
-  const path = pathnameOf(request)
-
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      navigate(request),
-    )
-    return
-  }
-
-  // Avoid caching private and Next.js image requests.
-  if (
-    isPrivateRoute(path) ||
-    path === '/_next/image'
-  ) {
-    return
-  }
-
-  if (
-    path === '/api/mushaf-riwaya-image'
-  ) {
-    event.respondWith(
-      riwayaImage(request),
-    )
-    return
-  }
-
-  if (
-    MUSHAF_API_PATHS.includes(path)
-  ) {
-    event.respondWith(
-      quranApi(request),
-    )
-    return
-  }
-
-  // Other APIs and React Server Component data
-  // are not cached by this worker.
-  if (
-    path.startsWith('/api/') ||
-    new URL(request.url)
-      .searchParams.has('_rsc')
-  ) {
-    return
-  }
-
-  if (
-    path.startsWith('/_next/static/') ||
-    /\.(?:js|css|woff2?|ttf|otf|svg|png|jpe?g|webp|ico)$/i.test(
-      path,
-    ) ||
-    path === '/manifest.json'
-  ) {
-    event.respondWith(
-      staticAsset(request),
-    )
-  }
-})
-
-// ----------------------------------------------------
-// Explicit full-audio download
-// ----------------------------------------------------
-
-async function downloadWholeAudio(url) {
-  if (!validDownloadUrl(url)) {
-    return {
-      ok: false,
-      error: 'رابط الصوت غير مسموح به.',
-    }
-  }
-
-  try {
-    const old = await cachedAudio(url)
-
-    if (old) {
-      return { ok: true }
-    }
-
-    const cache =
-      await caches.open(AUDIO_CACHE)
-
-    let response = null
-
+  for (const file of INSTALL_FILES) {
     try {
-      const cors = await fetch(
-        url,
+      const response = await fetch(
+        file,
         {
-          method: 'GET',
           credentials: 'omit',
-          mode: 'cors',
-          cache: 'no-store',
+          cache: 'reload',
         },
       )
 
-      if (
-        cors.ok &&
-        cors.status === 200
-      ) {
-        response = cors
-      }
-    } catch {
-      // Some audio hosts do not support CORS.
-    }
-
-    if (!response) {
-      const opaque = await fetch(
-        url,
-        {
-          method: 'GET',
-          credentials: 'omit',
-          mode: 'no-cors',
-          cache: 'no-store',
-        },
-      )
-
-      if (
-        opaque.type === 'opaque' ||
-        (
-          opaque.ok &&
-          opaque.status === 200
+      if (response.ok) {
+        await shell.put(
+          file,
+          response,
         )
-      ) {
-        response = opaque
       }
+    } catch {
+      // Manifest/icon are optional.
     }
+  }
 
-    if (!response) {
-      throw new Error(
-        'تعذر الحصول على الملف الصوتي كاملًا.',
-      )
-    }
+  const staticCache = await caches.open(
+    ASSET_CACHE,
+  )
 
-    await cache.put(
-      url,
-      response,
+  const paths = Array.from(assets).slice(
+    0,
+    180,
+  )
+
+  for (
+    let i = 0;
+    i < paths.length;
+    i += 6
+  ) {
+    await Promise.all(
+      paths.slice(i, i + 6).map(
+        async (path) => {
+          try {
+            const response = await fetch(
+              new URL(
+                path,
+                self.location.origin,
+              ),
+              {
+                credentials: 'omit',
+                cache: 'reload',
+              },
+            )
+
+            await storeIfSafe(
+              staticCache,
+              path,
+              response,
+              'asset',
+            )
+          } catch {
+            // Other assets can be cached later.
+          }
+        },
+      ),
     )
-
-    return { ok: true }
-  } catch (error) {
-    return {
-      ok: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'تعذر حفظ التلاوة.',
-    }
   }
 }
 
-// ----------------------------------------------------
-// Messages from application pages
-// ----------------------------------------------------
+// ========================================
+// Lifecycle
+// ========================================
 
-self.addEventListener('message', (event) => {
-  const data = event.data
-
-  if (
-    !data ||
-    typeof data.type !== 'string'
-  ) {
-    return
-  }
-
-  if (data.type === 'SKIP_WAITING') {
+self.addEventListener(
+  'install',
+  (event) => {
     event.waitUntil(
-      self.skipWaiting(),
+      prepareShell().then(
+        () => self.skipWaiting(),
+      ),
     )
-    return
-  }
+  },
+)
 
-  /*
-   * Disable the destructive legacy command.
-   * This prevents accidental deletion of
-   * downloaded Quran pages and recordings.
-   */
-  if (
-    data.type === 'CLEAR_SAMEE3_CACHE'
-  ) {
-    try {
-      if (
-        event.source &&
-        event.source.postMessage
-      ) {
-        event.source.postMessage({
-          type: 'CLEAR_SAMEE3_CACHE_RESULT',
-          ok: false,
-          error:
-            'حذف جميع التنزيلات غير مسموح من خدمة التطبيق.',
-        })
-      }
-    } catch {
-      // The requesting tab may have closed.
-    }
-
-    return
-  }
-
-  if (
-    data.type === 'CACHE_AUDIO_URL' &&
-    typeof data.url === 'string'
-  ) {
-    const url = data.url
-
+self.addEventListener(
+  'activate',
+  (event) => {
     event.waitUntil(
       (async () => {
-        const result =
-          await downloadWholeAudio(url)
+        const names = await caches.keys()
 
-        try {
-          if (
-            event.source &&
-            event.source.postMessage
-          ) {
-            event.source.postMessage({
-              type: 'CACHE_AUDIO_URL_RESULT',
-              url,
-              ok: result.ok,
-              error: result.error,
-            })
-          }
-        } catch {
-          // Tab closed before completion.
-        }
+        const active = new Set([
+          SHELL_CACHE,
+          NAV_CACHE,
+          ASSET_CACHE,
+          RSC_CACHE,
+        ])
+
+        // Only remove caches owned by older
+        // versions of this new SW implementation.
+        // Never erase user-downloaded content.
+        await Promise.all(
+          names
+            .filter(
+              (name) =>
+                name.startsWith(
+                  'samee3-sw-v',
+                ) &&
+                !active.has(name),
+            )
+            .map((name) =>
+              caches.delete(name),
+            ),
+        )
+
+        await self.clients.claim()
       })(),
     )
-  }
-})
+  },
+)
+
+// ========================================
+// Fetch routing
+// ========================================
+
+self.addEventListener(
+  'fetch',
+  (event) => {
+    const request = event.request
+
+    if (
+      !request ||
+      request.method !== 'GET'
+    ) {
+      return
+    }
+
+    let url
+
+    try {
+      url = new URL(request.url)
+    } catch {
+      return
+    }
+
+    if (isQuranAudio(request, url)) {
+      event.respondWith(
+        serveQuranAudio(request),
+      )
+      return
+    }
+
+    if (!isSameOrigin(url)) {
+      return
+    }
+
+    if (
+      isQuranPageRequest(
+        request,
+        url,
+      )
+    ) {
+      event.respondWith(
+        serveQuranPage(
+          request,
+          url,
+        ),
+      )
+      return
+    }
+
+    // Navigation to private pages is never
+    // cached, but can show an offline fallback.
+    if (request.mode === 'navigate') {
+      if (isPublicPath(url)) {
+        event.respondWith(
+          shellPage(
+            request,
+            url,
+          ),
+        )
+      } else {
+        event.respondWith(
+          fetch(request).catch(
+            () => offlineDocument(),
+          ),
+        )
+      }
+
+      return
+    }
+
+    // No cache for user data or APIs.
+    if (
+      isPrivateRequest(
+        request,
+        url,
+      )
+    ) {
+      return
+    }
+
+    if (
+      isRscRequest(
+        request,
+        url,
+      )
+    ) {
+      if (isPublicPath(url)) {
+        event.respondWith(
+          publicRsc(request),
+        )
+      }
+
+      return
+    }
+
+    if (isStaticAsset(url)) {
+      event.respondWith(
+        staticAsset(request),
+      )
+    }
+  },
+)
+
+// ========================================
+// Commands from the application
+// ========================================
+
+self.addEventListener(
+  'message',
+  (event) => {
+    const data = event.data
+
+    if (
+      !data ||
+      typeof data.type !== 'string'
+    ) {
+      return
+    }
+
+    if (data.type === 'SKIP_WAITING') {
+      event.waitUntil(
+        self.skipWaiting(),
+      )
+      return
+    }
+
+    if (
+      data.type === 'CACHE_AUDIO_URL' &&
+      typeof data.url === 'string'
+    ) {
+      event.waitUntil(
+        (async () => {
+          let success = false
+          let message = ''
+
+          try {
+            await saveAudioOnRequest(
+              data.url,
+            )
+
+            success = true
+          } catch (error) {
+            message =
+              error instanceof Error
+                ? error.message
+                : 'تعذر حفظ الصوت.'
+          }
+
+          try {
+            event.source?.postMessage({
+              type:
+                'CACHE_AUDIO_URL_RESULT',
+
+              url: data.url,
+              ok: success,
+
+              error:
+                message || undefined,
+            })
+          } catch {
+            // Page may have closed.
+          }
+        })(),
+      )
+
+      return
+    }
+
+    if (
+      data.type === 'CLEAR_SAMEE3_CACHE'
+    ) {
+      // Deliberately destructive command.
+      // Only run when explicitly requested
+      // by an application cache-clear action.
+      event.waitUntil(
+        caches.keys().then(
+          (keys) =>
+            Promise.all(
+              keys
+                .filter(
+                  (name) =>
+                    name.startsWith(
+                      'samee3-',
+                    ),
+                )
+                .map((name) =>
+                  caches.delete(name),
+                ),
+            ),
+        ),
+      )
+    }
+  },
+)
