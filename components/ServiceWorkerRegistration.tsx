@@ -1,102 +1,275 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { RefreshCw, X } from 'lucide-react'
 
-const SERVICE_WORKER_URL = '/sw.js'
-const UPDATE_CHECK_INTERVAL_MS = 60_000
+/**
+ * SAMEE3 — Service Worker registration and safe update prompt.
+ * Path: components/ServiceWorkerRegistration.tsx
+ *
+ * Never clears Cache Storage, unregisters the SW, or reloads the page
+ * automatically while Quran audio/downloads may be running.
+ */
+
+const SW_URL = '/sw.js'
+const CHECK_INTERVAL_MS = 30 * 60 * 1000
+const ACTIVATION_WAIT_MS = 12 * 1000
 
 export default function ServiceWorkerRegistration() {
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+  const [applyingUpdate, setApplyingUpdate] = useState(false)
+
+  const registrationRef = useRef<ServiceWorkerRegistration | null>(null)
+  const reloadOnActivationRef = useRef(false)
+  const activationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
-    if (!window.isSecureContext || !('serviceWorker' in navigator)) return
+    if (!window.isSecureContext || !('serviceWorker' in navigator)) {
+      return
+    }
 
     const serviceWorkers = navigator.serviceWorker
     let disposed = false
     let checking = false
-    let lastCheckAt: number | null = null
-    let registration: ServiceWorkerRegistration | null = null
+    let lastCheckedAt = 0
+    let hadController = Boolean(serviceWorkers.controller)
+    let listeningRegistration: ServiceWorkerRegistration | null = null
+    let installingWorker: ServiceWorker | null = null
+
+    const onInstallingStateChange = () => {
+      if (
+        !disposed &&
+        installingWorker?.state === 'installed' &&
+        serviceWorkers.controller
+      ) {
+        setUpdateAvailable(true)
+      }
+    }
+
+    const watchInstalling = (worker: ServiceWorker | null) => {
+      if (installingWorker) {
+        installingWorker.removeEventListener(
+          'statechange',
+          onInstallingStateChange,
+        )
+      }
+
+      installingWorker = worker
+
+      if (worker) {
+        worker.addEventListener('statechange', onInstallingStateChange)
+        onInstallingStateChange()
+      }
+    }
+
+    const onUpdateFound = () => {
+      watchInstalling(listeningRegistration?.installing || null)
+    }
+
+    const attachRegistration = (registration: ServiceWorkerRegistration) => {
+      if (disposed) return
+
+      if (listeningRegistration !== registration) {
+        listeningRegistration?.removeEventListener(
+          'updatefound',
+          onUpdateFound,
+        )
+        listeningRegistration = registration
+        registration.addEventListener('updatefound', onUpdateFound)
+      }
+
+      registrationRef.current = registration
+      watchInstalling(registration.installing)
+
+      if (registration.waiting && serviceWorkers.controller) {
+        setUpdateAvailable(true)
+      }
+    }
+
+    const onControllerChange = () => {
+      if (disposed) return
+
+      const nowControlled = Boolean(serviceWorkers.controller)
+      const replacingExistingWorker = hadController && nowControlled
+      hadController = nowControlled
+
+      if (!replacingExistingWorker) return
+
+      if (reloadOnActivationRef.current) {
+        window.location.reload()
+      } else {
+        // The new SW may take control now, but we never interrupt
+        // an active recitation or a Quran/tafsir download with reload.
+        setUpdateAvailable(true)
+        setApplyingUpdate(false)
+      }
+    }
 
     const checkForUpdates = async (force = false) => {
-      // النسخة المثبتة تظل تعمل دون اتصال؛ ننتظر الشبكة للتسجيل أو التحديث.
       if (disposed || checking || navigator.onLine === false) return
 
       const now = Date.now()
-      if (
-        !force &&
-        lastCheckAt !== null &&
-        now - lastCheckAt < UPDATE_CHECK_INTERVAL_MS
-      ) {
-        return
-      }
+      if (!force && now - lastCheckedAt < CHECK_INTERVAL_MS) return
 
       checking = true
-      lastCheckAt = now
 
       try {
-        if (registration) {
-          await registration.update()
-        } else {
-          // register يفحص التحديث أيضًا؛ لا نكرر الطلب فور التسجيل.
-          const nextRegistration = await serviceWorkers.register(
-            SERVICE_WORKER_URL,
-            { scope: '/', updateViaCache: 'none' },
-          )
+        const existing = registrationRef.current
+        const registration = existing || await serviceWorkers.register(
+          SW_URL,
+          { scope: '/', updateViaCache: 'none' },
+        )
 
-          if (!disposed) registration = nextRegistration
+        if (disposed) return
+        attachRegistration(registration)
+
+        // register() already checks the script; don't immediately
+        // issue a second network request for a new registration.
+        if (existing) {
+          await registration.update()
         }
+
+        lastCheckedAt = Date.now()
       } catch (error) {
         if (!disposed && navigator.onLine) {
-          console.warn('SAMEE3: تعذر تسجيل أو تحديث Service Worker.', error)
+          console.warn('SAMEE3: تعذر فحص تحديث التطبيق.', error)
         }
-        // نحافظ على التسجيل القديم والملفات المحفوظة عند فشل الشبكة.
       } finally {
         checking = false
       }
     }
 
-    const requestPersistentStorage = async () => {
-      try {
-        const storage = navigator.storage
-        if (!storage || typeof storage.persist !== 'function') return
-
-        const alreadyPersistent =
-          typeof storage.persisted === 'function'
-            ? await storage.persisted()
-            : false
-
-        if (!disposed && !alreadyPersistent) {
-          await storage.persist()
-        }
-      } catch {
-        // رفض الطلب لا يعطل التخزين العادي؛ المتصفح يقرر منح الاستمرارية.
-      }
-    }
-
-    const handleOnline = () => {
-      void checkForUpdates(true)
-    }
-
-    const handleFocus = () => {
+    const onOnline = () => { void checkForUpdates(true) }
+    const onFocus = () => {
       if (document.visibilityState === 'visible') {
         void checkForUpdates()
       }
     }
 
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleFocus)
+    serviceWorkers.addEventListener('controllerchange', onControllerChange)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
 
-    void checkForUpdates(true)
-    void requestPersistentStorage()
+    const periodicCheck = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void checkForUpdates()
+      }
+    }, CHECK_INTERVAL_MS)
 
-    // لا نعيد تحميل الصفحة عند controllerchange حتى لا نقطع التلاوة
-    // أو التنزيل الجاري، ولا نحذف أي كاش أو تسجيل من هذا المكوّن.
+    if (navigator.onLine === false) {
+      // An existing worker continues serving downloaded content offline.
+      void serviceWorkers.getRegistration('/').then((registration) => {
+        if (registration && !disposed) attachRegistration(registration)
+      }).catch(() => undefined)
+    } else {
+      void checkForUpdates(true)
+    }
+
+    // Best effort only; refusal never deletes or blocks downloads.
+    void (async () => {
+      try {
+        if (navigator.storage?.persist) {
+          const persisted = await navigator.storage.persisted?.()
+          if (!disposed && !persisted) {
+            await navigator.storage.persist()
+          }
+        }
+      } catch {
+        // The browser owns storage persistence policy.
+      }
+    })()
+
     return () => {
       disposed = true
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleFocus)
+      window.clearInterval(periodicCheck)
+
+      if (activationTimeoutRef.current !== null) {
+        clearTimeout(activationTimeoutRef.current)
+        activationTimeoutRef.current = null
+      }
+
+      watchInstalling(null)
+      listeningRegistration?.removeEventListener('updatefound', onUpdateFound)
+      serviceWorkers.removeEventListener('controllerchange', onControllerChange)
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+
+      reloadOnActivationRef.current = false
     }
   }, [])
 
-  return null
+  const installUpdate = () => {
+    if (applyingUpdate) return
+
+    const waiting = registrationRef.current?.waiting
+
+    if (!waiting) {
+      // The current public/sw.js calls skipWaiting() itself.
+      // Refresh only after the user explicitly chooses to do so.
+      window.location.reload()
+      return
+    }
+
+    reloadOnActivationRef.current = true
+    setApplyingUpdate(true)
+    waiting.postMessage({ type: 'SKIP_WAITING' })
+
+    // Don't leave the button disabled forever if the browser does
+    // not activate a waiting worker (e.g. because of an OS policy).
+    activationTimeoutRef.current = window.setTimeout(() => {
+      activationTimeoutRef.current = null
+      reloadOnActivationRef.current = false
+      setApplyingUpdate(false)
+    }, ACTIVATION_WAIT_MS)
+  }
+
+  if (!updateAvailable) return null
+
+  return (
+    <aside
+      dir="rtl"
+      role="status"
+      aria-live="polite"
+      className="fixed bottom-24 left-3 right-3 z-[120] mx-auto max-w-md rounded-2xl border border-[#dfc89d] bg-white p-4 text-[#12384a] shadow-[0_14px_45px_rgba(15,49,67,0.20)] sm:bottom-6"
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#f8f0df] text-[#b18a4a]">
+          <RefreshCw size={20} aria-hidden="true" />
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-extrabold">تحديث جديد لمصحف سميع</p>
+          <p className="mt-1 text-xs leading-6 text-slate-600">
+            التحديث جاهز. لن نعيد تحميل الصفحة تلقائيًا حتى لا تنقطع
+            التلاوة أو التنزيلات الجارية. احفظ عملك ثم حدّث في الوقت المناسب.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setUpdateAvailable(false)}
+          aria-label="تأجيل التحديث"
+          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={installUpdate}
+        disabled={applyingUpdate}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#145a72] px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+      >
+        <RefreshCw
+          size={17}
+          className={applyingUpdate ? 'animate-spin' : ''}
+          aria-hidden="true"
+        />
+        {applyingUpdate ? 'جارٍ تفعيل التحديث…' : 'تحديث التطبيق الآن'}
+      </button>
+    </aside>
+  )
 }
