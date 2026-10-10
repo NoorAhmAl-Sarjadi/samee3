@@ -6,10 +6,7 @@ import Link from 'next/link'
 import {
   ArrowLeft,
   BookOpen,
-  CheckCircle2,
-  CloudOff,
   Database,
-  Download,
   HardDrive,
   Headphones,
   Info,
@@ -20,41 +17,33 @@ import {
   WifiOff,
 } from 'lucide-react'
 
-/**
- * SAMEE3 Offline Library
- * Path: app/offline/page.tsx
- *
- * صفحة لعرض الملفات المحفوظة دون إنترنت.
- * لا تحذف أي بيانات ولا تبدأ تنزيلات تلقائية.
- */
-
-const PAGE_CACHE = 'samee3-mushaf-pages-v2'
+// مصحف سميع — لوحة الملفات المحفوظة دون اتصال.
+// هذه الصفحة للقراءة فقط: لا تنشئ كاش ولا تحذف تنزيلات.
+const PAGE_CACHES = [
+  'samee3-mushaf-pages-v2',
+  'samee3-v3-riwaya-images',
+]
 
 const AUDIO_CACHES = [
   'samee3-audio-v2',
   'samee3-v2-audio',
   'samee-audio-v2',
-] as const
+]
 
-const IMAGE_CACHES = [
-  'samee3-v3-riwaya-images',
-] as const
+const DB_NAME = 'samee-audio-library'
+const DB_STORE = 'audio'
+const PAGE_TOTAL = 604
 
-const LIBRARY_DB = 'samee-audio-library'
-const LIBRARY_STORE = 'audio'
-const TOTAL_QURAN_PAGES = 604
+type RiwayaId =
+  | 'hafs'
+  | 'warsh'
+  | 'qalun'
+  | 'douri'
+  | 'shubah'
+  | 'sousi'
+  | 'bazzi'
 
-const RIWAYAT = [
-  { id: 'hafs', name: 'حفص عن عاصم' },
-  { id: 'warsh', name: 'ورش عن نافع' },
-  { id: 'qalun', name: 'قالون عن نافع' },
-  { id: 'douri', name: 'الدوري عن أبي عمرو' },
-  { id: 'shubah', name: 'شعبة عن عاصم' },
-  { id: 'sousi', name: 'السوسي عن أبي عمرو' },
-  { id: 'bazzi', name: 'البزي عن ابن كثير' },
-] as const
-
-type Riwaya = (typeof RIWAYAT)[number]['id']
+type AssetKind = 'text' | 'svg' | 'image'
 
 type PageAssets = {
   text: Set<number>
@@ -62,62 +51,175 @@ type PageAssets = {
   image: Set<number>
 }
 
-type OfflineSummary = {
-  supported: boolean
-  pageFiles: number
-  audioFiles: number
-  indexedAudioFiles: number | null
-  byRiwaya: Record<Riwaya, number>
-  storageUsed: number | null
-  storageQuota: number | null
-  serviceWorkerReady: boolean
-  lastChecked: number
+type OfflineStats = {
+  cacheSupported: boolean
+  serviceWorkerActive: boolean
+  pageCount: number
+  pagesByRiwaya: Record<RiwayaId, number>
+  cachedAudioCount: number
+  indexedAudioCount: number | null
+  usedBytes: number | null
+  quotaBytes: number | null
+  checkedAt: number
 }
 
-function emptyAssets(): PageAssets {
-  return {
-    text: new Set<number>(),
-    svg: new Set<number>(),
-    image: new Set<number>(),
+const RIWAYAT: { id: RiwayaId; name: string }[] = [
+  { id: 'hafs', name: 'حفص عن عاصم' },
+  { id: 'warsh', name: 'ورش عن نافع' },
+  { id: 'qalun', name: 'قالون عن نافع' },
+  { id: 'douri', name: 'الدوري عن أبي عمرو' },
+  { id: 'shubah', name: 'شعبة عن عاصم' },
+  { id: 'sousi', name: 'السوسي عن أبي عمرو' },
+  { id: 'bazzi', name: 'البزي عن ابن كثير' },
+]
+
+function buildAssetIndex(): Record<RiwayaId, PageAssets> {
+  const index = {} as Record<RiwayaId, PageAssets>
+
+  RIWAYAT.forEach(({ id }) => {
+    index[id] = {
+      text: new Set<number>(),
+      svg: new Set<number>(),
+      image: new Set<number>(),
+    }
+  })
+
+  return index
+}
+
+function getPageAsset(
+  urlString: string,
+): {
+  riwaya: RiwayaId
+  page: number
+  kind: AssetKind
+} | null {
+  try {
+    const url = new URL(
+      urlString,
+      window.location.origin,
+    )
+
+    if (url.origin !== window.location.origin) {
+      return null
+    }
+
+    let kind: AssetKind
+
+    if (url.pathname === '/api/quran') {
+      kind = 'text'
+    } else if (url.pathname === '/api/mushaf-svg') {
+      kind = 'svg'
+    } else if (
+      url.pathname === '/api/mushaf-riwaya-image'
+    ) {
+      kind = 'image'
+    } else {
+      return null
+    }
+
+    const riwayaString =
+      url.searchParams.get('riwaya')
+
+    const riwaya = RIWAYAT.find(
+      (item) => item.id === riwayaString,
+    )
+
+    const pageString =
+      url.searchParams.get('page')
+
+    if (!riwaya || !pageString) {
+      return null
+    }
+
+    const page = Number(pageString)
+
+    if (
+      !Number.isInteger(page) ||
+      page < 1 ||
+      page > PAGE_TOTAL
+    ) {
+      return null
+    }
+
+    return {
+      riwaya: riwaya.id,
+      page,
+      kind,
+    }
+  } catch {
+    return null
   }
 }
 
-/**
- * حساب التسجيلات الموجودة داخل IndexedDB.
- * لا يتم إنشاء أو تعديل مخازن المستخدم.
- */
-function countStoredIndexedAudio(): Promise<number | null> {
+// Array.from يحوّل readonly Request[] إلى مصفوفة عادية.
+// متوافق مع إعداد target: es5 في المشروع.
+async function readCacheKeys(
+  name: string,
+  existingNames: string[],
+): Promise<Request[]> {
+  if (existingNames.indexOf(name) === -1) {
+    return []
+  }
+
+  try {
+    const cache = await caches.open(name)
+    return Array.from(await cache.keys())
+  } catch {
+    return []
+  }
+}
+
+// قراءة عدد الملفات من IndexedDB دون إنشاء قاعدة جديدة
+// أو تعديل قاعدة البيانات الموجودة.
+async function countIndexedAudio(): Promise<number | null> {
   if (typeof indexedDB === 'undefined') {
-    return Promise.resolve(null)
+    return null
   }
 
-  return new Promise((resolve) => {
-    let settled = false
-    let db: IDBDatabase | null = null
+  if (typeof indexedDB.databases === 'function') {
+    try {
+      const databases = await indexedDB.databases()
 
-    const finish = (value: number | null) => {
-      if (settled) return
+      if (
+        !databases.some(
+          (db) => db.name === DB_NAME,
+        )
+      ) {
+        return 0
+      }
+    } catch {
+      // نستخدم محاولة فتح آمنة عند عدم توفر القائمة.
+    }
+  }
 
-      settled = true
+  return new Promise<number | null>((resolve) => {
+    let finished = false
+    let database: IDBDatabase | null = null
+
+    const timer = window.setTimeout(
+      () => finish(null),
+      7000,
+    )
+
+    function finish(value: number | null) {
+      if (finished) return
+
+      finished = true
       window.clearTimeout(timer)
 
-      if (db) {
-        db.close()
+      if (database) {
+        database.close()
       }
 
       resolve(value)
     }
 
-    const timer = window.setTimeout(
-      () => finish(null),
-      6000,
-    )
-
     try {
-      const request = indexedDB.open(LIBRARY_DB)
+      const request = indexedDB.open(DB_NAME)
 
       request.onupgradeneeded = () => {
-        // إلغاء إنشاء قاعدة بيانات غير موجودة.
+        // منع إنشاء قاعدة غير موجودة.
         request.transaction?.abort()
       }
 
@@ -125,34 +227,36 @@ function countStoredIndexedAudio(): Promise<number | null> {
       request.onblocked = () => finish(null)
 
       request.onsuccess = () => {
-        db = request.result
+        database = request.result
 
-        if (settled) {
-          db.close()
+        if (finished) {
+          database.close()
           return
         }
 
-        if (!db.objectStoreNames.contains(LIBRARY_STORE)) {
+        if (
+          !database.objectStoreNames.contains(DB_STORE)
+        ) {
           finish(0)
           return
         }
 
         try {
-          const tx = db.transaction(
-            LIBRARY_STORE,
+          const transaction = database.transaction(
+            DB_STORE,
             'readonly',
           )
 
-          const count = tx
-            .objectStore(LIBRARY_STORE)
+          const counter = transaction
+            .objectStore(DB_STORE)
             .count()
 
-          count.onsuccess = () => {
-            finish(count.result)
+          counter.onsuccess = () => {
+            finish(counter.result)
           }
 
-          count.onerror = () => finish(null)
-          tx.onabort = () => finish(null)
+          counter.onerror = () => finish(null)
+          transaction.onabort = () => finish(null)
         } catch {
           finish(null)
         }
@@ -163,239 +267,136 @@ function countStoredIndexedAudio(): Promise<number | null> {
   })
 }
 
-/**
- * التعرف على صفحات القرآن الموجودة في الكاش.
- */
-function getPageIdentifier(
-  requestUrl: string,
-): {
-  riwaya: Riwaya
-  number: number
-  kind: 'text' | 'svg' | 'image'
-} | null {
+async function inspectStorage(): Promise<OfflineStats> {
+  const index = buildAssetIndex()
+
+  const pagesByRiwaya =
+    {} as Record<RiwayaId, number>
+
+  const cacheSupported =
+    typeof caches !== 'undefined'
+
+  const serviceWorkerActive = Boolean(
+    navigator.serviceWorker?.controller,
+  )
+
+  let usedBytes: number | null = null
+  let quotaBytes: number | null = null
+  let cachedAudioCount = 0
+
+  const indexedAudioPromise = countIndexedAudio()
+
   try {
-    const url = new URL(requestUrl)
+    if (
+      navigator.storage &&
+      typeof navigator.storage.estimate === 'function'
+    ) {
+      const estimate =
+        await navigator.storage.estimate()
 
-    if (url.origin !== window.location.origin) {
-      return null
+      usedBytes =
+        typeof estimate.usage === 'number'
+          ? estimate.usage
+          : null
+
+      quotaBytes =
+        typeof estimate.quota === 'number'
+          ? estimate.quota
+          : null
     }
+  } catch {
+    // بعض المتصفحات تمنع عرض تقديرات المساحة.
+  }
 
-    const path = url.pathname
+  if (cacheSupported) {
+    const existingNames = await caches.keys()
 
-    const kind =
-      path === '/api/quran'
-        ? 'text'
-        : path === '/api/mushaf-svg'
-          ? 'svg'
-          : path === '/api/mushaf-riwaya-image'
-            ? 'image'
-            : null
-
-    if (!kind) return null
-
-    const name = url.searchParams.get('riwaya')
-    const number = Number(
-      url.searchParams.get('page'),
+    const pageLists = await Promise.all(
+      PAGE_CACHES.map((name) =>
+        readCacheKeys(name, existingNames),
+      ),
     )
 
-    const riwaya = RIWAYAT.find(
-      (entry) => entry.id === name,
-    )?.id
+    pageLists.forEach((requests) => {
+      requests.forEach((request) => {
+        const asset = getPageAsset(request.url)
 
-    if (
-      !riwaya ||
-      !Number.isInteger(number) ||
-      number < 1 ||
-      number > TOTAL_QURAN_PAGES
-    ) {
-      return null
-    }
+        if (asset) {
+          index[asset.riwaya][asset.kind].add(
+            asset.page,
+          )
+        }
+      })
+    })
 
-    return {
-      riwaya,
-      number,
-      kind,
-    }
-  } catch {
-    return null
-  }
-}
+    const audioLists = await Promise.all(
+      AUDIO_CACHES.map((name) =>
+        readCacheKeys(name, existingNames),
+      ),
+    )
 
-/**
- * قراءة مفاتيح الكاش بشكل متوافق مع TypeScript.
- *
- * cache.keys() قد تعيد readonly Request[].
- * Array.from ينشئ مصفوفة عادية قابلة للاستخدام.
- */
-async function getCacheKeys(
-  name: string,
-  existing: Set<string>,
-): Promise<Request[]> {
-  if (!existing.has(name)) {
-    return []
+    const audioUrls = new Set<string>()
+
+    audioLists.forEach((requests) => {
+      requests.forEach((request) => {
+        audioUrls.add(request.url)
+      })
+    })
+
+    cachedAudioCount = audioUrls.size
   }
 
-  try {
-    const cache = await caches.open(name)
+  let pageCount = 0
 
-    const keys = await cache.keys()
+  RIWAYAT.forEach(({ id }) => {
+    const entry = index[id]
 
-    return Array.from(keys)
-  } catch {
-    return []
-  }
-}
+    const requiresImage =
+      id === 'sousi' || id === 'bazzi'
 
-/**
- * فحص مخازن الجهاز دون حذف أي ملفات.
- */
-async function inspectOfflineStorage(): Promise<OfflineSummary> {
-  const supported =
-    typeof window !== 'undefined' &&
-    'caches' in window
+    let complete = 0
 
-  const byRiwaya = Object.fromEntries(
-    RIWAYAT.map((item) => [item.id, 0]),
-  ) as Record<Riwaya, number>
-
-  const [
-    indexedAudioFiles,
-    estimate,
-    serviceWorkerReady,
-  ] = await Promise.all([
-    countStoredIndexedAudio(),
-
-    navigator.storage
-      ?.estimate?.()
-      .catch(() => null) ??
-      Promise.resolve(null),
-
-    Promise.resolve(
-      Boolean(navigator.serviceWorker?.controller),
-    ),
-  ])
-
-  if (!supported) {
-    return {
-      supported: false,
-      pageFiles: 0,
-      audioFiles: 0,
-      indexedAudioFiles,
-      byRiwaya,
-      storageUsed: estimate?.usage ?? null,
-      storageQuota: estimate?.quota ?? null,
-      serviceWorkerReady,
-      lastChecked: Date.now(),
-    }
-  }
-
-  const existing = new Set(
-    await caches.keys(),
-  )
-
-  const assets = Object.fromEntries(
-    RIWAYAT.map((item) => [
-      item.id,
-      emptyAssets(),
-    ]),
-  ) as Record<Riwaya, PageAssets>
-
-  const allPageRequests = await Promise.all(
-    [PAGE_CACHE, ...IMAGE_CACHES].map(
-      (name) => getCacheKeys(name, existing),
-    ),
-  )
-
-  for (const requests of allPageRequests) {
-    for (const request of requests) {
-      const page = getPageIdentifier(request.url)
-
-      if (page) {
-        assets[page.riwaya][page.kind].add(
-          page.number,
-        )
-      }
-    }
-  }
-
-  /**
-   * حساب الصفحات المكتملة لكل رواية.
-   */
-  for (const item of RIWAYAT) {
-    const stored = assets[item.id]
-    let total = 0
-
-    for (const page of stored.text) {
-      const hasVisual = stored.svg.has(page)
-
-      const needsImage =
-        item.id === 'sousi' ||
-        item.id === 'bazzi'
-
+    // Set.forEach بدلاً من for...of للتوافق مع ES5.
+    entry.text.forEach((page) => {
       if (
-        hasVisual &&
-        (!needsImage || stored.image.has(page))
+        entry.svg.has(page) &&
+        (!requiresImage || entry.image.has(page))
       ) {
-        total += 1
+        complete += 1
       }
-    }
+    })
 
-    byRiwaya[item.id] = total
-  }
-
-  /**
-   * جمع ملفات الصوت من جميع مخازن الكاش
-   * مع منع تكرار نفس الرابط.
-   */
-  const audioUrls = new Set<string>()
-
-  const allAudioRequests = await Promise.all(
-    AUDIO_CACHES.map(
-      (name) => getCacheKeys(name, existing),
-    ),
-  )
-
-  for (const requests of allAudioRequests) {
-    for (const request of requests) {
-      audioUrls.add(request.url)
-    }
-  }
+    pagesByRiwaya[id] = complete
+    pageCount += complete
+  })
 
   return {
-    supported: true,
-
-    pageFiles: Object.values(byRiwaya).reduce(
-      (sum, value) => sum + value,
-      0,
-    ),
-
-    audioFiles: audioUrls.size,
-    indexedAudioFiles,
-    byRiwaya,
-
-    storageUsed: estimate?.usage ?? null,
-    storageQuota: estimate?.quota ?? null,
-
-    serviceWorkerReady,
-    lastChecked: Date.now(),
+    cacheSupported,
+    serviceWorkerActive,
+    pageCount,
+    pagesByRiwaya,
+    cachedAudioCount,
+    indexedAudioCount: await indexedAudioPromise,
+    usedBytes,
+    quotaBytes,
+    checkedAt: Date.now(),
   }
 }
 
-/**
- * تحويل حجم الملفات لصيغة مقروءة.
- */
-function formatSize(
-  bytes: number | null,
-): string {
+function formatNumber(value: number): string {
+  return value.toLocaleString('ar-EG')
+}
+
+function formatBytes(value: number | null): string {
   if (
-    bytes === null ||
-    !Number.isFinite(bytes)
+    value === null ||
+    !Number.isFinite(value)
   ) {
     return 'غير متاح'
   }
 
-  if (bytes < 1024) {
-    return `${Math.round(bytes).toLocaleString('ar')} بايت`
+  if (value < 1024) {
+    return `${formatNumber(value)} بايت`
   }
 
   const units = [
@@ -405,72 +406,62 @@ function formatSize(
     'تيرابايت',
   ]
 
-  let value = bytes
+  let amount = value
   let unit = -1
 
   do {
-    value /= 1024
+    amount /= 1024
     unit += 1
   } while (
-    value >= 1024 &&
+    amount >= 1024 &&
     unit < units.length - 1
   )
 
-  return `${value.toLocaleString('ar', {
+  return `${amount.toLocaleString('ar-EG', {
     maximumFractionDigits: 1,
   })} ${units[unit]}`
-}
-
-function formatCount(value: number): string {
-  return value.toLocaleString('ar')
 }
 
 export default function OfflinePage() {
   const [online, setOnline] = useState(true)
   const [loading, setLoading] = useState(true)
 
-  const [summary, setSummary] =
-    useState<OfflineSummary | null>(null)
+  const [stats, setStats] =
+    useState<OfflineStats | null>(null)
 
   const [error, setError] = useState('')
 
-  /**
-   * إعادة فحص الملفات المحفوظة.
-   */
   const refresh = useCallback(async () => {
     setLoading(true)
     setError('')
 
     try {
-      const next = await inspectOfflineStorage()
-      setSummary(next)
+      const result = await inspectStorage()
+      setStats(result)
     } catch {
       setError(
-        'تعذر قراءة بعض الملفات المحفوظة. جرّب تحديث الفحص.',
+        'تعذر فحص بعض البيانات المحفوظة على هذا الجهاز. حاول مرة أخرى.',
       )
     } finally {
       setLoading(false)
     }
   }, [])
 
-  /**
-   * متابعة حالة الإنترنت.
-   */
   useEffect(() => {
-    setOnline(navigator.onLine)
-
-    const handleOnline = () => {
+    const updateConnection = () => {
       setOnline(navigator.onLine)
     }
 
+    updateConnection()
+
     window.addEventListener(
       'online',
-      handleOnline,
+      updateConnection,
     )
 
     window.addEventListener(
       'offline',
-      handleOnline,
+      updateConnection,
     )
 
     void refresh()
@@ -478,263 +469,249 @@ export default function OfflinePage() {
     return () => {
       window.removeEventListener(
         'online',
-        handleOnline,
+        updateConnection,
       )
 
       window.removeEventListener(
         'offline',
-        handleOnline,
+        updateConnection,
       )
     }
   }, [refresh])
 
-  const audioCount =
-    (summary?.audioFiles ?? 0) +
-    (summary?.indexedAudioFiles ?? 0)
-
-  const storagePercent =
-    summary?.storageUsed != null &&
-    summary.storageQuota != null &&
-    summary.storageQuota > 0
+  const percentage =
+    stats?.usedBytes != null &&
+    stats.quotaBytes != null &&
+    stats.quotaBytes > 0
       ? Math.min(
           100,
-          (summary.storageUsed /
-            summary.storageQuota) *
-            100,
+          (stats.usedBytes / stats.quotaBytes) * 100,
         )
-      : null
+      : 0
 
   return (
     <main
       dir="rtl"
-      className="min-h-screen bg-[#F5F8FB] pb-28 text-slate-900"
+      className="min-h-screen bg-[#f4f9fe] pb-28 text-slate-900"
     >
-      <div className="mx-auto max-w-3xl px-4 pt-6 sm:px-6 sm:pt-10">
+      <div className="mx-auto max-w-3xl px-4 py-7 sm:px-6">
 
         {/* Header */}
-        <header className="mb-6 flex items-center justify-between gap-3">
+        <header className="mb-6 flex items-start justify-between gap-3">
           <div>
-            <p className="mb-1 text-xs font-bold tracking-wide text-[#B48A49]">
-              مصحف سميع
+            <p className="text-xs font-bold text-[#bc924e]">
+              مصحف سميع · SAMEE3
             </p>
 
-            <h1 className="text-2xl font-extrabold sm:text-3xl">
+            <h1 className="mt-2 text-2xl font-extrabold">
               التنزيلات دون إنترنت
             </h1>
+
+            <p className="mt-2 text-sm text-slate-500">
+              ملفات القرآن والتلاوات الموجودة على جهازك
+            </p>
           </div>
 
           <Link
             href="/"
             aria-label="العودة للرئيسية"
-            className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-600 shadow-sm transition hover:bg-slate-50"
+            className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
           >
-            <ArrowLeft size={21} />
+            <ArrowLeft size={20} />
           </Link>
         </header>
 
         {/* Hero */}
-        <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#123C4B] via-[#15566B] to-[#0C3446] p-6 text-white shadow-xl sm:p-8">
+        <section className="rounded-[28px] bg-gradient-to-br from-[#0c3b59] via-[#11516c] to-[#16374c] p-6 text-white shadow-lg sm:p-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-bold">
+              {online ? (
+                <Wifi size={15} />
+              ) : (
+                <WifiOff size={15} />
+              )}
 
-          <div className="pointer-events-none absolute -left-20 -top-20 h-56 w-56 rounded-full bg-[#D9B878]/10 blur-2xl" />
-
-          <div className="relative flex items-start justify-between gap-4">
-            <div>
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90">
-                {online ? (
-                  <Wifi size={15} />
-                ) : (
-                  <WifiOff size={15} />
-                )}
-
-                {online
-                  ? 'متصل بالإنترنت'
-                  : 'تستخدم التطبيق دون اتصال'}
-              </span>
-
-              <h2 className="mt-5 text-xl font-extrabold leading-relaxed sm:text-2xl">
-                القرآن معك أينما كنت
-              </h2>
-
-              <p className="mt-2 max-w-md text-sm leading-7 text-white/75">
-                تابع ما حُفظ بالفعل على جهازك،
-                واعرف الصفحات والتلاوات المتاحة
-                للاستخدام دون إنترنت.
-              </p>
-            </div>
-
-            <div className="hidden h-16 w-16 shrink-0 place-items-center rounded-2xl border border-[#D9B878]/30 bg-[#D9B878]/10 text-[#F1D39A] sm:grid">
-              <Download
-                size={32}
-                strokeWidth={1.6}
-              />
-            </div>
-          </div>
-
-          <div className="relative mt-5 flex items-center gap-2 text-xs text-white/75">
-            {summary?.serviceWorkerReady ? (
-              <ShieldCheck
-                size={15}
-                className="text-[#D9B878]"
-              />
-            ) : (
-              <Info size={15} />
-            )}
-
-            <span>
-              {summary?.serviceWorkerReady
-                ? 'خدمة العمل دون إنترنت نشطة لهذه الصفحة'
-                : 'لتشغيل الملفات دون إنترنت، افتح التطبيق مرة على الأقل أثناء الاتصال وتأكد من تفعيل خدمة التطبيق.'}
+              {online
+                ? 'متصل بالإنترنت'
+                : 'بدون اتصال بالإنترنت'}
             </span>
+
+            <BookOpen
+              size={27}
+              className="text-[#e3c58e]"
+            />
           </div>
+
+          <h2 className="mt-5 text-xl font-extrabold sm:text-2xl">
+            مصحفك معك أينما كنت
+          </h2>
+
+          <p className="mt-2 max-w-lg text-sm leading-7 text-white/80">
+            اعرف ما تم حفظه بالفعل من صفحات المصحف
+            والتسجيلات الصوتية، دون تعديل أو حذف
+            أي تنزيلات.
+          </p>
+
+          <p className="mt-4 flex items-center gap-2 text-xs text-white/75">
+            <ShieldCheck
+              size={16}
+              className="shrink-0 text-[#e3c58e]"
+            />
+
+            {stats?.serviceWorkerActive
+              ? 'خدمة التطبيق تعمل لهذه الصفحة'
+              : 'قد تحتاج إلى فتح التطبيق مرة أثناء الاتصال لتفعيل العمل دون إنترنت'}
+          </p>
         </section>
 
         {/* Refresh */}
-        <div className="my-5 flex items-center justify-between gap-3">
-          <p className="text-sm text-slate-500">
-            البيانات المعروضة تخص هذا المتصفح وهذا الجهاز فقط.
+        <div className="my-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs leading-6 text-slate-500">
+            الأرقام تخص هذا المتصفح والجهاز فقط.
           </p>
 
           <button
             type="button"
             onClick={() => void refresh()}
             disabled={loading}
-            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-[#15566B] shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-[#0d5776] shadow-sm disabled:opacity-60"
           >
             {loading ? (
               <Loader2
-                size={16}
+                size={17}
                 className="animate-spin"
               />
             ) : (
-              <RefreshCw size={16} />
+              <RefreshCw size={17} />
             )}
 
-            تحديث الفحص
+            {loading
+              ? 'جارٍ الفحص'
+              : 'تحديث الفحص'}
           </button>
         </div>
 
         {error && (
           <div
             role="alert"
-            className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"
+            className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"
           >
             {error}
           </div>
         )}
 
         {/* Statistics */}
-        <div className="mb-5 grid grid-cols-2 gap-3">
-
-          <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
-            <div className="mb-3 inline-flex rounded-xl bg-[#EDF7F4] p-2.5 text-[#23745F]">
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:gap-4">
+          <article className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
+            <div className="mb-3 inline-flex rounded-xl bg-[#edf7f2] p-2.5 text-[#26795a]">
               <BookOpen size={21} />
             </div>
 
             <p className="text-3xl font-extrabold tabular-nums">
-              {loading && !summary
-                ? '—'
-                : formatCount(
-                    summary?.pageFiles ?? 0,
-                  )}
+              {stats
+                ? formatNumber(stats.pageCount)
+                : '—'}
             </p>
 
-            <p className="mt-1 text-sm font-bold text-slate-700">
-              صفحة مصحف محفوظة
-            </p>
+            <h3 className="mt-1 text-sm font-bold">
+              صفحة مصحف مكتملة
+            </h3>
 
             <p className="mt-2 text-xs leading-5 text-slate-500">
-              صفحات مكتملة العناصر اللازمة للعرض
+              حسب الملفات الموجودة في التخزين المحلي
             </p>
-          </div>
+          </article>
 
-          <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
-            <div className="mb-3 inline-flex rounded-xl bg-[#FFF6E9] p-2.5 text-[#B48A49]">
+          <article className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
+            <div className="mb-3 inline-flex rounded-xl bg-[#fff6e7] p-2.5 text-[#b48a49]">
               <Headphones size={21} />
             </div>
 
             <p className="text-3xl font-extrabold tabular-nums">
-              {loading && !summary
-                ? '—'
-                : formatCount(audioCount)}
+              {stats
+                ? formatNumber(
+                    stats.cachedAudioCount,
+                  )
+                : '—'}
             </p>
 
-            <p className="mt-1 text-sm font-bold text-slate-700">
-              ملف صوت محفوظ
-            </p>
+            <h3 className="mt-1 text-sm font-bold">
+              تسجيل بكاش الصوت
+            </h3>
 
             <p className="mt-2 text-xs leading-5 text-slate-500">
-              يشمل كاش التلاوات ومكتبة التسجيلات
+              قد تتكرر هذه الملفات مع المكتبة الصوتية
             </p>
-          </div>
+          </article>
         </div>
 
         {/* Quran pages */}
         <section className="mb-5 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
-
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-5 sm:px-6">
-
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-5 sm:px-6">
             <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-[#EDF5FA] p-2 text-[#17678B]">
+              <div className="rounded-xl bg-[#eaf3fa] p-2.5 text-[#17678b]">
                 <BookOpen size={20} />
               </div>
 
               <div>
                 <h2 className="font-extrabold">
-                  صفحات القرآن المحفوظة
+                  صفحات المصحف المحفوظة
                 </h2>
 
                 <p className="mt-1 text-xs text-slate-500">
-                  عدد الصفحات المكتملة لكل رواية
-                  من أصل ٦٠٤ صفحات
+                  الصفحات المكتملة من أصل ٦٠٤ لكل رواية
                 </p>
               </div>
             </div>
 
             <Link
               href="/mushaf"
-              className="text-xs font-extrabold text-[#17678B] hover:underline"
+              className="text-sm font-bold text-[#17678b] hover:underline"
             >
               فتح المصحف
             </Link>
           </div>
 
           <div className="divide-y divide-slate-100 px-5 sm:px-6">
-
-            {RIWAYAT.map((item) => {
+            {RIWAYAT.map(({ id, name }) => {
               const count =
-                summary?.byRiwaya[item.id] ?? 0
+                stats?.pagesByRiwaya[id] ?? 0
 
-              const percent =
-                (count / TOTAL_QURAN_PAGES) * 100
+              const width = Math.max(
+                0,
+                Math.min(
+                  100,
+                  (count / PAGE_TOTAL) * 100,
+                ),
+              )
 
               return (
                 <div
-                  key={item.id}
+                  key={id}
                   className="py-4"
                 >
-                  <div className="mb-2 flex items-center justify-between gap-2 text-sm">
-
+                  <div className="mb-2 flex justify-between gap-3 text-sm">
                     <span className="font-bold text-slate-700">
-                      {item.name}
+                      {name}
                     </span>
 
-                    <span className="font-extrabold text-[#15566B] tabular-nums">
-                      {formatCount(count)} / ٦٠٤
+                    <span className="shrink-0 font-extrabold tabular-nums text-[#11516c]">
+                      {formatNumber(count)} / ٦٠٤
                     </span>
                   </div>
 
                   <div
                     className="h-2 overflow-hidden rounded-full bg-slate-100"
                     role="progressbar"
-                    aria-label={`صفحات ${item.name}`}
-                    aria-valuenow={count}
+                    aria-label={`صفحات ${name}`}
                     aria-valuemin={0}
-                    aria-valuemax={TOTAL_QURAN_PAGES}
+                    aria-valuemax={PAGE_TOTAL}
+                    aria-valuenow={count}
                   >
                     <div
-                      className="h-full rounded-full bg-gradient-to-l from-[#C69B5B] to-[#E6CB98] transition-all"
+                      className="h-full rounded-full bg-gradient-to-l from-[#bd9150] to-[#e5c48a]"
                       style={{
-                        width: `${percent}%`,
+                        width: `${width}%`,
                       }}
                     />
                   </div>
@@ -743,24 +720,63 @@ export default function OfflinePage() {
             })}
           </div>
 
-          <div className="flex items-start gap-2 border-t border-slate-100 bg-[#FAFBFC] px-5 py-4 text-xs leading-6 text-slate-500 sm:px-6">
+          <p className="flex items-start gap-2 border-t border-slate-100 bg-[#fafbfc] px-5 py-4 text-xs leading-6 text-slate-500 sm:px-6">
             <Info
-              size={17}
-              className="mt-0.5 shrink-0"
+              size={16}
+              className="mt-1 shrink-0"
             />
 
-            قد توجد موارد مخزنة جزئيًا؛ لا تُحتسب
-            الصفحة مكتملة إلا عند وجود النص والرسم،
-            وصورة الصفحة للروايات التي تحتاجها.
+            تُحتسب الصفحة عند وجود بياناتها
+            ورسمها، وكذلك صورتها في روايتي السوسي
+            والبزي. هذا فحص لمفاتيح التخزين وليس
+            اختبارًا لفتح كل صفحة.
+          </p>
+        </section>
+
+        {/* IndexedDB audio */}
+        <section className="mb-5 rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-3 flex items-center gap-3">
+            <div className="rounded-xl bg-[#fff6e7] p-2.5 text-[#b48a49]">
+              <Database size={20} />
+            </div>
+
+            <div>
+              <h2 className="font-extrabold">
+                تسجيلات المكتبة الصوتية
+              </h2>
+
+              <p className="mt-1 text-xs text-slate-500">
+                نسخ محفوظة داخل قاعدة بيانات المتصفح
+              </p>
+            </div>
           </div>
+
+          <p className="text-2xl font-extrabold tabular-nums text-[#11516c]">
+            {stats?.indexedAudioCount == null
+              ? 'غير متاح'
+              : formatNumber(
+                  stats.indexedAudioCount,
+                )}
+          </p>
+
+          <p className="mt-2 text-xs leading-6 text-slate-500">
+            نعرضها منفصلة عن كاش الصوت حتى لا
+            نجمع النسخة نفسها مرتين.
+          </p>
+
+          <Link
+            href="/audio"
+            className="mt-4 inline-flex items-center gap-2 text-sm font-extrabold text-[#17678b] hover:underline"
+          >
+            <Headphones size={17} />
+            فتح المكتبة الصوتية
+          </Link>
         </section>
 
         {/* Storage */}
         <section className="mb-5 rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
-
           <div className="mb-4 flex items-center gap-3">
-
-            <div className="rounded-xl bg-[#FFF6E9] p-2 text-[#B48A49]">
+            <div className="rounded-xl bg-[#eaf3fa] p-2.5 text-[#17678b]">
               <HardDrive size={20} />
             </div>
 
@@ -770,123 +786,70 @@ export default function OfflinePage() {
               </h2>
 
               <p className="mt-1 text-xs text-slate-500">
-                تقدير المتصفح لمساحة هذا الموقع،
-                وليس تنزيلات سميع وحدها
+                تقدير الاستخدام الكلي لبيانات هذا الموقع
               </p>
             </div>
           </div>
 
-          <div className="flex items-baseline justify-between gap-3">
-
-            <span className="text-lg font-extrabold text-[#15566B]">
-              {formatSize(
-                summary?.storageUsed ?? null,
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <strong className="text-lg text-[#11516c]">
+              {formatBytes(
+                stats?.usedBytes ?? null,
               )}
-            </span>
+            </strong>
 
             <span className="text-xs text-slate-500">
-              المتاح للموقع:{' '}
-              {formatSize(
-                summary?.storageQuota ?? null,
+              الحصة المتاحة:{' '}
+              {formatBytes(
+                stats?.quotaBytes ?? null,
               )}
             </span>
           </div>
 
           <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
-
             <div
-              className="h-full rounded-full bg-[#C69B5B] transition-all"
+              className="h-full rounded-full bg-[#c9a05e]"
               style={{
-                width: `${storagePercent ?? 0}%`,
+                width: `${percentage}%`,
               }}
             />
           </div>
-
-          <p className="mt-3 flex items-start gap-2 text-xs leading-6 text-slate-500">
-
-            <CheckCircle2
-              size={16}
-              className="mt-0.5 shrink-0 text-[#23745F]"
-            />
-
-            هذه الصفحة لا تحذف أي ملفات أو تسجيلات
-            محفوظة. الحفظ الكامل يتم من داخل المصحف
-            والمكتبة الصوتية.
-          </p>
         </section>
 
-        {/* Navigation */}
-        <div className="mb-5 grid gap-3 sm:grid-cols-2">
+        {/* Browser support */}
+        {!loading &&
+          stats &&
+          !stats.cacheSupported && (
+            <div
+              role="status"
+              className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+            >
+              هذا المتصفح لا يدعم Cache Storage،
+              لذلك تعذر فحص صفحات المصحف
+              والتسجيلات المخزنة فيه.
+            </div>
+          )}
 
-          <Link
-            href="/mushaf"
-            className="group flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:border-[#D9B878]"
-          >
-            <span className="flex items-center gap-3 font-bold">
-              <BookOpen
-                size={19}
-                className="text-[#17678B]"
-              />
-
-              تنزيل صفحات المصحف
-            </span>
-
-            <ArrowLeft
-              size={17}
-              className="text-slate-400 transition group-hover:-translate-x-1"
-            />
-          </Link>
-
-          <Link
-            href="/audio"
-            className="group flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:border-[#D9B878]"
-          >
-            <span className="flex items-center gap-3 font-bold">
-
-              <Headphones
-                size={19}
-                className="text-[#B48A49]"
-              />
-
-              تنزيل التلاوات والصوتيات
-            </span>
-
-            <ArrowLeft
-              size={17}
-              className="text-slate-400 transition group-hover:-translate-x-1"
-            />
-          </Link>
-        </div>
-
-        {/* Information */}
-        <div className="rounded-2xl border border-[#DCE8EE] bg-[#EDF5FA] p-4 text-sm leading-7 text-[#31576A]">
-
-          <div className="mb-1 flex items-center gap-2 font-extrabold">
-
-            {online ? (
-              <Database size={17} />
-            ) : (
-              <CloudOff size={17} />
-            )}
-
-            مهم قبل السفر أو انقطاع الاتصال
+        {/* Safety information */}
+        <div className="rounded-2xl border border-[#dbe6ef] bg-white p-5 text-sm leading-7 text-slate-600">
+          <div className="mb-2 flex items-center gap-2 font-extrabold text-[#11516c]">
+            <ShieldCheck size={18} />
+            خصوصية وأمان التنزيلات
           </div>
 
-          نزّل الرواية والتلاوات التي تحتاجها وأنت
-          متصل بالإنترنت، ثم اختبر فتح المصحف
-          وتشغيل الصوت دون اتصال على نفس الجهاز.
-        </div>
+          الصفحة تقرأ حالة التخزين فقط ولا
+          تحذف أي ملفات أو تنزّل محتوى تلقائيًا.
+          قبل السفر، احفظ الرواية والتلاوات المطلوبة
+          ثم اختبر فتحها في وضع الطيران على جهازك.
 
-        {!summary?.supported && !loading && (
-          <div
-            role="status"
-            className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
-          >
-            المتصفح الحالي لا يدعم واجهة
-            Cache Storage، وبالتالي لا يمكن فحص
-            صفحات المصحف المخزنة من هنا.
-          </div>
-        )}
+          <p className="mt-2 text-xs text-slate-400">
+            {stats
+              ? `آخر فحص: ${new Date(
+                  stats.checkedAt,
+                ).toLocaleString('ar-EG')}`
+              : 'لم يكتمل الفحص بعد'}
+          </p>
+        </div>
       </div>
     </main>
   )
