@@ -1,74 +1,317 @@
+
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // =========================================
+    // Authentication and administration
+    // =========================================
+
     function signedIn() {
       return request.auth != null;
     }
 
-    // حساب الإدارة يحدد فقط من خلال users/{uid}.role = "admin".
-    // لا نعتمد على الواجهة وحدها؛ هذه القاعدة هي خط الحماية الفعلي للبيانات.
-    function isAdmin() {
+    function isOwner(userId) {
       return signedIn()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+        && request.auth.uid == userId;
     }
 
-    function validMessageText() {
-      return request.resource.data.text is string
-        && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 5000;
+    // Admin privileges are assigned through Firebase,
+    // not by modifying the application interface.
+    function isAdmin() {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        )
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.get('role', 'user') == 'admin';
+    }
+
+    function validText(value, maximum) {
+      return value is string
+        && value.size() > 0
+        && value.size() <= maximum;
+    }
+
+    function validName(value) {
+      return validText(value, 100);
+    }
+
+    function accountEmailMatches() {
+      return signedIn()
+        && request.resource.data.get('email', '') is string
+        && request.resource.data.get('email', '')
+          == request.auth.token.get('email', '');
+    }
+
+    function validAccountIdentity() {
+      return validName(
+          request.resource.data.get('name', '')
+        )
+        && (
+          !request.resource.data.keys().hasAny(['displayName'])
+          || validName(request.resource.data.displayName)
+        )
+        && accountEmailMatches();
+    }
+
+    function isChanged(field) {
+      return request.resource.data
+        .diff(resource.data)
+        .affectedKeys()
+        .hasAny([field]);
+    }
+
+    // =========================================
+    // Users
+    // =========================================
+
+    function validUserCreate() {
+      return request.resource.data.keys().hasOnly([
+          'name',
+          'displayName',
+          'email',
+          'role',
+          'status',
+          'createdAt',
+          'lastLoginAt',
+          'updatedAt'
+        ])
+        && validAccountIdentity()
+        && request.resource.data.get('role', 'user') == 'user'
+        && request.resource.data.get('status', 'active') == 'active'
+        && request.resource.data.get('createdAt', request.time)
+          == request.time
+        && request.resource.data.get('lastLoginAt', request.time)
+          == request.time
+        && request.resource.data.get('updatedAt', request.time)
+          == request.time;
+    }
+
+    function validUserUpdate() {
+      return request.resource.data
+        .diff(resource.data)
+        .affectedKeys()
+        .hasOnly([
+          'name',
+          'displayName',
+          'email',
+          'lastLoginAt',
+          'updatedAt',
+          'khatmaDays',
+          'khatmaStartDate',
+          'khatmaPagesPerDay',
+          'lastReadPage',
+          'lastReadRiwayaId',
+          'lastReadSurahNumber',
+          'lastReadSurahName',
+          'lastReadJuz',
+          'lastReadAyahKey',
+          'lastReadAyahNumber',
+          'lastReadReciterId',
+          'lastReadReciterName'
+        ])
+        && validAccountIdentity()
+
+        && (
+          !isChanged('lastLoginAt')
+          || request.resource.data.lastLoginAt == request.time
+        )
+
+        && (
+          !isChanged('updatedAt')
+          || request.resource.data.updatedAt == request.time
+        )
+
+        && (
+          !isChanged('khatmaDays')
+          || (
+            request.resource.data.khatmaDays is int
+            && request.resource.data.khatmaDays >= 1
+            && request.resource.data.khatmaDays <= 365
+          )
+        )
+
+        && (
+          !isChanged('khatmaStartDate')
+          || (
+            request.resource.data.khatmaStartDate is string
+            && request.resource.data.khatmaStartDate.matches(
+              '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+            )
+          )
+        )
+
+        && (
+          !isChanged('khatmaPagesPerDay')
+          || (
+            request.resource.data.khatmaPagesPerDay is int
+            && request.resource.data.khatmaPagesPerDay >= 1
+            && request.resource.data.khatmaPagesPerDay <= 604
+          )
+        )
+
+        && (
+          !isChanged('lastReadPage')
+          || (
+            request.resource.data.lastReadPage is int
+            && request.resource.data.lastReadPage >= 1
+            && request.resource.data.lastReadPage <= 604
+          )
+        )
+
+        && (
+          !isChanged('lastReadSurahNumber')
+          || (
+            request.resource.data.lastReadSurahNumber is int
+            && request.resource.data.lastReadSurahNumber >= 1
+            && request.resource.data.lastReadSurahNumber <= 114
+          )
+        )
+
+        && (
+          !isChanged('lastReadJuz')
+          || (
+            request.resource.data.lastReadJuz is int
+            && request.resource.data.lastReadJuz >= 1
+            && request.resource.data.lastReadJuz <= 30
+          )
+        )
+
+        && (
+          !isChanged('lastReadAyahNumber')
+          || (
+            request.resource.data.lastReadAyahNumber is int
+            && request.resource.data.lastReadAyahNumber >= 1
+            && request.resource.data.lastReadAyahNumber <= 286
+          )
+        )
+
+        && (
+          !isChanged('lastReadRiwayaId')
+          || validText(
+            request.resource.data.lastReadRiwayaId, 30
+          )
+        )
+
+        && (
+          !isChanged('lastReadSurahName')
+          || validText(
+            request.resource.data.lastReadSurahName, 100
+          )
+        )
+
+        && (
+          !isChanged('lastReadAyahKey')
+          || validText(
+            request.resource.data.lastReadAyahKey, 30
+          )
+        )
+
+        && (
+          !isChanged('lastReadReciterId')
+          || validText(
+            request.resource.data.lastReadReciterId, 100
+          )
+        )
+
+        && (
+          !isChanged('lastReadReciterName')
+          || validText(
+            request.resource.data.lastReadReciterName, 100
+          )
+        );
     }
 
     match /users/{userId} {
 
-      // المستخدم يرى ملفه فقط، والأدمن يرى جميع المستخدمين.
-      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      // The owner reads their own record.
+      // The administrator can read any record.
+      allow get: if isOwner(userId) || isAdmin();
 
-      // إنشاء الملف بعد إنشاء حساب Firebase Auth.
-      // لا يمكن للمستخدم إنشاء نفسه كأدمن من الواجهة.
-      allow create: if signedIn()
-        && request.auth.uid == userId
-        && request.resource.data.name is string
-        && request.resource.data.name.size() >= 2
-        && request.resource.data.name.size() <= 60
-        && request.resource.data.email is string
-        && (
-          !request.resource.data.keys().hasAny(['role'])
-          || request.resource.data.role == 'user'
-        );
+      // Only administrators can list all users.
+      allow list: if isAdmin();
 
-      // المستخدم يعدل بياناته دون القدرة على تغيير role.
-      // الأدمن يستطيع إدارة أي ملف مستخدم.
+      // New accounts cannot assign themselves admin access.
+      allow create: if isOwner(userId)
+        && validUserCreate();
+
+      // Regular users can update only permitted fields.
+      // role, status and disabled remain admin-controlled.
       allow update: if isAdmin()
         || (
-          signedIn()
-          && request.auth.uid == userId
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
+          isOwner(userId)
+          && validUserUpdate()
         );
 
-      // الحذف للإدارة فقط.
       allow delete: if isAdmin();
     }
 
-    // محادثة واحدة لكل مستخدم، ويرتبط مفتاحها مباشرة بـ UID المستخدم.
-    match /conversations/{userId} {
+    // =========================================
+    // Conversation metadata
+    // =========================================
 
-      // المستخدم لا يرى إلا محادثته. الأدمن يرى كل المحادثات.
-      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+    function validConversation(userId) {
+      return request.resource.data.keys().hasOnly([
+          'userId',
+          'userName',
+          'userEmail',
+          'lastMessage',
+          'lastSenderId',
+          'updatedAt',
+          'unreadForAdmin',
+          'unreadForUser'
+        ])
+        && request.resource.data.get('userId', '') == userId
 
-      // المستخدم ينشئ محادثته بنفس UID فقط.
-      allow create: if signedIn()
-        && request.auth.uid == userId
-        && request.resource.data.userId == userId;
+        && validName(
+          request.resource.data.get(
+            'userName',
+            'مستخدم مصحف سميع'
+          )
+        )
 
-      // المستخدم يستطيع تحديث بيانات المحادثة الخاصة به، والأدمن يستطيع إدارتها.
-      allow update: if isAdmin()
-        || (
-          signedIn()
-          && request.auth.uid == userId
-          && request.resource.data.userId == userId
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        && request.resource.data.get('userEmail', '') is string
+        && request.resource.data.get('userEmail', '').size() <= 320
+
+        && request.resource.data.get('lastMessage', '') is string
+        && request.resource.data.get('lastMessage', '').size() <= 5000
+
+        && request.resource.data.get('lastSenderId', '') is string
+        && request.resource.data.get('lastSenderId', '').size() <= 128
+
+        && request.resource.data.get('unreadForAdmin', false) is bool
+        && request.resource.data.get('unreadForUser', false) is bool
+
+        && request.resource.data.get('updatedAt', request.time)
+          == request.time;
+    }
+
+    function ownerConversationCreate(userId) {
+      return isOwner(userId)
+        && validConversation(userId)
+
+        && request.resource.data.get('userEmail', '')
+          == request.auth.token.get('email', '')
+
+        && request.resource.data.get('lastSenderId', userId)
+          == userId
+
+        && request.resource.data.get('unreadForUser', false)
+          == false;
+    }
+
+    function ownerConversationUpdate(userId) {
+      return isOwner(userId)
+
+        && request.resource.data.get('userId', '') == userId
+
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
             'userName',
             'userEmail',
             'lastMessage',
@@ -77,60 +320,140 @@ service cloud.firestore {
             'unreadForAdmin',
             'unreadForUser'
           ])
+
+        && validConversation(userId)
+
+        && request.resource.data.get('userEmail', '')
+          == request.auth.token.get('email', '')
+
+        && (
+          !isChanged('lastSenderId')
+          || request.resource.data.lastSenderId == userId
+        )
+
+        && (
+          !isChanged('unreadForAdmin')
+          || request.resource.data.unreadForAdmin == true
+        )
+
+        && (
+          !isChanged('unreadForUser')
+          || request.resource.data.unreadForUser == false
+        );
+    }
+
+    // =========================================
+    // Individual messages
+    // =========================================
+
+    function validMessageCreate() {
+      return request.resource.data.keys().hasOnly([
+          'senderId',
+          'senderName',
+          'text',
+          'createdAt',
+          'read'
+        ])
+
+        && request.resource.data.keys().hasAll([
+          'senderId',
+          'senderName',
+          'text',
+          'createdAt',
+          'read'
+        ])
+
+        && request.resource.data.senderId == request.auth.uid
+        && validName(request.resource.data.senderName)
+        && validText(request.resource.data.text, 5000)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.read == false;
+    }
+
+    // Read receipts move from false to true only.
+    // Senders cannot mark their own messages as read.
+    function validReadReceipt(userId) {
+      return (
+          isOwner(userId)
+          || isAdmin()
+        )
+
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasOnly(['read'])
+
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasAll(['read'])
+
+        && resource.data.get('read', false) == false
+        && request.resource.data.read == true
+
+        && resource.data.senderId != request.auth.uid;
+    }
+
+    match /conversations/{userId} {
+
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if ownerConversationCreate(userId)
+        || (
+          isAdmin()
+          && validConversation(userId)
+        );
+
+      allow update: if ownerConversationUpdate(userId)
+        || (
+          isAdmin()
+          && request.resource.data.get('userId', '') == userId
         );
 
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
 
-        // المستخدم والأدمن يقرآن الرسائل داخل المحادثة المسموح بها فقط.
-        allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+        allow get, list: if isOwner(userId) || isAdmin();
 
-        // المستخدم يرسل لنفس محادثته فقط، والأدمن يستطيع إرسال رد للمستخدم.
         allow create: if signedIn()
-          && validMessageText()
-          && request.resource.data.senderId == request.auth.uid
           && (
-            request.auth.uid == userId
+            isOwner(userId)
             || isAdmin()
-          );
+          )
+          && validMessageCreate();
 
-        // الرسالة نفسها لا يمكن تعديل نصها بعد الإرسال؛ التعديل الوحيد هو read.
         allow update: if signedIn()
-          && (request.auth.uid == userId || isAdmin())
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+          && validReadReceipt(userId);
 
         allow delete: if isAdmin();
       }
     }
 
-    // =========================================================
-    // المكتبة الشرعية
-    // =========================================================
-    //
-    // بيانات الكتب متاحة للقراءة من صفحة المكتبة والقراء.
-    // الإضافة والتعديل والحذف من لوحة الإدارة فقط.
-    //
+    // =========================================
+    // Islamic library
+    // =========================================
+
     match /islamicLibraryBooks/{bookId} {
 
-      // المستخدمون والزوار يستطيعون قراءة الكتب المنشورة.
-      allow read: if true;
+      // Existing library queries require public reads.
+      allow get, list: if true;
 
-      // إدارة الكتب من الأدمن فقط.
       allow create, update, delete: if isAdmin();
 
-      // فيديوهات ودروس الشرح الخاصة بالكتاب.
       match /videos/{videoId} {
 
-        // عرض الدروس والفيديوهات متاح للمستخدمين والزوار.
-        allow read: if true;
+        allow get, list: if true;
 
-        // إضافة وتعديل وحذف الفيديوهات من الأدمن فقط.
         allow create, update, delete: if isAdmin();
       }
     }
 
-    // بقية مجموعات Firestore مغلقة حتى نضيف لها صلاحية صريحة لاحقًا.
+    // =========================================
+    // Default deny
+    // =========================================
+
     match /{document=**} {
       allow read, write: if false;
     }
