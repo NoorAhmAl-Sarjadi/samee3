@@ -22,11 +22,10 @@ import {
 import { auth, db } from '@/lib/firebase'
 
 /**
- * SAMEE3 – Firebase authentication and live user profile.
+ * SAMEE3 — Live authentication context.
  * Path: context/AuthContext.tsx
  *
- * Reads users/{uid} in real time; never writes or changes roles.
- * A user with a missing/unreadable profile is never treated as admin.
+ * Reads users/{uid}; never changes Firestore documents or roles.
  */
 
 export interface UserProfile {
@@ -62,7 +61,7 @@ export type ProfileStatus =
   | 'unavailable'
   | 'signed-out'
 
-interface AuthContextValue {
+export interface AuthContextValue {
   user: FirebaseUser | null
   profile: UserProfile | null
   loading: boolean
@@ -78,24 +77,19 @@ const AuthContext = createContext<AuthContextValue>({
   profileStatus: 'loading',
 })
 
-const PROFILE_TIMEOUT_MS = 7000
+const PROFILE_TIMEOUT_MS = 8000
 
-function nameFrom(value: unknown): string {
+function safeText(value: unknown): string {
   return typeof value === 'string'
     ? value.trim().replace(/\s+/g, ' ').slice(0, 100)
     : ''
 }
 
-function fallbackName(user: FirebaseUser): string {
-  return (
-    nameFrom(user.displayName) ||
-    nameFrom(user.email?.split('@')[0]) ||
+function fallbackProfile(user: FirebaseUser): UserProfile {
+  const name =
+    safeText(user.displayName) ||
+    safeText(user.email?.split('@')[0]) ||
     'مستخدم مصحف سميع'
-  )
-}
-
-function makeFallbackProfile(user: FirebaseUser): UserProfile {
-  const name = fallbackName(user)
 
   return {
     uid: user.uid,
@@ -106,23 +100,35 @@ function makeFallbackProfile(user: FirebaseUser): UserProfile {
   }
 }
 
-function makeFirestoreProfile(
+function profileFromFirestore(
   user: FirebaseUser,
   data: DocumentData,
+  serverVerified: boolean,
 ): UserProfile {
-  const storedName = nameFrom(data.name)
-  const storedDisplayName = nameFrom(data.displayName)
+  const fallback = fallbackProfile(user)
+
   const name =
-    storedName || storedDisplayName || fallbackName(user)
+    safeText(data.name) ||
+    safeText(data.displayName) ||
+    fallback.name
 
   return {
     ...data,
     uid: user.uid,
     name,
     displayName:
-      storedDisplayName || nameFrom(user.displayName) || name,
-    email: user.email || nameFrom(data.email),
-    role: data.role === 'admin' ? 'admin' : 'user',
+      safeText(data.displayName) ||
+      safeText(user.displayName) ||
+      name,
+    email:
+      user.email ||
+      (typeof data.email === 'string'
+        ? data.email
+        : ''),
+    role:
+      serverVerified && data.role === 'admin'
+        ? 'admin'
+        : 'user',
   }
 }
 
@@ -131,39 +137,51 @@ export function AuthProvider({
 }: {
   children: ReactNode
 }) {
-  const [user, setUser] = useState<FirebaseUser | null>(null)
-  const [profile, setProfile] = useState<UserProfile | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUser] =
+    useState<FirebaseUser | null>(null)
+
+  const [profile, setProfile] =
+    useState<UserProfile | null>(null)
+
+  const [loading, setLoading] =
+    useState(true)
+
   const [profileStatus, setProfileStatus] =
     useState<ProfileStatus>('loading')
 
   useEffect(() => {
-    let active = true
-    let generation = 0
-    let stopProfile: Unsubscribe | null = null
-    let firstSnapshotTimer: number | null = null
+    let mounted = true
+    let session = 0
 
-    const stopPreviousProfile = () => {
-      if (stopProfile) {
-        stopProfile()
-        stopProfile = null
+    let unsubscribeProfile: Unsubscribe | null = null
+
+    let timer:
+      | ReturnType<typeof setTimeout>
+      | null = null
+
+    function stopProfile() {
+      if (unsubscribeProfile) {
+        unsubscribeProfile()
+        unsubscribeProfile = null
       }
 
-      if (firstSnapshotTimer !== null) {
-        window.clearTimeout(firstSnapshotTimer)
-        firstSnapshotTimer = null
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
       }
     }
 
     const unsubscribeAuth = onAuthStateChanged(
       auth,
-      (currentUser) => {
-        // Invalidate all callbacks belonging to an earlier login.
-        generation += 1
-        const thisGeneration = generation
-        stopPreviousProfile()
 
-        if (!active) return
+      (currentUser) => {
+        session += 1
+
+        const currentSession = session
+
+        stopProfile()
+
+        if (!mounted) return
 
         setUser(currentUser)
 
@@ -174,89 +192,131 @@ export function AuthProvider({
           return
         }
 
-        const fallback = makeFallbackProfile(currentUser)
+        const fallback =
+          fallbackProfile(currentUser)
+
         setProfile(fallback)
         setProfileStatus('loading')
         setLoading(true)
 
-        const isCurrentSession = () =>
-          active && generation === thisGeneration
+        const isCurrent = () =>
+          mounted &&
+          session === currentSession
 
-        // Avoid keeping every screen on an infinite loader when
-        // Firestore is temporarily unreachable or the device is offline.
-        firstSnapshotTimer = window.setTimeout(() => {
-          firstSnapshotTimer = null
+        // Prevent infinite loading when offline.
+        timer = setTimeout(() => {
+          timer = null
 
-          if (!isCurrentSession()) return
+          if (!isCurrent()) return
 
-          setProfileStatus((previous) =>
-            previous === 'loading' ? 'unavailable' : previous,
+          setProfileStatus((status) =>
+            status === 'loading'
+              ? 'unavailable'
+              : status,
           )
+
           setLoading(false)
-          // Keep onSnapshot active: data can arrive after the timeout.
         }, PROFILE_TIMEOUT_MS)
 
         try {
-          stopProfile = onSnapshot(
-            doc(db, 'users', currentUser.uid),
-            (snapshot) => {
-              if (!isCurrentSession()) return
+          unsubscribeProfile = onSnapshot(
+            doc(
+              db,
+              'users',
+              currentUser.uid,
+            ),
 
-              if (firstSnapshotTimer !== null) {
-                window.clearTimeout(firstSnapshotTimer)
-                firstSnapshotTimer = null
+            {
+              includeMetadataChanges: true,
+            },
+
+            (snapshot) => {
+              if (!isCurrent()) return
+
+              if (timer !== null) {
+                clearTimeout(timer)
+                timer = null
               }
 
-              if (snapshot.exists()) {
-                setProfile(
-                  makeFirestoreProfile(currentUser, snapshot.data()),
+              if (!snapshot.exists()) {
+                setProfile(fallback)
+
+                setProfileStatus(
+                  snapshot.metadata.fromCache
+                    ? 'unavailable'
+                    : 'missing',
                 )
-                setProfileStatus('ready')
               } else {
-                // A newly created Auth account can reach this state
-                // before registration writes users/{uid}.
-                // The listener will update as soon as it is created.
-                setProfile(makeFallbackProfile(currentUser))
-                setProfileStatus('missing')
+                const verified =
+                  !snapshot.metadata.fromCache &&
+                  !snapshot.metadata.hasPendingWrites
+
+                setProfile(
+                  profileFromFirestore(
+                    currentUser,
+                    snapshot.data(),
+                    verified,
+                  ),
+                )
+
+                setProfileStatus(
+                  verified
+                    ? 'ready'
+                    : 'unavailable',
+                )
               }
 
               setLoading(false)
             },
+
             (error) => {
-              if (!isCurrentSession()) return
+              if (!isCurrent()) return
 
               console.error(
-                'SAMEE3: Firestore profile listener failed:',
-                error.code || 'unknown',
+                'SAMEE3 Firestore profile error:',
+                error,
               )
 
-              if (firstSnapshotTimer !== null) {
-                window.clearTimeout(firstSnapshotTimer)
-                firstSnapshotTimer = null
+              if (timer !== null) {
+                clearTimeout(timer)
+                timer = null
               }
 
-              // Never keep a stale admin role when profile reads fail.
-              setProfile(makeFallbackProfile(currentUser))
+              setProfile(fallback)
               setProfileStatus('unavailable')
               setLoading(false)
             },
           )
         } catch (error) {
-          if (!isCurrentSession()) return
+          if (!isCurrent()) return
 
-          console.error('SAMEE3: Unable to start profile listener', error)
-          stopPreviousProfile()
+          console.error(
+            'SAMEE3 profile subscription error:',
+            error,
+          )
+
+          stopProfile()
+
           setProfile(fallback)
           setProfileStatus('unavailable')
           setLoading(false)
         }
       },
-      (error) => {
-        if (!active) return
 
-        console.error('SAMEE3: Firebase Auth listener failed:', error.code || 'unknown')
-        generation += 1
-        stopPreviousProfile()
+      (error) => {
+        if (!mounted) return
+
+        // Firebase Auth reports an Error object.
+        // Do not assume every error has a code property.
+        console.error(
+          'SAMEE3 Firebase Auth error:',
+          error,
+        )
+
+        session += 1
+
+        stopProfile()
+
         setUser(null)
         setProfile(null)
         setProfileStatus('unavailable')
@@ -265,10 +325,11 @@ export function AuthProvider({
     )
 
     return () => {
-      active = false
-      generation += 1
+      mounted = false
+      session += 1
+
       unsubscribeAuth()
-      stopPreviousProfile()
+      stopProfile()
     }
   }, [])
 
@@ -277,7 +338,8 @@ export function AuthProvider({
       profile &&
       profile.uid === user.uid &&
       profileStatus === 'ready' &&
-      profile.role === 'admin',
+      profile.role === 'admin' &&
+      profile.status !== 'disabled',
   )
 
   const value = useMemo<AuthContextValue>(
@@ -288,7 +350,13 @@ export function AuthProvider({
       isAdmin,
       profileStatus,
     }),
-    [user, profile, loading, isAdmin, profileStatus],
+    [
+      user,
+      profile,
+      loading,
+      isAdmin,
+      profileStatus,
+    ],
   )
 
   return (
