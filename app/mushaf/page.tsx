@@ -1482,6 +1482,103 @@ export default function MushafPage() {
   const audioToggleBusyRef = useRef(false)
   const mushafWarmupRunningRef = useRef(false)
 
+
+  // إبقاء شاشة الجهاز مضاءة أثناء قراءة صفحات المصحف.
+  // عند إخفاء الصفحة نحرر القفل، ثم نطلبه مجددًا عند العودة إليها.
+  // عدم دعم Wake Lock أو رفض النظام للطلب لا يؤثر على فتح المصحف.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || typeof document === 'undefined') {
+      return
+    }
+
+    type WakeLockSentinelLike = {
+      released: boolean
+      release: () => Promise<void>
+      addEventListener: (type: 'release', listener: () => void) => void
+    }
+
+    type WakeLockApiLike = {
+      request: (type: 'screen') => Promise<WakeLockSentinelLike>
+    }
+
+    const wakeLockApi = (
+      navigator as unknown as { wakeLock?: WakeLockApiLike }
+    ).wakeLock
+
+    if (!wakeLockApi) {
+      // بعض المتصفحات أو إصدارات أنظمة التشغيل لا تدعم هذه الميزة.
+      return
+    }
+
+    let disposed = false
+    let requesting = false
+    let wakeLock: WakeLockSentinelLike | null = null
+
+    const requestWakeLock = async () => {
+      if (
+        disposed ||
+        requesting ||
+        document.visibilityState !== 'visible' ||
+        (wakeLock !== null && !wakeLock.released)
+      ) {
+        return
+      }
+
+      requesting = true
+
+      try {
+        const sentinel = await wakeLockApi.request('screen')
+
+        // قد يكون المستخدم غادر المصحف أثناء انتظار استجابة النظام.
+        if (disposed || document.visibilityState !== 'visible') {
+          await sentinel.release().catch(() => undefined)
+          return
+        }
+
+        wakeLock = sentinel
+
+        sentinel.addEventListener('release', () => {
+          if (wakeLock === sentinel) {
+            wakeLock = null
+          }
+        })
+      } catch (error) {
+        // رفض النظام للقفل لا ينبغي أن يعطل القراءة أو تشغيل التلاوة.
+        console.info('SAMEE3: تعذر إبقاء الشاشة مضاءة في هذا الظرف.', error)
+      } finally {
+        requesting = false
+      }
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void requestWakeLock()
+        return
+      }
+
+      if (wakeLock) {
+        const previousWakeLock = wakeLock
+        wakeLock = null
+        void previousWakeLock.release().catch(() => undefined)
+      }
+    }
+
+    void requestWakeLock()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      disposed = true
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+
+      const previousWakeLock = wakeLock
+      wakeLock = null
+
+      if (previousWakeLock && !previousWakeLock.released) {
+        void previousWakeLock.release().catch(() => undefined)
+      }
+    }
+  }, [])
+
   const pageMemoryCacheRef = useRef(new Map<string, PageData>())
   const svgMemoryCacheRef = useRef(new Map<string, string>())
   const ayahPageCacheRef = useRef(new Map<string, number>())
