@@ -105,6 +105,7 @@ type LibraryAudio = {
 
 type PlayerItem = {
   kind: 'quran' | 'library'
+  legacyOpaque?: boolean
   title: string
   subtitle: string
   audioUrl: string
@@ -123,6 +124,7 @@ type OfflineRecord = {
   subtitle: string
   blob: Blob
   savedAt: number
+  item?: PlayerItem
 }
 
 type TabKey = 'quran' | 'ruqyah' | 'khutbah' | 'sunnah'
@@ -213,91 +215,225 @@ function safeFileName(value: string) {
 function getOfflineDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('samee-audio-library', 1)
-
+    let expired = false
+    const timer = window.setTimeout(() => {
+      expired = true
+      reject(new Error('تعذر فتح مخزن الصوت على الجهاز.'))
+    }, 8000)
     request.onupgradeneeded = () => {
-      const db = request.result
-      if (!db.objectStoreNames.contains('audio')) {
-        db.createObjectStore('audio', { keyPath: 'key' })
+      if (!request.result.objectStoreNames.contains('audio')) {
+        request.result.createObjectStore('audio', { keyPath: 'key' })
       }
     }
+    request.onsuccess = () => {
+      window.clearTimeout(timer)
+      if (expired) { request.result.close(); return }
+      request.result.onversionchange = () => request.result.close()
+      resolve(request.result)
+    }
+    request.onerror = () => {
+      window.clearTimeout(timer)
+      reject(request.error || new Error('تعذر فتح مخزن الصوت.'))
+    }
+  })
+}
 
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+async function offlineRequest<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  const db = await getOfflineDb()
+  return new Promise<T>((resolve, reject) => {
+    try {
+      const tx = db.transaction('audio', mode)
+      const request = action(tx.objectStore('audio'))
+      tx.oncomplete = () => { db.close(); resolve(request.result) }
+      tx.onabort = tx.onerror = () => { db.close(); reject(tx.error || new Error('تعذر إتمام حفظ الصوت.')) }
+    } catch (error) { db.close(); reject(error) }
   })
 }
 
 async function putOffline(record: OfflineRecord) {
-  const db = await getOfflineDb()
-  return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction('audio', 'readwrite')
-    transaction.objectStore('audio').put(record)
-    transaction.oncomplete = () => {
-      db.close()
-      resolve()
-    }
-    transaction.onerror = () => {
-      db.close()
-      reject(transaction.error)
-    }
-  })
+  await offlineRequest('readwrite', (store) => store.put(record))
 }
 
-async function getOffline(key: string) {
-  const db = await getOfflineDb()
-  return new Promise<OfflineRecord | null>((resolve, reject) => {
-    const transaction = db.transaction('audio', 'readonly')
-    const request = transaction.objectStore('audio').get(key)
-    request.onsuccess = () => {
-      db.close()
-      resolve((request.result as OfflineRecord | undefined) || null)
-    }
-    request.onerror = () => {
-      db.close()
-      reject(request.error)
-    }
-  })
+async function getOffline(key: string): Promise<OfflineRecord | null> {
+  return (await offlineRequest<OfflineRecord | undefined>('readonly', (store) => store.get(key))) || null
 }
 
 async function deleteOffline(key: string) {
+  await offlineRequest('readwrite', (store) => store.delete(key))
+}
+
+async function listOffline(): Promise<OfflineRecord[]> {
+  // القراءة بالمؤشر تمنع تحميل كل ملفات الصوت الكبيرة إلى الذاكرة دفعة واحدة.
   const db = await getOfflineDb()
-  return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction('audio', 'readwrite')
-    transaction.objectStore('audio').delete(key)
-    transaction.oncomplete = () => {
-      db.close()
-      resolve()
-    }
-    transaction.onerror = () => {
-      db.close()
-      reject(transaction.error)
-    }
+  return new Promise((resolve, reject) => {
+    const rows: OfflineRecord[] = []
+    try {
+      const tx = db.transaction('audio', 'readonly')
+      const request = tx.objectStore('audio').openCursor()
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (!cursor) return
+        const row = cursor.value as OfflineRecord
+        if (row.blob instanceof Blob && row.blob.size > 0) {
+          // لا نحتفظ بالصوت داخل قائمة الواجهة.
+          rows.push({ ...row, blob: new Blob() })
+        }
+        cursor.continue()
+      }
+      tx.oncomplete = () => { db.close(); resolve(rows) }
+      tx.onabort = tx.onerror = () => { db.close(); reject(tx.error) }
+    } catch (error) { db.close(); reject(error) }
   })
 }
 
-async function listOffline() {
-  const db = await getOfflineDb()
-  return new Promise<OfflineRecord[]>((resolve, reject) => {
-    const transaction = db.transaction('audio', 'readonly')
-    const request = transaction.objectStore('audio').getAll()
-    request.onsuccess = () => {
-      db.close()
-      resolve((request.result as OfflineRecord[]) || [])
+const AUDIO_CATALOG_KEY = 'samee3_audio_saved_catalog_v1'
+const API_CATALOG_PREFIX = 'samee3_audio_api_v1:'
+const AUDIO_CACHE_NAMES = [SAMEE3_QURAN_AUDIO_CACHE, 'samee3-v2-audio', 'samee-audio-v2']
+
+function offlineKeyFor(item: PlayerItem) {
+  return item.kind === 'quran'
+    ? `quran:${item.reciterId}:${item.riwayaId}:${item.surahId}`
+    : `library:${item.libraryId}`
+}
+
+function isPlayerItem(value: unknown): value is PlayerItem {
+  if (!value || typeof value !== 'object') return false
+  const item = value as Partial<PlayerItem>
+  return (item.kind === 'quran' || item.kind === 'library') &&
+    typeof item.title === 'string' && typeof item.subtitle === 'string' &&
+    typeof item.reciterName === 'string' && typeof item.audioUrl === 'string'
+}
+
+function readAudioCatalog(): PlayerItem[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(AUDIO_CATALOG_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed.filter(isPlayerItem) : []
+  } catch { return [] }
+}
+
+function rememberAudio(item: PlayerItem, remove = false) {
+  try {
+    const entries = readAudioCatalog().filter((entry) =>
+      item.audioUrl ? entry.audioUrl !== item.audioUrl : offlineKeyFor(entry) !== offlineKeyFor(item))
+    if (!remove) entries.push(item)
+    localStorage.setItem(AUDIO_CATALOG_KEY, JSON.stringify(entries))
+  } catch { /* الصوت نفسه يظل محفوظًا إذا امتلأ مخزن البيانات النصية. */ }
+}
+
+function recordPlayer(record: OfflineRecord): PlayerItem {
+  if (isPlayerItem(record.item)) return record.item
+  const parts = record.key.split(':')
+  const catalog = readAudioCatalog().find((item) => offlineKeyFor(item) === record.key)
+  if (catalog) return catalog
+  return {
+    kind: parts[0] === 'quran' ? 'quran' : 'library',
+    title: record.title || 'تسجيل محفوظ', subtitle: record.subtitle || '',
+    audioUrl: '', reciterName: 'تسجيل محفوظ على الجهاز',
+    ...(parts[0] === 'quran'
+      ? { reciterId: Number(parts[1]), riwayaId: Number(parts[2]), surahId: Number(parts[3]) }
+      : { libraryId: parts.slice(1).join(':') }),
+  }
+}
+
+function isCompleteAudio(response: Response): boolean {
+  const type = response.headers.get('content-type') || ''
+  return response.status === 200 && !response.headers.has('content-range') &&
+    !/text\/|json|xml/i.test(type) && response.headers.get('content-length') !== '0'
+}
+
+async function findCachedAudio(url: string): Promise<Response | null> {
+  if (!url || typeof caches === 'undefined') return null
+  try {
+    const existing = await caches.keys()
+    for (const name of AUDIO_CACHE_NAMES) {
+      if (!existing.includes(name)) continue
+      const cache = await caches.open(name)
+      const response = await cache.match(url)
+      if (response && isCompleteAudio(response)) return response
     }
-    request.onerror = () => {
-      db.close()
-      reject(request.error)
+  } catch { /* يمكن تجربة IndexedDB أو الشبكة. */ }
+  return null
+}
+
+async function hasLegacyOpaque(url: string): Promise<boolean> {
+  if (!url || typeof caches === 'undefined' || !navigator.serviceWorker?.controller) return false
+  try {
+    const names = await caches.keys()
+    for (const name of AUDIO_CACHE_NAMES.filter((entry) => names.includes(entry))) {
+      if ((await (await caches.open(name)).match(url))?.type === 'opaque') return true
     }
-  })
+  } catch {}
+  return false
+}
+
+async function getSavedBlob(item: PlayerItem): Promise<Blob | null> {
+  if (item.kind === 'quran') {
+    const cached = await findCachedAudio(item.audioUrl)
+    if (cached) {
+      try { const blob = await cached.blob(); if (blob.size) return blob } catch {}
+    }
+  }
+  try {
+    const record = await getOffline(offlineKeyFor(item))
+    return record?.blob instanceof Blob && record.blob.size ? record.blob : null
+  } catch { return null }
+}
+
+async function fetchAudioBlob(url: string): Promise<Blob> {
+  if (!url || navigator.onLine === false) throw new Error('لا توجد نسخة كاملة محفوظة لهذا الصوت.')
+  const controller = new AbortController()
+  // يمتد الحد للتحميل كاملًا، وليس لاستلام الترويسات فقط.
+  const timer = window.setTimeout(() => controller.abort(), 300000)
+  try {
+    const response = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store', signal: controller.signal })
+    if (!isCompleteAudio(response)) throw new Error('لم يرجع المصدر ملف صوت كاملًا.')
+    const blob = await response.blob()
+    if (!blob.size) throw new Error('الملف الصوتي فارغ.')
+    return blob
+  } finally { window.clearTimeout(timer) }
+}
+
+async function storeAudio(item: PlayerItem): Promise<void> {
+  if (item.isStream) throw new Error('البث المباشر لا يمكن حفظه.')
+  const blob = await getSavedBlob(item) ?? await fetchAudioBlob(item.audioUrl)
+  if (item.kind === 'quran' && item.audioUrl && typeof caches !== 'undefined') {
+    try {
+      const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
+      await cache.put(item.audioUrl, new Response(blob, {
+        status: 200, headers: { 'Content-Type': blob.type || 'audio/mpeg', 'Content-Length': String(blob.size) },
+      }))
+      // نحتفظ بالنسخ القديمة ولا نحذفها أثناء الترحيل.
+      rememberAudio(item)
+      return
+    } catch { /* نخزن في IndexedDB إذا تعذر Cache Storage. */ }
+  }
+  await putOffline({ key: offlineKeyFor(item), title: item.title, subtitle: item.subtitle, blob, savedAt: Date.now(), item })
+  rememberAudio(item)
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    cache: 'no-store',
-  })
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`)
+  let cached: T | undefined
+  try {
+    const raw = localStorage.getItem(`${API_CATALOG_PREFIX}${url}`)
+    if (raw) cached = JSON.parse(raw) as T
+  } catch {}
+  if (navigator.onLine === false) {
+    if (cached !== undefined) return cached
+    throw new Error('هذه القائمة لم تُحفظ على الجهاز بعد.')
   }
-  return response.json() as Promise<T>
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), 12000)
+  try {
+    const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+    const data = await response.json() as T
+    if (data && typeof data === 'object' && 'ok' in data && data.ok === false) throw new Error('تعذر تحميل القائمة.')
+    try { localStorage.setItem(`${API_CATALOG_PREFIX}${url}`, JSON.stringify(data)) } catch {}
+    return data
+  } catch (error) {
+    if (cached !== undefined) return cached
+    throw error
+  } finally { window.clearTimeout(timer) }
 }
 
 function AudioAvatar({
@@ -434,6 +570,12 @@ export default function AudioPage() {
 
   const [offlineKeys, setOfflineKeys] = useState<Set<string>>(new Set())
   const [sharedQuranUrls, setSharedQuranUrls] = useState<Set<string>>(new Set())
+  const [savedItems, setSavedItems] = useState<PlayerItem[]>([])
+  const [isOffline, setIsOffline] = useState(false)
+  const [showSaved, setShowSaved] = useState(false)
+  const operationBusyRef = useRef(false)
+  const indexRequestRef = useRef(0)
+  const libraryRequestRef = useRef(0)
   const [offlineBusyKey, setOfflineBusyKey] = useState<string | null>(null)
   const [zipBusy, setZipBusy] = useState(false)
 
@@ -449,29 +591,43 @@ export default function AudioPage() {
   }, [])
 
   const loadOfflineIndex = useCallback(async () => {
-    try {
-      const records = await listOffline()
-      setOfflineKeys(new Set(records.map((record) => record.key)))
-    } catch (err) {
-      console.warn('Offline index load failed:', err)
+    const requestId = ++indexRequestRef.current
+    const records = await listOffline().catch(() => [] as OfflineRecord[])
+    const items = new Map<string, PlayerItem>()
+    const urls = new Set<string>()
+    const catalog = readAudioCatalog()
+    for (const record of records) {
+      const item = recordPlayer(record)
+      items.set(item.audioUrl || offlineKeyFor(item), item)
     }
-
-    try {
-      if (typeof caches !== 'undefined') {
-        const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
-        const requests = await cache.keys()
-        setSharedQuranUrls(
-          new Set(
-            requests
-              .map((request) => request.url)
-              .filter((url) => /\.mp3(?:$|\?)/i.test(url))
-          )
-        )
-      }
-    } catch (err) {
-      console.warn('Shared Quran cache index load failed:', err)
-      setSharedQuranUrls(new Set())
+    if (typeof caches !== 'undefined') {
+      try {
+        const names = await caches.keys()
+        for (const name of AUDIO_CACHE_NAMES.filter((entry) => names.includes(entry))) {
+          const cache = await caches.open(name)
+          for (const request of await cache.keys()) {
+            if (!/\.mp3(?:$|\?)/i.test(request.url)) continue
+            const response = await cache.match(request)
+            if (!response || (!isCompleteAudio(response) && response.type !== 'opaque')) continue
+            if (isCompleteAudio(response)) urls.add(request.url)
+            // النسخ القديمة غير القابلة للفحص تظهر منفصلة عن الملفات المؤكدة.
+            if (items.has(request.url) && !items.get(request.url)?.legacyOpaque) continue
+            const known = catalog.find((item) => item.audioUrl === request.url)
+            const match = new URL(request.url).pathname.match(/\/(\d{3})\.mp3$/i)
+            const surahId = match ? Number(match[1]) : undefined
+            items.set(request.url, { ...(known || {
+              kind: 'quran', title: surahId ? `سورة رقم ${arabicDigits(surahId)}` : 'تلاوة محفوظة',
+              subtitle: 'محفوظة من المصحف', audioUrl: request.url,
+              reciterName: 'تلاوة محفوظة على الجهاز', surahId,
+            }), legacyOpaque: response.type === 'opaque' })
+          }
+        }
+      } catch { /* تظل ملفات IndexedDB ظاهرة عند تعذر كاش المتصفح. */ }
     }
+    if (requestId !== indexRequestRef.current) return
+    setOfflineKeys(new Set(records.map((record) => record.key)))
+    setSharedQuranUrls(urls)
+    setSavedItems(Array.from(items.values()))
   }, [])
 
   const loadBaseLibrary = useCallback(async () => {
@@ -488,7 +644,7 @@ export default function AudioPage() {
         ),
         fetchJson<{ radios: RadioStation[] }>(
           `${MP3QURAN_API}/radios?language=ar`
-        ),
+        ).catch(() => ({ radios: [] })),
       ])
 
       const nextRiwayat = Array.isArray(riwayatData.riwayat)
@@ -513,7 +669,7 @@ export default function AudioPage() {
       setRiwayat(nextRiwayat)
       setSurahs(nextSurahs)
       setRadios(radioList)
-      setSelectedRiwaya(preferredRiwaya)
+      setSelectedRiwaya((current) => nextRiwayat.find((entry) => entry.id === current?.id) || preferredRiwaya)
     } catch (err) {
       console.error('Audio base library error:', err)
       setError('تعذر تحميل مكتبة القرآن حاليًا.')
@@ -529,6 +685,7 @@ export default function AudioPage() {
       start = 1,
       append = false
     ) => {
+      const requestId = ++libraryRequestRef.current
       setLibraryLoading(true)
       setLibraryUnavailable(false)
       setLibraryError('')
@@ -551,6 +708,7 @@ export default function AudioPage() {
           nextStart?: number
         }>(`${AUDIO_LIBRARY_API}?${params.toString()}`)
 
+        if (requestId !== libraryRequestRef.current) return
         if (result.ok === false) {
           throw new Error(result.error || 'Library request failed')
         }
@@ -575,6 +733,7 @@ export default function AudioPage() {
           }
         }
       } catch (err) {
+        if (requestId !== libraryRequestRef.current) return
         console.error('Audio library content error:', err)
         if (!append) setLibraryItems([])
         setLibraryUnavailable(true)
@@ -586,7 +745,7 @@ export default function AudioPage() {
               : 'تعذر تحميل مكتبة الرقية الصوتية حاليًا.'
         )
       } finally {
-        setLibraryLoading(false)
+        if (requestId === libraryRequestRef.current) setLibraryLoading(false)
       }
     },
     []
@@ -596,6 +755,29 @@ export default function AudioPage() {
     void loadBaseLibrary()
     void loadOfflineIndex()
   }, [loadBaseLibrary, loadOfflineIndex])
+
+  useEffect(() => {
+    const update = () => {
+      const offline = navigator.onLine === false
+      setIsOffline(offline)
+      if (offline) setShowSaved(true)
+      void loadOfflineIndex()
+    }
+    const visible = () => { if (document.visibilityState === 'visible') update() }
+    update()
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    window.addEventListener('focus', update)
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+      window.removeEventListener('focus', update)
+      document.removeEventListener('visibilitychange', visible)
+      indexRequestRef.current += 1
+      libraryRequestRef.current += 1
+    }
+  }, [loadOfflineIndex])
 
   useEffect(() => {
     if (!selectedRiwaya) return
@@ -650,6 +832,7 @@ export default function AudioPage() {
 
         setReciters(nextReciters)
       } catch (err) {
+        if (cancelled) return
         console.error('Reciters request error:', err)
         setReciters([])
         setError('تعذر تحميل قراء الرواية المحددة.')
@@ -732,7 +915,7 @@ export default function AudioPage() {
       kind: 'quran',
       title: surah.name,
       subtitle: selectedRiwaya.name,
-      audioUrl: `${selectedMoshaf.server}${pad3(surah.id)}.mp3`,
+      audioUrl: `${selectedMoshaf.server.replace(/\/?$/, "/")}${pad3(surah.id)}.mp3`,
       reciterName: selectedReciter.name,
       surahId: surah.id,
       reciterId: selectedReciter.id,
@@ -768,85 +951,6 @@ export default function AudioPage() {
     }
   }, [])
 
-  const loadOfflineAudioUrl = useCallback(
-    async (item: PlayerItem) => {
-      if (!item.libraryId && !item.surahId) return null
-
-      if (item.kind === 'quran') {
-        // أولًا: استخدم نفس Cache Storage الخاص بالمصحف، حتى لا نكرر التنزيل.
-        try {
-          if (typeof caches !== 'undefined') {
-            const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
-            const shared = await cache.match(item.audioUrl)
-
-            if (shared) {
-              if (shared.type !== 'opaque') {
-                const blob = await shared.blob()
-                if (blob.size > 0) {
-                  revokeObjectUrl()
-                  const objectUrl = URL.createObjectURL(blob)
-                  objectUrlRef.current = objectUrl
-                  return objectUrl
-                }
-              }
-
-              // الاستجابة opaque يمكن لـService Worker تقديمها من نفس الرابط.
-              return item.audioUrl
-            }
-          }
-        } catch (err) {
-          console.warn('Shared Quran cache read failed:', err)
-        }
-
-        // توافق مع التنزيلات القديمة الموجودة في IndexedDB ثم ننقلها للمخزن المشترك.
-        const key = `quran:${item.reciterId}:${item.riwayaId}:${item.surahId}`
-        const legacy = await getOffline(key)
-        if (!legacy) return null
-
-        try {
-          if (typeof caches !== 'undefined') {
-            const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
-            await cache.put(
-              item.audioUrl,
-              new Response(legacy.blob, {
-                status: 200,
-                headers: { 'Content-Type': legacy.blob.type || 'audio/mpeg' },
-              })
-            )
-            await deleteOffline(key)
-            setSharedQuranUrls((previous) => {
-              const next = new Set(previous)
-              next.add(item.audioUrl)
-              return next
-            })
-
-            revokeObjectUrl()
-            const objectUrl = URL.createObjectURL(legacy.blob)
-            objectUrlRef.current = objectUrl
-            return objectUrl
-          }
-        } catch (err) {
-          console.warn('Legacy Quran cache migration failed:', err)
-        }
-
-        revokeObjectUrl()
-        const objectUrl = URL.createObjectURL(legacy.blob)
-        objectUrlRef.current = objectUrl
-        return objectUrl
-      }
-
-      const key = `library:${item.libraryId}`
-      const offline = await getOffline(key)
-      if (!offline) return null
-
-      revokeObjectUrl()
-      const objectUrl = URL.createObjectURL(offline.blob)
-      objectUrlRef.current = objectUrl
-      return objectUrl
-    },
-    [revokeObjectUrl]
-  )
-
   const startPlayer = useCallback(
     async (
       item: PlayerItem,
@@ -856,13 +960,12 @@ export default function AudioPage() {
     ) => {
       const audio = audioRef.current
       if (!audio) return
-
+      pendingPlayRef.current = autoplay
       setQueue(nextQueue)
       setQueueIndex(nextIndex)
       setPlayer(item)
       setProgress(0)
       setDuration(0)
-      pendingPlayRef.current = autoplay
     },
     []
   )
@@ -874,14 +977,23 @@ export default function AudioPage() {
     const currentPlayer = player
     let disposed = false
     let playListener: (() => void) | null = null
+    let ownedObjectUrl: string | null = null
 
     async function prepare() {
       try {
-        let source = currentPlayer.audioUrl
-        const offlineSource = await loadOfflineAudioUrl(currentPlayer)
-        if (offlineSource) source = offlineSource
-
+        const savedBlob = await getSavedBlob(currentPlayer)
         if (disposed || audioRef.current !== currentAudio) return
+        let source = currentPlayer.audioUrl
+        if (savedBlob) {
+          ownedObjectUrl = URL.createObjectURL(savedBlob)
+          objectUrlRef.current = ownedObjectUrl
+          source = ownedObjectUrl
+        } else if (!source || navigator.onLine === false) {
+          // بعض التنزيلات القديمة لا تُقرأ كـ Blob؛ يقدّمها Service Worker من رابطها.
+          const legacyAvailable = await hasLegacyOpaque(source)
+          if (disposed || audioRef.current !== currentAudio) return
+          if (!legacyAvailable) throw new Error('هذا الملف غير محفوظ كاملًا. اتصل بالإنترنت واحفظه أولًا.')
+        }
 
         /*
          * مهم: تغيير مستوى الصوت أو سرعة التشغيل لا يعيد تحميل الملف.
@@ -916,7 +1028,7 @@ export default function AudioPage() {
         if (disposed) return
         console.error('Player prepare error:', err)
         setIsPlaying(false)
-        notify('تعذر تجهيز الملف الصوتي.')
+        notify(err instanceof Error ? err.message : 'تعذر تجهيز الملف الصوتي.')
       }
     }
 
@@ -924,12 +1036,19 @@ export default function AudioPage() {
 
     return () => {
       disposed = true
+      currentAudio.pause()
+      currentAudio.removeAttribute('src')
+      currentAudio.load()
+      if (ownedObjectUrl) {
+        URL.revokeObjectURL(ownedObjectUrl)
+        if (objectUrlRef.current === ownedObjectUrl) objectUrlRef.current = null
+      }
       if (playListener) {
         currentAudio.removeEventListener('canplay', playListener)
         playListener = null
       }
     }
-  }, [loadOfflineAudioUrl, notify, player])
+  }, [notify, player])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -1079,8 +1198,13 @@ export default function AudioPage() {
       isStream: entry.isStream,
     }))
 
-    const index = queueItems.findIndex((entry) => entry.libraryId === item.id)
-    if (index === -1) return
+    let index = queueItems.findIndex((entry) => entry.libraryId === item.id)
+    if (index === -1) {
+      queueItems.push({ kind: 'library', title: item.title, subtitle: item.subtitle,
+        audioUrl: item.audioUrl, reciterName: item.authorName || item.subtitle,
+        libraryId: item.id, sourceName: item.sourceName, isStream: item.isStream })
+      index = queueItems.length - 1
+    }
 
     if (player?.kind === 'library' && player.libraryId === item.id) {
       await togglePlayer()
@@ -1151,351 +1275,122 @@ export default function AudioPage() {
     }
   }
 
-  function offlineKeyFor(item: PlayerItem) {
-    if (item.kind === 'quran') {
-      return `quran:${item.reciterId}:${item.riwayaId}:${item.surahId}`
-    }
-    return `library:${item.libraryId}`
-  }
-
-  const downloadDirect = async (
-    url: string,
-    suggestedName: string,
-    isStream = false
-  ) => {
-    if (isStream) {
-      notify('هذا مصدر بث مباشر، وليس ملفًا ثابتًا للتنزيل.')
-      return
-    }
-
+  const downloadDirect = async (url: string, suggestedName: string, isStream = false) => {
+    if (isStream) { notify('البث المباشر ليس ملفًا ثابتًا للتنزيل.'); return }
     try {
-      const response = await fetch(url, { mode: 'cors' })
-
-      if (!response.ok) throw new Error('download failed')
-
-      const blob = await response.blob()
-      const extension =
-        blob.type.split('/')[1] || detectFileExtension(url) || 'mp3'
-
+      const known = savedItems.find((item) => item.audioUrl === url)
+      const cached = await findCachedAudio(url)
+      const blob = (known ? await getSavedBlob(known) : null) ??
+        (cached ? await cached.blob() : await fetchAudioBlob(url))
       const downloadUrl = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = downloadUrl
-      anchor.download = `${safeFileName(suggestedName)}.${extension}`
+      anchor.download = `${safeFileName(suggestedName)}.${detectFileExtension(url)}`
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
-      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 2000)
-    } catch (err) {
-      console.error('Direct download failed:', err)
-      /*
-       * بعض الخوادم تمنع القراءة عبر CORS رغم أن الرابط نفسه صالح.
-       * نفتح الرابط الأصلي كحل احتياطي بدل إظهار فشل كامل للمستخدم.
-       */
-      window.open(url, '_blank', 'noopener,noreferrer')
-      notify('تم فتح المصدر المباشر لأن الخادم منع تنزيله برمجيًا.')
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 10000)
+    } catch {
+      if (url && navigator.onLine !== false) {
+        window.open(url, '_blank', 'noopener,noreferrer')
+        notify('تعذر تنزيل الملف برمجيًا. يمكنك تنزيله من رابط المصدر إن سمح المتصفح.')
+      } else notify('لا توجد نسخة متاحة للتنزيل دون اتصال.')
     }
   }
 
   const saveOfflinePlayer = async (item: PlayerItem) => {
-    if (item.isStream) {
-      notify('البث المباشر لا يمكن حفظه بدون ملف ثابت.')
-      return
-    }
-
-    const key = offlineKeyFor(item)
-    setOfflineBusyKey(key)
-
+    if (operationBusyRef.current) { notify('انتظر انتهاء العملية الحالية.'); return }
+    if (item.isStream) { notify('البث المباشر لا يمكن حفظه.'); return }
+    operationBusyRef.current = true
+    setOfflineBusyKey(offlineKeyFor(item))
     try {
-      if (item.kind === 'quran') {
-        if (typeof caches === 'undefined') throw new Error('CACHE_UNAVAILABLE')
-
-        const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
-        const existing = await cache.match(item.audioUrl)
-        if (existing) {
-          await loadOfflineIndex()
-          notify('التلاوة محفوظة بالفعل على الجهاز — لن يتم تنزيلها مرة أخرى.')
-          return
-        }
-
-        let cached = false
-
-        try {
-          const response = await fetch(item.audioUrl, {
-            method: 'GET',
-            cache: 'no-store',
-            mode: 'cors',
-            credentials: 'omit',
-          })
-          if (response.ok && response.status !== 206) {
-            await cache.put(item.audioUrl, response.clone())
-            cached = true
-          }
-        } catch {
-          // نستخدم Service Worker عند منع CORS.
-        }
-
-        if (!cached) {
-          try {
-            const response = await fetch(item.audioUrl, {
-              method: 'GET',
-              cache: 'no-store',
-              mode: 'no-cors',
-              credentials: 'omit',
-            })
-            if (response.type === 'opaque') {
-              await cache.put(item.audioUrl, response.clone())
-              cached = true
-            }
-          } catch {
-            // نجرّب إرسال الطلب للـService Worker.
-          }
-        }
-
-        if (!cached && navigator.serviceWorker?.controller) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'CACHE_AUDIO_URL',
-            url: item.audioUrl,
-          })
-          await new Promise((resolve) => window.setTimeout(resolve, 700))
-          const verified = await cache.match(item.audioUrl)
-          cached = Boolean(verified)
-        }
-
-        if (!cached) throw new Error('QURAN_CACHE_FAILED')
-
-        setSharedQuranUrls((previous) => {
-          const next = new Set(previous)
-          next.add(item.audioUrl)
-          return next
-        })
-        await loadOfflineIndex()
-        notify('تم حفظ التلاوة على الجهاز للاستماع دون إنترنت.')
-        return
-      }
-
-      // المواد غير القرآنية تبقى في IndexedDB الخاص بالمكتبة.
-      const response = await fetch(item.audioUrl, { mode: 'cors' })
-      if (!response.ok) throw new Error('offline fetch failed')
-
-      const blob = await response.blob()
-
-      await putOffline({
-        key,
-        title: item.title,
-        subtitle: item.subtitle,
-        blob,
-        savedAt: Date.now(),
-      })
-
+      await storeAudio(item)
       await loadOfflineIndex()
-      notify('تم حفظ الصوت على الجهاز للاستماع بدون إنترنت.')
-    } catch (err) {
-      console.error('Offline save failed:', err)
-      notify(
-        item.kind === 'quran'
-          ? 'تعذر حفظ التلاوة دون إنترنت. تأكد من اتصالك ثم حاول مرة أخرى.'
-          : 'تعذر الحفظ دون إنترنت. غالبًا يمنع مصدر الصوت القراءة عبر CORS.'
-      )
-    } finally {
-      setOfflineBusyKey(null)
-    }
+      notify('اكتمل حفظ الصوت للاستماع دون إنترنت.')
+    } catch (error) {
+      console.warn('Offline save failed:', error)
+      notify('لم يكتمل الحفظ. تحقق من الاتصال والمساحة؛ وقد يمنع المصدر تنزيل الصوت.')
+    } finally { setOfflineBusyKey(null); operationBusyRef.current = false }
   }
 
   const removeOfflinePlayer = async (item: PlayerItem) => {
+    if (operationBusyRef.current) { notify('انتظر انتهاء العملية الحالية.'); return }
+    operationBusyRef.current = true
+    setOfflineBusyKey(offlineKeyFor(item))
     try {
-      if (item.kind === 'quran') {
-        if (typeof caches !== 'undefined') {
-          const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
-          await cache.delete(item.audioUrl)
+      if (item.kind === 'quran' && item.audioUrl && typeof caches !== 'undefined') {
+        const names = await caches.keys()
+        for (const name of AUDIO_CACHE_NAMES.filter((entry) => names.includes(entry))) {
+          await (await caches.open(name)).delete(item.audioUrl)
         }
-        // حذف أي نسخة قديمة من IndexedDB أيضًا.
-        await deleteOffline(offlineKeyFor(item)).catch(() => {})
-        setSharedQuranUrls((previous) => {
-          const next = new Set(previous)
-          next.delete(item.audioUrl)
-          return next
-        })
-      } else {
-        await deleteOffline(offlineKeyFor(item))
       }
-
+      const legacy = await getOffline(offlineKeyFor(item)).catch(() => null)
+      if (legacy) await deleteOffline(offlineKeyFor(item))
+      rememberAudio(item, true)
       await loadOfflineIndex()
-      notify('تم حذف النسخة المحفوظة من الجهاز.')
-    } catch (err) {
-      console.error('Offline delete failed:', err)
-      notify('تعذر حذف النسخة المحفوظة.')
-    }
+      notify('تم حذف النسخة المحفوظة.')
+    } catch {
+      await loadOfflineIndex()
+      notify('تعذر إتمام الحذف. حاول مرة أخرى.')
+    } finally { setOfflineBusyKey(null); operationBusyRef.current = false }
   }
 
   const downloadQuranZip = async () => {
-    if (!selectedReciter || !selectedMoshaf || !selectedRiwaya) {
-      notify('اختر القارئ والرواية أولًا.')
-      return
+    if (operationBusyRef.current) { notify('انتظر انتهاء العملية الحالية.'); return }
+    if (!selectedReciter || !selectedRiwaya || !quranQueue.length) {
+      notify('اختر القارئ والرواية أولًا.'); return
     }
-
+    operationBusyRef.current = true
     setZipBusy(true)
     setQuranZipProgress(0)
-
     try {
       const zip = new JSZip()
-      const folder = zip.folder(
-        safeFileName(
-          `مصحف ${selectedReciter.name} - ${selectedRiwaya.name}`
-        )
-      )
-
-      if (!folder) throw new Error('ZIP folder failed')
-
-      const total = availableSurahs.length
-      let completed = 0
-
-      for (const surah of availableSurahs) {
-        const url = `${selectedMoshaf.server}${pad3(surah.id)}.mp3`
-        const response = await fetch(url, { mode: 'cors' })
-
-        if (!response.ok) {
-          console.warn('Skipping unavailable surah:', surah.id)
-          completed += 1
-          setQuranZipProgress(Math.round((completed / total) * 100))
-          continue
-        }
-
-        const blob = await response.blob()
-
-        folder.file(
-          `${String(surah.id).padStart(3, '0')} - ${safeFileName(
-            surah.name
-          )}.mp3`,
-          blob
-        )
-
-        completed += 1
-        setQuranZipProgress(Math.round((completed / total) * 100))
+      const total = quranQueue.length
+      const failed: string[] = []
+      let added = 0
+      for (let index = 0; index < total; index += 1) {
+        const item = quranQueue[index]
+        try {
+          const blob = await getSavedBlob(item) ?? await fetchAudioBlob(item.audioUrl)
+          zip.file(`${pad3(item.surahId || index + 1)} - ${safeFileName(item.title)}.mp3`, blob)
+          added += 1
+        } catch { failed.push(item.title) }
+        setQuranZipProgress(Math.round(((index + 1) / total) * 90))
       }
-
-      const content = await zip.generateAsync(
-        {
-          type: 'blob',
-          compression: 'STORE',
-          streamFiles: true,
-        },
-        (metadata) => {
-          const zipStageProgress = 95 + Math.round(metadata.percent * 0.05)
-          setQuranZipProgress(Math.min(100, zipStageProgress))
-        }
-      )
-
+      if (!added) throw new Error('لم يمكن تجهيز أي سورة.')
+      if (failed.length) zip.file('السور-غير-المضمنة.txt', failed.join('\n'))
+      const content = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: true },
+        (metadata) => setQuranZipProgress(90 + Math.round(metadata.percent / 10)))
       const blobUrl = URL.createObjectURL(content)
       const anchor = document.createElement('a')
       anchor.href = blobUrl
-      anchor.download = safeFileName(
-        `مصحف كامل - ${selectedReciter.name} - ${selectedRiwaya.name}.zip`
-      )
+      anchor.download = `${safeFileName(`تلاوات ${selectedReciter.name} - ${selectedRiwaya.name} - ${added} سورة`)}.zip`
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
-      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
-
-      notify('تم تجهيز ملف ZIP للمصحف كاملًا.')
-    } catch (err) {
-      console.error('Quran ZIP error:', err)
-      notify(
-        'تعذر إنشاء ZIP من المتصفح. غالبًا خادم الصوت لا يسمح بالتحميل عبر CORS.'
-      )
-    } finally {
-      setZipBusy(false)
-      window.setTimeout(() => setQuranZipProgress(0), 1500)
-    }
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
+      notify(failed.length ? `تم تجهيز ${arabicDigits(added)} سورة؛ تعذر تضمين ${arabicDigits(failed.length)} سورة.` : `تم تجهيز جميع السور المختارة (${arabicDigits(added)}) في ZIP.`)
+    } catch { notify('تعذر إنشاء ZIP. تحقق من الاتصال والمساحة المتاحة.') }
+    finally { setZipBusy(false); setQuranZipProgress(0); operationBusyRef.current = false }
   }
 
   const saveWholeQuranOffline = async () => {
-    if (!selectedReciter || !selectedMoshaf || !selectedRiwaya) {
-      notify('اختر القارئ والرواية أولًا.')
-      return
-    }
-
+    if (operationBusyRef.current) { notify('انتظر انتهاء العملية الحالية.'); return }
+    if (!quranQueue.length) { notify('اختر القارئ والرواية أولًا.'); return }
+    operationBusyRef.current = true
     setZipBusy(true)
     setQuranZipProgress(0)
-
+    let saved = 0
+    let failed = 0
     try {
-      if (typeof caches === 'undefined') throw new Error('CACHE_UNAVAILABLE')
-
-      const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
-      const total = availableSurahs.length
-      let completed = 0
-
-      for (const surah of availableSurahs) {
-        const url = `${selectedMoshaf.server}${pad3(surah.id)}.mp3`
-        const key = `quran:${selectedReciter.id}:${selectedRiwaya.id}:${surah.id}`
-
-        // نفس المخزن المشترك: ما حفظه المصحف أو المكتبة لا يعاد تنزيله.
-        let existing = await cache.match(url)
-
-        if (!existing) {
-          // نقل أي نسخة قديمة من IndexedDB إلى Cache Storage بدل إعادة تنزيلها.
-          const legacy = await getOffline(key)
-          if (legacy) {
-            await cache.put(
-              url,
-              new Response(legacy.blob, {
-                status: 200,
-                headers: { 'Content-Type': legacy.blob.type || 'audio/mpeg' },
-              })
-            )
-            await deleteOffline(key).catch(() => {})
-            existing = await cache.match(url)
-          }
-        }
-
-        if (!existing) {
-          try {
-            const response = await fetch(url, {
-              method: 'GET',
-              cache: 'no-store',
-              mode: 'cors',
-              credentials: 'omit',
-            })
-            if (response.ok && response.status !== 206) {
-              await cache.put(url, response.clone())
-              existing = response
-            }
-          } catch {
-            // حاول Service Worker في الخطوة التالية.
-          }
-        }
-
-        if (!existing && navigator.serviceWorker?.controller) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'CACHE_AUDIO_URL',
-            url,
-          })
-          await new Promise((resolve) => window.setTimeout(resolve, 700))
-          existing = await cache.match(url)
-        }
-
-        if (existing) {
-          setSharedQuranUrls((previous) => {
-            const next = new Set(previous)
-            next.add(url)
-            return next
-          })
-        }
-
-        completed += 1
-        setQuranZipProgress(Math.round((completed / Math.max(total, 1)) * 100))
+      for (let index = 0; index < quranQueue.length; index += 1) {
+        try { await storeAudio(quranQueue[index]); saved += 1 }
+        catch { failed += 1 }
+        setQuranZipProgress(Math.round(((index + 1) / quranQueue.length) * 100))
       }
-
       await loadOfflineIndex()
-      notify('تم حفظ السور المتاحة في المخزن المشترك — ولن تُنزّل مرة أخرى من المصحف.')
-    } catch (err) {
-      console.error('Whole Quran offline error:', err)
-      notify(
-        'تعذر حفظ المصحف كاملًا. قد يمنع مصدر الصوت الحفظ البرمجي.'
-      )
-    } finally {
-      setZipBusy(false)
-      window.setTimeout(() => setQuranZipProgress(0), 1500)
-    }
+      notify(failed ? `المحفوظ ${arabicDigits(saved)} من ${arabicDigits(quranQueue.length)} سورة. تعذر حفظ ${arabicDigits(failed)}؛ يمكنك إعادة المحاولة.` : `اكتمل حفظ جميع السور المختارة (${arabicDigits(saved)}) دون إنترنت.`)
+    } finally { setZipBusy(false); setQuranZipProgress(0); operationBusyRef.current = false }
   }
 
   const resetSelection = () => {
@@ -1579,26 +1474,10 @@ export default function AudioPage() {
       </header>
 
       <main className="mx-auto w-full max-w-7xl px-4 py-6">
-        {loading ? (
-          <div className="flex min-h-[65vh] flex-col items-center justify-center gap-4 text-mushaf-teal">
-            <div className="flex h-20 w-20 items-center justify-center rounded-3xl border border-mushaf-border/30 bg-white shadow-sm">
-              <Loader2 className="animate-spin" size={38} />
-            </div>
-            <p className="font-black">جاري تجهيز مكتبة سميع الصوتية...</p>
-          </div>
-        ) : error && !riwayat.length ? (
-          <div className="rounded-3xl border border-red-100 bg-white p-8 text-center shadow-sm">
-            <p className="mb-4 font-bold text-red-600">{error}</p>
-            <button
-              type="button"
-              onClick={() => void loadBaseLibrary()}
-              className="rounded-2xl bg-mushaf-teal px-6 py-3 font-bold text-white"
-            >
-              إعادة المحاولة
-            </button>
-          </div>
-        ) : (
+        {(
           <>
+            {loading && <p role="status" className="mb-4 text-center text-sm font-bold text-mushaf-teal">جاري تحميل القوائم...</p>}
+            {isOffline && <p role="status" className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-900">أنت دون اتصال. افتح «المحفوظ على الجهاز» للاستماع إلى الملفات المحفوظة على هذا الجهاز.</p>}
             <section className="relative overflow-hidden rounded-[2rem] border border-mushaf-gold/20 bg-gradient-to-br from-[#175E67] via-[#124A51] to-[#0D383E] p-5 text-white shadow-[0_20px_60px_rgba(13,56,62,0.18)] sm:p-7">
               <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-white/5 blur-3xl" />
               <div className="absolute -bottom-24 -left-20 h-64 w-64 rounded-full bg-mushaf-gold/10 blur-3xl" />
@@ -1653,7 +1532,7 @@ export default function AudioPage() {
                   <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center">
                     <p className="text-[10px] text-white/50">دون نت</p>
                     <p className="mt-1 text-lg font-black">
-                      {arabicDigits(offlineKeys.size)}
+                      {arabicDigits(savedItems.length)}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center">
@@ -1664,6 +1543,26 @@ export default function AudioPage() {
                   </div>
                 </div>
               </div>
+            </section>
+
+            <section className="mt-5 rounded-3xl border border-mushaf-border/30 bg-white p-4 shadow-sm">
+              <button type="button" onClick={() => { setShowSaved((value) => !value); void loadOfflineIndex() }} className="flex w-full items-center justify-between gap-3 text-right font-black text-mushaf-teal" aria-expanded={showSaved}>
+                <span className="flex items-center gap-2"><WifiOff size={20} /> المحفوظ على الجهاز ({arabicDigits(savedItems.length)})</span>
+                <ChevronDown size={19} className={showSaved ? 'rotate-180' : ''} />
+              </button>
+              {showSaved && (savedItems.length ? (
+                <div className="mt-4 grid max-h-[32rem] gap-3 overflow-y-auto sm:grid-cols-2">
+                  {savedItems.map((item) => {
+                    const identity = item.audioUrl || offlineKeyFor(item)
+                    const active = player && (player.audioUrl || offlineKeyFor(player)) === identity
+                    return <article key={identity} className="flex items-center gap-3 rounded-2xl bg-mushaf-paper p-3">
+                      <div className="min-w-0 flex-1"><p className="truncate text-sm font-black text-mushaf-dark">{item.title}</p><p className="mt-1 truncate text-xs text-gray-500">{item.reciterName} · {item.subtitle}</p>{item.legacyOpaque && <p className="mt-1 text-[10px] text-amber-700">نسخة قديمة؛ إن تعذر تشغيلها أعد حفظها أثناء الاتصال.</p>}</div>
+                      <button type="button" aria-label={`تشغيل ${item.title}`} onClick={() => active ? void togglePlayer() : void startPlayer(item, savedItems, savedItems.indexOf(item), true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mushaf-teal text-white">{active && isPlaying ? <Pause size={17} /> : <Play size={17} />}</button>
+                      <button type="button" aria-label={`حذف النسخة المحفوظة من ${item.title}`} disabled={zipBusy || offlineBusyKey !== null} onClick={() => void removeOfflinePlayer(item)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-mushaf-gold disabled:opacity-40"><Trash2 size={16} /></button>
+                    </article>
+                  })}
+                </div>
+              ) : <p className="mt-4 text-sm leading-7 text-gray-500">لا توجد ملفات ظاهرة في المخزن. اتصل بالإنترنت، واختر تسجيلًا ثم اضغط «حفظ دون نت». النسخ القديمة لم تُحذف.</p>)}
             </section>
 
       {player && (
@@ -1884,7 +1783,7 @@ export default function AudioPage() {
                     </p>
                     <button
                       type="button"
-                      disabled={!!player.isStream || offlineBusyKey !== null}
+                      disabled={!!player.isStream || zipBusy || offlineBusyKey !== null}
                       onClick={() =>
                         currentOffline
                           ? void removeOfflinePlayer(player)
@@ -1948,6 +1847,8 @@ export default function AudioPage() {
                       type="button"
                       key={tab}
                       onClick={() => {
+                        libraryRequestRef.current += 1
+                        setLibraryLoading(false)
                         setActiveTab(tab)
                         setSearch('')
                         setShowRiwayat(false)
@@ -1977,6 +1878,7 @@ export default function AudioPage() {
             {error && (
               <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4 text-center text-sm font-bold text-red-700">
                 {error}
+                <button type="button" onClick={() => void loadBaseLibrary()} className="mr-3 underline">إعادة تحميل القوائم</button>
               </div>
             )}
 
@@ -2433,7 +2335,7 @@ export default function AudioPage() {
 
                                   <button
                                     type="button"
-                                    disabled={busy}
+                                    disabled={busy || zipBusy || offlineBusyKey !== null}
                                     onClick={() => {
                                       if (!currentItem) return
 
@@ -2570,7 +2472,7 @@ export default function AudioPage() {
                         {selectedSunnahBookId && (
                           <button
                             type="button"
-                            onClick={() => { setSelectedSunnahBookId(null); setLibraryItems([]); setSunnahHasMore(false); setSunnahNextStart(1) }}
+                            onClick={() => { libraryRequestRef.current += 1; setLibraryLoading(false); setSelectedSunnahBookId(null); setLibraryItems([]); setSunnahHasMore(false); setSunnahNextStart(1) }}
                             className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-paper px-4 py-3 text-xs font-black text-mushaf-teal"
                           >
                             <ArrowRight size={16} /> كل الكتب
@@ -2681,7 +2583,7 @@ export default function AudioPage() {
                                   </div>
                                   <div className="mt-3 flex gap-2">
                                     <button type="button" onClick={() => void downloadDirect(item.audioUrl, item.title)} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-mushaf-paper py-2.5 text-xs font-black text-mushaf-gold"><Download size={15} /> تنزيل</button>
-                                    <button type="button" disabled={busy} onClick={() => saved ? void removeOfflinePlayer(libraryPlayer) : void saveOfflinePlayer(libraryPlayer)} className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black ${saved ? 'bg-mushaf-gold text-white' : 'bg-mushaf-paper text-mushaf-teal'}`}><WifiOff size={15} /> {saved ? 'محفوظ دون نت' : 'حفظ دون نت'}</button>
+                                    <button type="button" disabled={busy || zipBusy || offlineBusyKey !== null} onClick={() => saved ? void removeOfflinePlayer(libraryPlayer) : void saveOfflinePlayer(libraryPlayer)} className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black ${saved ? 'bg-mushaf-gold text-white' : 'bg-mushaf-paper text-mushaf-teal'}`}><WifiOff size={15} /> {saved ? 'محفوظ دون نت' : 'حفظ دون نت'}</button>
                                   </div>
                                 </article>
                               )
@@ -2758,7 +2660,7 @@ export default function AudioPage() {
                               <div className="mt-3 grid grid-cols-4 gap-2">
                                 <button type="button" onClick={() => void playLibraryItem(item)} className="flex items-center justify-center gap-1 rounded-xl bg-mushaf-teal py-2.5 text-white text-xs font-black col-span-2">{playing && isPlaying ? <Pause size={15} /> : <Play size={15} />} تشغيل</button>
                                 <button type="button" onClick={() => void downloadDirect(item.audioUrl, item.title)} className="flex items-center justify-center rounded-xl bg-mushaf-paper text-mushaf-gold" title="تنزيل"><Download size={15} /></button>
-                                <button type="button" disabled={busy} onClick={() => saved ? void removeOfflinePlayer(libraryPlayer) : void saveOfflinePlayer(libraryPlayer)} className={`flex items-center justify-center rounded-xl ${saved ? 'bg-mushaf-gold text-white' : 'bg-mushaf-paper text-mushaf-teal'}`} title={saved ? 'حذف النسخة' : 'حفظ دون إنترنت'}>{saved ? <Check size={15} /> : <WifiOff size={15} />}</button>
+                                <button type="button" disabled={busy || zipBusy || offlineBusyKey !== null} onClick={() => saved ? void removeOfflinePlayer(libraryPlayer) : void saveOfflinePlayer(libraryPlayer)} className={`flex items-center justify-center rounded-xl ${saved ? 'bg-mushaf-gold text-white' : 'bg-mushaf-paper text-mushaf-teal'}`} title={saved ? 'حذف النسخة' : 'حفظ دون إنترنت'}>{saved ? <Check size={15} /> : <WifiOff size={15} />}</button>
                               </div>
                             </article>
                           )
