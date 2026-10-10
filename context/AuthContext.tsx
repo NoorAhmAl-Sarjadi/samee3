@@ -1,3 +1,4 @@
+
 'use client'
 
 import {
@@ -6,6 +7,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ReactNode,
 } from 'react'
 import {
   onAuthStateChanged,
@@ -13,31 +15,30 @@ import {
 } from 'firebase/auth'
 import {
   doc,
-  getDoc,
+  onSnapshot,
+  type DocumentData,
+  type Unsubscribe,
 } from 'firebase/firestore'
-import {
-  auth,
-  db,
-} from '@/lib/firebase'
+import { auth, db } from '@/lib/firebase'
 
-/* =========================================================
-   بيانات المستخدم المحفوظة في Firestore
-========================================================= */
+/**
+ * SAMEE3 – Firebase authentication and live user profile.
+ * Path: context/AuthContext.tsx
+ *
+ * Reads users/{uid} in real time; never writes or changes roles.
+ * A user with a missing/unreadable profile is never treated as admin.
+ */
 
 export interface UserProfile {
   uid: string
   name: string
   displayName: string
   email: string
-
   role: 'user' | 'admin'
-
   status?: string
-
   createdAt?: unknown
   lastLoginAt?: unknown
   updatedAt?: unknown
-
   lastReadPage?: number
   lastReadRiwayaId?: string
   lastReadSurahNumber?: number
@@ -47,227 +48,237 @@ export interface UserProfile {
   lastReadAyahNumber?: number
   lastReadReciterId?: string
   lastReadReciterName?: string
-
+  lastReadMoshafId?: number
   khatmaDays?: number
   khatmaStartDate?: string
-
+  khatmaPagesPerDay?: number
   [key: string]: unknown
 }
 
-/* =========================================================
-   قيمة الـ Context
-========================================================= */
+export type ProfileStatus =
+  | 'loading'
+  | 'ready'
+  | 'missing'
+  | 'unavailable'
+  | 'signed-out'
 
 interface AuthContextValue {
   user: FirebaseUser | null
   profile: UserProfile | null
   loading: boolean
   isAdmin: boolean
+  profileStatus: ProfileStatus
 }
-
-/* =========================================================
-   القيمة الافتراضية
-========================================================= */
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   profile: null,
   loading: true,
   isAdmin: false,
+  profileStatus: 'loading',
 })
 
-/* =========================================================
-   Provider
-========================================================= */
+const PROFILE_TIMEOUT_MS = 7000
+
+function nameFrom(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim().replace(/\s+/g, ' ').slice(0, 100)
+    : ''
+}
+
+function fallbackName(user: FirebaseUser): string {
+  return (
+    nameFrom(user.displayName) ||
+    nameFrom(user.email?.split('@')[0]) ||
+    'مستخدم مصحف سميع'
+  )
+}
+
+function makeFallbackProfile(user: FirebaseUser): UserProfile {
+  const name = fallbackName(user)
+
+  return {
+    uid: user.uid,
+    name,
+    displayName: name,
+    email: user.email || '',
+    role: 'user',
+  }
+}
+
+function makeFirestoreProfile(
+  user: FirebaseUser,
+  data: DocumentData,
+): UserProfile {
+  const storedName = nameFrom(data.name)
+  const storedDisplayName = nameFrom(data.displayName)
+  const name =
+    storedName || storedDisplayName || fallbackName(user)
+
+  return {
+    ...data,
+    uid: user.uid,
+    name,
+    displayName:
+      storedDisplayName || nameFrom(user.displayName) || name,
+    email: user.email || nameFrom(data.email),
+    role: data.role === 'admin' ? 'admin' : 'user',
+  }
+}
 
 export function AuthProvider({
   children,
 }: {
-  children: React.ReactNode
+  children: ReactNode
 }) {
   const [user, setUser] = useState<FirebaseUser | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profileStatus, setProfileStatus] =
+    useState<ProfileStatus>('loading')
 
   useEffect(() => {
-    let mounted = true
+    let active = true
+    let generation = 0
+    let stopProfile: Unsubscribe | null = null
+    let firstSnapshotTimer: number | null = null
 
-    const unsubscribe = onAuthStateChanged(
+    const stopPreviousProfile = () => {
+      if (stopProfile) {
+        stopProfile()
+        stopProfile = null
+      }
+
+      if (firstSnapshotTimer !== null) {
+        window.clearTimeout(firstSnapshotTimer)
+        firstSnapshotTimer = null
+      }
+    }
+
+    const unsubscribeAuth = onAuthStateChanged(
       auth,
-      async (currentUser) => {
-        if (!mounted) return
+      (currentUser) => {
+        // Invalidate all callbacks belonging to an earlier login.
+        generation += 1
+        const thisGeneration = generation
+        stopPreviousProfile()
 
-        /*
-         * أولًا نحفظ حالة Firebase Authentication
-         */
+        if (!active) return
+
         setUser(currentUser)
 
-        /*
-         * لا يوجد مستخدم مسجل
-         */
         if (!currentUser) {
           setProfile(null)
+          setProfileStatus('signed-out')
           setLoading(false)
           return
         }
 
+        const fallback = makeFallbackProfile(currentUser)
+        setProfile(fallback)
+        setProfileStatus('loading')
+        setLoading(true)
+
+        const isCurrentSession = () =>
+          active && generation === thisGeneration
+
+        // Avoid keeping every screen on an infinite loader when
+        // Firestore is temporarily unreachable or the device is offline.
+        firstSnapshotTimer = window.setTimeout(() => {
+          firstSnapshotTimer = null
+
+          if (!isCurrentSession()) return
+
+          setProfileStatus((previous) =>
+            previous === 'loading' ? 'unavailable' : previous,
+          )
+          setLoading(false)
+          // Keep onSnapshot active: data can arrive after the timeout.
+        }, PROFILE_TIMEOUT_MS)
+
         try {
-          /*
-           * جلب بيانات المستخدم من:
-           *
-           * users/{uid}
-           */
-          const userRef = doc(
-            db,
-            'users',
-            currentUser.uid,
+          stopProfile = onSnapshot(
+            doc(db, 'users', currentUser.uid),
+            (snapshot) => {
+              if (!isCurrentSession()) return
+
+              if (firstSnapshotTimer !== null) {
+                window.clearTimeout(firstSnapshotTimer)
+                firstSnapshotTimer = null
+              }
+
+              if (snapshot.exists()) {
+                setProfile(
+                  makeFirestoreProfile(currentUser, snapshot.data()),
+                )
+                setProfileStatus('ready')
+              } else {
+                // A newly created Auth account can reach this state
+                // before registration writes users/{uid}.
+                // The listener will update as soon as it is created.
+                setProfile(makeFallbackProfile(currentUser))
+                setProfileStatus('missing')
+              }
+
+              setLoading(false)
+            },
+            (error) => {
+              if (!isCurrentSession()) return
+
+              console.error(
+                'SAMEE3: Firestore profile listener failed:',
+                error.code || 'unknown',
+              )
+
+              if (firstSnapshotTimer !== null) {
+                window.clearTimeout(firstSnapshotTimer)
+                firstSnapshotTimer = null
+              }
+
+              // Never keep a stale admin role when profile reads fail.
+              setProfile(makeFallbackProfile(currentUser))
+              setProfileStatus('unavailable')
+              setLoading(false)
+            },
           )
-
-          const userSnapshot = await getDoc(userRef)
-
-          if (!mounted) return
-
-          if (userSnapshot.exists()) {
-            const data = userSnapshot.data()
-
-            const firestoreName =
-              typeof data.name === 'string'
-                ? data.name.trim()
-                : ''
-
-            const firestoreDisplayName =
-              typeof data.displayName === 'string'
-                ? data.displayName.trim()
-                : ''
-
-            /*
-             * أولوية الاسم:
-             *
-             * 1. name في Firestore
-             * 2. displayName في Firestore
-             * 3. displayName في Firebase Auth
-             * 4. الجزء قبل @
-             */
-            const finalName =
-              firestoreName ||
-              firestoreDisplayName ||
-              currentUser.displayName?.trim() ||
-              currentUser.email?.split('@')[0] ||
-              'مستخدم مصحف سميع'
-
-            const rawRole = data.role
-
-            const finalRole: 'user' | 'admin' =
-              rawRole === 'admin'
-                ? 'admin'
-                : 'user'
-
-            const nextProfile: UserProfile = {
-              ...data,
-
-              uid: currentUser.uid,
-
-              name: finalName,
-
-              displayName:
-                firestoreDisplayName ||
-                currentUser.displayName?.trim() ||
-                finalName,
-
-              email:
-                typeof data.email === 'string' &&
-                data.email.trim()
-                  ? data.email.trim()
-                  : currentUser.email || '',
-
-              role: finalRole,
-            }
-
-            setProfile(nextProfile)
-          } else {
-            /*
-             * في حالة وجود حساب Firebase Auth
-             * ولكن لا يوجد مستند users حتى الآن.
-             *
-             * ننشئ Profile مؤقت من بيانات Auth
-             * بدون الكتابة إلى Firestore هنا.
-             */
-            const fallbackName =
-              currentUser.displayName?.trim() ||
-              currentUser.email?.split('@')[0] ||
-              'مستخدم مصحف سميع'
-
-            const fallbackProfile: UserProfile = {
-              uid: currentUser.uid,
-
-              name: fallbackName,
-
-              displayName: currentUser.displayName?.trim() ||
-                fallbackName,
-
-              email: currentUser.email || '',
-
-              role: 'user',
-            }
-
-            setProfile(fallbackProfile)
-          }
         } catch (error) {
-          console.error(
-            'Failed to load user profile:',
-            error,
-          )
+          if (!isCurrentSession()) return
 
-          /*
-           * حتى لو فشل Firestore،
-           * لا نُخرج المستخدم من الحساب.
-           *
-           * نستخدم بيانات Firebase Auth كحل احتياطي.
-           */
-          const fallbackName =
-            currentUser.displayName?.trim() ||
-            currentUser.email?.split('@')[0] ||
-            'مستخدم مصحف سميع'
-
-          if (!mounted) return
-
-          setProfile({
-            uid: currentUser.uid,
-
-            name: fallbackName,
-
-            displayName:
-              currentUser.displayName?.trim() ||
-              fallbackName,
-
-            email: currentUser.email || '',
-
-            role: 'user',
-          })
-        } finally {
-          if (mounted) {
-            setLoading(false)
-          }
+          console.error('SAMEE3: Unable to start profile listener', error)
+          stopPreviousProfile()
+          setProfile(fallback)
+          setProfileStatus('unavailable')
+          setLoading(false)
         }
+      },
+      (error) => {
+        if (!active) return
+
+        console.error('SAMEE3: Firebase Auth listener failed:', error.code || 'unknown')
+        generation += 1
+        stopPreviousProfile()
+        setUser(null)
+        setProfile(null)
+        setProfileStatus('unavailable')
+        setLoading(false)
       },
     )
 
     return () => {
-      mounted = false
-      unsubscribe()
+      active = false
+      generation += 1
+      unsubscribeAuth()
+      stopPreviousProfile()
     }
   }, [])
 
-  /* =======================================================
-     معرفة هل المستخدم Admin
-  ======================================================= */
-
-  const isAdmin =
-    profile?.role === 'admin'
-
-  /* =======================================================
-     القيمة النهائية للـ Context
-  ======================================================= */
+  const isAdmin = Boolean(
+    user &&
+      profile &&
+      profile.uid === user.uid &&
+      profileStatus === 'ready' &&
+      profile.role === 'admin',
+  )
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -275,13 +286,9 @@ export function AuthProvider({
       profile,
       loading,
       isAdmin,
+      profileStatus,
     }),
-    [
-      user,
-      profile,
-      loading,
-      isAdmin,
-    ],
+    [user, profile, loading, isAdmin, profileStatus],
   )
 
   return (
@@ -291,10 +298,6 @@ export function AuthProvider({
   )
 }
 
-/* =========================================================
-   Hook
-========================================================= */
-
-export function useAuth() {
+export function useAuth(): AuthContextValue {
   return useContext(AuthContext)
 }
