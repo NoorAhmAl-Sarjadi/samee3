@@ -17,8 +17,10 @@ import {
   WifiOff,
 } from 'lucide-react'
 
-// مصحف سميع — لوحة الملفات المحفوظة دون اتصال.
-// هذه الصفحة للقراءة فقط: لا تنشئ كاش ولا تحذف تنزيلات.
+// SAMEE3 — Offline Library
+// Path: app/offline/page.tsx
+// صفحة فحص التنزيلات والانتقال لإدارتها.
+
 const PAGE_CACHES = [
   'samee3-mushaf-pages-v2',
   'samee3-v3-riwaya-images',
@@ -152,8 +154,6 @@ function getPageAsset(
   }
 }
 
-// Array.from يحوّل readonly Request[] إلى مصفوفة عادية.
-// متوافق مع إعداد target: es5 في المشروع.
 async function readCacheKeys(
   name: string,
   existingNames: string[],
@@ -164,14 +164,14 @@ async function readCacheKeys(
 
   try {
     const cache = await caches.open(name)
+
     return Array.from(await cache.keys())
   } catch {
     return []
   }
 }
 
-// قراءة عدد الملفات من IndexedDB دون إنشاء قاعدة جديدة
-// أو تعديل قاعدة البيانات الموجودة.
+// فحص قاعدة البيانات دون تعديل محتوياتها.
 async function countIndexedAudio(): Promise<number | null> {
   if (typeof indexedDB === 'undefined') {
     return null
@@ -189,7 +189,7 @@ async function countIndexedAudio(): Promise<number | null> {
         return 0
       }
     } catch {
-      // نستخدم محاولة فتح آمنة عند عدم توفر القائمة.
+      // يمكن المتابعة بفحص آمن.
     }
   }
 
@@ -219,7 +219,7 @@ async function countIndexedAudio(): Promise<number | null> {
       const request = indexedDB.open(DB_NAME)
 
       request.onupgradeneeded = () => {
-        // منع إنشاء قاعدة غير موجودة.
+        // عدم إنشاء قاعدة جديدة من صفحة الفحص.
         request.transaction?.abort()
       }
 
@@ -305,7 +305,7 @@ async function inspectStorage(): Promise<OfflineStats> {
           : null
     }
   } catch {
-    // بعض المتصفحات تمنع عرض تقديرات المساحة.
+    // معلومات مساحة التخزين اختيارية.
   }
 
   if (cacheSupported) {
@@ -356,7 +356,7 @@ async function inspectStorage(): Promise<OfflineStats> {
 
     let complete = 0
 
-    // Set.forEach بدلاً من for...of للتوافق مع ES5.
+    // استخدام forEach لدعم TypeScript ES5.
     entry.text.forEach((page) => {
       if (
         entry.svg.has(page) &&
@@ -523,8 +523,10 @@ export default function OfflinePage() {
 
         {/* Hero */}
         <section className="rounded-[28px] bg-gradient-to-br from-[#0c3b59] via-[#11516c] to-[#16374c] p-6 text-white shadow-lg sm:p-8">
+
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-bold">
+
               {online ? (
                 <Wifi size={15} />
               ) : (
@@ -551,6 +553,24 @@ export default function OfflinePage() {
             والتسجيلات الصوتية، دون تعديل أو حذف
             أي تنزيلات.
           </p>
+
+          {/* زر إدارة التنزيلات الجديد */}
+          <Link
+            href="/offline/manage"
+            className="mt-6 inline-flex w-full items-center justify-center gap-3 rounded-2xl border border-[#f1d7a5]/50 bg-[#dfbd82] px-5 py-3.5 text-sm font-extrabold text-[#183949] shadow-lg transition hover:bg-[#efd29b] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:w-auto"
+          >
+            <Database
+              size={19}
+              aria-hidden="true"
+            />
+
+            إدارة التنزيلات
+
+            <ArrowLeft
+              size={17}
+              aria-hidden="true"
+            />
+          </Link>
 
           <p className="mt-4 flex items-center gap-2 text-xs text-white/75">
             <ShieldCheck
@@ -602,6 +622,7 @@ export default function OfflinePage() {
 
         {/* Statistics */}
         <div className="mb-5 grid grid-cols-2 gap-3 sm:gap-4">
+
           <article className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
             <div className="mb-3 inline-flex rounded-xl bg-[#edf7f2] p-2.5 text-[#26795a]">
               <BookOpen size={21} />
@@ -629,9 +650,7 @@ export default function OfflinePage() {
 
             <p className="text-3xl font-extrabold tabular-nums">
               {stats
-                ? formatNumber(
-                    stats.cachedAudioCount,
-                  )
+                ? formatNumber(stats.cachedAudioCount)
                 : '—'}
             </p>
 
@@ -647,7 +666,9 @@ export default function OfflinePage() {
 
         {/* Quran pages */}
         <section className="mb-5 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-5 sm:px-6">
+
             <div className="flex items-center gap-3">
               <div className="rounded-xl bg-[#eaf3fa] p-2.5 text-[#17678b]">
                 <BookOpen size={20} />
@@ -673,6 +694,7 @@ export default function OfflinePage() {
           </div>
 
           <div className="divide-y divide-slate-100 px-5 sm:px-6">
+
             {RIWAYAT.map(({ id, name }) => {
               const count =
                 stats?.pagesByRiwaya[id] ?? 0
@@ -691,6 +713,7 @@ export default function OfflinePage() {
                   className="py-4"
                 >
                   <div className="mb-2 flex justify-between gap-3 text-sm">
+
                     <span className="font-bold text-slate-700">
                       {name}
                     </span>
@@ -735,7 +758,9 @@ export default function OfflinePage() {
 
         {/* IndexedDB audio */}
         <section className="mb-5 rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
+
           <div className="mb-3 flex items-center gap-3">
+
             <div className="rounded-xl bg-[#fff6e7] p-2.5 text-[#b48a49]">
               <Database size={20} />
             </div>
@@ -775,6 +800,7 @@ export default function OfflinePage() {
 
         {/* Storage */}
         <section className="mb-5 rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
+
           <div className="mb-4 flex items-center gap-3">
             <div className="rounded-xl bg-[#eaf3fa] p-2.5 text-[#17678b]">
               <HardDrive size={20} />
@@ -832,13 +858,14 @@ export default function OfflinePage() {
 
         {/* Safety information */}
         <div className="rounded-2xl border border-[#dbe6ef] bg-white p-5 text-sm leading-7 text-slate-600">
+
           <div className="mb-2 flex items-center gap-2 font-extrabold text-[#11516c]">
             <ShieldCheck size={18} />
             خصوصية وأمان التنزيلات
           </div>
 
-          الصفحة تقرأ حالة التخزين فقط ولا
-          تحذف أي ملفات أو تنزّل محتوى تلقائيًا.
+          الصفحة تقرأ حالة التخزين فقط ولا تحذف
+          أي ملفات أو تنزّل محتوى تلقائيًا.
           قبل السفر، احفظ الرواية والتلاوات المطلوبة
           ثم اختبر فتحها في وضع الطيران على جهازك.
 
