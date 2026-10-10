@@ -1,152 +1,249 @@
+
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  ShieldCheck,
-  LockKeyhole,
-  Loader2,
-  AlertTriangle,
   ArrowRight,
+  Home,
+  Loader2,
+  LockKeyhole,
+  LogIn,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  WifiOff,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
-import { db } from '@/lib/firebase'
-import { doc, getDoc } from 'firebase/firestore'
+
+/**
+ * SAMEE3 — Admin access gate
+ * Path: components/AdminGate.tsx
+ *
+ * Uses the live, server-verified profile from AuthContext.
+ * Does not read Firestore a second time or cache admin permissions.
+ */
+
+type GateState =
+  | 'checking'
+  | 'signed-out'
+  | 'unavailable'
+  | 'missing'
+  | 'denied'
 
 interface AdminGateProps {
-  children: React.ReactNode
+  children: ReactNode
 }
 
-export default function AdminGate({ children }: AdminGateProps) {
-  const { user, loading } = useAuth()
-  const router = useRouter()
+function GateScreen({
+  state,
+  disabledAccount,
+}: {
+  state: GateState
+  disabledAccount: boolean
+}) {
+  const checking = state === 'checking'
+  const signedOut = state === 'signed-out'
+  const unavailable = state === 'unavailable'
+  const missing = state === 'missing'
 
-  const [checkingAdmin, setCheckingAdmin] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [error, setError] = useState('')
+  const heading = checking
+    ? 'جارٍ التحقق من صلاحيات الإدارة'
+    : signedOut
+      ? 'تسجيل الدخول مطلوب'
+      : unavailable
+        ? 'تعذر التحقق من الصلاحيات'
+        : missing
+          ? 'ملف الحساب غير مكتمل'
+          : disabledAccount
+            ? 'هذا الحساب غير مفعل'
+            : 'الوصول إلى الإدارة غير مسموح'
 
-  useEffect(() => {
-    if (loading) return
+  const description = checking
+    ? 'نتأكد من حسابك وصلاحية الإدارة من بيانات Firebase الحالية.'
+    : signedOut
+      ? 'سجّل الدخول بحساب الإدارة أولًا لفتح لوحة التحكم.'
+      : unavailable
+        ? 'تعذر تأكيد صلاحية الإدارة من Firestore حاليًا. لا نسمح بالدخول اعتمادًا على بيانات قديمة محفوظة دون اتصال.'
+        : missing
+          ? 'حسابك موجود، لكن مستند المستخدم في Firestore غير موجود. راجع بيانات الحساب وصلاحياته.'
+          : disabledAccount
+            ? 'تم تعطيل الحساب من بيانات المستخدم. تواصل مع مسؤول المنصة إذا كان ذلك غير متوقع.'
+            : 'الحساب الحالي لا يحمل دور admin معتمدًا في Firestore.'
 
-    if (!user) {
-      router.replace('/auth')
-      return
-    }
-
-    const checkAdmin = async () => {
-      setCheckingAdmin(true)
-      setError('')
-
-      try {
-        const userRef = doc(db, 'users', user.uid)
-        const snapshot = await getDoc(userRef)
-
-        if (!snapshot.exists()) {
-          setIsAdmin(false)
-          return
-        }
-
-        const data = snapshot.data()
-        const role = String(data?.role || '').trim().toLowerCase()
-
-        // يقبل فقط الدور الصريح "admin".
-        setIsAdmin(role === 'admin')
-      } catch (err) {
-        console.error('Admin permission check error:', err)
-        setIsAdmin(false)
-        setError('تعذر التحقق من صلاحيات الإدارة حاليًا.')
-      } finally {
-        setCheckingAdmin(false)
-      }
-    }
-
-    void checkAdmin()
-  }, [loading, user, router])
-
-  if (loading || checkingAdmin) {
-    return (
-      <div
-        className="min-h-screen bg-gray-50 flex items-center justify-center p-6"
-        dir="rtl"
+  return (
+    <main
+      dir="rtl"
+      className="flex min-h-screen items-center justify-center bg-[#f4f9fe] px-4 py-10 text-slate-900"
+    >
+      <section
+        aria-live={checking ? 'polite' : undefined}
+        className="w-full max-w-md overflow-hidden rounded-[28px] border border-[#e5d8be] bg-white shadow-[0_22px_65px_rgba(15,46,63,0.10)]"
       >
-        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-8 text-center w-full max-w-sm">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-[#075640]/10 flex items-center justify-center">
-            <Loader2
-              size={28}
-              className="text-[#075640] animate-spin"
-            />
-          </div>
+        <div className="bg-gradient-to-br from-[#103d4c] to-[#155b72] px-6 py-7 text-center text-white">
+          <span className="text-xs font-bold tracking-wide text-[#e6ca96]">
+            SAMEE3 · مصحف سميع
+          </span>
 
-          <h1 className="font-black text-gray-900 mt-5">
-            جاري التحقق من الصلاحيات
-          </h1>
-
-          <p className="text-sm text-gray-400 leading-7 mt-2">
-            لحظة واحدة، يتم التأكد من أن الحساب يملك صلاحية الإدارة.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return null
-  }
-
-  if (!isAdmin) {
-    return (
-      <div
-        className="min-h-screen bg-mushaf-paper flex items-center justify-center p-6"
-        dir="rtl"
-      >
-        <div className="w-full max-w-md bg-white rounded-3xl border border-red-100 shadow-sm p-7 text-center">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-red-50 flex items-center justify-center">
-            {error ? (
-              <AlertTriangle
+          <div className="mx-auto mt-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/20 bg-white/10 text-[#e8d09f]">
+            {checking ? (
+              <Loader2
                 size={30}
-                className="text-red-500"
+                className="animate-spin"
+                aria-hidden="true"
+              />
+            ) : unavailable ? (
+              <WifiOff
+                size={30}
+                aria-hidden="true"
+              />
+            ) : signedOut ? (
+              <LogIn
+                size={30}
+                aria-hidden="true"
+              />
+            ) : missing ? (
+              <ShieldAlert
+                size={30}
+                aria-hidden="true"
               />
             ) : (
               <LockKeyhole
                 size={30}
-                className="text-red-500"
+                aria-hidden="true"
               />
             )}
           </div>
 
-          <h1 className="text-xl font-black text-gray-900 mt-5">
-            الوصول إلى لوحة الإدارة غير متاح
+          <h1 className="mt-5 text-xl font-extrabold leading-8">
+            {heading}
           </h1>
+        </div>
 
-          <p className="text-sm text-gray-500 leading-7 mt-3">
-            هذا الحساب لا يملك دور الإدارة المطلوب لدخول هذه الصفحة.
+        <div className="px-6 pb-7 pt-6 text-center">
+          <p className="text-sm leading-8 text-slate-600">
+            {description}
           </p>
 
-          {error && (
-            <p className="mt-4 rounded-2xl bg-red-50 text-red-600 text-xs font-bold leading-6 p-3">
-              {error}
-            </p>
+          {!checking && (
+            <div className="mt-6 grid gap-3">
+              {signedOut ? (
+                <Link
+                  href="/auth"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#145b72] px-5 py-3.5 text-sm font-extrabold text-white transition hover:bg-[#0e485b]"
+                >
+                  <LogIn
+                    size={18}
+                    aria-hidden="true"
+                  />
+                  تسجيل الدخول
+                </Link>
+              ) : unavailable || missing ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.location.reload()
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#145b72] px-5 py-3.5 text-sm font-extrabold text-white transition hover:bg-[#0e485b]"
+                >
+                  <RefreshCw
+                    size={18}
+                    aria-hidden="true"
+                  />
+                  إعادة التحقق
+                </button>
+              ) : null}
+
+              <Link
+                href="/"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-bold text-[#145b72] transition hover:bg-slate-50"
+              >
+                <Home
+                  size={18}
+                  aria-hidden="true"
+                />
+                العودة إلى التطبيق
+                <ArrowRight
+                  size={16}
+                  aria-hidden="true"
+                />
+              </Link>
+            </div>
           )}
 
-          <div className="flex flex-col sm:flex-row gap-3 mt-6">
-            <button
-              type="button"
-              onClick={() => router.replace('/')}
-              className="flex-1 rounded-2xl bg-[#075640] text-white py-3.5 font-black text-sm flex items-center justify-center gap-2"
-            >
-              <ArrowRight size={17} />
-              العودة للتطبيق
-            </button>
-
-            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold text-gray-500 flex items-center justify-center gap-2">
-              <ShieldCheck size={16} className="text-[#c6a15a]" />
-              محمي بصلاحيات Firebase
-            </div>
-          </div>
+          <p className="mt-6 flex items-center justify-center gap-2 text-xs leading-6 text-slate-500">
+            <ShieldCheck
+              size={16}
+              className="shrink-0 text-[#b48b4a]"
+              aria-hidden="true"
+            />
+            حماية البيانات الفعلية تتم من خلال قواعد Firestore.
+          </p>
         </div>
-      </div>
-    )
+      </section>
+    </main>
+  )
+}
+
+export default function AdminGate({
+  children,
+}: AdminGateProps) {
+  const {
+    user,
+    profile,
+    loading,
+    isAdmin,
+    profileStatus,
+  } = useAuth()
+
+  const router = useRouter()
+
+  const checking =
+    loading || profileStatus === 'loading'
+
+  useEffect(() => {
+    if (
+      !checking &&
+      !user &&
+      profileStatus === 'signed-out'
+    ) {
+      router.replace('/auth')
+    }
+  }, [
+    checking,
+    user,
+    profileStatus,
+    router,
+  ])
+
+  // Revoke the admin UI immediately
+  // whenever the live role changes.
+  if (
+    !checking &&
+    user &&
+    isAdmin &&
+    profileStatus === 'ready'
+  ) {
+    return <>{children}</>
   }
 
-  return <>{children}</>
+  const state: GateState = checking
+    ? 'checking'
+    : profileStatus === 'unavailable'
+      ? 'unavailable'
+      : !user
+        ? 'signed-out'
+        : profileStatus === 'missing'
+          ? 'missing'
+          : 'denied'
+
+  return (
+    <GateScreen
+      state={state}
+      disabledAccount={
+        profile?.status === 'disabled'
+      }
+    />
+  )
 }
