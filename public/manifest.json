@@ -1,0 +1,55 @@
+
+{
+  "id": "/",
+  "name": "مصحف سميع | المنصة القرآنية الشاملة",
+  "short_name": "مصحف سميع",
+  "description": "موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F9FE",
+  "theme_color": "#0284C7",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": [
+    "books",
+    "education",
+    "lifestyle"
+  ],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "المصحف الشريف",
+      "short_name": "المصحف",
+      "description": "فتح صفحات المصحف وقراءة القرآن الكريم.",
+      "url": "/mushaf"
+    },
+    {
+      "name": "المكتبة الصوتية",
+      "short_name": "التلاوات",
+      "description": "الاستماع إلى التلاوات القرآنية.",
+      "url": "/audio"
+    },
+    {
+      "name": "الأذكار",
+      "short_name": "الأذكار",
+      "description": "الوصول إلى الأذكار اليومية.",
+      "url": "/adhkar"
+    },
+    {
+      "name": "التنزيلات دون إنترنت",
+      "short_name": "التنزيلات",
+      "description": "فحص ملفات المصحف والتلاوات المحفوظة.",
+      "url": "/offline"
+    }
+  ]
+}
