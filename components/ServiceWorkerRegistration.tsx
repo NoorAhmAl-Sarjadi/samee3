@@ -2,78 +2,99 @@
 
 import { useEffect } from 'react'
 
+const SERVICE_WORKER_URL = '/sw.js'
+const UPDATE_CHECK_INTERVAL_MS = 60_000
+
 export default function ServiceWorkerRegistration() {
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) {
-      console.log('SAMEE3: Service Worker غير مدعوم في هذا المتصفح')
-      return
-    }
+    if (!window.isSecureContext || !('serviceWorker' in navigator)) return
 
-    let isReloading = false
+    const serviceWorkers = navigator.serviceWorker
     let disposed = false
+    let checking = false
+    let lastCheckAt: number | null = null
+    let registration: ServiceWorkerRegistration | null = null
 
-    const registerServiceWorker = async () => {
+    const checkForUpdates = async (force = false) => {
+      // النسخة المثبتة تظل تعمل دون اتصال؛ ننتظر الشبكة للتسجيل أو التحديث.
+      if (disposed || checking || navigator.onLine === false) return
+
+      const now = Date.now()
+      if (
+        !force &&
+        lastCheckAt !== null &&
+        now - lastCheckAt < UPDATE_CHECK_INTERVAL_MS
+      ) {
+        return
+      }
+
+      checking = true
+      lastCheckAt = now
+
       try {
-        const registration = await navigator.serviceWorker.register('/sw.js', {
-          scope: '/',
-          updateViaCache: 'none',
-        })
-
-        if (disposed) return
-
-        console.log(
-          'SAMEE3 Service Worker registered:',
-          registration.scope,
-        )
-
-        try {
+        if (registration) {
           await registration.update()
-        } catch (updateError) {
-          console.warn(
-            'SAMEE3 Service Worker update warning:',
-            updateError,
+        } else {
+          // register يفحص التحديث أيضًا؛ لا نكرر الطلب فور التسجيل.
+          const nextRegistration = await serviceWorkers.register(
+            SERVICE_WORKER_URL,
+            { scope: '/', updateViaCache: 'none' },
           )
-        }
 
-        /*
-         * نحاول جعل مساحة التخزين أكثر ثباتًا للـPWA.
-         * المتصفح هو صاحب القرار النهائي، لذلك فشل هذا الطلب لا يكسر التطبيق.
-         */
-        try {
-          if ('storage' in navigator && 'persist' in navigator.storage) {
-            await navigator.storage.persist()
-          }
-        } catch {
-          // التخزين العادي يظل فعالًا حتى لو لم يمنح المتصفح persistent storage.
+          if (!disposed) registration = nextRegistration
         }
       } catch (error) {
-        console.error(
-          'SAMEE3 Service Worker registration failed:',
-          error,
-        )
+        if (!disposed && navigator.onLine) {
+          console.warn('SAMEE3: تعذر تسجيل أو تحديث Service Worker.', error)
+        }
+        // نحافظ على التسجيل القديم والملفات المحفوظة عند فشل الشبكة.
+      } finally {
+        checking = false
       }
     }
 
-    void registerServiceWorker()
+    const requestPersistentStorage = async () => {
+      try {
+        const storage = navigator.storage
+        if (!storage || typeof storage.persist !== 'function') return
 
-    const handleControllerChange = () => {
-      if (isReloading || disposed) return
+        const alreadyPersistent =
+          typeof storage.persisted === 'function'
+            ? await storage.persisted()
+            : false
 
-      isReloading = true
-      window.location.reload()
+        if (!disposed && !alreadyPersistent) {
+          await storage.persist()
+        }
+      } catch {
+        // رفض الطلب لا يعطل التخزين العادي؛ المتصفح يقرر منح الاستمرارية.
+      }
     }
 
-    navigator.serviceWorker.addEventListener(
-      'controllerchange',
-      handleControllerChange,
-    )
+    const handleOnline = () => {
+      void checkForUpdates(true)
+    }
 
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        void checkForUpdates()
+      }
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleFocus)
+
+    void checkForUpdates(true)
+    void requestPersistentStorage()
+
+    // لا نعيد تحميل الصفحة عند controllerchange حتى لا نقطع التلاوة
+    // أو التنزيل الجاري، ولا نحذف أي كاش أو تسجيل من هذا المكوّن.
     return () => {
       disposed = true
-      navigator.serviceWorker.removeEventListener(
-        'controllerchange',
-        handleControllerChange,
-      )
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleFocus)
     }
   }, [])
 
