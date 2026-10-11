@@ -22,6 +22,10 @@ import {
   type HadithChapter,
   type HadithRecord,
 } from '@/lib/hadith-catalog'
+import {
+  getHadithExplanation,
+  type HadithExplanationResult,
+} from '@/lib/hadith-explanations'
 
 const FAV_KEY = 'samee3_hadith_favorites'
 const SAVED_KEY = 'samee3_hadith_saved_v2'
@@ -412,6 +416,10 @@ export default function HadithPage() {
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [showNotes, setShowNotes] = useState(false)
   const [showReferences, setShowReferences] = useState(false)
+  const [showExplanation, setShowExplanation] = useState(false)
+  const [explanationLoading, setExplanationLoading] = useState(false)
+  const [explanationResult, setExplanationResult] = useState<HadithExplanationResult | null>(null)
+  const [explanationRetry, setExplanationRetry] = useState(0)
   const [showChapters, setShowChapters] = useState(true)
   const [appearance, setAppearance] = useState<Appearance>('cream')
   const [fontSize, setFontSize] = useState(27)
@@ -872,9 +880,71 @@ export default function HadithPage() {
     }
   }, [selectedBook, currentChapter, activeHadith])
 
+  // Return to the hadith text when advancing; never leave the previous
+  // explanation visible over a different hadith.
   useEffect(() => {
     setShowReferences(false)
-  }, [activeKey])
+    setShowExplanation(false)
+    setExplanationResult(null)
+    setExplanationLoading(false)
+  }, [bookId, chapterId, activeHadith?.idInBook, activeHadith?.arabic])
+
+  // Fetch only when the visitor opens the explanation panel. The curated
+  // explanation layer validates the book, chapter, hadith number and text anchor.
+  useEffect(() => {
+    if (!showExplanation || !bookId || chapterId === null || !activeHadith) return
+
+    const controller = new AbortController()
+    const record = {
+      idInBook: activeHadith.idInBook,
+      chapterId: activeHadith.chapterId,
+      arabic: activeHadith.arabic,
+    }
+
+    setExplanationLoading(true)
+    setExplanationResult(null)
+
+    void getHadithExplanation(bookId, record, {
+      signal: controller.signal,
+      refresh: explanationRetry > 0,
+    }).then((result) => {
+      if (!controller.signal.aborted) setExplanationResult(result)
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setExplanationResult({
+          status: 'source-unavailable',
+          explanation: null,
+          origin: 'none',
+          message: 'تعذر فتح الشروح الآن. نص الحديث الأصلي متاح دون تغيير.',
+          researchUrl: 'https://dorar.net/hadith',
+        })
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setExplanationLoading(false)
+    })
+
+    return () => controller.abort()
+  }, [showExplanation, bookId, chapterId, activeHadith?.idInBook, activeHadith?.chapterId, activeHadith?.arabic, explanationRetry])
+
+  const copyExplanationCitation = useCallback(async () => {
+    const entry = explanationResult?.explanation
+    if (!entry || !selectedBook) return
+    const citation = [
+      `شرح الحديث: ${entry.title}`,
+      `الحديث: ${selectedBook.name_ar}، رقم ${entry.hadithNumber}`,
+      `مرجع الشرح: ${entry.source.title}`,
+      entry.source.author ? `المؤلف: ${entry.source.author}` : '',
+      `موضع النص: ${entry.source.reference}`,
+      entry.source.url,
+      'مصحف سميع — مادة محررة مع الرجوع إلى مرجع الشرح عند الاستشهاد.',
+    ].filter(Boolean).join('\n')
+    try {
+      await navigator.clipboard.writeText(citation)
+      setFeedback('تم نسخ مرجع الشرح وموضعه.')
+    } catch {
+      try { window.prompt('انسخ المرجع:', citation) } catch { /* blocked */ }
+    }
+  }, [explanationResult, selectedBook])
 
   const activeNote = activeKey ? notes[activeKey] || '' : ''
   const updateNote = (value: string) => {
@@ -1125,7 +1195,7 @@ export default function HadithPage() {
                                 <strong className="font-black">درجة الحديث:</strong> غير مذكورة في البيانات المتاحة لهذا الحديث. لا يُستنتج حكم خاص من مجرد وجوده في هذا الكتاب.
                               </p>
                               <p className={`mt-1 text-xs leading-8 ${quiet}`}>
-                                <strong className="font-black">الشرح والتخريج التفصيلي:</strong> لا يتوفران داخل هذا المصدر بصيغة موثقة مرتبطة بهذا النص.
+                                <strong className="font-black">الشرح والتخريج التفصيلي:</strong> بيانات هذا المصدر لا تشمل تخريجًا تفصيليًا تلقائيًا. تظهر الشروح المعتمدة - إن وجدت - في لوحة شرح الحديث أدناه مع توثيق مستقل.
                               </p>
                               <p className={`mt-1 text-xs leading-8 ${quiet}`}>
                                 <strong className="font-black">المصدر الرقمي:</strong> واجهة الفرقان للأحاديث. الأرقام تخص ترقيم المصدر الرقمي، وقد تختلف عن طبعات أخرى؛ والإسناد والمتن معروضان دون فصل تخميني.
@@ -1156,6 +1226,130 @@ export default function HadithPage() {
                             </div>
                           </div>
                         )}
+
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            aria-expanded={showExplanation}
+                            aria-controls="hadith-reviewed-explanation"
+                            onClick={() => setShowExplanation((value) => !value)}
+                            className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-4 text-right transition ${bg ? 'border-white/10 bg-[#20373a]' : 'border-[#c2a66e]/25 bg-[#faf5ea]'}`}
+                          >
+                            <span className="flex min-w-0 items-center gap-3">
+                              <BookMarked size={21} className="shrink-0 text-[#aa8950]" />
+                              <span className="min-w-0">
+                                <strong className="block text-sm font-black">شرح الحديث ومعاني الكلمات</strong>
+                                <span className={`mt-1 block text-xs ${quiet}`}>شروح مراجعة مع ذكر المرجع فقط</span>
+                              </span>
+                            </span>
+                            <ChevronLeft size={19} className={`shrink-0 text-[#aa8950] transition-transform ${showExplanation ? '-rotate-90' : ''}`} />
+                          </button>
+
+                          {showExplanation && (
+                            <section
+                              id="hadith-reviewed-explanation"
+                              aria-label="شرح الحديث الموثق"
+                              className={`mt-3 overflow-hidden rounded-2xl border ${bg ? 'border-white/10 bg-[#172c2f]' : 'border-[#c2a66e]/25 bg-[#fffdf8]'}`}
+                            >
+                              {explanationLoading ? (
+                                <div className="flex items-center gap-3 p-5 text-sm" role="status">
+                                  <Loader2 size={19} className="animate-spin text-[#b18f53]" />
+                                  <span>جارٍ التحقق من وجود شرح مراجع لهذا الحديث...</span>
+                                </div>
+                              ) : explanationResult?.status === 'available' && explanationResult.explanation ? (
+                                <div className="space-y-5 p-4 sm:p-6">
+                                  <div className={`rounded-2xl border p-4 ${bg ? 'border-[#b99b59]/25 bg-[#283d3d]' : 'border-[#b99b59]/25 bg-[#f7f0e2]'}`}>
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <span className="flex items-center gap-2 text-xs font-black text-[#b19257]"><ShieldCheck size={16} /> شرح تحريري مسجّل بعد مراجعة</span>
+                                      <span className={`text-[11px] ${quiet}`}>{explanationResult.origin === 'cache' || explanationResult.origin === 'memory' ? 'قد يكون محفوظًا على الجهاز' : 'بيانات الشروح المحلية'}</span>
+                                    </div>
+                                    <h3 className="mt-3 text-lg font-black leading-8">{explanationResult.explanation.title}</h3>
+                                    <p className={`mt-2 text-xs leading-7 ${quiet}`}>هذا شرح منفصل عن لفظ الحديث النبوي؛ يُرجع إلى مصدره الأصلي قبل الاستشهاد.</p>
+                                  </div>
+
+                                  <div>
+                                    <h4 className="mb-2 text-sm font-black">شرح الحديث</h4>
+                                    <p dir="rtl" lang="ar" className="whitespace-pre-line break-words font-serif text-[19px] leading-[2.1]" style={{ overflowWrap: 'anywhere' }}>
+                                      {explanationResult.explanation.explanation}
+                                    </p>
+                                  </div>
+
+                                  {explanationResult.explanation.vocabulary.length > 0 && (
+                                    <div>
+                                      <h4 className="mb-3 text-sm font-black">معاني الكلمات</h4>
+                                      <div className="grid gap-2 sm:grid-cols-2">
+                                        {explanationResult.explanation.vocabulary.map((entry, index) => (
+                                          <div key={`${entry.word}-${index}`} className={`rounded-xl p-3 ${softSurface}`}>
+                                            <strong className="block text-sm text-[#b49459]">{entry.word}</strong>
+                                            <p className="mt-1 whitespace-pre-line text-sm leading-7">{entry.meaning}</p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {explanationResult.explanation.benefits.length > 0 && (
+                                    <div>
+                                      <h4 className="mb-3 text-sm font-black">الفوائد المذكورة في الشرح</h4>
+                                      <ol className="space-y-2">
+                                        {explanationResult.explanation.benefits.map((benefit, index) => (
+                                          <li key={index} className={`flex items-start gap-3 rounded-xl p-3 text-sm leading-7 ${softSurface}`}>
+                                            <span className="shrink-0 font-black text-[#b49459]">{digit(index + 1)}.</span>
+                                            <span>{benefit}</span>
+                                          </li>
+                                        ))}
+                                      </ol>
+                                    </div>
+                                  )}
+
+                                  <div className={`rounded-2xl border p-4 ${bg ? 'border-white/10' : 'border-[#b99b59]/25'}`}>
+                                    <h4 className="flex items-center gap-2 text-sm font-black"><ShieldCheck size={17} className="text-[#b49459]" /> مرجع الشرح ومراجعته</h4>
+                                    <dl className="mt-3 grid gap-3 text-xs leading-7 sm:grid-cols-2">
+                                      <div><dt className={quiet}>المصدر</dt><dd className="font-bold">{explanationResult.explanation.source.title}</dd></div>
+                                      {explanationResult.explanation.source.author && (
+                                        <div><dt className={quiet}>صاحب المصدر</dt><dd className="font-bold">{explanationResult.explanation.source.author}</dd></div>
+                                      )}
+                                      <div><dt className={quiet}>موضع الشرح في المرجع</dt><dd className="font-bold">{explanationResult.explanation.source.reference}</dd></div>
+                                      <div><dt className={quiet}>المراجع التحريري وتاريخه</dt><dd className="font-bold">{explanationResult.explanation.editorial.reviewedBy} · {explanationResult.explanation.editorial.reviewedAt}</dd></div>
+                                    </dl>
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                      <a
+                                        href={explanationResult.explanation.source.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-2 rounded-xl bg-[#1c5c60] px-4 py-2.5 text-xs font-black text-white"
+                                      ><ExternalLink size={16} /> فتح المرجع</a>
+                                      <button type="button" onClick={() => void copyExplanationCitation()} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black ${softSurface}`}><Copy size={16} /> نسخ المرجع</button>
+                                    </div>
+                                    <p className={`mt-3 text-[11px] leading-6 ${quiet}`}>وصف «مراجع» يعني أن سجل الشرح يتضمن بيانات مراجعة تحريرية، ولا يُعد بديلًا عن التحقق العلمي من المرجع الأصلي.</p>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-3 p-4 sm:p-6" role="status">
+                                  <div className="flex items-start gap-3">
+                                    <Info size={21} className="mt-0.5 shrink-0 text-[#b19257]" />
+                                    <div>
+                                      <h3 className="text-sm font-black">{explanationResult?.status === 'source-unavailable' ? 'تعذر تحميل الشرح' : 'لم يُضف شرح موثق لهذا الحديث بعد'}</h3>
+                                      <p className={`mt-2 text-xs leading-8 ${quiet}`}>
+                                        {explanationResult?.message || 'لم تتوفر بيانات الشروح حاليًا. لن نعرض شرحًا منسوبًا لمرجع دون تحقق.'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <p className={`text-xs leading-7 ${quiet}`}>البحث الخارجي للمراجعة فقط؛ يجب مطابقة ألفاظ الحديث ورقمه ومصدره بنفسك، ولا يُثبت حكمًا تلقائيًا عليه.</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    <a
+                                      href={explanationResult?.researchUrl || HADITH_VERIFICATION_URL}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-2 rounded-xl bg-[#1c5c60] px-4 py-2.5 text-xs font-black text-white"
+                                    ><ExternalLink size={16} /> البحث في الموسوعة الحديثية</a>
+                                    <button type="button" onClick={() => setExplanationRetry((value) => value + 1)} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black ${softSurface}`}><RefreshCw size={16} /> إعادة التحقق</button>
+                                  </div>
+                                </div>
+                              )}
+                            </section>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className={`grid grid-cols-4 gap-2 border-t px-4 py-4 sm:px-7 ${bg ? 'border-white/10' : 'border-[#bfa267]/20'}`}>
