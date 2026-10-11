@@ -1372,7 +1372,28 @@ type MushafCacheSummary = {
 }
 
 const MUSHAF_TOTAL_PAGES = 604
-const MUSHAF_ONLINE_SESSION_PREFIX = 'samee3_mushaf_online_choice_v1:'
+// This decision applies to the DEVICE, not to a single riwaya or browser session.
+// Never show the first-visit dialog again unless the user explicitly taps Download.
+const MUSHAF_FIRST_VISIT_KEY = 'samee3_mushaf_first_visit_decision_v3'
+const MUSHAF_FIRST_VISIT_FALLBACK = 'samee3_mushaf_first_visit_session_v3'
+
+function hasSeenMushafWelcome(): boolean {
+  try {
+    if (localStorage.getItem(MUSHAF_FIRST_VISIT_KEY) === '1') return true
+    // A previously used mushaf predating this release is not a first visit.
+    if (localStorage.getItem('samee3_persistent_reading_v2')) {
+      markMushafWelcomeSeen()
+      return true
+    }
+  } catch { /* Storage can be blocked in private browsing. */ }
+  try { return sessionStorage.getItem(MUSHAF_FIRST_VISIT_FALLBACK) === '1' } catch { return false }
+}
+
+function markMushafWelcomeSeen(): void {
+  try { localStorage.setItem(MUSHAF_FIRST_VISIT_KEY, '1') } catch { /* ignored */ }
+  try { sessionStorage.setItem(MUSHAF_FIRST_VISIT_FALLBACK, '1') } catch { /* ignored */ }
+}
+
 
 function emptyMushafCache(): Record<Riwaya, Set<number>> {
   return {
@@ -1440,7 +1461,7 @@ function MushafDownloadStartup({
   reopenCount,
 }: {
   riwaya: Riwaya
-  prefetchPage: (riwaya: Riwaya, page: number) => Promise<boolean>
+  prefetchPage: (riwaya: Riwaya, page: number, signal?: AbortSignal) => Promise<boolean>
   reopenCount: number
 }) {
   const [choice, setChoice] = useState<MushafDownloadChoice>('checking')
@@ -1456,21 +1477,39 @@ function MushafDownloadStartup({
   const generationRef = useRef(0)
   const runningRef = useRef(false)
   const mountedRef = useRef(true)
+  const downloadControllerRef = useRef<AbortController | null>(null)
+  const openedAutomaticallyRef = useRef(false)
 
   useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+      downloadControllerRef.current?.abort()
+    }
   }, [])
 
   useEffect(() => {
     const generation = ++generationRef.current
     runningRef.current = false
-    setChoice('checking')
+    downloadControllerRef.current?.abort()
+    downloadControllerRef.current = null
     setMode('hafs')
     setPickedRiwaya(riwaya)
     setMessage('')
     setFailedCount(0)
 
+    const manualRequest = reopenCount > 0
+    const alreadySeen = hasSeenMushafWelcome()
+    openedAutomaticallyRef.current = !manualRequest && !alreadySeen
+
+    // No loading overlay, no toast and no cache scan on subsequent visits.
+    // Opening the download manager manually is still always possible.
+    if (!manualRequest && alreadySeen) {
+      setChoice('ready')
+      return () => { generationRef.current += 1 }
+    }
+
+    setChoice('checking')
     void (async () => {
       try {
         const summary = await inspectAllMushafCaches()
@@ -1479,20 +1518,36 @@ function MushafDownloadStartup({
         const next = {} as Record<Riwaya, number>
         ALL_MUSHAF_RIWAYAT.forEach((id) => { next[id] = summary.completed[id].size })
         setCounts(next)
-        let choseOnline = false
-        try {
-          choseOnline = sessionStorage.getItem(MUSHAF_ONLINE_SESSION_PREFIX + riwaya) === '1'
-        } catch { /* Session Storage may be disabled. */ }
-        setChoice(reopenCount === 0 && (next[riwaya] === MUSHAF_TOTAL_PAGES || choseOnline)
-          ? 'ready' : 'choose')
+
+        if (manualRequest) {
+          setChoice('choose')
+          return
+        }
+        // Returning users with a previously downloaded riwaya don't need
+        // a new first-time dialog just because the storage key is newer.
+        if (ALL_MUSHAF_RIWAYAT.some((id) => next[id] === MUSHAF_TOTAL_PAGES)) {
+          markMushafWelcomeSeen()
+          setChoice('ready')
+          return
+        }
+        // Save when SHOWN, not only after a choice: the offer is truly once.
+        markMushafWelcomeSeen()
+        setChoice('choose')
       } catch {
         if (generation !== generationRef.current || !mountedRef.current) return
-        setMessage('تعذر فحص الصفحات المحفوظة. يمكن القراءة عبر الإنترنت.')
+        if (manualRequest) {
+          setMessage('تعذر فحص الصفحات المحفوظة. يمكنك القراءة عبر الإنترنت.')
+        }
+        // The first-visit decision is still considered shown once.
+        if (!manualRequest) markMushafWelcomeSeen()
         setChoice('choose')
       }
     })()
 
-    return () => { generationRef.current += 1 }
+    return () => {
+      generationRef.current += 1
+      downloadControllerRef.current?.abort()
+    }
   }, [riwaya, reopenCount])
 
   const targets: Riwaya[] = mode === 'all'
@@ -1507,7 +1562,7 @@ function MushafDownloadStartup({
     generationRef.current += 1
     runningRef.current = false
     setCurrentRiwaya(null)
-    try { sessionStorage.setItem(MUSHAF_ONLINE_SESSION_PREFIX + riwaya, '1') } catch { /* fine */ }
+    markMushafWelcomeSeen()
     setChoice('ready')
   }
 
@@ -1519,14 +1574,16 @@ function MushafDownloadStartup({
     }
 
     const generation = generationRef.current
+    const controller = new AbortController()
+    downloadControllerRef.current = controller
     runningRef.current = true
     setChoice('downloading')
     setFailedCount(0)
-    setMessage('جارٍ فحص الملفات السابقة؛ سيتم تنزيل الناقص فقط. اترك نافذة المصحف مفتوحة أثناء التحميل.')
+    setMessage('سيتم حفظ الصفحات الناقصة فقط. يمكنك إيقاف التحميل والاستكمال لاحقًا.')
 
     try {
       const summary = await inspectAllMushafCaches()
-      if (generation !== generationRef.current) return
+      if (generation !== generationRef.current || controller.signal.aborted) return
       if (!summary.supported) throw new Error('المتصفح لا يدعم حفظ الصفحات محليًا.')
       const latest = {} as Record<Riwaya, number>
       ALL_MUSHAF_RIWAYAT.forEach((id) => { latest[id] = summary.completed[id].size })
@@ -1537,70 +1594,123 @@ function MushafDownloadStartup({
           if (!summary.completed[id].has(page)) queue.push({ id, page })
         }
       })
-
       if (queue.length && navigator.storage?.persist) {
         void navigator.storage.persist().catch(() => false)
       }
 
+      // A small bounded pool is faster than serial fetching and safer on iOS
+      // than launching hundreds of Quran page requests simultaneously.
+      const connection = (navigator as Navigator & {
+        connection?: { effectiveType?: string; saveData?: boolean }
+      }).connection
+      const slowConnection = connection?.saveData === true ||
+        connection?.effectiveType === '2g' || connection?.effectiveType === 'slow-2g'
+      const ios = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      const parallel = slowConnection ? 1 : ios ? 2 : 3
       let nextIndex = 0
-      let failed = 0
-      let failedInARow = 0
-      let abortForFailures = false
+      let failures = 0
+      let consecutiveFailures = 0
+      let stoppedForFailures = false
+      const pending: Partial<Record<Riwaya, number>> = {}
+      let pendingTotal = 0
+      let lastFlush = Date.now()
+
+      const flush = () => {
+        if (!pendingTotal || generation !== generationRef.current || controller.signal.aborted) return
+        const delta = { ...pending }
+        ALL_MUSHAF_RIWAYAT.forEach((id) => { delete pending[id] })
+        pendingTotal = 0
+        lastFlush = Date.now()
+        setCounts((previous) => {
+          const next = { ...previous }
+          ALL_MUSHAF_RIWAYAT.forEach((id) => {
+            next[id] = Math.min(MUSHAF_TOTAL_PAGES, next[id] + (delta[id] || 0))
+          })
+          return next
+        })
+      }
+
       const worker = async () => {
         while (
           generation === generationRef.current &&
-          !abortForFailures && navigator.onLine && nextIndex < queue.length
+          !controller.signal.aborted && navigator.onLine &&
+          !stoppedForFailures && nextIndex < queue.length
         ) {
-          const task = queue[nextIndex]
-          nextIndex += 1
-          setCurrentRiwaya(task.id)
+          const task = queue[nextIndex++]
+          setCurrentRiwaya((previous) => previous === task.id ? previous : task.id)
           let saved = false
-          try { saved = await prefetchPage(task.id, task.page) } catch { saved = false }
-          if (generation !== generationRef.current) return
+          for (let attempt = 0; attempt < 3 && !saved; attempt += 1) {
+            if (controller.signal.aborted || generation !== generationRef.current) return
+            if (attempt) {
+              await new Promise<void>((resolve) => {
+                const timer = window.setTimeout(resolve, 420 * attempt * attempt)
+                controller.signal.addEventListener('abort', () => {
+                  window.clearTimeout(timer)
+                  resolve()
+                }, { once: true })
+              })
+            }
+            if (controller.signal.aborted) return
+            try { saved = await prefetchPage(task.id, task.page, controller.signal) }
+            catch { saved = false }
+          }
+          if (generation !== generationRef.current || controller.signal.aborted) return
           if (saved) {
-            failedInARow = 0
-            setCounts((previous) => ({ ...previous, [task.id]: Math.min(MUSHAF_TOTAL_PAGES, previous[task.id] + 1) }))
+            consecutiveFailures = 0
+            pending[task.id] = (pending[task.id] || 0) + 1
+            pendingTotal += 1
+            if (pendingTotal >= 7 || Date.now() - lastFlush > 650) flush()
           } else {
-            failed += 1
-            failedInARow += 1
-            setFailedCount(failed)
-            // Avoid thousands of failed requests if source is temporarily unavailable.
-            if (failedInARow >= 12) abortForFailures = true
+            failures += 1
+            consecutiveFailures += 1
+            setFailedCount(failures)
+            // Stop when the upstream endpoint consistently fails.
+            if (consecutiveFailures >= 12) stoppedForFailures = true
           }
         }
       }
-      await Promise.all([worker(), worker()])
-      if (generation !== generationRef.current) return
+      await Promise.all(Array.from({ length: parallel }, () => worker()))
+      if (generation !== generationRef.current || controller.signal.aborted) return
+      flush()
       const verified = await inspectAllMushafCaches()
-      if (generation !== generationRef.current) return
+      if (generation !== generationRef.current || controller.signal.aborted) return
       const final = {} as Record<Riwaya, number>
       ALL_MUSHAF_RIWAYAT.forEach((id) => { final[id] = verified.completed[id].size })
       setCounts(final)
       const complete = targets.every((id) => final[id] === MUSHAF_TOTAL_PAGES)
-      setChoice('choose')
       setCurrentRiwaya(null)
-      setMessage(complete
-        ? 'اكتمل حفظ اختيارك. يمكنك الآن القراءة من الصفحات المحفوظة، أو تنزيل رواية أخرى.'
-        : navigator.onLine
-          ? 'لم تكتمل بعض الصفحات؛ قد يكون السبب المصدر أو سعة التخزين. اضغط استكمال لاحقًا لتنزيل الناقص فقط.'
-          : 'انقطع الاتصال. الصفحات التي اكتمل تنزيلها محفوظة؛ استكمل عند عودة الإنترنت.')
+      if (complete && openedAutomaticallyRef.current) {
+        // First offer closes permanently on success; no second prompt.
+        finishSelection()
+      } else {
+        setChoice('choose')
+        setMessage(complete
+          ? 'اكتمل حفظ الصفحات. يمكنك إغلاق المدير والقراءة مباشرة.'
+          : navigator.onLine
+            ? 'بعض الصفحات لم تكتمل. المحفوظات السابقة سليمة ويمكن استكمال الناقص عند الطلب.'
+            : 'انقطع الاتصال. ستظل الصفحات المحفوظة متاحة، واستكمل الباقي لاحقًا.')
+      }
     } catch (error) {
-      if (generation !== generationRef.current) return
+      if (generation !== generationRef.current || controller.signal.aborted) return
       setChoice('choose')
       setMessage(error instanceof Error ? error.message : 'تعذر تحميل الصفحات.')
     } finally {
-      if (generation === generationRef.current) runningRef.current = false
-      if (generation === generationRef.current) setCurrentRiwaya(null)
+      if (downloadControllerRef.current === controller) downloadControllerRef.current = null
+      if (generation === generationRef.current) {
+        runningRef.current = false
+        setCurrentRiwaya(null)
+      }
     }
   }
 
   const pauseDownload = () => {
+    downloadControllerRef.current?.abort()
+    downloadControllerRef.current = null
     generationRef.current += 1
     runningRef.current = false
     setChoice('choose')
     setCurrentRiwaya(null)
-    setMessage('تم إيقاف متابعة التحميل. ستظل الصفحات المحفوظة كما هي، ويمكن استكمال الناقص في أي وقت.')
-    // In-flight requests may still finish; rescan before resuming.
+    setMessage('تم إيقاف التحميل. الصفحات المكتملة باقية، ويمكن استكمال الناقص من زر التنزيل وقتما تشاء.')
     void inspectAllMushafCaches().then((summary) => {
       const next = {} as Record<Riwaya, number>
       ALL_MUSHAF_RIWAYAT.forEach((id) => { next[id] = summary.completed[id].size })
@@ -1608,7 +1718,7 @@ function MushafDownloadStartup({
     }).catch(() => undefined)
   }
 
-  if (choice === 'ready') return null
+  if (choice === 'ready' || choice === 'checking') return null
 
   return (
     <div role="presentation" className="fixed inset-0 z-[300] flex items-center justify-center overflow-y-auto bg-[#0b2535]/80 px-3 py-5 backdrop-blur-sm"
@@ -2284,15 +2394,36 @@ export default function MushafPage() {
   // A single broken CDN request must not freeze a 604/4228-page download.
   const downloadFetch = useCallback(async (url: string, init: RequestInit = {}) => {
     const controller = new AbortController()
-    const timeout = window.setTimeout(() => controller.abort(), 22000)
+    const parentSignal = init.signal
+    const stop = () => controller.abort()
+    if (parentSignal?.aborted) controller.abort()
+    else parentSignal?.addEventListener('abort', stop, { once: true })
+    const timeout = window.setTimeout(stop, 26000)
     try {
-      return await fetch(url, { ...init, signal: controller.signal })
+      const response = await fetch(url, { ...init, signal: controller.signal })
+      // Keep the timeout and the parent cancellation active until EVERY byte
+      // arrives. fetch() by itself only waits for the response headers.
+      const contentLength = Number(response.headers.get('Content-Length') || 0)
+      if (contentLength > 16 * 1024 * 1024) {
+        throw new Error('صفحة المصحف أكبر من الحجم المتوقع.')
+      }
+      const data = await response.blob()
+      if (data.size > 16 * 1024 * 1024 || controller.signal.aborted) {
+        throw new Error('لم تكتمل صفحة المصحف أو تجاوزت الحجم المسموح.')
+      }
+      return new Response(data, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      })
     } finally {
       window.clearTimeout(timeout)
+      parentSignal?.removeEventListener('abort', stop)
     }
   }, [])
 
-  const prefetchRiwayaPage = useCallback(async (targetRiwaya: Riwaya, page: number) => {
+  const prefetchRiwayaPage = useCallback(async (targetRiwaya: Riwaya, page: number, signal?: AbortSignal) => {
+    if (signal?.aborted) return false
     const safePage = clampPage(page)
     const cache = 'caches' in window
       ? await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME).catch(() => null)
@@ -2330,6 +2461,7 @@ export default function MushafPage() {
         const response = await downloadFetch(pageUrl, {
           cache: 'force-cache',
           headers: { Accept: 'application/json' },
+          signal,
         })
         if (response.ok) {
           const data = await response.clone().json()
@@ -2371,7 +2503,7 @@ export default function MushafPage() {
 
     if (!svgOk && navigator.onLine) {
       try {
-        const response = await downloadFetch(svgUrl, { cache: 'force-cache' })
+        const response = await downloadFetch(svgUrl, { cache: 'force-cache', signal })
         if (response.ok) {
           const data = await response.clone().json()
           if (data?.success && data?.svg) {
@@ -2406,7 +2538,7 @@ export default function MushafPage() {
 
       if (!imageOk && navigator.onLine) {
         try {
-          const response = await downloadFetch(imageUrl, { cache: 'force-cache' })
+          const response = await downloadFetch(imageUrl, { cache: 'force-cache', signal })
           if (response.ok && (response.headers.get('content-type') || '').startsWith('image/')) {
             if (cache) {
               await cache.put(imageUrl, response).then(() => { imageOk = true }).catch(() => {})
@@ -5600,23 +5732,25 @@ export default function MushafPage() {
           <>
             <div className="samee3-top-controls" onClick={(event) => event.stopPropagation()}>
               <div className="samee3-search-row">
-                <div className="samee3-search-box">
-                  <Search size={19} />
+                <form className="samee3-search-box" role="search" onSubmit={(event) => { event.preventDefault(); void executeSearch() }}>
+                  <span className="samee3-search-mark" aria-hidden="true"><Search size={19} strokeWidth={2.2} /></span>
                   <input
                     value={searchInput}
                     onChange={(event) => setSearchInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') void executeSearch()
-                    }}
-                    placeholder="ابحث عن آية"
+                    placeholder="ابحث عن كلمة أو آية في القرآن"
+                    aria-label="البحث عن آية في القرآن الكريم"
                     inputMode="search"
+                    enterKeyHint="search"
                     dir="rtl"
                   />
                   {searchInput ? (
-                    <button type="button" onClick={() => setSearchInput('')} aria-label="مسح البحث"><X size={16} /></button>
+                    <button className="samee3-search-clear" type="button" onClick={() => setSearchInput('')} aria-label="مسح البحث"><X size={16} /></button>
                   ) : null}
-                </div>
-                <button type="button" title="تنزيل صفحات المصحف وإدارة الروايات" aria-label="تنزيل صفحات المصحف" onClick={() => setMushafDownloadOpenCount((value) => value + 1)} className="samee3-download-shortcut"><Download size={19} /></button>
+                  <button className="samee3-search-submit" type="submit" disabled={!searchInput.trim() || searchLoading} aria-label="تنفيذ البحث" title="ابحث في آيات القرآن">
+                    {searchLoading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} strokeWidth={2.4} />}
+                  </button>
+                </form>
+                <button type="button" title="إدارة تنزيل صفحات المصحف" aria-label="إدارة تنزيل صفحات المصحف" onClick={() => setMushafDownloadOpenCount((value) => value + 1)} className="samee3-download-shortcut"><Download size={19} /></button>
                 <button
                   type="button"
                   onClick={toggleKeepAwake}
@@ -5626,9 +5760,6 @@ export default function MushafPage() {
                   className={`samee3-awake-toggle ${wakeLockStatus === 'on' ? 'is-on' : ''}`}
                 >
                   {wakeLockStatus === 'requesting' ? <Loader2 size={18} className="animate-spin" /> : keepScreenAwake ? <Sun size={19} /> : <Moon size={19} />}
-                </button>
-                <button type="button" onClick={() => void executeSearch()} disabled={searchLoading} className="samee3-search-submit">
-                  {searchLoading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
                 </button>
               </div>
               {searchMessage ? <div className="samee3-search-message">{searchMessage}</div> : null}
@@ -5857,13 +5988,13 @@ export default function MushafPage() {
               <button type="button" onClick={() => void copyAyah()}><Copy size={20} /><span>نسخ النص</span></button>
             </div>
 
-            <p className="samee3-action-group-label">قوالب المشاركة القرآنية</p>
+            <p className="samee3-action-group-label">مشاركة قرآنية بتصميم سميع</p>
             <div className="samee3-card-customizer">
               <label>شكل البطاقة
                 <select value={cardTheme} onChange={(event) => setCardTheme(event.target.value as CardTheme)}>
-                  <option value="ivory">عاجي هادئ</option>
-                  <option value="night">داكن فاخر</option>
-                  <option value="gold">ذهبي راقٍ</option>
+                  <option value="ivory">لؤلؤي هادئ</option>
+                  <option value="night">ليلي مخملي</option>
+                  <option value="gold">رملي ذهبي</option>
                 </select>
               </label>
               <label>المقاس
@@ -5877,12 +6008,12 @@ export default function MushafPage() {
             <div className="samee3-image-actions">
               <button type="button" disabled={imageGenerating} onClick={() => void downloadAyahCard(false)}>
                 <ImageIcon size={21} />
-                <span><strong>صورة الآية</strong><small>بطاقة قرآنية أنيقة بالنص كاملًا</small></span>
+                <span><strong>الآية بتصميم فني</strong><small>تكوين عصري هادئ وخط قرآني واضح</small></span>
                 {imageGenerating ? <Loader2 size={18} className="animate-spin" /> : <ChevronLeft size={18} />}
               </button>
               <button type="button" disabled={imageGenerating} onClick={() => void downloadAyahCard(true)}>
                 <FileText size={21} />
-                <span><strong>صورة الآية مع التفسير</strong><small>الآية والتفسير المختار دون اختصار صامت</small></span>
+                <span><strong>الآية مع التفسير</strong><small>تنسيق تحريري أنيق بلا اقتطاع للنص</small></span>
                 {imageGenerating ? <Loader2 size={18} className="animate-spin" /> : <ChevronLeft size={18} />}
               </button>
             </div>
@@ -6173,6 +6304,21 @@ export default function MushafPage() {
         .samee3-search-box button { display:flex; align-items:center; justify-content:center; border:0; background:transparent; color:#7b8797; }
         .samee3-search-submit { width:46px; height:46px; border:0; border-radius:16px; background:#0e99d4; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(14,153,212,.22); }
         .samee3-search-submit:disabled { opacity:.65; }
+        /* SAMEE3 refined one-piece search control — sand-gold / ocean ink. */
+        .samee3-top-controls { border:1px solid rgba(197,165,113,.45); background:rgba(255,253,249,.95); box-shadow:0 12px 38px rgba(28,51,58,.13); }
+        .samee3-search-row { gap:7px; }
+        .samee3-search-box { min-width:0; flex:1; height:48px; padding:4px 5px 4px 11px; gap:7px; border-radius:17px; border:1px solid #dcc7a5; background:linear-gradient(120deg,#fffefa,#fbf6eb); box-shadow:inset 0 1px 2px rgba(72,52,23,.035); transition:border-color .2s, box-shadow .2s; }
+        .samee3-search-box:focus-within { border-color:#b88e50; box-shadow:0 0 0 3px rgba(191,148,77,.13); }
+        .samee3-search-mark { display:flex; align-items:center; justify-content:center; flex:0 0 28px; color:#98743b; }
+        .samee3-search-box input { font-size:13px; font-weight:700; color:#1b3e4b; padding:0 1px; width:100%; }
+        .samee3-search-box input::placeholder { color:#988e7c; font-weight:500; }
+        .samee3-search-clear { flex:0 0 26px; width:26px; height:26px; border-radius:50%; background:#f1e7d6 !important; color:#876c47 !important; }
+        .samee3-search-box .samee3-search-submit { flex:0 0 39px; width:39px; height:38px; border:0; border-radius:12px; display:flex; align-items:center; justify-content:center; color:#fff; background:linear-gradient(145deg,#bf995c,#987038); box-shadow:0 3px 9px rgba(118,83,34,.17); cursor:pointer; }
+        .samee3-search-box .samee3-search-submit:disabled { opacity:.43; box-shadow:none; }
+        .samee3-download-shortcut { width:43px; height:43px; flex-basis:43px; border-radius:14px; background:linear-gradient(160deg,#fffdf7,#f2e9d6); border-color:#dcc8a9; color:#936d37; }
+        .samee3-awake-toggle { width:43px; height:43px; flex-basis:43px; border-radius:14px; }
+        @media (max-width:440px) { .samee3-top-controls { padding:7px; border-radius:20px; } .samee3-search-row { gap:5px; } .samee3-search-box { height:45px; gap:4px; padding-left:4px; } .samee3-search-box input { font-size:12px; } .samee3-search-mark { flex-basis:22px; } .samee3-search-box .samee3-search-submit { flex-basis:35px; width:35px; height:35px; } .samee3-download-shortcut,.samee3-awake-toggle { width:39px; height:39px; flex-basis:39px; border-radius:13px; } }
+
         .samee3-search-message { margin-top:7px; text-align:center; font-size:11px; font-weight:800; color:#8b5f28; }
         .samee3-search-results-overlay { position:absolute; z-index:78; inset:0; padding:88px 12px 116px; display:flex; align-items:flex-start; justify-content:center; pointer-events:auto; background:rgba(245,240,228,.30); backdrop-filter:blur(5px); }
         .samee3-search-results-sheet { width:min(94vw,860px); max-height:calc(100dvh - 150px); overflow:hidden; border:1px solid rgba(177,126,59,.35); border-radius:26px; background:rgba(255,253,248,.98); box-shadow:0 24px 70px rgba(64,49,30,.20); }
@@ -6307,6 +6453,21 @@ export default function MushafPage() {
         .samee3-image-actions button strong { font-size:12px; font-weight:900; }
         .samee3-image-actions button small { font-size:10px; font-weight:600; color:#75848c; line-height:1.5; }
         .samee3-image-actions button:disabled { opacity:.55; cursor:wait; }
+        /* Premium actions and live preview — restrained, clear and tactile. */
+        .samee3-card-customizer { gap:11px; margin:13px 0 17px; }
+        .samee3-card-customizer label { color:#7e684b; font-size:12px; gap:8px; }
+        .samee3-card-customizer select { min-height:45px; border-radius:14px; padding:10px 12px; border:1px solid #ddcbb0; background:linear-gradient(180deg,#fffcf6,#f8f2e8); color:#27454b; font-weight:800; box-shadow:0 2px 9px rgba(81,65,37,.04); }
+        .samee3-card-customizer select:focus { outline:2px solid rgba(183,142,80,.3); outline-offset:2px; }
+        .samee3-image-actions { gap:11px; }
+        .samee3-image-actions button { position:relative; min-height:92px; padding:15px; border:1px solid #dfceb3; border-radius:20px; background:linear-gradient(150deg,#fffcf6,#f6eee0); box-shadow:0 7px 22px rgba(56,51,42,.06); transition:transform .16s,border-color .16s,box-shadow .16s; }
+        .samee3-image-actions button:hover:not(:disabled) { transform:translateY(-2px); border-color:#ba9052; box-shadow:0 12px 27px rgba(56,51,42,.12); }
+        .samee3-image-actions button strong { color:#244751; font-size:13px; }
+        .samee3-image-actions button small { color:#7c8480; font-size:11px; }
+        .samee3-image-preview-sheet { border-radius:28px; border:1px solid #d6be93; background:#fffdf8; }
+        .samee3-image-preview-frame { border-radius:20px; border-color:#d7c8af; background:linear-gradient(140deg,#ebe2d3,#faf6ed); }
+        .samee3-image-download-btn { background:linear-gradient(140deg,#b48b4b,#947039); }
+        .samee3-image-share-btn { background:linear-gradient(140deg,#205c69,#153c4a); }
+
         .samee3-tafsir-section { margin-top:20px; padding:16px; border:1px solid #e7e1d6; border-radius:22px; background:#f9faf8; }
         .samee3-tafsir-section-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
         .samee3-tafsir-section-head > div { display:flex; flex-direction:column; gap:3px; }
@@ -6582,161 +6743,187 @@ function drawSamee3AyahCard({
   format: CardFormat
 }): HTMLCanvasElement {
   const width = 1080
+  const side = 82
+  const contentWidth = width - side * 2
   const canvas = document.createElement('canvas')
-  const side = 95
-  const innerWidth = width - side * 2
-  const verseFont = '"Amiri Quran", "Amiri", serif'
-  const tafsirFont = '"Amiri", "Tajawal", serif'
-
-  const verse = fitArabicLines(canvas, ayah, verseFont, 70, 43, innerWidth - 76, 10000)
+  const verse = fitArabicLines(
+    canvas, ayah, '"Amiri Quran", "Amiri", serif', 66, 39, contentWidth - 120, 10000,
+  )
   const explanation = withTafsir
-    ? fitArabicLines(canvas, tafsir, tafsirFont, 36, 29, innerWidth - 72, 10000)
+    ? fitArabicLines(canvas, tafsir, '"Amiri", "Tajawal", serif', 36, 27, contentWidth - 110, 10000)
     : null
+
   const verseSpace = verse.lines.length * verse.lineHeight
   const tafsirSpace = explanation ? explanation.lines.length * explanation.lineHeight : 0
-  const headerSpace = 290
-  const verseCardTop = headerSpace
-  const verseCardHeight = Math.max(295, verseSpace + 126)
-  const tafsirTop = verseCardTop + verseCardHeight + 55
-  const tafsirCardHeight = explanation ? tafsirSpace + 195 : 0
-  const footerTop = explanation ? tafsirTop + tafsirCardHeight + 74 : verseCardTop + verseCardHeight + 92
-  const minimumHeight = format === 'square' ? 1080 : format === 'story' ? 1920 : 1030
-  const requiredHeight = Math.max(1030, footerTop + 110)
-  if (format !== 'auto' && requiredHeight > minimumHeight) {
-    throw new Error('النص أطول من مقاس الصورة المختار. اختر «تلقائي للنص الكامل» لتجنب قص الآية أو التفسير.')
+  const verseTop = 276
+  const verseHeight = Math.max(355, verseSpace + 158)
+  const tafsirTop = verseTop + verseHeight + 63
+  const tafsirHeight = explanation ? Math.max(335, tafsirSpace + 195) : 0
+  const ending = explanation ? tafsirTop + tafsirHeight + 92 : verseTop + verseHeight + 140
+  const minimumHeight = format === 'square' ? 1080 : format === 'story' ? 1920 : 1080
+  const desiredHeight = Math.ceil(ending + 55)
+  if (format !== 'auto' && desiredHeight > minimumHeight) {
+    throw new Error('النص أطول من المقاس الثابت. اختر «تلقائي للنص الكامل» حتى لا تُقصّ الآية أو التفسير.')
   }
-  const height = Math.max(minimumHeight, requiredHeight)
-
-  // Avoid mobile canvas allocation failures and never silently drop text.
+  const height = Math.max(minimumHeight, desiredHeight)
   if (height > 7800 || width * height > 9000000) {
     throw new Error(withTafsir
-      ? 'هذا التفسير طويل جدًا ليظهر كاملًا في صورة واحدة. اختر تفسيرًا مختصرًا، وسيظل النص كاملًا متاحًا داخل المصحف.'
-      : 'هذه الآية طويلة جدًا لإخراجها بصورة واحدة على هذا الجهاز.')
+      ? 'نص التفسير طويل جدًا لتصميمه في صورة واحدة على هذا الجهاز؛ اختر تفسيرًا مختصرًا.'
+      : 'الآية طويلة جدًا لتصميمها في صورة واحدة على هذا الجهاز.')
   }
 
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('متصفحك لا يدعم إنشاء صور الآيات.')
+  if (!ctx) throw new Error('المتصفح لا يدعم إنشاء الصور القرآنية.')
+  const dark = theme === 'night'
+  const golden = theme === 'gold'
+  const palette = {
+    background: dark ? '#101f2b' : golden ? '#efe3cf' : '#f3f0e9',
+    backgroundEdge: dark ? '#213a46' : golden ? '#e1c79c' : '#e4ddd0',
+    surface: dark ? '#19323e' : golden ? '#fff9eb' : '#fffefb',
+    surface2: dark ? '#152d38' : golden ? '#f8edd7' : '#faf8f1',
+    ink: dark ? '#f5f0e6' : '#203d46',
+    subtle: dark ? '#bbcad0' : '#687b7d',
+    gold: dark ? '#dfbf86' : golden ? '#966e36' : '#ac8148',
+    line: dark ? '#3b5561' : golden ? '#dfcca8' : '#e6dac7',
+    softLine: dark ? '#29424d' : '#eee7db',
+  }
 
   const rounded = (x: number, y: number, w: number, h: number, r: number) => {
+    const radius = Math.min(r, w / 2, h / 2)
     ctx.beginPath()
-    ctx.moveTo(x + r, y)
-    ctx.arcTo(x + w, y, x + w, y + h, r)
-    ctx.arcTo(x + w, y + h, x, y + h, r)
-    ctx.arcTo(x, y + h, x, y, r)
-    ctx.arcTo(x, y, x + w, y, r)
+    ctx.moveTo(x + radius, y)
+    ctx.arcTo(x + w, y, x + w, y + h, radius)
+    ctx.arcTo(x + w, y + h, x, y + h, radius)
+    ctx.arcTo(x, y + h, x, y, radius)
+    ctx.arcTo(x, y, x + w, y, radius)
     ctx.closePath()
   }
-  const ink = theme === 'night' ? '#f6f0e5' : '#1c3943'
-  const gold = theme === 'gold' ? '#a8772b' : theme === 'night' ? '#dec08d' : '#b18b53'
-  const muted = theme === 'night' ? '#cbbfae' : '#6c7b7c'
-  const paper = theme === 'night' ? '#142a35' : theme === 'gold' ? '#f2e5c8' : '#f2eddf'
-  const frame = theme === 'night' ? '#1e3b47' : theme === 'gold' ? '#fffbef' : '#fcfaf5'
-  const versePaper = theme === 'night' ? '#244653' : '#fffefa'
-  const tafsirPaper = theme === 'night' ? '#213944' : '#f7f5ee'
-
-  // Background: warm ivory, thin manuscript frame, restrained accents.
-  ctx.fillStyle = paper
-  ctx.fillRect(0, 0, width, height)
-  ctx.fillStyle = frame
-  rounded(24, 24, width - 48, height - 48, 35)
-  ctx.fill()
-  ctx.strokeStyle = '#d4bb91'
-  ctx.lineWidth = 2
-  rounded(44, 44, width - 88, height - 88, 25)
-  ctx.stroke()
-  ctx.strokeStyle = '#e7dac1'
-  ctx.lineWidth = 1
-  rounded(56, 56, width - 112, height - 112, 18)
-  ctx.stroke()
-
-  // Masthead. Make the riwaya explicit, rather than treating all texts as Hafs.
-  ctx.fillStyle = ink
-  ctx.textAlign = 'center'
-  ctx.direction = 'rtl'
-  ctx.font = '700 43px "Amiri", serif'
-  ctx.fillText('مصحف سميع', width / 2, 126)
-  ctx.fillStyle = gold
-  ctx.font = '600 22px "Tajawal", sans-serif'
-  ctx.fillText('القرآن الكريم', width / 2, 166)
-  ctx.strokeStyle = '#c8a978'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(330, 188)
-  ctx.lineTo(492, 188)
-  ctx.moveTo(588, 188)
-  ctx.lineTo(750, 188)
-  ctx.stroke()
-  ctx.font = '33px "Amiri", serif'
-  ctx.fillText('۞', 540, 201)
-  ctx.fillStyle = ink
-  ctx.font = '700 38px "Amiri", serif'
-  ctx.fillText(`سورة ${surah}`, 540, 247)
-  ctx.fillStyle = muted
-  ctx.font = '600 20px "Tajawal", sans-serif'
-  ctx.fillText(`الآية ${arabicNumber(ayahNumber)}  •  ${riwaya}`, 540, 279)
-
-  // Quran verse card.
-  ctx.save()
-  ctx.shadowColor = 'rgba(23,49,57,.11)'
-  ctx.shadowBlur = 24
-  ctx.shadowOffsetY = 9
-  rounded(side, verseCardTop, innerWidth, verseCardHeight, 27)
-  ctx.fillStyle = versePaper
-  ctx.fill()
-  ctx.restore()
-  ctx.strokeStyle = '#ddc7a4'
-  ctx.lineWidth = 1.8
-  rounded(side, verseCardTop, innerWidth, verseCardHeight, 27)
-  ctx.stroke()
-  ctx.fillStyle = gold
-  ctx.font = '29px "Amiri", serif'
-  ctx.fillText('﴿', 155, verseCardTop + 53)
-  ctx.fillText('﴾', 925, verseCardTop + 53)
-  drawFittedArabicLines(ctx, verse, 540, verseCardTop + 90, ink)
-  ctx.fillStyle = '#957548'
-  ctx.font = '600 21px "Tajawal", sans-serif'
-  ctx.fillText(`۞ ${arabicNumber(ayahNumber)} ۞`, 540, verseCardTop + verseCardHeight - 34)
-
-  // Commentary is a separate reading panel, not small footnote text.
-  if (explanation) {
-    ctx.fillStyle = gold
-    ctx.textAlign = 'right'
-    ctx.font = '700 27px "Tajawal", sans-serif'
-    ctx.fillText('تفسير الآية', width - side - 9, tafsirTop - 16)
-    rounded(side, tafsirTop, innerWidth, tafsirCardHeight, 24)
-    ctx.fillStyle = tafsirPaper
-    ctx.fill()
-    ctx.strokeStyle = '#e1d3b9'
-    ctx.lineWidth = 1.5
-    ctx.stroke()
-    ctx.fillStyle = ink
-    ctx.font = '700 28px "Tajawal", sans-serif'
-    ctx.fillText(tafsirBook?.short_name || tafsirBook?.name || 'التفسير', width - side - 36, tafsirTop + 48)
-    ctx.fillStyle = muted
-    ctx.font = '500 17px "Tajawal", sans-serif'
-    if (tafsirBook?.author) ctx.fillText(tafsirBook.author, width - side - 36, tafsirTop + 83)
-    ctx.strokeStyle = '#e1d6c4'
+  const strokeLine = (x1: number, y1: number, x2: number, y2: number, color: string, weight = 1) => {
     ctx.beginPath()
-    ctx.moveTo(side + 33, tafsirTop + 103)
-    ctx.lineTo(width - side - 33, tafsirTop + 103)
+    ctx.moveTo(x1, y1)
+    ctx.lineTo(x2, y2)
+    ctx.strokeStyle = color
+    ctx.lineWidth = weight
     ctx.stroke()
-    ctx.fillStyle = ink
-    ctx.textAlign = 'center'
-    ctx.direction = 'rtl'
-    ctx.font = `${explanation.fontSize}px ${explanation.fontFamily}`
-    drawFittedArabicLines(ctx, explanation, 540, tafsirTop + 151, ink)
   }
 
-  // Footer intentionally contains no links or claims about authentication.
-  ctx.fillStyle = '#a48b64'
+  // Editorial paper wash with delicate halo, not a heavy ornamental frame.
+  const background = ctx.createLinearGradient(0, 0, width, height)
+  background.addColorStop(0, palette.background)
+  background.addColorStop(1, palette.backgroundEdge)
+  ctx.fillStyle = background
+  ctx.fillRect(0, 0, width, height)
+  const halo = ctx.createRadialGradient(540, 180, 25, 540, 200, 900)
+  halo.addColorStop(0, dark ? 'rgba(221,185,120,.08)' : 'rgba(255,255,255,.72)')
+  halo.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = halo
+  ctx.fillRect(0, 0, width, height)
+
+  // Quiet edge rhythm; never overlaps Quranic text.
+  strokeLine(57, 66, width - 57, 66, palette.line, 2)
+  strokeLine(57, height - 65, width - 57, height - 65, palette.line, 2)
+  const ornament = (x: number, y: number) => {
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(Math.PI / 4)
+    ctx.strokeStyle = palette.gold
+    ctx.lineWidth = 2
+    ctx.strokeRect(-9, -9, 18, 18)
+    ctx.fillStyle = palette.gold
+    ctx.fillRect(-3, -3, 6, 6)
+    ctx.restore()
+  }
+  ornament(78, 66)
+  ornament(width - 78, 66)
+  ornament(78, height - 65)
+  ornament(width - 78, height - 65)
+
+  // Wordmark, section signature and verse provenance.
   ctx.textAlign = 'center'
-  ctx.font = '700 22px "Tajawal", sans-serif'
-  ctx.fillText('مصحف سميع  •  مشاركة آية من القرآن الكريم', 540, height - 88)
-  ctx.fillStyle = muted
-  ctx.font = '500 17px "Tajawal", sans-serif'
-  ctx.fillText(withTafsir ? 'التفسير من المصدر المختار' : riwaya, 540, height - 59)
+  ctx.direction = 'rtl'
+  ctx.fillStyle = palette.gold
+  ctx.font = '700 20px "Tajawal",sans-serif'
+  ctx.fillText('S A M E E 3  •  مُصْحَف سَمِيع', width / 2, 117)
+  ctx.fillStyle = palette.ink
+  ctx.font = '700 52px "Aref Ruqaa","Amiri",serif'
+  ctx.fillText(`سورة ${surah}`, width / 2, 181)
+  ctx.fillStyle = palette.subtle
+  ctx.font = '600 21px "Tajawal",sans-serif'
+  ctx.fillText(`الآية ${arabicNumber(ayahNumber)}  ·  ${riwaya}`, width / 2, 223)
+
+  // Verse block: generous white space, subtle golden vertical marker.
+  ctx.save()
+  ctx.shadowColor = 'rgba(13,35,45,.10)'
+  ctx.shadowBlur = 38
+  ctx.shadowOffsetY = 13
+  rounded(side, verseTop, contentWidth, verseHeight, 31)
+  ctx.fillStyle = palette.surface
+  ctx.fill()
+  ctx.restore()
+  ctx.lineWidth = 1.8
+  ctx.strokeStyle = palette.line
+  rounded(side, verseTop, contentWidth, verseHeight, 31)
+  ctx.stroke()
+  const accent = ctx.createLinearGradient(0, verseTop, 0, verseTop + verseHeight)
+  accent.addColorStop(0, palette.gold)
+  accent.addColorStop(.5, dark ? '#f3d6a5' : '#d9b87d')
+  accent.addColorStop(1, palette.gold)
+  ctx.fillStyle = accent
+  rounded(width - side - 13, verseTop + 32, 4, verseHeight - 64, 2)
+  ctx.fill()
+
+  ctx.fillStyle = palette.gold
+  ctx.font = '45px "Amiri",serif'
+  ctx.fillText('۞', width / 2, verseTop + 57)
+  const verseStart = verseTop + (verseHeight - verseSpace) / 2 + verse.lineHeight * .79 + 15
+  drawFittedArabicLines(ctx, verse, width / 2, verseStart, palette.ink)
+  ctx.font = '700 19px "Tajawal",sans-serif'
+  ctx.fillStyle = palette.gold
+  ctx.fillText(`۝ ${arabicNumber(ayahNumber)}`, width / 2, verseTop + verseHeight - 37)
+
+  if (explanation) {
+    // Separate scholarly panel; full tafsir is visible without silent truncation.
+    ctx.save()
+    ctx.shadowColor = 'rgba(13,35,45,.06)'
+    ctx.shadowBlur = 22
+    ctx.shadowOffsetY = 7
+    rounded(side, tafsirTop, contentWidth, tafsirHeight, 29)
+    ctx.fillStyle = palette.surface2
+    ctx.fill()
+    ctx.restore()
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = palette.line
+    rounded(side, tafsirTop, contentWidth, tafsirHeight, 29)
+    ctx.stroke()
+
+    ctx.textAlign = 'right'
+    ctx.direction = 'rtl'
+    ctx.font = '700 20px "Tajawal",sans-serif'
+    ctx.fillStyle = palette.gold
+    ctx.fillText('في معنى الآية', width - side - 45, tafsirTop + 55)
+    ctx.font = '700 34px "Amiri",serif'
+    ctx.fillStyle = palette.ink
+    ctx.fillText(tafsirBook?.short_name || tafsirBook?.name || 'التفسير', width - side - 45, tafsirTop + 101)
+    if (tafsirBook?.author) {
+      ctx.font = '500 18px "Tajawal",sans-serif'
+      ctx.fillStyle = palette.subtle
+      ctx.fillText(tafsirBook.author, width - side - 45, tafsirTop + 130)
+    }
+    strokeLine(side + 42, tafsirTop + 151, width - side - 42, tafsirTop + 151, palette.line, 1.3)
+    const tafsirStart = tafsirTop + 162 + explanation.lineHeight * .95
+    drawFittedArabicLines(ctx, explanation, width / 2, tafsirStart, palette.ink)
+  }
+
+  ctx.direction = 'rtl'
+  ctx.textAlign = 'center'
+  ctx.fillStyle = palette.gold
+  ctx.font = '700 18px "Tajawal",sans-serif'
+  ctx.fillText('مصحف سميع', width / 2, height - 119)
+  ctx.fillStyle = palette.subtle
+  ctx.font = '500 17px "Tajawal",sans-serif'
+  ctx.fillText(withTafsir ? 'آية كريمة وتفسيرها من المصدر المختار' : 'القرآن الكريم · تصميم لمشاركة الآيات', width / 2, height - 89)
   return canvas
 }
 
