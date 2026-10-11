@@ -14,6 +14,15 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { adhkarCitation, findAdhkarCategory, loadAdhkarCatalog, readCachedAdhkar } from '@/lib/adhkar-catalog'
 import {
+  checkAdhkarRecording,
+  findAdhkarReciter,
+  findAdhkarRecording,
+  getIndividualAdhkarAudio,
+  listAdhkarReciters,
+  makeAdhkarAudioUrl,
+  type AdhkarRecording,
+} from '@/lib/adhkar-reciters'
+import {
   ArrowRight,
   BookOpen,
   Check,
@@ -63,48 +72,15 @@ type AdhkarCategory = {
   category: string
   array: AdhkarItem[]
 }
-type AudioTrack = { id: string; type: AdhkarType; title: string; url: string }
-type Reciter = { id: string; name: string; itemAudio?: boolean; tracks: AudioTrack[] }
 type AudioMode = 'item' | 'section' | null
 
 type ProgressRecord = { counts: Record<string, number>; savedAt: number }
 
 const SETTINGS_KEY = 'samee3_adhkar_read_settings_v1'
 const AUDIO_CACHE = 'samee3-adhkar-audio-v1'
-const AUDIO_BASE = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main'
-const TVQURAN = 'https://download.tvquran.com/download/TvQuran.com__Athkar'
 const RECITER_KEY = 'samee3_adhkar_reciter'
 const MAX_AUDIO_BYTES = 180 * 1024 * 1024
-
-// The tracks below retain the source configuration from the existing reader.
-// These are human recordings, not synthesized speech. Availability depends on the source.
-const RECITERS: Reciter[] = [
-  { id: 'mishary-alafasy', name: 'مشاري بن راشد العفاسي', tracks: [
-    { id: 'mishary-waking', type: 'waking', title: 'أذكار الاستيقاظ', url: `${TVQURAN}/TvQuran.com_athkar_01.mp3` },
-    { id: 'mishary-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN}/TvQuran.com_athkar_03.mp3` },
-    { id: 'mishary-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN}/TvQuran.com_athkar_04.mp3` },
-    { id: 'mishary-sleep', type: 'sleep', title: 'أذكار النوم', url: `${TVQURAN}/TvQuran.com_athkar_11.mp3` },
-  ] },
-  { id: 'faris-abbad', name: 'فارس عباد', tracks: [
-    { id: 'faris-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN}/TvQuran.com_athkar_05.mp3` },
-    { id: 'faris-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN}/TvQuran.com_athkar_06.mp3` },
-  ] },
-  { id: 'mohamed-jibril', name: 'محمد جبريل', tracks: [
-    { id: 'jibril-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN}/TvQuran.com_athkar_07.mp3` },
-    { id: 'jibril-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN}/TvQuran.com_athkar_08.mp3` },
-  ] },
-  { id: 'nasser-alqatami', name: 'ناصر القطامي', tracks: [
-    { id: 'nasser-morning', type: 'morning', title: 'أذكار اليوم والليلة', url: `${TVQURAN}/TvQuran.com_athkar_02.mp3` },
-    { id: 'nasser-evening', type: 'evening', title: 'أذكار اليوم والليلة', url: `${TVQURAN}/TvQuran.com_athkar_02.mp3` },
-  ] },
-  { id: 'hamad-al-drehem', name: 'حمد الدريهم', itemAudio: true, tracks: [
-    { id: 'hamad-waking', type: 'waking', title: 'أذكار الاستيقاظ', url: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain_01/Hisn_Almuslim/Hisn_Almuslim_AlDuraihim/ar_002_Hisn_Almuslim_AlDuraihim.mp3' },
-  ] },
-  { id: 'sulaiman-al-shuhayhi', name: 'سليمان بن محمد الشويهي', tracks: [
-    { id: 'sulaiman-waking', type: 'waking', title: 'أذكار الاستيقاظ', url: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain_01/Hisn_Almuslim/Hisn_Almuslim_AlShwehi/ar_003_Hisn_Almuslim_Alshwehi.mp3' },
-  ] },
-  { id: 'walid-abu-ziyad', name: 'وليد أبو زياد', tracks: [] },
-]
+const RECITERS = listAdhkarReciters({ includeLegacy: true, includeSourceOnly: true })
 
 const LABELS: Record<AdhkarType, string> = {
   morning: 'أذكار الصباح',
@@ -122,6 +98,16 @@ function categoryFor(categories: AdhkarCategory[], id: number, type: AdhkarType)
   return findAdhkarCategory(categories, type)
 }
 
+function audioTypeForCategory(name: string, requested: AdhkarType, explicitId: number): AdhkarType | null {
+  if (!explicitId) return requested
+  if (name.includes('الصباح') && name.includes('المساء')) return requested === 'evening' ? 'evening' : 'morning'
+  if (name.includes('الصباح')) return 'morning'
+  if (name.includes('المساء')) return 'evening'
+  if (name.includes('الاستيقاظ')) return 'waking'
+  if (name.includes('النوم')) return 'sleep'
+  return null
+}
+
 function categoryLabel(name: string, type: AdhkarType, explicitId: number) {
   if (!explicitId) return LABELS[type]
   if (name.includes('الصباح') && name.includes('المساء')) return 'أذكار الصباح والمساء'
@@ -137,15 +123,6 @@ function timeLabel(value: number) {
   if (!Number.isFinite(value) || value < 0) return '٠:٠٠'
   const seconds = Math.floor(value)
   return `${numberAr(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, '0').replace(/\d/g, (digit) => '٠١٢٣٤٥٦٧٨٩'[Number(digit)])}`
-}
-
-function sourceUrl(url: string): string {
-  const absolute = /^https:\/\//i.test(url) ? url : `${AUDIO_BASE}/${url.replace(/^\/+/, '')}`
-  return `/api/adhkar-audio?url=${encodeURIComponent(absolute)}`
-}
-
-function getItemUrl(item: AdhkarItem): string {
-  return item.audio ? sourceUrl(item.audio) : ''
 }
 
 async function readSavedAudio(url: string): Promise<string | null> {
@@ -367,6 +344,7 @@ function ReadAdhkarContent() {
   const [reciterId, setReciterId] = useState(RECITERS.some((reader) => reader.id === requestedReader) ? requestedReader : RECITERS[0].id)
   const [items, setItems] = useState<AdhkarItem[]>([])
   const [title, setTitle] = useState(LABELS[type])
+  const [audioSectionType, setAudioSectionType] = useState<AdhkarType | null>(categoryId ? null : type)
   const [counts, setCounts] = useState<Record<number, number>>({})
   const [favorites, setFavorites] = useState<number[]>([])
   const [ready, setReady] = useState(false)
@@ -409,17 +387,27 @@ function ReadAdhkarContent() {
   const speedRef = useRef(speed)
   const mutedRef = useRef(muted)
 
-  const selectedReader = RECITERS.find((reader) => reader.id === reciterId) || RECITERS[0]
-  const sectionTrack = selectedReader.tracks.find((track) => track.type === type) || null
-  const recordedItems = selectedReader.itemAudio ? items.filter((item) => Boolean(item.audio)) : []
+  const selectedReader = findAdhkarReciter(reciterId) || RECITERS[0]
+  const sectionTrack: AdhkarRecording | null = audioSectionType
+    ? findAdhkarRecording(selectedReader.id, audioSectionType, { allowCombined: true })
+    : null
+  const sectionUrl = sectionTrack ? makeAdhkarAudioUrl(sectionTrack.url) : null
+  const itemUrl = (item: AdhkarItem): string =>
+    getIndividualAdhkarAudio(selectedReader.id, item) || ''
+  const recordedItems = selectedReader.individualAudio
+    ? items.filter((item) => Boolean(itemUrl(item)))
+    : []
   const canPlayItem = recordedItems.length > 0
-  const hasAudio = Boolean(sectionTrack || canPlayItem)
+  const hasAudio = Boolean(sectionUrl || canPlayItem)
+  const combinedTrack = sectionTrack?.kind === 'combined-section'
+  const [checkState, setCheckState] = useState<'checking' | 'available' | 'unavailable' | 'unknown' | null>(null)
   const complete = items.filter((item) => (counts[item.id] ?? item.count) === 0).length
   const totalRepetitions = items.reduce((sum, item) => sum + item.count, 0)
   const finishedRepetitions = items.reduce((sum, item) => sum + item.count - (counts[item.id] ?? item.count), 0)
   const progress = totalRepetitions ? Math.round(finishedRepetitions / totalRepetitions * 100) : 0
   const activeItem = items.find((item) => item.id === activeId) || null
 
+  useEffect(() => { setCheckState(null) }, [reciterId, audioSectionType])
   useEffect(() => { itemsRef.current = items }, [items])
   useEffect(() => { countsRef.current = counts }, [counts])
   useEffect(() => { speedRef.current = speed; if (audioRef.current) audioRef.current.playbackRate = speed }, [speed])
@@ -531,6 +519,7 @@ function ReadAdhkarContent() {
       itemsRef.current = selected.array
       setItems(selected.array)
       setTitle(categoryLabel(selected.category, type, categoryId))
+      setAudioSectionType(audioTypeForCategory(selected.category, type, categoryId))
       setCachedData(cached)
       readyKeyRef.current = progressKey
       dayRef.current = localDay(Date.now())
@@ -663,7 +652,7 @@ function ReadAdhkarContent() {
         return
       }
       const nextIndex = itemsRef.current.findIndex((entry, i) =>
-        i > index && Boolean(entry.audio) && (countsRef.current[entry.id] ?? entry.count) > 0,
+        i > index && Boolean(getIndividualAdhkarAudio(selectedReader.id, entry)) && (countsRef.current[entry.id] ?? entry.count) > 0,
       )
       if (nextIndex < 0) {
         sequenceRef.current = false
@@ -673,7 +662,9 @@ function ReadAdhkarContent() {
       }
       const next = itemsRef.current[nextIndex]
       setActiveId(next.id)
-      void playSource(getItemUrl(next), 'item', nextIndex, true)
+      const nextUrl = getIndividualAdhkarAudio(selectedReader.id, next)
+      if (nextUrl) void playSource(nextUrl, 'item', nextIndex, true)
+      else { sequenceRef.current = false; setAudioMode(null); setPlaying(false) }
     }
 
     try { await audio.play() }
@@ -688,15 +679,17 @@ function ReadAdhkarContent() {
 
   const startItem = (index: number, sequential = true) => {
     const item = items[index]
-    if (!item?.audio || !selectedReader.itemAudio) return
+    if (!item) return
+    const url = itemUrl(item)
+    if (!url) return
     setActiveId(item.id)
-    void playSource(getItemUrl(item), 'item', index, sequential)
+    void playSource(url, 'item', index, sequential)
   }
 
   const startSection = () => {
-    if (!sectionTrack) return
+    if (!sectionUrl) return
     setActiveId(null)
-    void playSource(sourceUrl(sectionTrack.url), 'section', -1, false)
+    void playSource(sectionUrl, 'section', -1, false)
   }
 
   const togglePlayback = () => {
@@ -708,7 +701,7 @@ function ReadAdhkarContent() {
     }
     if (sectionTrack) { startSection(); return }
     if (canPlayItem) {
-      const first = items.findIndex((item) => Boolean(item.audio) && (counts[item.id] ?? item.count) > 0)
+      const first = items.findIndex((item) => Boolean(itemUrl(item)) && (counts[item.id] ?? item.count) > 0)
       if (first >= 0) startItem(first)
       else setMessage('انتهت الأذكار المسجّلة. يمكنك إعادة الأعداد للتشغيل من البداية.')
     }
@@ -774,9 +767,10 @@ function ReadAdhkarContent() {
 
   const saveRecordings = async () => {
     if (downloadControllerRef.current) return
-    const urls = sectionTrack ? [sourceUrl(sectionTrack.url)]
-      : selectedReader.itemAudio ? Array.from(new Set(items.filter((item) => Boolean(item.audio)).map(getItemUrl)))
-      : []
+    const urls = sectionUrl ? [sectionUrl]
+      : selectedReader.individualAudio
+        ? Array.from(new Set(items.map(itemUrl).filter(Boolean)))
+        : []
     if (!urls.length) return
     const controller = new AbortController()
     downloadControllerRef.current = controller
@@ -864,12 +858,12 @@ function ReadAdhkarContent() {
           <div className="relative flex items-start gap-3"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-[#e9ca92]"><Headphones size={23} /></span><div className="min-w-0 flex-1"><p className="text-xs font-bold text-[#e9ca92]">القراءة والتلاوة</p><h2 className="mt-1 text-xl font-black">{selectedReader.name}</h2><p className="mt-2 text-xs leading-6 text-white/70">الورد النصي مستقل عن التسجيلات. لا تُحسب الأذكار تلقائيًا عند تشغيل تسجيل القسم كاملًا، لعدم توفر توقيت مطابق لكل ذكر.</p></div></div>
           <div className="relative mt-5">
             <select aria-label="اختيار قارئ الأذكار" value={reciterId} onChange={(event: ChangeEvent<HTMLSelectElement>) => changeReciter(event.target.value)} className="w-full appearance-none rounded-2xl border border-white/20 bg-white px-4 py-3.5 pl-11 text-sm font-black text-[#183e46] outline-none">
-              {RECITERS.map((reader) => <option value={reader.id} key={reader.id}>{reader.name}</option>)}
+              {RECITERS.map((reader) => <option value={reader.id} key={reader.id}>{reader.name}{!reader.individualAudio && !reader.recordings.length ? ' — قراءة فقط' : ''}</option>)}
             </select>
             <ChevronDown size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#ac894f]" />
           </div>
           <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
-            <span className="rounded-full bg-white/10 px-3 py-1.5">{hasAudio ? 'تسجيل بشري متاح بالقائمة' : 'قراءة وعداد فقط'}</span>
+            <span className="rounded-full bg-white/10 px-3 py-1.5">{hasAudio ? 'تسجيل مُدرج — يتحقق عند التشغيل' : 'قراءة وعداد فقط'}</span>
             {cachedData && <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5"><WifiOff size={13} /> بيانات محفوظة</span>}
           </div>
         </section>
@@ -878,6 +872,8 @@ function ReadAdhkarContent() {
         {message && <p role="status" className="rounded-2xl border border-[#ddcba8] bg-[#fffaf0] p-4 text-sm leading-7 text-[#786039]">{message}</p>}
 
         <section className="rounded-[26px] border border-[#e9dece] bg-white p-4 shadow-sm sm:p-5">
+          {combinedTrack && <p className="mb-3 rounded-2xl border border-[#e9d4a9] bg-[#fff8e8] p-3 text-xs leading-6 text-[#806030]">هذا تسجيل واحد يجمع أذكار اليوم والليلة، وليس تسجيلًا مستقلًا لكل من الصباح والمساء. تشغيله لا يحتسب عدّاد أي ذكر تلقائيًا.</p>}
+          {sectionTrack && sectionUrl && <div className="mb-3 flex flex-wrap items-center gap-3 text-xs"><span className="text-[#82908c]">حالة رابط التسجيل: {checkState === 'checking' ? 'جارٍ الفحص…' : checkState === 'available' ? 'تم الوصول إلى الصوت' : checkState === 'unavailable' ? 'الرابط غير متاح حاليًا' : checkState === 'unknown' ? 'تعذر التأكد من الرابط' : 'لم يُفحص'}</span><button type="button" disabled={checkState === 'checking'} onClick={() => { setCheckState('checking'); void checkAdhkarRecording(sectionTrack).then((result) => setCheckState(result.status)).catch(() => setCheckState('unknown')) }} className="rounded-xl border border-[#e6d7bf] bg-white px-3 py-2 font-bold text-[#765e3c] disabled:opacity-50">فحص التسجيل</button></div>}
           <div className="mb-4 flex items-center justify-between gap-3"><div><p className="text-xs font-black text-[#b08b4e]">المشغّل الصوتي</p><h2 className="mt-1 text-base font-black">{audioMode === 'item' && activeItem ? 'تشغيل الذكر بالتكرار' : sectionTrack?.title || 'تسجيلات الأذكار'}</h2></div><span className="rounded-full bg-[#f7f1e7] px-3 py-1.5 text-[11px] font-bold text-[#927345]">{audioMode === 'item' ? 'متتابع' : audioMode === 'section' ? 'الورد كاملًا' : 'جاهز'}</span></div>
           <div className="rounded-[22px] bg-[#153f48] p-4 text-white">
             <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-[#ecc993]"><Volume2 size={20} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{selectedReader.name}</p><p className="mt-1 line-clamp-1 text-xs text-white/60">{audioMode === 'item' && activeItem ? activeItem.text : sectionTrack?.title || 'اختر ذكرًا مسجّلًا'}</p></div>
@@ -905,7 +901,7 @@ function ReadAdhkarContent() {
             const done = remaining === 0
             const active = activeId === item.id
             const liked = favorites.includes(item.id)
-            const itemPlayable = Boolean(selectedReader.itemAudio && item.audio)
+            const itemPlayable = Boolean(itemUrl(item))
             return (
               <article key={`${item.id}-${index}`} className={`rounded-[26px] border p-5 shadow-sm transition sm:p-6 ${darkMode ? 'border-[#435657] bg-[#203841] text-[#f5f1e8]' : done ? 'border-[#b9dbd0] bg-[#f5fbf7]' : active ? 'border-[#c7a56c] bg-white ring-1 ring-[#e8d7b8]' : 'border-[#e9dfd1] bg-white'}`}>
                 <div className="mb-4 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><span className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-black ${done ? 'bg-[#e4f4e9] text-[#31765d]' : 'bg-[#f4ede1] text-[#987645]'}`}>{done ? <Check size={20} /> : numberAr(index + 1)}</span><div><p className="text-[11px] text-[#8d9797]">العدد المطلوب</p><p className="text-sm font-black">{numberAr(item.count)} {item.count === 1 ? 'مرة' : 'مرات'}</p></div></div><button type="button" onClick={() => toggleFavorite(item.id)} aria-label={liked ? 'إزالة من المفضلة' : 'إضافة للمفضلة'} className={`rounded-xl p-2.5 ${liked ? 'bg-red-50 text-red-500' : 'bg-[#f9f6f1] text-[#aaa19a]'}`}><Heart size={19} fill={liked ? 'currentColor' : 'none'} /></button></div>
