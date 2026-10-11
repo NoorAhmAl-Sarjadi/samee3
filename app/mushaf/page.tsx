@@ -1995,7 +1995,6 @@ export default function MushafPage() {
   const [leftPageData, setLeftPageData] = useState<PageData | null>(null)
   const [svg, setSvg] = useState('')
   const [leftSvg, setLeftSvg] = useState('')
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   const [selectedAyah, setSelectedAyah] = useState<Ayah | null>(null)
@@ -2316,7 +2315,8 @@ export default function MushafPage() {
 
     try {
       if ('caches' in window) {
-        const cachedResponse = await caches.match(url)
+        const primaryCache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
+        const cachedResponse = (await primaryCache.match(url)) || (await caches.match(url))
         if (cachedResponse) {
           const data = await cachedResponse.json()
           const result = {
@@ -2326,8 +2326,10 @@ export default function MushafPage() {
                 ? data.data.ayahs
                 : [],
           } as PageData
-          pageMemoryCacheRef.current.set(key, result)
-          return result
+          if (result.ayahs.length > 0) {
+            pageMemoryCacheRef.current.set(key, result)
+            return result
+          }
         }
       }
     } catch {
@@ -2477,7 +2479,8 @@ export default function MushafPage() {
 
     try {
       if ('caches' in window) {
-        const cachedResponse = await caches.match(url)
+        const primaryCache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
+        const cachedResponse = (await primaryCache.match(url)) || (await caches.match(url))
         if (cachedResponse) {
           const data = await cachedResponse.json()
           if (data?.success && data?.svg) {
@@ -2679,28 +2682,6 @@ export default function MushafPage() {
   // تنزيل المصحف الكامل يتم فقط بطلب صريح من المستخدم عبر شاشة البدء.
   // لا نقوم بتسخين الروايات السبع تلقائيًا في الخلفية.
 
-  useEffect(() => {
-    let cancelled = false
-
-    const run = async () => {
-      const nearby = Array.from(new Set([
-        pageNumber,
-        clampPage(pageNumber + 1),
-        clampPage(pageNumber - 1),
-      ]))
-
-      for (const page of nearby) {
-        if (cancelled) return
-        void prefetchRiwayaPage(riwaya, page)
-      }
-    }
-
-    void run()
-
-    return () => {
-      cancelled = true
-    }
-  }, [pageNumber, prefetchRiwayaPage, riwaya])
 
   useEffect(() => {
     if (!navigatingRef.current) return
@@ -2733,62 +2714,33 @@ export default function MushafPage() {
 
   useEffect(() => {
     let cancelled = false
-    // لا نترك شاشة بيضاء أثناء انتظار بيانات الصفحة أو SVG، خصوصًا على
-    // شاشات العرض/المتصفحات الأبطأ. الصفحة السابقة تبقى في الذاكرة أثناء
-    // الانتقال، لكن عند أول فتح نعرض حالة تحميل واضحة بدل الفراغ.
-    setLoading(true)
-    setError('')
 
-    const rightPage = desktopRightPage
-    const leftPage = desktopLeftPage
-
+    // Fetch the ayah text and printed page together. Downloaded pages are
+    // read from the existing local cache and never show a loading dialog.
     ;(async () => {
       try {
-        const dataPromises: Array<Promise<PageData>> = [
+        const [mainData, mainSvg] = await Promise.all([
           fetchPageData(pageNumber),
-        ]
-
-        // الصفحة الحالية فقط مطلوبة على الكمبيوتر أيضًا؛ لا نحمّل صفحة ثانية.
-        // هذا يقلل الطلبات ويمنع اختلاف ترتيب الصفحات على شاشة العرض.
-
-        const dataResults = await Promise.all(dataPromises)
+          fetchSvg(pageNumber),
+        ])
         if (cancelled) return
 
-        const mainData = dataResults[0]
         setPageData(mainData)
-
-        if (isDesktop) {
-          setRightPageData(mainData)
-          setLeftPageData(null)
-        } else {
-          setRightPageData(mainData)
-          setLeftPageData(null)
-        }
-
-        // نفس طبقة SVG تُستخدم لكل الروايات.
-        // للسوسي والبزي يأتي SVG من نص الرواية الحقيقي + الخط الخاص بها،
-        // بينما الخمس الأخرى تأتي من صفحات المصحف المطبوعة الأصلية.
-        const svgPromises: Array<Promise<string>> = [fetchSvg(pageNumber)]
-
-        const svgResults = await Promise.all(svgPromises)
-        if (cancelled) return
-
-        setSvg(svgResults[0] || '')
+        setRightPageData(mainData)
+        setLeftPageData(null)
+        setSvg(mainSvg || '')
         setLeftSvg('')
-        if (!cancelled) setLoading(false)
+        setError('')
       } catch (loadError) {
-        console.error(loadError)
         if (!cancelled) {
-          setLoading(false)
-          setError(loadError instanceof Error ? loadError.message : 'تعذر تحميل المصحف')
+          console.error(loadError)
+          setError(loadError instanceof Error ? loadError.message : 'تعذر فتح صفحة المصحف')
         }
       }
     })()
 
-    return () => {
-      cancelled = true
-    }
-  }, [desktopLeftPage, desktopRightPage, fetchPageData, fetchSvg, isDesktop, pageNumber, riwaya])
+    return () => { cancelled = true }
+  }, [fetchPageData, fetchSvg, pageNumber, riwaya])
 
   useEffect(() => {
     let cancelled = false
@@ -3364,7 +3316,7 @@ export default function MushafPage() {
       window.setTimeout(() => {
         if (token !== pageTurnNavigationTokenRef.current) return
         if (pendingNavigationPageRef.current !== nextPage) return
-        router.replace(`/mushaf?${params.toString()}`)
+        window.history.replaceState(null, '', `/mushaf?${params.toString()}`)
       }, remaining + 18)
 
       // حماية أخيرة فقط. عند وصول pageNumber الجديدة، useEffect الخاص بالصفحة يمسح الحالة فورًا.
@@ -3820,7 +3772,7 @@ export default function MushafPage() {
       params.delete('juzEnd')
       params.delete('ayah')
     }
-    router.push(`/mushaf?${params.toString()}`)
+    window.history.pushState(null, '', `/mushaf?${params.toString()}`)
   }, [pageNumber, router, searchParams])
 
   const handleRiwayaSelect = async (value: Riwaya) => {
@@ -4024,7 +3976,7 @@ export default function MushafPage() {
     }
     params.set('autoplay', '1')
 
-    router.push(`/mushaf?${params.toString()}`)
+    window.history.pushState(null, '', `/mushaf?${params.toString()}`)
 
     await loadAudioForSurah(
       juz.start.surah,
@@ -4130,7 +4082,7 @@ export default function MushafPage() {
       setShowSearchResults(false)
       setSearchResults([])
       setSearchMessage('')
-      router.push(`/mushaf?${params.toString()}`)
+      window.history.pushState(null, '', `/mushaf?${params.toString()}`)
     } finally {
       setSearchLoading(false)
     }
@@ -5179,7 +5131,7 @@ export default function MushafPage() {
 
     const target = `/mushaf?${params.toString()}`
     const current = `/mushaf?${searchParams.toString()}`
-    if (target !== current) router.replace(target)
+    if (target !== current) window.history.replaceState(null, '', target)
   }, [router, searchParams])
 
   useEffect(() => {
@@ -5306,7 +5258,7 @@ export default function MushafPage() {
 
           const currentTarget = `/mushaf?${params.toString()}`
           const currentPath = `/mushaf?${searchParams.toString()}`
-          if (currentPath !== currentTarget) router.replace(currentTarget)
+          if (currentPath !== currentTarget) window.history.replaceState(null, '', currentTarget)
         }
       }
     }).catch(() => {})
