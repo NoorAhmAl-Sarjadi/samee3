@@ -1,55 +1,104 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type MouseEvent,
+} from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
+  ArrowRight,
+  BookOpen,
   Check,
   CheckCheck,
   ChevronDown,
-  ChevronRight,
   Copy,
-  Headphones,
+  Download,
   Heart,
+  Headphones,
   Loader2,
   Pause,
   Play,
   RotateCcw,
+  Square,
   Volume2,
   VolumeX,
+  WifiOff,
+  BookmarkCheck,
+  Image as ImageIcon,
+  Moon,
+  Sun,
+  Settings2,
+  Type as TypeIcon,
+  Share2,
   X,
+  Minus,
+  Plus,
+  Info,
+  ListFilter,
 } from 'lucide-react'
 
-type AdhkarItem = { id: number; text: string; count: number; audio?: string; filename?: string }
-type AdhkarCategory = { id: number; category: string; audio?: string; filename?: string; array: AdhkarItem[] }
-type AdhkarType = 'morning' | 'evening' | 'sleep' | 'waking'
-type AudioTrack = { id: string; type: AdhkarType; title: string; url: string }
-type AdhkarReciter = { id: string; name: string; itemAudio?: boolean; tracks: AudioTrack[] }
+/** SAMEE3 — Adhkar reading page; app/adhkar/read/page.tsx */
 
+type AdhkarType = 'morning' | 'evening' | 'sleep' | 'waking'
+type AdhkarItem = {
+  id: number
+  text: string
+  count: number
+  audio?: string
+  filename?: string
+  source?: string
+  reference?: string
+  benefit?: string
+}
+type AdhkarCategory = {
+  id: number
+  category: string
+  array: AdhkarItem[]
+}
+type AudioTrack = { id: string; type: AdhkarType; title: string; url: string }
+type Reciter = { id: string; name: string; itemAudio?: boolean; tracks: AudioTrack[] }
 type AudioMode = 'item' | 'section' | null
 
-const DATA_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json'
-const AUDIO_BASE_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main'
-const TVQURAN_BASE = 'https://download.tvquran.com/download/TvQuran.com__Athkar'
+type ProgressRecord = { counts: Record<string, number>; savedAt: number }
 
-const ADHKAR_RECITERS: AdhkarReciter[] = [
+const DATA_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json'
+const DATA_CACHE = 'samee3-adhkar-data-v1'
+const DATA_BACKUP = 'https://raw.githubusercontent.com/rn0x/Adhkar-json/main/adhkar.json'
+const SETTINGS_KEY = 'samee3_adhkar_read_settings_v1'
+const MAX_DATA_BYTES = 2 * 1024 * 1024
+const AUDIO_CACHE = 'samee3-adhkar-audio-v1'
+const AUDIO_BASE = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main'
+const TVQURAN = 'https://download.tvquran.com/download/TvQuran.com__Athkar'
+const RECITER_KEY = 'samee3_adhkar_reciter'
+const MAX_AUDIO_BYTES = 180 * 1024 * 1024
+
+// The tracks below retain the source configuration from the existing reader.
+// These are human recordings, not synthesized speech. Availability depends on the source.
+const RECITERS: Reciter[] = [
   { id: 'mishary-alafasy', name: 'مشاري بن راشد العفاسي', tracks: [
-    { id: 'mishary-waking', type: 'waking', title: 'أذكار الاستيقاظ', url: `${TVQURAN_BASE}/TvQuran.com_athkar_01.mp3` },
-    { id: 'mishary-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN_BASE}/TvQuran.com_athkar_03.mp3` },
-    { id: 'mishary-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN_BASE}/TvQuran.com_athkar_04.mp3` },
-    { id: 'mishary-sleep', type: 'sleep', title: 'أذكار النوم', url: `${TVQURAN_BASE}/TvQuran.com_athkar_11.mp3` },
+    { id: 'mishary-waking', type: 'waking', title: 'أذكار الاستيقاظ', url: `${TVQURAN}/TvQuran.com_athkar_01.mp3` },
+    { id: 'mishary-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN}/TvQuran.com_athkar_03.mp3` },
+    { id: 'mishary-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN}/TvQuran.com_athkar_04.mp3` },
+    { id: 'mishary-sleep', type: 'sleep', title: 'أذكار النوم', url: `${TVQURAN}/TvQuran.com_athkar_11.mp3` },
   ] },
   { id: 'faris-abbad', name: 'فارس عباد', tracks: [
-    { id: 'faris-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN_BASE}/TvQuran.com_athkar_05.mp3` },
-    { id: 'faris-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN_BASE}/TvQuran.com_athkar_06.mp3` },
+    { id: 'faris-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN}/TvQuran.com_athkar_05.mp3` },
+    { id: 'faris-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN}/TvQuran.com_athkar_06.mp3` },
   ] },
   { id: 'mohamed-jibril', name: 'محمد جبريل', tracks: [
-    { id: 'jibril-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN_BASE}/TvQuran.com_athkar_07.mp3` },
-    { id: 'jibril-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN_BASE}/TvQuran.com_athkar_08.mp3` },
+    { id: 'jibril-morning', type: 'morning', title: 'أذكار الصباح', url: `${TVQURAN}/TvQuran.com_athkar_07.mp3` },
+    { id: 'jibril-evening', type: 'evening', title: 'أذكار المساء', url: `${TVQURAN}/TvQuran.com_athkar_08.mp3` },
   ] },
   { id: 'nasser-alqatami', name: 'ناصر القطامي', tracks: [
-    { id: 'nasser-day-night', type: 'morning', title: 'أذكار اليوم والليلة', url: `${TVQURAN_BASE}/TvQuran.com_athkar_02.mp3` },
-    { id: 'nasser-day-night-evening', type: 'evening', title: 'أذكار اليوم والليلة', url: `${TVQURAN_BASE}/TvQuran.com_athkar_02.mp3` },
+    { id: 'nasser-morning', type: 'morning', title: 'أذكار اليوم والليلة', url: `${TVQURAN}/TvQuran.com_athkar_02.mp3` },
+    { id: 'nasser-evening', type: 'evening', title: 'أذكار اليوم والليلة', url: `${TVQURAN}/TvQuran.com_athkar_02.mp3` },
   ] },
   { id: 'hamad-al-drehem', name: 'حمد الدريهم', itemAudio: true, tracks: [
     { id: 'hamad-waking', type: 'waking', title: 'أذكار الاستيقاظ', url: 'https://d1.islamhouse.com/data/ar/ih_sounds/chain_01/Hisn_Almuslim/Hisn_Almuslim_AlDuraihim/ar_002_Hisn_Almuslim_AlDuraihim.mp3' },
@@ -60,327 +109,909 @@ const ADHKAR_RECITERS: AdhkarReciter[] = [
   { id: 'walid-abu-ziyad', name: 'وليد أبو زياد', tracks: [] },
 ]
 
-const TYPE_TITLES: Record<AdhkarType, string> = { morning: 'أذكار الصباح', evening: 'أذكار المساء', sleep: 'أذكار النوم', waking: 'أذكار الاستيقاظ' }
+const LABELS: Record<AdhkarType, string> = {
+  morning: 'أذكار الصباح',
+  evening: 'أذكار المساء',
+  sleep: 'أذكار النوم',
+  waking: 'أذكار الاستيقاظ',
+}
 
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
-function getArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value
-  if (!isRecord(value)) return []
-  if (Array.isArray(value.data)) return value.data
-  if (Array.isArray(value.adhkar)) return value.adhkar
-  if (Array.isArray(value.categories)) return value.categories
-  return []
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
-function normalizeItem(value: unknown, fallbackId: number): AdhkarItem | null {
-  if (!isRecord(value)) return null
-  const text = typeof value.text === 'string' ? value.text.trim() : ''
-  if (!text) return null
-  const rawId = Number(value.id), rawCount = Number(value.count)
-  return {
-    id: Number.isFinite(rawId) && rawId > 0 ? Math.floor(rawId) : fallbackId,
-    text,
-    count: Number.isFinite(rawCount) && rawCount > 0 ? Math.floor(rawCount) : 1,
-    ...(typeof value.audio === 'string' && value.audio.trim() ? { audio: value.audio.trim() } : {}),
-    ...(typeof value.filename === 'string' && value.filename.trim() ? { filename: value.filename.trim() } : {}),
-  }
-}
-function normalizeCategories(value: unknown): AdhkarCategory[] {
-  return getArray(value).map((entry, index) => {
-    if (!isRecord(entry)) return null
-    const category = typeof entry.category === 'string' ? entry.category.trim() : ''
-    const rawItems = Array.isArray(entry.array) ? entry.array : []
-    const array = rawItems.map((item, itemIndex) => normalizeItem(item, itemIndex + 1)).filter((item): item is AdhkarItem => item !== null)
-    const rawId = Number(entry.id)
-    if (!category || !array.length) return null
-    return { id: Number.isFinite(rawId) && rawId > 0 ? Math.floor(rawId) : index + 1, category, array,
-      ...(typeof entry.audio === 'string' && entry.audio.trim() ? { audio: entry.audio.trim() } : {}),
-      ...(typeof entry.filename === 'string' && entry.filename.trim() ? { filename: entry.filename.trim() } : {}) }
+
+function categoriesFrom(value: unknown): AdhkarCategory[] {
+  const array = Array.isArray(value) ? value
+    : isObject(value) && Array.isArray(value.data) ? value.data
+    : isObject(value) && Array.isArray(value.adhkar) ? value.adhkar
+    : isObject(value) && Array.isArray(value.categories) ? value.categories
+    : []
+
+  return array.map((raw, categoryIndex): AdhkarCategory | null => {
+    if (!isObject(raw) || typeof raw.category !== 'string' || !Array.isArray(raw.array)) return null
+    const items: AdhkarItem[] = raw.array.map((entry: unknown, index: number): AdhkarItem | null => {
+      if (!isObject(entry) || typeof entry.text !== 'string' || !entry.text.trim()) return null
+      const parsedId = Number(entry.id)
+      const parsedCount = Number(entry.count)
+      return {
+        id: Number.isFinite(parsedId) && parsedId > 0 ? Math.floor(parsedId) : index + 1,
+        text: entry.text.trim(),
+        count: Number.isFinite(parsedCount) && parsedCount > 0 ? Math.floor(parsedCount) : 1,
+        ...(typeof entry.audio === 'string' && entry.audio.trim() ? { audio: entry.audio.trim() } : {}),
+        ...(typeof entry.filename === 'string' && entry.filename.trim() ? { filename: entry.filename.trim() } : {}),
+        ...(typeof entry.source === 'string' && entry.source.trim() ? { source: entry.source.trim() } : {}),
+        ...(typeof entry.reference === 'string' && entry.reference.trim() ? { reference: entry.reference.trim() } : {}),
+        ...(typeof entry.benefit === 'string' && entry.benefit.trim() ? { benefit: entry.benefit.trim() } : {}),
+      }
+    }).filter((entry: AdhkarItem | null): entry is AdhkarItem => entry !== null)
+    const id = Number(raw.id)
+    return items.length ? {
+      id: Number.isFinite(id) && id > 0 ? Math.floor(id) : categoryIndex + 1,
+      category: raw.category.trim(),
+      array: items,
+    } : null
   }).filter((entry): entry is AdhkarCategory => entry !== null)
 }
-function arabicDigits(value: number | string) { return String(value).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[Number(d)]) }
-function displayCategoryName(name: string) {
+
+function validCorpus(categories: AdhkarCategory[]): boolean {
+  return categories.length >= 5 &&
+    categories.reduce((sum, category) => sum + category.array.length, 0) >= 20
+}
+
+function categoryFor(categories: AdhkarCategory[], id: number, type: AdhkarType) {
+  if (id > 0) return categories.find((entry) => entry.id === id) ?? null
+  return categories.find((entry) => {
+    const name = entry.category
+    if (type === 'sleep') return name.includes('النوم')
+    if (type === 'waking') return name.includes('الاستيقاظ')
+    return name.includes('الصباح') && name.includes('المساء')
+  }) ?? categories.find((entry) => entry.category.includes(type === 'morning' ? 'الصباح' : type === 'evening' ? 'المساء' : type === 'sleep' ? 'النوم' : 'الاستيقاظ')) ?? null
+}
+
+function categoryLabel(name: string, type: AdhkarType, explicitId: number) {
+  if (!explicitId) return LABELS[type]
   if (name.includes('الصباح') && name.includes('المساء')) return 'أذكار الصباح والمساء'
-  if (name.includes('الصباح')) return 'أذكار الصباح'
-  if (name.includes('المساء')) return 'أذكار المساء'
-  if (name.includes('النوم')) return 'أذكار النوم'
-  if (name.includes('الاستيقاظ')) return 'أذكار الاستيقاظ'
+  if (name.includes('الصباح')) return LABELS.morning
+  if (name.includes('المساء')) return LABELS.evening
+  if (name.includes('النوم')) return LABELS.sleep
+  if (name.includes('الاستيقاظ')) return LABELS.waking
   return 'أذكار متنوعة'
 }
-function toProxyUrl(url: string) { return `/api/adhkar-audio?url=${encodeURIComponent(url)}` }
-function itemAudioUrl(item: AdhkarItem) {
-  if (!item.audio) return ''
-  if (/^https?:\/\//i.test(item.audio)) return toProxyUrl(item.audio)
-  return toProxyUrl(`${AUDIO_BASE_URL}${item.audio.startsWith('/') ? item.audio : `/${item.audio}`}`)
-}
-function trackByType(reader: AdhkarReciter, type: AdhkarType) { return reader.tracks.find((track) => track.type === type) ?? null }
 
-function ReaderSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <div className="relative">
-      <select value={value} onChange={(event: ChangeEvent<HTMLSelectElement>) => onChange(event.target.value)} className="w-full appearance-none rounded-2xl border border-white/15 bg-white/10 px-4 py-3.5 text-sm font-black text-white outline-none backdrop-blur">
-        {ADHKAR_RECITERS.map((reader) => <option key={reader.id} value={reader.id} className="bg-white text-mushaf-dark">{reader.name}</option>)}
-      </select>
-      <ChevronDown className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/60" size={18} />
-    </div>
-  )
+function numberAr(value: number) { return value.toLocaleString('ar-EG') }
+function timeLabel(value: number) {
+  if (!Number.isFinite(value) || value < 0) return '٠:٠٠'
+  const seconds = Math.floor(value)
+  return `${numberAr(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, '0').replace(/\d/g, (digit) => '٠١٢٣٤٥٦٧٨٩'[Number(digit)])}`
+}
+
+function sourceUrl(url: string): string {
+  const absolute = /^https:\/\//i.test(url) ? url : `${AUDIO_BASE}/${url.replace(/^\/+/, '')}`
+  return `/api/adhkar-audio?url=${encodeURIComponent(absolute)}`
+}
+
+function getItemUrl(item: AdhkarItem): string {
+  return item.audio ? sourceUrl(item.audio) : ''
+}
+
+async function loadCachedCategories(): Promise<AdhkarCategory[]> {
+  if (typeof caches === 'undefined') return []
+  try {
+    const cache = await caches.open(DATA_CACHE)
+    const response = await cache.match(DATA_URL)
+    if (!response) return []
+    const parsed = categoriesFrom(await response.json())
+    return validCorpus(parsed) ? parsed : []
+  } catch { return [] }
+}
+
+async function readSavedAudio(url: string): Promise<string | null> {
+  if (typeof caches === 'undefined') return null
+  try {
+    const names = await caches.keys()
+    if (!names.includes(AUDIO_CACHE)) return null
+    const response = await (await caches.open(AUDIO_CACHE)).match(url)
+    if (!response || response.status !== 200 || response.headers.has('Content-Range')) return null
+    const blob = await response.blob()
+    if (!blob.size || blob.size > MAX_AUDIO_BYTES) return null
+    return URL.createObjectURL(blob)
+  } catch { return null }
+}
+
+async function downloadAudio(url: string, signal: AbortSignal): Promise<void> {
+  if (typeof caches === 'undefined') throw new Error('التخزين المحلي غير متاح.')
+  if (signal.aborted) throw new Error('تم إيقاف التحميل.')
+
+  const cache = await caches.open(AUDIO_CACHE)
+  const existing = await cache.match(url)
+  if (existing && existing.ok && existing.status === 200 &&
+    !existing.headers.has('Content-Range') &&
+    !/(?:json|html|xml)/i.test(existing.headers.get('Content-Type') || '')) {
+    // Keep a previously saved recording; never re-download it unnecessarily.
+    return
+  }
+
+  const response = await fetch(url, { method: 'GET', cache: 'no-store', signal })
+  const mime = (response.headers.get('Content-Type') || '').toLowerCase()
+  const declaredText = response.headers.get('Content-Length')
+  const declared = declaredText && /^\d+$/.test(declaredText) ? Number(declaredText) : null
+
+  if (!response.ok || response.status !== 200 || response.headers.has('Content-Range') ||
+    /(?:json|html|xml)/.test(mime) || (declared !== null && declared > MAX_AUDIO_BYTES)) {
+    throw new Error('المصدر لم يرجع ملفًا صوتيًا كاملًا.')
+  }
+
+  // A complete body is required before any Cache Storage write.
+  // This protects the previous recording if the download is interrupted.
+  const blob = await response.blob()
+  if (signal.aborted) throw new Error('تم إيقاف التحميل.')
+  if (!blob.size || blob.size > MAX_AUDIO_BYTES || (declared !== null && blob.size !== declared)) {
+    throw new Error('تعذّر التحقق من اكتمال التسجيل.')
+  }
+  await cache.put(url, new Response(blob, {
+    status: 200,
+    headers: { 'Content-Type': mime || 'audio/mpeg', 'Content-Length': String(blob.size) },
+  }))
+}
+
+async function retryDownloadAudio(url: string, signal: AbortSignal): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (signal.aborted) throw new Error('أُوقف التنزيل.')
+    try {
+      await downloadAudio(url, signal)
+      return
+    } catch (error) {
+      if (signal.aborted || attempt === 2) throw error
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          signal.removeEventListener('abort', cancelled)
+          resolve()
+        }, 600 * Math.pow(2, attempt))
+        const cancelled = () => {
+          window.clearTimeout(timer)
+          signal.removeEventListener('abort', cancelled)
+          reject(new Error('أُوقف التنزيل.'))
+        }
+        signal.addEventListener('abort', cancelled, { once: true })
+      })
+    }
+  }
+}
+
+function localDay(value: number): string {
+  const date = new Date(value)
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
+}
+
+function readProgress(key: string, items: AdhkarItem[], daily: boolean): Record<number, number> {
+  let saved: ProgressRecord | null = null
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) || 'null')
+    if (isObject(parsed) && isObject(parsed.counts)) {
+      saved = parsed as ProgressRecord
+    }
+  } catch { /* use initial counts */ }
+  if (daily && saved && (!Number.isFinite(saved.savedAt) ||
+    localDay(saved.savedAt) !== localDay(Date.now()))) {
+    saved = null
+  }
+  const result: Record<number, number> = {}
+  items.forEach((item) => {
+    const value = Number(saved?.counts?.[String(item.id)])
+    result[item.id] = Number.isFinite(value)
+      ? Math.max(0, Math.min(item.count, Math.floor(value)))
+      : item.count
+  })
+  return result
+}
+
+type ImageTheme = 'ivory' | 'emerald' | 'night'
+const IMAGE_PALETTES: Record<ImageTheme, { background: string; ink: string; gold: string; panel: string }> = {
+  ivory: { background: '#F8F4ED', ink: '#22424A', gold: '#B79251', panel: '#FFFDFC' },
+  emerald: { background: '#123F3D', ink: '#FFFFFF', gold: '#DEC18B', panel: '#1B5350' },
+  night: { background: '#132431', ink: '#FFFFFF', gold: '#D6B57B', panel: '#1D3544' },
+}
+
+function wrappedCanvasLines(context: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const result: string[] = []
+  for (const paragraph of text.split(/\n/)) {
+    const words = paragraph.trim().split(/\s+/).filter(Boolean)
+    if (!words.length) { result.push(''); continue }
+    let line = ''
+    for (const word of words) {
+      if (context.measureText(word).width > maxWidth) throw new Error('الذكر يحتوي على كلمة طويلة لا تصلح للصورة الحالية.')
+      const trial = line ? `${line} ${word}` : word
+      if (line && context.measureText(trial).width > maxWidth) {
+        result.push(line)
+        line = word
+      } else { line = trial }
+    }
+    if (line) result.push(line)
+  }
+  return result
+}
+
+async function shareDhikrImage(item: AdhkarItem, theme: ImageTheme): Promise<void> {
+  const palette = IMAGE_PALETTES[theme]
+  const canvas = document.createElement('canvas')
+  const width = 1080
+  canvas.width = width
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('المتصفح لا يدعم تصميم الصورة.')
+  context.direction = 'rtl'
+  context.font = '52px Amiri, Georgia, serif'
+  const textLines = wrappedCanvasLines(context, item.text, width - 180)
+  const source = item.reference || item.source || 'من مجموعة أذكار حصن المسلم'
+  context.font = '28px Tahoma, Arial, sans-serif'
+  const sourceLines = wrappedCanvasLines(context, source, width - 190)
+  const lineHeight = 93
+  const height = 650 + textLines.length * lineHeight + sourceLines.length * 43
+  if (height > 7400) throw new Error('النص طويل جدًا لصورة واحدة. استخدم زر نسخ النص كاملًا.')
+  canvas.height = height
+  context.direction = 'rtl'
+  context.fillStyle = palette.background
+  context.fillRect(0, 0, width, height)
+  context.strokeStyle = palette.gold
+  context.lineWidth = 3
+  context.strokeRect(38, 38, width - 76, height - 76)
+  context.lineWidth = 1
+  context.strokeRect(54, 54, width - 108, height - 108)
+  context.textAlign = 'center'
+  context.fillStyle = palette.gold
+  context.font = 'bold 33px Tahoma, Arial, sans-serif'
+  context.fillText('مصحف سميع', width / 2, 142)
+  context.beginPath()
+  context.moveTo(410, 180)
+  context.lineTo(670, 180)
+  context.strokeStyle = palette.gold
+  context.lineWidth = 2
+  context.stroke()
+  context.fillStyle = palette.ink
+  context.font = '52px Amiri, Georgia, serif'
+  let y = 290
+  for (const line of textLines) {
+    context.fillText(line, width / 2, y)
+    y += lineHeight
+  }
+  y += 20
+  context.strokeStyle = palette.gold
+  context.beginPath()
+  context.moveTo(430, y)
+  context.lineTo(650, y)
+  context.stroke()
+  y += 62
+  context.fillStyle = palette.gold
+  context.font = '28px Tahoma, Arial, sans-serif'
+  for (const line of sourceLines) {
+    context.fillText(line, width / 2, y)
+    y += 43
+  }
+  context.font = 'bold 24px Tahoma, Arial, sans-serif'
+  context.fillText('أذكار وأدعية', width / 2, height - 110)
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+  if (!blob) throw new Error('تعذّر إنتاج صورة الذكر.')
+  const name = `samee3-dhikr-${item.id}.png`
+  const file = new File([blob], name, { type: 'image/png' })
+  if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'ذكر من مصحف سميع' }); return }
+    catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return
+    }
+  }
+  const url = URL.createObjectURL(blob)
+  try {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+  }
 }
 
 function ReadAdhkarContent() {
-  const searchParams = useSearchParams()
-  const requestedCategoryId = Number(searchParams.get('categoryId') || 0)
-  const requestedType = searchParams.get('type')
-  const requestedReciter = searchParams.get('reciter') || ''
-  const type: AdhkarType = requestedType === 'evening' || requestedType === 'sleep' || requestedType === 'waking' ? requestedType : 'morning'
+  const params = useSearchParams()
+  const categoryId = Number(params.get('categoryId') || 0)
+  const rawType = params.get('type')
+  const type: AdhkarType = rawType === 'evening' || rawType === 'sleep' || rawType === 'waking' ? rawType : 'morning'
+  const requestedReader = params.get('reciter') || ''
+  const progressKey = `samee3_adhkar_progress_v2_${categoryId || type}`
+  const isDaily = !categoryId && (type === 'morning' || type === 'evening')
+  const favoriteKey = `samee3_adhkar_favorites_${categoryId || type}`
 
-  const defaultReciter = ADHKAR_RECITERS.some((reader) => reader.id === requestedReciter) ? requestedReciter : ADHKAR_RECITERS[0].id
-  const [reciterId, setReciterId] = useState(defaultReciter)
+  const [reciterId, setReciterId] = useState(RECITERS.some((reader) => reader.id === requestedReader) ? requestedReader : RECITERS[0].id)
   const [items, setItems] = useState<AdhkarItem[]>([])
-  const [pageTitle, setPageTitle] = useState(TYPE_TITLES[type])
+  const [title, setTitle] = useState(LABELS[type])
   const [counts, setCounts] = useState<Record<number, number>>({})
-  const [completed, setCompleted] = useState<number[]>([])
-  const [activeId, setActiveId] = useState<number | null>(null)
-  const [favoriteIds, setFavoriteIds] = useState<number[]>([])
-  const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [favorites, setFavorites] = useState<number[]>([])
+  const [ready, setReady] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState('')
+  const [cachedData, setCachedData] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [activeId, setActiveId] = useState<number | null>(null)
+  const [copied, setCopied] = useState<number | null>(null)
+  const [audioMode, setAudioMode] = useState<AudioMode>(null)
   const [playing, setPlaying] = useState(false)
+  const [audioLoading, setAudioLoading] = useState(false)
   const [muted, setMuted] = useState(false)
-  const [playerMode, setPlayerMode] = useState<AudioMode>(null)
-  const [playerCurrent, setPlayerCurrent] = useState(0)
-  const [playerDuration, setPlayerDuration] = useState(0)
+  const [speed, setSpeed] = useState(1)
+  const [position, setPosition] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [downloadCount, setDownloadCount] = useState<number | null>(null)
+  const [downloadTotal, setDownloadTotal] = useState(0)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [darkMode, setDarkMode] = useState(false)
+  const [fontSize, setFontSize] = useState(25)
+  const [showMarks, setShowMarks] = useState(true)
+  const [onlyFavorites, setOnlyFavorites] = useState(false)
+  const [sourceItem, setSourceItem] = useState<AdhkarItem | null>(null)
+  const [imageItem, setImageItem] = useState<AdhkarItem | null>(null)
+  const [imageTheme, setImageTheme] = useState<'ivory' | 'emerald' | 'night'>('ivory')
+  const [makingImage, setMakingImage] = useState(false)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const tokenRef = useRef(0)
+  const objectUrlRef = useRef<string | null>(null)
+  const audioTokenRef = useRef(0)
   const sequenceRef = useRef(false)
+  const itemsRef = useRef<AdhkarItem[]>([])
+  const countsRef = useRef<Record<number, number>>({})
+  const loadKeyRef = useRef('')
+  const readyKeyRef = useRef('')
+  const dayRef = useRef(localDay(Date.now()))
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const downloadControllerRef = useRef<AbortController | null>(null)
+  const speedRef = useRef(speed)
+  const mutedRef = useRef(muted)
 
-  const selectedReciter = ADHKAR_RECITERS.find((reader) => reader.id === reciterId) ?? ADHKAR_RECITERS[0]
-  const selectedTrack = trackByType(selectedReciter, type)
-  const hasItemAudio = Boolean(selectedReciter.itemAudio && items.some((item) => Boolean(item.audio)))
-  const activeIndex = useMemo(() => items.findIndex((item) => item.id === activeId), [items, activeId])
-  const activeItem = activeIndex >= 0 ? items[activeIndex] : null
-  const progress = items.length ? Math.round((completed.length / items.length) * 100) : 0
-  const remaining = activeItem ? counts[activeItem.id] ?? activeItem.count : 0
+  const selectedReader = RECITERS.find((reader) => reader.id === reciterId) || RECITERS[0]
+  const sectionTrack = selectedReader.tracks.find((track) => track.type === type) || null
+  const recordedItems = selectedReader.itemAudio ? items.filter((item) => Boolean(item.audio)) : []
+  const canPlayItem = recordedItems.length > 0
+  const hasAudio = Boolean(sectionTrack || canPlayItem)
+  const complete = items.filter((item) => (counts[item.id] ?? item.count) === 0).length
+  const progress = items.length ? Math.round(complete / items.length * 100) : 0
+  const activeItem = items.find((item) => item.id === activeId) || null
+
+  useEffect(() => { itemsRef.current = items }, [items])
+  useEffect(() => { countsRef.current = counts }, [counts])
+  useEffect(() => { speedRef.current = speed; if (audioRef.current) audioRef.current.playbackRate = speed }, [speed])
+  useEffect(() => { mutedRef.current = muted; if (audioRef.current) audioRef.current.muted = muted }, [muted])
+
+  const updateCount = useCallback((item: AdhkarItem, value: number) => {
+    const next = Math.max(0, Math.min(item.count, value))
+    countsRef.current = { ...countsRef.current, [item.id]: next }
+    setCounts(countsRef.current)
+    return next
+  }, [])
 
   const stopAudio = useCallback(() => {
-    tokenRef.current += 1
+    audioTokenRef.current += 1
     sequenceRef.current = false
     const audio = audioRef.current
     if (audio) {
-      audio.onended = null; audio.onerror = null; audio.onplay = null; audio.onpause = null; audio.ontimeupdate = null; audio.onloadedmetadata = null
-      audio.pause(); audio.removeAttribute('src'); audio.load()
+      audio.onended = null
+      audio.onerror = null
+      audio.onplay = null
+      audio.onpause = null
+      audio.ontimeupdate = null
+      audio.onloadedmetadata = null
+      audio.pause()
+      audio.removeAttribute('src')
+      audio.load()
       audioRef.current = null
     }
-    setPlaying(false); setPlayerMode(null); setPlayerCurrent(0); setPlayerDuration(0)
-  }, [])
-
-  const markCompleted = useCallback((item: AdhkarItem) => {
-    setCounts((previous) => ({ ...previous, [item.id]: 0 }))
-    setCompleted((previous) => previous.includes(item.id) ? previous : [...previous, item.id])
-  }, [])
-
-  const findNextIncomplete = useCallback((from: number) => {
-    for (let index = from; index < items.length; index += 1) {
-      const item = items[index]
-      if ((counts[item.id] ?? item.count) > 0 && item.audio) return index
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
     }
-    return -1
-  }, [counts, items])
+    setPlaying(false)
+    setAudioLoading(false)
+    setAudioMode(null)
+    setPosition(0)
+    setDuration(0)
+  }, [])
 
-  const playItemAt = useCallback((index: number, repetition = 1) => {
-    if (index < 0 || index >= items.length) return
-    const item = items[index]
-    const url = itemAudioUrl(item)
-    if (!url) return
+  // Safely stop sound when the reader changes, URL changes or the page unmounts.
+  useEffect(() => () => {
+    audioTokenRef.current += 1
+    sequenceRef.current = false
+    const audio = audioRef.current
+    if (audio) { audio.onended = null; audio.pause(); audio.removeAttribute('src'); audioRef.current = null }
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
+    downloadControllerRef.current?.abort()
+  }, [])
 
-    tokenRef.current += 1
-    const token = tokenRef.current
-    sequenceRef.current = true
-    setActiveId(item.id); setPlayerMode('item'); setPlaying(false); setPlayerCurrent(0); setPlayerDuration(0)
+  useEffect(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null')
+      if (isObject(saved)) {
+        setDarkMode(saved.darkMode === true)
+        setShowMarks(saved.showMarks !== false)
+        const size = Number(saved.fontSize)
+        if (Number.isInteger(size) && size >= 20 && size <= 34) setFontSize(size)
+      }
+    } catch { /* optional display preferences */ }
+    setSettingsLoaded(true)
+  }, [])
 
-    const previous = audioRef.current
-    if (previous) { previous.pause(); previous.removeAttribute('src'); previous.load() }
+  useEffect(() => {
+    if (!settingsLoaded) return
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ darkMode, showMarks, fontSize })) }
+    catch { /* optional display settings */ }
+  }, [darkMode, showMarks, fontSize, settingsLoaded])
 
-    const audio = new Audio(url)
-    audio.preload = 'auto'; audio.volume = muted ? 0 : 1
+  useEffect(() => {
+    try {
+      if (!requestedReader) {
+        const saved = localStorage.getItem(RECITER_KEY)
+        if (saved && RECITERS.some((reader) => reader.id === saved)) setReciterId(saved)
+      }
+      const parsed: unknown = JSON.parse(localStorage.getItem(favoriteKey) || '[]')
+      setFavorites(Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [])
+    } catch { setFavorites([]) }
+  }, [favoriteKey, requestedReader])
+
+  useEffect(() => {
+    if (!ready || readyKeyRef.current !== progressKey) return
+    try { localStorage.setItem(progressKey, JSON.stringify({ counts, savedAt: Date.now() })) } catch { /* storage full */ }
+  }, [counts, progressKey, ready])
+
+  useEffect(() => {
+    let disposed = false
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 15000)
+    setReady(false)
+    setLoading(true)
+    setError('')
+    setItems([])
+    stopAudio()
+    loadKeyRef.current = ''
+
+    const apply = (categories: AdhkarCategory[], cached: boolean) => {
+      if (disposed) return false
+      const selected = categoryFor(categories, categoryId, type)
+      if (!selected) return false
+      if (loadKeyRef.current !== progressKey) {
+        const savedCounts = readProgress(progressKey, selected.array, isDaily)
+        loadKeyRef.current = progressKey
+        countsRef.current = savedCounts
+        setCounts(savedCounts)
+        setActiveId(null)
+      }
+      itemsRef.current = selected.array
+      setItems(selected.array)
+      setTitle(categoryLabel(selected.category, type, categoryId))
+      setCachedData(cached)
+      readyKeyRef.current = progressKey
+      dayRef.current = localDay(Date.now())
+      setReady(true)
+      setLoading(false)
+      return true
+    }
+
+    void (async () => {
+      const cached = await loadCachedCategories()
+      const foundCached = apply(cached, true)
+      if (navigator.onLine === false && foundCached) { window.clearTimeout(timeout); return }
+      try {
+        let fresh = false
+        for (const source of [DATA_URL, DATA_BACKUP]) {
+          if (controller.signal.aborted) break
+          try {
+            const response = await fetch(source, { cache: 'no-store', signal: controller.signal })
+            if (!response.ok) continue
+            const length = Number(response.headers.get('Content-Length') || 0)
+            if (length > MAX_DATA_BYTES) continue
+            const content = await response.text()
+            if (content.length > MAX_DATA_BYTES) continue
+            const parsed: unknown = JSON.parse(content)
+            const categories = categoriesFrom(parsed)
+            if (!validCorpus(categories)) continue
+            if (!apply(categories, false)) continue
+            if (!disposed && typeof caches !== 'undefined') {
+              const normalized = new Response(content, { headers: { 'Content-Type': 'application/json' } })
+              void caches.open(DATA_CACHE).then((cache) => cache.put(DATA_URL, normalized)).catch(() => undefined)
+            }
+            fresh = true
+            break
+          } catch { /* try the other known source */ }
+        }
+        if (!fresh && !foundCached) throw new Error('Data unavailable')
+      } catch {
+        if (!disposed && !foundCached) {
+          setLoading(false)
+          setError('تعذّر تحميل الأذكار. افتح القسم مرة أثناء الاتصال ليُحفظ على الجهاز.')
+        }
+      } finally { window.clearTimeout(timeout) }
+    })()
+    return () => { disposed = true; controller.abort(); window.clearTimeout(timeout) }
+  }, [categoryId, progressKey, stopAudio, type, isDaily])
+
+  useEffect(() => {
+    if (!isDaily) return
+    const refreshDay = () => {
+      const today = localDay(Date.now())
+      if (dayRef.current === today || !itemsRef.current.length) return
+      dayRef.current = today
+      stopAudio()
+      const reset: Record<number, number> = {}
+      itemsRef.current.forEach((item) => { reset[item.id] = item.count })
+      countsRef.current = reset
+      setCounts(reset)
+      setActiveId(null)
+      setMessage('بدأ يوم جديد، وتم تجهيز الورد من البداية.')
+    }
+    window.addEventListener('focus', refreshDay)
+    document.addEventListener('visibilitychange', refreshDay)
+    const interval = window.setInterval(refreshDay, 60000)
+    return () => {
+      window.removeEventListener('focus', refreshDay)
+      document.removeEventListener('visibilitychange', refreshDay)
+      window.clearInterval(interval)
+    }
+  }, [isDaily, stopAudio])
+
+  const playSource = async (
+    url: string,
+    mode: Exclude<AudioMode, null>,
+    index: number,
+    sequential: boolean,
+  ) => {
+    const token = ++audioTokenRef.current
+    sequenceRef.current = sequential
+    setMessage('')
+    setAudioLoading(true)
+    setPlaying(false)
+    setAudioMode(mode)
+    setPosition(0)
+    setDuration(0)
+
+    const old = audioRef.current
+    if (old) {
+      old.onended = null; old.onerror = null; old.onplay = null; old.onpause = null
+      old.pause(); old.removeAttribute('src')
+    }
+    if (objectUrlRef.current) { URL.revokeObjectURL(objectUrlRef.current); objectUrlRef.current = null }
+
+    const cached = await readSavedAudio(url)
+    if (audioTokenRef.current !== token) {
+      if (cached) URL.revokeObjectURL(cached)
+      return
+    }
+    if (!cached && navigator.onLine === false) {
+      setAudioLoading(false)
+      setAudioMode(null)
+      setMessage('التسجيل غير محفوظ على هذا الجهاز. نزّله أثناء الاتصال لتشغيله دون نت.')
+      return
+    }
+
+    const audio = old || new Audio()
     audioRef.current = audio
-    audio.onloadedmetadata = () => { if (token === tokenRef.current) setPlayerDuration(Number.isFinite(audio.duration) ? audio.duration : 0) }
-    audio.ontimeupdate = () => { if (token === tokenRef.current) setPlayerCurrent(audio.currentTime) }
-    audio.onplay = () => { if (token === tokenRef.current) setPlaying(true) }
-    audio.onpause = () => { if (token === tokenRef.current) setPlaying(false) }
-    audio.onerror = () => { if (token === tokenRef.current) { sequenceRef.current = false; setPlaying(false); setPlayerMode(null); setErrorMessage('تعذر تشغيل التسجيل لهذا الذكر حاليًا.') } }
+    objectUrlRef.current = cached
+    audio.preload = 'auto'
+    audio.playbackRate = speedRef.current
+    audio.muted = mutedRef.current
+    audio.src = cached || url
+    audio.onloadedmetadata = () => { if (token === audioTokenRef.current) setDuration(Number.isFinite(audio.duration) ? audio.duration : 0) }
+    audio.ontimeupdate = () => { if (token === audioTokenRef.current) setPosition(audio.currentTime) }
+    audio.onplay = () => { if (token === audioTokenRef.current) { setPlaying(true); setAudioLoading(false) } }
+    audio.onpause = () => { if (token === audioTokenRef.current) setPlaying(false) }
+    audio.onerror = () => {
+      if (token !== audioTokenRef.current) return
+      sequenceRef.current = false
+      setPlaying(false)
+      setAudioLoading(false)
+      setAudioMode(null)
+      setMessage('تعذّر تشغيل التسجيل. ربما الملف الصوتي غير متاح من المصدر.')
+    }
     audio.onended = () => {
-      if (token !== tokenRef.current) return
-      const total = Math.max(1, Number(item.count) || 1)
-      const nextRemaining = Math.max(0, total - repetition)
-      setCounts((previous) => ({ ...previous, [item.id]: nextRemaining }))
-
-      if (repetition < total && sequenceRef.current) {
-        void audio.play().catch(() => { sequenceRef.current = false; setPlaying(false); setPlayerMode(null) })
+      if (token !== audioTokenRef.current) return
+      if (mode === 'section') {
+        sequenceRef.current = false
+        setPlaying(false)
+        setAudioMode(null)
         return
       }
-
-      markCompleted(item)
-      const nextIndex = findNextIncomplete(index + 1)
-      if (nextIndex >= 0 && sequenceRef.current) { playItemAt(nextIndex, 1); return }
-      sequenceRef.current = false; setPlaying(false); setPlayerMode(null)
+      const item = itemsRef.current[index]
+      if (!item) return
+      const left = updateCount(item, (countsRef.current[item.id] ?? item.count) - 1)
+      if (!sequenceRef.current) {
+        setPlaying(false)
+        setAudioMode(null)
+        return
+      }
+      if (left > 0) {
+        audio.currentTime = 0
+        void audio.play().catch(() => {
+          if (token === audioTokenRef.current) {
+            sequenceRef.current = false
+            setPlaying(false)
+            setMessage('توقف التشغيل التلقائي. اضغط تشغيل للاستكمال.')
+          }
+        })
+        return
+      }
+      const nextIndex = itemsRef.current.findIndex((entry, i) =>
+        i > index && Boolean(entry.audio) && (countsRef.current[entry.id] ?? entry.count) > 0,
+      )
+      if (nextIndex < 0) {
+        sequenceRef.current = false
+        setPlaying(false)
+        setAudioMode(null)
+        return
+      }
+      const next = itemsRef.current[nextIndex]
+      setActiveId(next.id)
+      void playSource(getItemUrl(next), 'item', nextIndex, true)
     }
-    void audio.play().catch(() => { if (token === tokenRef.current) { sequenceRef.current = false; setPlaying(false); setPlayerMode(null); setErrorMessage('اضغط تشغيل مرة أخرى لبدء الصوت.') } })
-  }, [counts, findNextIncomplete, items, markCompleted, muted])
 
-  const playSection = useCallback(() => {
-    if (!selectedTrack?.url) return
-    stopAudio()
-    tokenRef.current += 1
-    const token = tokenRef.current
-    sequenceRef.current = false
-    setPlayerMode('section'); setActiveId(null); setPlaying(false); setPlayerCurrent(0); setPlayerDuration(0)
-
-    const audio = new Audio(toProxyUrl(selectedTrack.url))
-    audio.preload = 'metadata'; audio.volume = muted ? 0 : 1; audioRef.current = audio
-    audio.onloadedmetadata = () => { if (token === tokenRef.current) setPlayerDuration(Number.isFinite(audio.duration) ? audio.duration : 0) }
-    audio.ontimeupdate = () => { if (token === tokenRef.current) setPlayerCurrent(audio.currentTime) }
-    audio.onplay = () => { if (token === tokenRef.current) setPlaying(true) }
-    audio.onpause = () => { if (token === tokenRef.current) setPlaying(false) }
-    audio.onerror = () => { if (token === tokenRef.current) { setPlaying(false); setPlayerMode(null); setErrorMessage('تعذر تشغيل هذا الورد الصوتي حاليًا.') } }
-    audio.onended = () => { if (token === tokenRef.current) { setPlaying(false); setPlayerMode(null) } }
-    void audio.play().catch(() => { if (token === tokenRef.current) { setPlaying(false); setPlayerMode(null); setErrorMessage('اضغط تشغيل مرة أخرى لبدء الورد الصوتي.') } })
-  }, [muted, selectedTrack, stopAudio])
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('samee3_adhkar_reciter')
-      if (!requestedReciter && saved && ADHKAR_RECITERS.some((reader) => reader.id === saved)) setReciterId(saved)
-    } catch { /* ignore */ }
-  }, [requestedReciter])
-  useEffect(() => { try { localStorage.setItem('samee3_adhkar_reciter', reciterId) } catch { /* ignore */ } }, [reciterId])
-  useEffect(() => { stopAudio() }, [reciterId, stopAudio])
-
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setLoading(true); setErrorMessage(''); stopAudio()
-      try {
-        const response = await fetch(DATA_URL, { cache: 'no-store' })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const json: unknown = await response.json()
-        const categories = normalizeCategories(json)
-        const selected = requestedCategoryId
-          ? categories.find((category) => category.id === requestedCategoryId)
-          : categories.find((category) => {
-              const name = category.category
-              if (type === 'sleep') return name.includes('النوم')
-              if (type === 'waking') return name.includes('الاستيقاظ')
-              return name.includes('الصباح') && name.includes('المساء')
-            })
-        if (!selected) throw new Error('Category not found')
-        if (!cancelled) {
-          setItems(selected.array); setCounts(Object.fromEntries(selected.array.map((item) => [item.id, Math.max(1, Number(item.count) || 1)])))
-          setCompleted([]); setActiveId(null); setPageTitle(requestedCategoryId ? displayCategoryName(selected.category) : TYPE_TITLES[type])
-        }
-      } catch (error) {
-        console.error('Adhkar read error:', error)
-        if (!cancelled) { setItems([]); setCounts({}); setCompleted([]); setActiveId(null); setErrorMessage('تعذر تحميل هذا القسم حاليًا.') }
-      } finally { if (!cancelled) setLoading(false) }
+    try { await audio.play() }
+    catch {
+      if (token === audioTokenRef.current) {
+        setAudioLoading(false)
+        setPlaying(false)
+        setMessage('تعذّر بدء الصوت. اضغط تشغيل مرة أخرى أو جرّب تسجيلًا آخر.')
+      }
     }
-    void load()
-    return () => { cancelled = true }
-  }, [requestedCategoryId, stopAudio, type])
-
-  useEffect(() => {
-    const key = `samee3_adhkar_favorites_${requestedCategoryId || type}`
-    try {
-      const saved: unknown = JSON.parse(localStorage.getItem(key) || '[]')
-      setFavoriteIds(Array.isArray(saved) ? saved.map(Number).filter(Number.isFinite) : [])
-    } catch { setFavoriteIds([]) }
-  }, [requestedCategoryId, type])
-
-  useEffect(() => { if (audioRef.current) audioRef.current.volume = muted ? 0 : 1 }, [muted])
-
-  const handleReaderChange = (value: string) => {
-    if (!ADHKAR_RECITERS.some((reader) => reader.id === value)) return
-    stopAudio(); setReciterId(value)
   }
 
-  const handleTap = (item: AdhkarItem) => {
-    const current = counts[item.id] ?? item.count
-    if (current <= 0) return
+  const startItem = (index: number, sequential = true) => {
+    const item = items[index]
+    if (!item?.audio || !selectedReader.itemAudio) return
     setActiveId(item.id)
-    const next = Math.max(0, current - 1)
-    setCounts((previous) => ({ ...previous, [item.id]: next }))
-    if (next === 0) markCompleted(item)
+    void playSource(getItemUrl(item), 'item', index, sequential)
   }
 
-  const resetItem = (item: AdhkarItem) => {
-    stopAudio(); setActiveId(item.id); setCompleted((previous) => previous.filter((id) => id !== item.id)); setCounts((previous) => ({ ...previous, [item.id]: Math.max(1, Number(item.count) || 1) }))
-  }
-  const resetAll = () => { stopAudio(); setActiveId(null); setCompleted([]); setCounts(Object.fromEntries(items.map((item) => [item.id, Math.max(1, Number(item.count) || 1)]))) }
-  const copyItem = async (item: AdhkarItem) => { try { await navigator.clipboard.writeText(item.text); setCopiedId(item.id); window.setTimeout(() => setCopiedId(null), 1500) } catch { /* ignore */ } }
-  const toggleFavorite = (item: AdhkarItem) => {
-    const key = `samee3_adhkar_favorites_${requestedCategoryId || type}`
-    setFavoriteIds((previous) => { const next = previous.includes(item.id) ? previous.filter((id) => id !== item.id) : [...previous, item.id]; try { localStorage.setItem(key, JSON.stringify(next)) } catch { /* ignore */ } return next })
+  const startSection = () => {
+    if (!sectionTrack) return
+    setActiveId(null)
+    void playSource(sourceUrl(sectionTrack.url), 'section', -1, false)
   }
 
-  const toggleMainPlayer = () => {
-    const audio = audioRef.current
-    if (!audio) { if (selectedTrack) playSection(); else if (activeItem?.audio && selectedReciter.itemAudio) playItemAt(activeIndex, 1); return }
-    if (playing) { if (playerMode === 'item') sequenceRef.current = false; audio.pause(); return }
-    if (playerMode === 'item') sequenceRef.current = true
-    void audio.play().catch(() => setErrorMessage('اضغط تشغيل مرة أخرى لبدء الصوت.'))
+  const togglePlayback = () => {
+    const current = audioRef.current
+    if (current && audioMode) {
+      if (!current.paused) { current.pause(); return }
+      void current.play().catch(() => setMessage('تعذّر استكمال التسجيل.'))
+      return
+    }
+    if (sectionTrack) { startSection(); return }
+    if (canPlayItem) {
+      const first = items.findIndex((item) => Boolean(item.audio) && (counts[item.id] ?? item.count) > 0)
+      if (first >= 0) startItem(first)
+      else setMessage('انتهت الأذكار المسجّلة. يمكنك إعادة الأعداد للتشغيل من البداية.')
+    }
   }
 
-  const playerTitle = playerMode === 'section' ? selectedTrack?.title ?? pageTitle : activeItem?.text ?? pageTitle
-  const playerHasAudio = Boolean(selectedTrack || (activeItem?.audio && selectedReciter.itemAudio))
+  const changeReciter = (id: string) => {
+    if (!RECITERS.some((reader) => reader.id === id)) return
+    stopAudio()
+    setReciterId(id)
+    try { localStorage.setItem(RECITER_KEY, id) } catch { /* ignore */ }
+  }
+
+  const changeCount = (item: AdhkarItem) => {
+    setActiveId(item.id)
+    updateCount(item, (countsRef.current[item.id] ?? item.count) - 1)
+  }
+
+  const resetOne = (item: AdhkarItem) => {
+    stopAudio()
+    updateCount(item, item.count)
+    setActiveId(item.id)
+  }
+
+  const resetAll = () => {
+    stopAudio()
+    const reset: Record<number, number> = {}
+    items.forEach((item) => { reset[item.id] = item.count })
+    countsRef.current = reset
+    setCounts(reset)
+    setActiveId(null)
+    setMessage('تمت إعادة عدادات الورد إلى البداية.')
+  }
+
+  const toggleFavorite = (id: number) => {
+    setFavorites((previous) => {
+      const next = previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id]
+      try { localStorage.setItem(favoriteKey, JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }
+
+  const copyText = async (item: AdhkarItem) => {
+    try {
+      await navigator.clipboard.writeText(item.text)
+      setCopied(item.id)
+      window.setTimeout(() => setCopied(null), 1500)
+    } catch { setMessage('تعذّر النسخ. حاول مجددًا.') }
+  }
+
+  const saveRecordings = async () => {
+    if (downloadControllerRef.current) return
+    const urls = sectionTrack ? [sourceUrl(sectionTrack.url)]
+      : selectedReader.itemAudio ? Array.from(new Set(items.filter((item) => Boolean(item.audio)).map(getItemUrl)))
+      : []
+    if (!urls.length) return
+    const controller = new AbortController()
+    downloadControllerRef.current = controller
+    setDownloadTotal(urls.length)
+    setDownloadCount(0)
+    setMessage('')
+    let succeeded = 0
+    let failed = 0
+    let cursor = 0
+    const workers = Math.min(2, urls.length)
+    try {
+      await Promise.all(Array.from({ length: workers }, async () => {
+        for (;;) {
+          if (controller.signal.aborted) return
+          const index = cursor
+          cursor += 1
+          if (index >= urls.length) return
+          try { await retryDownloadAudio(urls[index], controller.signal); succeeded += 1 }
+          catch { if (controller.signal.aborted) return; failed += 1 }
+          if (!controller.signal.aborted) setDownloadCount(succeeded + failed)
+        }
+      }))
+      setMessage(controller.signal.aborted
+        ? `تم إيقاف التنزيل. المحفوظ: ${numberAr(succeeded)}.`
+        : failed ? `حُفظ ${numberAr(succeeded)} تسجيل وتعذّر حفظ ${numberAr(failed)}. يمكن إعادة المحاولة لاحقًا.`
+        : 'تم حفظ التسجيلات المتاحة على هذا الجهاز للتشغيل دون إنترنت.')
+    } finally {
+      downloadControllerRef.current = null
+      setDownloadCount(null)
+    }
+  }
+
+  const makeImage = async () => {
+    if (!imageItem || makingImage) return
+    setMakingImage(true)
+    try {
+      await shareDhikrImage(imageItem, imageTheme)
+      setImageItem(null)
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'تعذّر تجهيز صورة الذكر.')
+    } finally { setMakingImage(false) }
+  }
+
+  const visibleItems = onlyFavorites
+    ? items.filter((item) => favorites.includes(item.id))
+    : items
+
+  const readingText = (text: string) => showMarks ? text
+    : text.replace(/[\u064b-\u065f\u0670]/g, '')
+
+  const completed = useMemo(() => items.filter((item) => (counts[item.id] ?? item.count) === 0), [counts, items])
 
   return (
-    <div className="min-h-screen bg-mushaf-paper pb-32" dir="rtl">
-      <header className="sticky top-0 z-50 border-b border-mushaf-border/30 bg-mushaf-paper/95 backdrop-blur-xl">
+    <div dir="rtl" className={`min-h-screen pb-32 ${darkMode ? 'bg-[#13232c] text-white' : 'bg-[#f7f5ef] text-[#183e46]'}`}>
+      <header className="sticky top-0 z-40 border-b border-[#e7dccb] bg-[#f7f5ef]/95 backdrop-blur-xl">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-3">
-          <Link href="/adhkar" className="flex h-11 w-11 items-center justify-center rounded-2xl border border-mushaf-border/20 bg-white text-mushaf-teal shadow-sm"><ChevronRight size={21} /></Link>
-          <div className="min-w-0 text-center"><h1 className="truncate text-lg font-black text-mushaf-dark">{pageTitle}</h1><p className="mt-0.5 text-[11px] text-gray-500">قراءة وعداد وتشغيل صوتي</p></div>
-          <button type="button" onClick={() => setMuted((previous) => !previous)} className="flex h-11 w-11 items-center justify-center rounded-2xl border border-mushaf-border/20 bg-white text-mushaf-teal shadow-sm">{muted ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
+          <Link href="/adhkar" aria-label="العودة إلى الأذكار" className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#e7dccb] bg-white shadow-sm"><ArrowRight size={20} /></Link>
+          <div className="min-w-0 text-center"><h1 className="truncate text-lg font-black">{title}</h1><p className="text-[11px] text-[#889493]">وردك اليومي</p></div>
+          <div className="flex items-center gap-2">
+            <button type="button" aria-label="إعدادات القراءة" onClick={() => setSettingsOpen((old) => !old)} className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#e7dccb] bg-white text-[#175760]"><Settings2 size={19} /></button>
+            <button type="button" aria-label={muted ? 'إلغاء كتم الصوت' : 'كتم الصوت'} onClick={() => setMuted((value) => !value)} className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#e7dccb] bg-white text-[#175760]">{muted ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
+          </div>
         </div>
-        <div className="mx-auto max-w-4xl px-5 pb-3"><div className="mb-2 flex items-center justify-between text-xs font-black text-gray-500"><span>الإنجاز</span><span className="text-mushaf-teal">{arabicDigits(progress)}٪</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-gradient-to-r from-mushaf-teal to-mushaf-gold transition-all duration-500" style={{ width: `${progress}%` }} /></div></div>
+        <div className="mx-auto max-w-4xl px-5 pb-3">
+          <div className="mb-2 flex items-center justify-between text-xs font-bold"><span>الإنجاز — {numberAr(completed.length)} من {numberAr(items.length)}</span><span className="text-[#a47f43]">{numberAr(progress)}٪</span></div>
+          <div className="h-2 overflow-hidden rounded-full bg-[#e9e1d4]"><div className="h-full rounded-full bg-gradient-to-l from-[#c59c5b] to-[#1a6068] transition-all" style={{ width: `${progress}%` }} /></div>
+        </div>
       </header>
 
-      <main className="mx-auto w-full max-w-4xl px-4 pt-5 sm:px-5">
-        <section className="overflow-hidden rounded-[2rem] border border-mushaf-gold/20 bg-gradient-to-br from-[#175E67] via-[#11474E] to-[#0D383E] p-5 text-white shadow-xl sm:p-6">
-          <div className="flex items-start gap-4"><div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10"><Headphones size={25} className="text-mushaf-gold" /></div><div className="min-w-0 flex-1"><p className="text-xs font-black text-mushaf-gold">اختر القارئ</p><h2 className="mt-1 text-xl font-black">{selectedReciter.name}</h2><p className="mt-2 text-sm leading-7 text-white/70">الصوت يظهر هنا فقط عندما يوجد تسجيل مطابق للقسم أو تسجيل مفرد مرتبط بالذكر.</p><div className="mt-4"><ReaderSelect value={reciterId} onChange={handleReaderChange} /></div></div></div>
-        </section>
-
-        {errorMessage && <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold leading-6 text-amber-900">{errorMessage}</div>}
-
-        <section className="mt-4 rounded-[2rem] border border-mushaf-border/40 bg-white p-4 shadow-sm sm:p-5">
-          <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-[11px] font-black text-mushaf-gold">مشغل الورد</p><h2 className="mt-1 text-lg font-black text-mushaf-dark">{playerTitle}</h2></div><span className={`rounded-xl px-3 py-2 text-[10px] font-black ${playerHasAudio ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-500'}`}>{playerHasAudio ? 'تشغيل مباشر' : 'قراءة وعداد'}</span></div>
-          <div className="rounded-[1.7rem] bg-gradient-to-br from-[#175E67] to-[#0D383E] p-4 text-white shadow-lg sm:p-5">
-            <div className="flex items-center gap-3"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10"><Volume2 size={22} className="text-mushaf-gold" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-black">{selectedReciter.name}</p><p className="mt-1 line-clamp-2 text-xs leading-6 text-white/65">{activeItem?.text ?? selectedTrack?.title ?? 'اختر الذكر أو الورد لبدء التشغيل.'}</p></div><button type="button" onClick={toggleMainPlayer} disabled={!playerHasAudio} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-mushaf-gold text-white shadow-md disabled:opacity-40">{playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>{playing && <button type="button" onClick={stopAudio} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10"><X size={18} /></button>}</div>
-            {playerHasAudio && <><div className="mb-2 mt-4 flex items-center justify-between text-[10px] text-white/60"><span>{formatTime(playerCurrent)}</span><span>{formatTime(playerDuration)}</span></div><input type="range" min={0} max={Math.max(playerDuration, 1)} step={0.1} value={Math.min(playerCurrent, Math.max(playerDuration, 1))} onChange={(event: ChangeEvent<HTMLInputElement>) => { const next = Number(event.target.value); if (audioRef.current) audioRef.current.currentTime = next; setPlayerCurrent(next) }} className="w-full accent-[rgb(217,119,6)]" /></>}
-            {activeItem && selectedReciter.itemAudio && playerMode === 'item' && <div className="mt-3 flex items-center justify-between rounded-2xl bg-white/10 px-4 py-3 text-xs"><span className="text-white/65">المتبقي</span><strong className="text-mushaf-gold">{arabicDigits(remaining)}</strong></div>}
-            {selectedTrack && playerMode !== 'section' && <button type="button" onClick={playSection} className="mt-3 w-full rounded-2xl bg-white py-3 text-sm font-black text-mushaf-teal"><span className="inline-flex items-center justify-center gap-2"><Play size={17} fill="currentColor" /> تشغيل {selectedTrack.title}</span></button>}
+      <main className="mx-auto max-w-4xl space-y-5 px-4 pt-5 sm:px-5">
+        {settingsOpen && <section aria-label="إعدادات القراءة" className="rounded-[24px] border border-[#e9dac2] bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-black"><TypeIcon size={18} /> تفضيلات القراءة</h2><button type="button" onClick={() => setSettingsOpen(false)} aria-label="إغلاق الإعدادات"><X size={18} /></button></div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <span className="text-xs font-bold">حجم الخط</span>
+            <button type="button" onClick={() => setFontSize((n) => Math.max(20, n - 2))} aria-label="تصغير خط الأذكار" className="rounded-xl border px-3 py-2"><Minus size={17} /></button>
+            <span className="min-w-10 text-center text-sm font-bold">{numberAr(fontSize)}</span>
+            <button type="button" onClick={() => setFontSize((n) => Math.min(34, n + 2))} aria-label="تكبير خط الأذكار" className="rounded-xl border px-3 py-2"><Plus size={17} /></button>
+            <button type="button" onClick={() => setShowMarks((v) => !v)} className="rounded-xl border border-[#e6d9c6] px-4 py-2 text-xs font-bold">{showMarks ? 'إخفاء التشكيل بصريًا' : 'إظهار التشكيل'}</button>
+            <button type="button" onClick={() => setDarkMode((v) => !v)} className="inline-flex items-center gap-2 rounded-xl border border-[#e6d9c6] px-4 py-2 text-xs font-bold">{darkMode ? <Sun size={16} /> : <Moon size={16} />}{darkMode ? 'الوضع الفاتح' : 'وضع القراءة الليلي'}</button>
+          </div>
+          <p className="mt-3 text-[11px] leading-6 text-slate-500">إخفاء التشكيل يغيّر طريقة العرض فقط؛ النص الأصلي محفوظ بلا تغيير.</p>
+        </section>}
+        <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#1c5960] via-[#13484f] to-[#0e3038] p-5 text-white shadow-[0_16px_42px_rgba(13,54,58,0.18)] sm:p-7">
+          <div aria-hidden="true" className="pointer-events-none absolute -left-12 -top-12 h-44 w-44 rounded-full border border-white/10" />
+          <div className="relative flex items-start gap-3"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-[#e9ca92]"><Headphones size={23} /></span><div className="min-w-0 flex-1"><p className="text-xs font-bold text-[#e9ca92]">القراءة والتلاوة</p><h2 className="mt-1 text-xl font-black">{selectedReader.name}</h2><p className="mt-2 text-xs leading-6 text-white/70">الورد النصي مستقل عن التسجيلات. لا تُحسب الأذكار تلقائيًا عند تشغيل تسجيل القسم كاملًا، لعدم توفر توقيت مطابق لكل ذكر.</p></div></div>
+          <div className="relative mt-5">
+            <select aria-label="اختيار قارئ الأذكار" value={reciterId} onChange={(event: ChangeEvent<HTMLSelectElement>) => changeReciter(event.target.value)} className="w-full appearance-none rounded-2xl border border-white/20 bg-white px-4 py-3.5 pl-11 text-sm font-black text-[#183e46] outline-none">
+              {RECITERS.map((reader) => <option value={reader.id} key={reader.id}>{reader.name}</option>)}
+            </select>
+            <ChevronDown size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#ac894f]" />
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
+            <span className="rounded-full bg-white/10 px-3 py-1.5">{hasAudio ? 'تسجيل بشري متاح بالقائمة' : 'قراءة وعداد فقط'}</span>
+            {cachedData && <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5"><WifiOff size={13} /> بيانات محفوظة</span>}
           </div>
         </section>
 
-        <div className="mt-5 flex items-center justify-between gap-3"><div><h2 className="text-lg font-black text-mushaf-dark">{pageTitle}</h2><p className="mt-1 text-xs text-gray-400">اضغط على الذكر للعد حتى يكتمل العدد، ثم يظهر «تم».</p></div><button type="button" onClick={resetAll} className="inline-flex items-center gap-2 rounded-2xl border border-mushaf-border/30 bg-white px-4 py-3 text-xs font-black text-gray-500"><RotateCcw size={16} /> إعادة الكل</button></div>
+        {error && <div role="alert" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-900">{error}<Link href="/adhkar" className="mr-2 font-bold underline">العودة للأذكار</Link></div>}
+        {message && <p role="status" className="rounded-2xl border border-[#ddcba8] bg-[#fffaf0] p-4 text-sm leading-7 text-[#786039]">{message}</p>}
 
-        {loading ? <div className="flex flex-col items-center justify-center gap-4 py-20 text-mushaf-teal"><Loader2 size={40} className="animate-spin" /><p className="font-bold">جاري تجهيز الورد...</p></div> : items.length ? <div className="mt-4 flex flex-col gap-4">
-          {items.map((item, index) => { const current = counts[item.id] ?? item.count; const done = completed.includes(item.id) || current === 0; const active = activeId === item.id; const favorite = favoriteIds.includes(item.id); const itemPlayable = Boolean(selectedReciter.itemAudio && item.audio)
-            return <article key={`${item.id}-${index}`} className={`rounded-[2rem] border bg-white p-5 shadow-sm transition-all ${done ? 'border-emerald-200 bg-emerald-50/20' : active ? 'border-mushaf-teal/50 shadow-md ring-1 ring-mushaf-teal/10' : 'border-mushaf-border/40'}`}>
-              <div className="mb-4 flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className={`flex h-11 w-11 items-center justify-center rounded-2xl border text-sm font-black ${done ? 'border-emerald-200 bg-emerald-50 text-emerald-600' : 'border-mushaf-border/30 bg-mushaf-paper text-mushaf-teal'}`}>{done ? <Check size={19} /> : arabicDigits(index + 1)}</div><div><p className="text-[11px] font-bold text-gray-400">العدد المطلوب</p><p className="mt-1 text-sm font-black text-mushaf-dark">{arabicDigits(item.count)} مرات</p></div></div><button type="button" onClick={() => toggleFavorite(item)} className={`rounded-xl p-2 ${favorite ? 'bg-red-50 text-red-500' : 'text-gray-300 hover:bg-red-50 hover:text-red-400'}`}><Heart size={18} fill={favorite ? 'currentColor' : 'none'} /></button></div>
-              <button type="button" onClick={() => handleTap(item)} disabled={done} className="w-full text-right disabled:cursor-default"><p className={`font-uthmani text-2xl leading-[2.2] text-mushaf-dark ${done ? 'opacity-70' : ''}`}>{item.text}</p></button>
-              <div className="mt-5 flex flex-wrap items-center gap-2">{itemPlayable && <button type="button" onClick={() => { if (active && playing && playerMode === 'item') { sequenceRef.current = false; audioRef.current?.pause(); return } const indexOfItem = items.findIndex((candidate) => candidate.id === item.id); playItemAt(indexOfItem, 1) }} className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-teal px-4 py-2.5 text-sm font-black text-white">{active && playing && playerMode === 'item' ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}{active && playing && playerMode === 'item' ? 'إيقاف' : 'تشغيل الذكر'}</button>}
-                <button type="button" onClick={() => void copyItem(item)} className="inline-flex items-center gap-2 rounded-2xl bg-mushaf-paper px-4 py-2.5 text-sm font-black text-mushaf-teal">{copiedId === item.id ? <CheckCheck size={17} /> : <Copy size={17} />}{copiedId === item.id ? 'تم النسخ' : 'نسخ'}</button>
-                <button type="button" onClick={() => resetItem(item)} className="inline-flex items-center gap-2 rounded-2xl bg-gray-50 px-4 py-2.5 text-sm font-black text-gray-500"><RotateCcw size={17} /> إعادة</button>
-                <div className="mr-auto">{done ? <span className="inline-flex items-center gap-1 rounded-2xl bg-emerald-50 px-4 py-2.5 text-sm font-black text-emerald-600"><CheckCheck size={17} /> تم</span> : <div className="min-w-[86px] rounded-2xl border border-mushaf-border/30 bg-mushaf-paper px-3 py-2 text-center"><span className="block text-[10px] font-bold text-gray-400">متبقي</span><span className="text-lg font-black text-mushaf-teal">{arabicDigits(current)}</span></div>}</div>
-              </div>
-            </article> })}
-          {progress === 100 && <div className="rounded-[2rem] border border-mushaf-gold/20 bg-gradient-to-br from-[#175E67] to-[#0D383E] p-7 text-center text-white shadow-xl"><CheckCheck size={46} className="mx-auto mb-3 text-mushaf-gold" /><h2 className="text-2xl font-black">تقبّل الله طاعتكم</h2><p className="mt-2 text-sm text-white/70">أتممت {pageTitle} كاملًا.</p><Link href="/adhkar" className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-white px-6 py-3 text-sm font-black text-mushaf-teal"><ChevronRight size={18} /> العودة للأذكار</Link></div>}
-        </div> : <div className="py-16 text-center text-sm text-gray-500">لا توجد أذكار لعرضها.</div>}
+        <section className="rounded-[26px] border border-[#e9dece] bg-white p-4 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-center justify-between gap-3"><div><p className="text-xs font-black text-[#b08b4e]">المشغّل الصوتي</p><h2 className="mt-1 text-base font-black">{audioMode === 'item' && activeItem ? 'تشغيل الذكر بالتكرار' : sectionTrack?.title || 'تسجيلات الأذكار'}</h2></div><span className="rounded-full bg-[#f7f1e7] px-3 py-1.5 text-[11px] font-bold text-[#927345]">{audioMode === 'item' ? 'متتابع' : audioMode === 'section' ? 'الورد كاملًا' : 'جاهز'}</span></div>
+          <div className="rounded-[22px] bg-[#153f48] p-4 text-white">
+            <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-[#ecc993]"><Volume2 size={20} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{selectedReader.name}</p><p className="mt-1 line-clamp-1 text-xs text-white/60">{audioMode === 'item' && activeItem ? activeItem.text : sectionTrack?.title || 'اختر ذكرًا مسجّلًا'}</p></div>
+              <button type="button" onClick={togglePlayback} disabled={!hasAudio || audioLoading} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#d9b77d] text-[#163a41] disabled:opacity-40">{audioLoading ? <Loader2 size={19} className="animate-spin" /> : playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>
+              <button type="button" onClick={stopAudio} disabled={!audioMode} aria-label="إيقاف التسجيل" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 disabled:opacity-30"><Square size={16} fill="currentColor" /></button>
+            </div>
+            <div className="mt-4 flex items-center justify-between text-[11px] text-white/60"><span>{timeLabel(position)}</span><span>{timeLabel(duration)}</span></div>
+            <input aria-label="تغيير موضع التلاوة" type="range" min={0} max={Math.max(duration, 1)} step={1} value={Math.min(position, Math.max(duration, 1))} disabled={!duration || !audioMode} onChange={(event: ChangeEvent<HTMLInputElement>) => { const value = Number(event.target.value); if (audioRef.current && Number.isFinite(value)) { audioRef.current.currentTime = value; setPosition(value) } }} className="mt-2 w-full accent-[#d9b77d] disabled:opacity-40" />
+            <div className="mt-3 flex items-center justify-between gap-3 text-xs"><span className="text-white/70">السرعة</span><select aria-label="سرعة تشغيل الأذكار" value={speed} onChange={(event: ChangeEvent<HTMLSelectElement>) => setSpeed(Number(event.target.value))} className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white"><option className="text-black" value={0.85}>0.85×</option><option className="text-black" value={1}>1×</option><option className="text-black" value={1.15}>1.15×</option><option className="text-black" value={1.3}>1.3×</option></select></div>
+          </div>
+          {hasAudio && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void saveRecordings()} disabled={downloadCount !== null} className="inline-flex items-center gap-2 rounded-xl border border-[#e8d9bf] bg-[#fffaf0] px-4 py-3 text-xs font-bold text-[#85653a]"><Download size={16} />{downloadCount !== null ? `جارٍ الحفظ ${numberAr(downloadCount)} / ${numberAr(downloadTotal)}` : 'تنزيل الصوت المتاح دون نت'}</button>{downloadCount !== null && <button type="button" onClick={() => downloadControllerRef.current?.abort()} className="rounded-xl bg-[#fff1ef] px-4 py-3 text-xs font-bold text-red-700">إيقاف التنزيل</button>}</div>}
+          {!hasAudio && <p className="mt-3 text-xs leading-6 text-[#899394]">القارئ المختار لا يتوفر له تسجيل مطابق لهذا القسم حاليًا. يمكنك القراءة والعد بشكل طبيعي.</p>}
+        </section>
+
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-black">{title}</h2><p className="mt-1 text-xs text-[#7a8b8c]">اضغط على نص الذكر للعد، وسيُحفظ تقدمك على هذا الجهاز.</p></div><div className="flex items-center gap-2"><button type="button" onClick={() => setOnlyFavorites((v) => !v)} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold ${onlyFavorites ? 'border-[#d9b77d] bg-[#f7ead5] text-[#755323]' : 'border-[#e9dece] bg-white text-[#5e777a]'}`}><ListFilter size={16} />{onlyFavorites ? 'كل الأذكار' : 'المفضلة'}</button><button type="button" onClick={resetAll} disabled={!items.length} className="inline-flex items-center gap-2 rounded-xl border border-[#e9dece] bg-white px-3 py-2.5 text-xs font-bold text-[#21464b] disabled:opacity-50"><RotateCcw size={16} />إعادة الكل</button></div></div>
+
+        {loading && <div className="flex flex-col items-center justify-center gap-3 py-16"><Loader2 size={32} className="animate-spin text-[#ba965e]" /><p className="text-sm text-[#7a8b8c]">جارٍ تجهيز الأذكار…</p></div>}
+        {!loading && !items.length && !error && <div className="rounded-2xl bg-white p-8 text-center text-sm text-[#7a8b8c]">لا توجد أذكار للعرض في هذا القسم.</div>}
+
+        {onlyFavorites && !visibleItems.length && <div className="rounded-2xl border border-[#e5d7bc] bg-white p-7 text-center text-sm text-[#8b7751]">لا توجد أذكار في المفضلة بهذا القسم بعد.</div>}
+        <div className="space-y-4">
+          {visibleItems.map((item) => {
+            const index = items.indexOf(item)
+            const remaining = counts[item.id] ?? item.count
+            const done = remaining === 0
+            const active = activeId === item.id
+            const liked = favorites.includes(item.id)
+            const itemPlayable = Boolean(selectedReader.itemAudio && item.audio)
+            return (
+              <article key={`${item.id}-${index}`} className={`rounded-[26px] border p-5 shadow-sm transition sm:p-6 ${darkMode ? 'border-[#435657] bg-[#203841] text-[#f5f1e8]' : done ? 'border-[#b9dbd0] bg-[#f5fbf7]' : active ? 'border-[#c7a56c] bg-white ring-1 ring-[#e8d7b8]' : 'border-[#e9dfd1] bg-white'}`}>
+                <div className="mb-4 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><span className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-black ${done ? 'bg-[#e4f4e9] text-[#31765d]' : 'bg-[#f4ede1] text-[#987645]'}`}>{done ? <Check size={20} /> : numberAr(index + 1)}</span><div><p className="text-[11px] text-[#8d9797]">العدد المطلوب</p><p className="text-sm font-black">{numberAr(item.count)} {item.count === 1 ? 'مرة' : 'مرات'}</p></div></div><button type="button" onClick={() => toggleFavorite(item.id)} aria-label={liked ? 'إزالة من المفضلة' : 'إضافة للمفضلة'} className={`rounded-xl p-2.5 ${liked ? 'bg-red-50 text-red-500' : 'bg-[#f9f6f1] text-[#aaa19a]'}`}><Heart size={19} fill={liked ? 'currentColor' : 'none'} /></button></div>
+                <button type="button" disabled={done} onClick={() => changeCount(item)} aria-label={`تسبيح ${index + 1}، المتبقي ${remaining}`} className="w-full text-right disabled:cursor-default"><p className={`font-uthmani leading-[2.15] ${darkMode ? 'text-[#f9f4e9]' : 'text-[#214349]'} ${done ? 'opacity-70' : ''}`} style={{ fontSize: `${fontSize}px` }}>{readingText(item.text)}</p></button>
+                <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[#f0e8dc] pt-4">
+                  {itemPlayable && <button type="button" onClick={() => { if (active && audioMode === 'item') togglePlayback(); else startItem(index) }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#175660] px-3 py-2.5 text-xs font-bold text-white">{active && playing && audioMode === 'item' ? <Pause size={16} /> : <Play size={16} />} تشغيل الذكر</button>}
+                  <button type="button" onClick={() => void copyText(item)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#f5efe5] px-3 py-2.5 text-xs font-bold text-[#80613b]">{copied === item.id ? <CheckCheck size={16} /> : <Copy size={16} />}{copied === item.id ? 'تم النسخ' : 'نسخ'}</button>
+                  <button type="button" onClick={() => resetOne(item)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#f5f6f5] px-3 py-2.5 text-xs font-bold text-[#6e7f80]"><RotateCcw size={16} />إعادة</button>
+                  <button type="button" onClick={() => setSourceItem(item)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#edf4f1] px-3 py-2.5 text-xs font-bold text-[#396c5b]"><Info size={16} />المصدر</button>
+                  <button type="button" onClick={() => setImageItem(item)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#e9f0f5] px-3 py-2.5 text-xs font-bold text-[#345b75]"><ImageIcon size={16} />صورة الذكر</button>
+                  <div className="mr-auto rounded-xl bg-[#f5efe5] px-3 py-2 text-center text-xs font-black text-[#8d6a36]">{done ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCheck size={16} /> تم</span> : <>المتبقي: {numberAr(remaining)}</>}</div>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+
+        {!!items.length && progress === 100 && <section className="rounded-[26px] bg-[#184a52] p-7 text-center text-white shadow-lg"><CheckCheck size={43} className="mx-auto text-[#e9c68e]" /><h2 className="mt-3 text-2xl font-black">تقبّل الله طاعتكم</h2><p className="mt-2 text-sm text-white/70">أتممت {title} كاملًا.</p><Link href="/adhkar" className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#184a52]"><BookOpen size={18} />العودة إلى الأذكار</Link></section>}
+        {sourceItem && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4" onClick={() => setSourceItem(null)}>
+          <section role="dialog" aria-modal="true" aria-label="مصدر الذكر" onClick={(event: MouseEvent<HTMLElement>) => event.stopPropagation()} className="w-full max-w-lg rounded-[25px] bg-[#fffdf8] p-6 text-[#1c4146] shadow-2xl">
+            <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-lg font-black"><BookmarkCheck className="text-[#b28d52]" size={22} /> المصدر والفضل</h2><button type="button" onClick={() => setSourceItem(null)} aria-label="إغلاق"><X size={20} /></button></div>
+            <p className="mt-4 text-sm leading-8">{sourceItem.reference || sourceItem.source || 'هذا النص مدرج في مجموعة بيانات أذكار حصن المسلم المستخدمة بالمشروع. لم يُرفق المصدر بمرجع تفصيلي مستقل لهذا الذكر؛ لذلك لا ننسب إليه حديثًا محددًا من غير توثيق.'}</p>
+            {sourceItem.benefit && <div className="mt-4 rounded-xl bg-[#f7f0e5] p-4"><h3 className="text-sm font-black">الفضل</h3><p className="mt-2 text-sm leading-7">{sourceItem.benefit}</p></div>}
+            {!sourceItem.benefit && <p className="mt-3 text-xs leading-6 text-[#8b785c]">لا يتوفر شرح أو فضل موثّق بصورة منفصلة لهذا الذكر في البيانات الحالية.</p>}
+          </section>
+        </div>}
+        {imageItem && <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/60 p-4" onClick={() => !makingImage && setImageItem(null)}>
+          <section role="dialog" aria-modal="true" aria-label="تصميم صورة الذكر" onClick={(event: MouseEvent<HTMLElement>) => event.stopPropagation()} className="w-full max-w-md rounded-[25px] bg-[#fffdf8] p-6 text-[#1d4146] shadow-2xl">
+            <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-lg font-black"><ImageIcon size={21} className="text-[#a9854c]" />صورة الذكر</h2><button type="button" disabled={makingImage} onClick={() => setImageItem(null)} aria-label="إغلاق"><X size={20} /></button></div>
+            <p className="mt-3 text-xs leading-6 text-slate-600">اختر لون الصورة. سيظهر نص الذكر كاملًا، مع المصدر المتاح، دون اختصار.</p>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {(['ivory','emerald','night'] as const).map((value) => <button key={value} type="button" onClick={() => setImageTheme(value)} className={`rounded-xl border-2 p-2 text-xs font-bold ${imageTheme === value ? 'border-[#c49c5e]' : 'border-transparent'}`}>
+                <span className={`mb-2 block h-20 rounded-lg ${value === 'ivory' ? 'bg-[#f8f4ed]' : value === 'emerald' ? 'bg-[#123f3d]' : 'bg-[#132431]'}`} />
+                {value === 'ivory' ? 'عاجي' : value === 'emerald' ? 'زمردي' : 'ليلي'}
+              </button>)}
+            </div>
+            <button type="button" disabled={makingImage} onClick={() => void makeImage()} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#175760] px-4 py-3.5 text-sm font-extrabold text-white disabled:opacity-60">{makingImage ? <Loader2 size={18} className="animate-spin" /> : <Share2 size={18} />}{makingImage ? 'جارٍ تجهيز الصورة…' : 'حفظ أو مشاركة الصورة'}</button>
+          </section>
+        </div>}
       </main>
     </div>
   )
 }
 
-function formatTime(value: number) { if (!Number.isFinite(value) || value <= 0) return '٠:٠٠'; const total = Math.floor(value); const minutes = Math.floor(total / 60); const seconds = String(total % 60).padStart(2, '0'); return `${arabicDigits(minutes)}:${arabicDigits(seconds)}` }
-
 export default function ReadAdhkarPage() {
-  return <Suspense fallback={<div className="min-h-screen bg-mushaf-paper flex items-center justify-center text-mushaf-teal"><Loader2 size={42} className="animate-spin" /></div>}><ReadAdhkarContent /></Suspense>
+  return (
+    <Suspense fallback={<div dir="rtl" className="flex min-h-screen items-center justify-center bg-[#f7f5ef] text-[#175660]"><Loader2 size={34} className="animate-spin" /></div>}>
+      <ReadAdhkarContent />
+    </Suspense>
+  )
 }
