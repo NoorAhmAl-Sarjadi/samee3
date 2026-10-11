@@ -1,0 +1,149 @@
+name: SAMEE3 Hadith Explanations Review
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'public/data/hadith-explanations.json'
+      - '.github/workflows/hadith-explanations-review.yml'
+  pull_request:
+    paths:
+      - 'public/data/hadith-explanations.json'
+      - '.github/workflows/hadith-explanations-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate reviewed explanations
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out files
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check format, references, and editorial approval
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises'
+          import { resolve } from 'node:path'
+          import { createHash } from 'node:crypto'
+
+          const file = resolve('public/data/hadith-explanations.json')
+          const maxBytes = 3 * 1024 * 1024
+          const books = new Set([
+            'bukhari', 'muslim', 'abudawud', 'nasai', 'tirmidhi',
+            'ibnmajah', 'malik', 'darimi', 'ahmed', 'nawawi40',
+            'qudsi40', 'shahwaliullah40', 'riyad_assalihin',
+            'mishkat_almasabih', 'bulugh_almaram',
+            'aladab_almufrad', 'shamail_muhammadiyah',
+          ])
+          const safeId = /^[a-zA-Z0-9_-]{4,100}$/
+          const datePattern = /^\d{4}-\d{2}-\d{2}$/
+          const uniqueIds = new Set()
+          const uniqueHadiths = new Set()
+          const approvedRights = new Set(['licensed', 'public-domain', 'original'])
+          const today = new Date().toISOString().slice(0, 10)
+          const isObject = x => x !== null && typeof x === 'object' && !Array.isArray(x)
+          const string = (x, max) => typeof x === 'string' && !!x.trim() && x.length <= max
+          const integer = (x, min = 1) => Number.isSafeInteger(x) && x >= min && x <= 1000000
+          const normalize = s => s.normalize('NFKC')
+            .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+            .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي')
+            .replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/ة/g, 'ه')
+            .replace(/[^\u0621-\u064Aa-zA-Z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ').trim()
+          const fail = message => { throw new Error(message) }
+          const ensure = (condition, message) => { if (!condition) fail(message) }
+
+          let bytes
+          try { bytes = await readFile(file) }
+          catch { fail('Missing public/data/hadith-explanations.json') }
+          ensure(bytes.length <= maxBytes, 'Explanation JSON exceeds 3 MiB')
+          let document
+          try {
+            document = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+          } catch { fail('Explanation file must contain valid UTF-8 JSON') }
+          ensure(isObject(document) && document.version === 1, 'Expected { version: 1, entries: [] }')
+          ensure(Array.isArray(document.entries), 'entries must be an array')
+          ensure(document.entries.length <= 8000, 'Too many explanation entries')
+
+          for (const [index, entry] of document.entries.entries()) {
+            const where = `Entry #${index + 1}`
+            ensure(isObject(entry), `${where}: invalid object`)
+            ensure(string(entry.id, 100) && safeId.test(entry.id), `${where}: invalid id`)
+            ensure(books.has(entry.bookId), `${where}: unknown bookId`)
+            ensure(integer(entry.chapterId, 0), `${where}: invalid chapterId`)
+            ensure(integer(entry.hadithNumber), `${where}: invalid hadithNumber`)
+            ensure(string(entry.textAnchor, 280) && normalize(entry.textAnchor).length >= 18,
+              `${where}: missing/short matching textAnchor`)
+            ensure(string(entry.title, 180), `${where}: missing title`)
+            ensure(string(entry.explanation, 35000), `${where}: missing explanation`)
+            ensure(Array.isArray(entry.vocabulary) && entry.vocabulary.length <= 80,
+              `${where}: vocabulary must be an array (max 80)`)
+            ensure(Array.isArray(entry.benefits) && entry.benefits.length <= 50,
+              `${where}: benefits must be an array (max 50)`)
+
+            for (const [n, word] of entry.vocabulary.entries()) {
+              ensure(isObject(word) && string(word.word, 150) && string(word.meaning, 1200),
+                `${where}: invalid vocabulary item #${n + 1}`)
+            }
+            for (const [n, benefit] of entry.benefits.entries()) {
+              ensure(string(benefit, 2500), `${where}: invalid benefit #${n + 1}`)
+            }
+
+            const source = entry.source
+            ensure(isObject(source), `${where}: missing source`)
+            ensure(string(source.title, 250) && string(source.reference, 500),
+              `${where}: source title/reference required`)
+            if (source.author !== undefined) {
+              ensure(string(source.author, 250), `${where}: invalid source author`)
+            }
+            ensure(string(source.url, 2048), `${where}: missing source URL`)
+            let sourceUrl
+            try { sourceUrl = new URL(source.url) }
+            catch { fail(`${where}: invalid source URL`) }
+            ensure(
+              sourceUrl.protocol === 'https:' && !sourceUrl.username && !sourceUrl.password &&
+              !sourceUrl.port && sourceUrl.hostname.includes('.') &&
+              sourceUrl.hostname !== 'localhost' && !sourceUrl.hostname.endsWith('.local'),
+              `${where}: source URL must be a public HTTPS link`,
+            )
+
+            const editorial = entry.editorial
+            ensure(isObject(editorial) && editorial.status === 'approved',
+              `${where}: only human-approved records may be published`)
+            ensure(string(editorial.reviewedBy, 180), `${where}: reviewer name required`)
+            ensure(string(editorial.reviewedAt, 10) && datePattern.test(editorial.reviewedAt),
+              `${where}: invalid review date`)
+            const parsed = new Date(`${editorial.reviewedAt}T00:00:00Z`)
+            ensure(!Number.isNaN(parsed.getTime()) &&
+              parsed.toISOString().slice(0, 10) === editorial.reviewedAt &&
+              editorial.reviewedAt <= today,
+              `${where}: review date is impossible or in the future`)
+            ensure(approvedRights.has(editorial.rights), `${where}: rights declaration required`)
+
+            const key = `${entry.bookId}:${entry.chapterId}:${entry.hadithNumber}`
+            ensure(!uniqueIds.has(entry.id), `${where}: duplicate entry ID`)
+            ensure(!uniqueHadiths.has(key), `${where}: duplicate explanation for ${key}`)
+            uniqueIds.add(entry.id)
+            uniqueHadiths.add(key)
+          }
+
+          console.log(`Valid JSON structure: ${document.entries.length} approved records`)
+          console.log(`SHA-256: ${createHash('sha256').update(bytes).digest('hex')}`)
+          if (document.entries.length === 0) {
+            console.warn('No explanations published yet. The UI will correctly show the research link.')
+          }
+          console.warn('IMPORTANT: Automated checks do NOT verify scholarly accuracy,')
+          console.warn('the source text against a particular hadith edition, or redistribution rights.')
+          console.warn('Those checks require a real human reviewer before marking an entry approved.')
+          NODE
