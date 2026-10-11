@@ -379,36 +379,228 @@ async function getSavedBlob(item: PlayerItem): Promise<Blob | null> {
   } catch { return null }
 }
 
-async function fetchAudioBlob(url: string): Promise<Blob> {
-  if (!url || navigator.onLine === false) throw new Error('لا توجد نسخة كاملة محفوظة لهذا الصوت.')
-  const controller = new AbortController()
-  // يمتد الحد للتحميل كاملًا، وليس لاستلام الترويسات فقط.
-  const timer = window.setTimeout(() => controller.abort(), 300000)
-  try {
-    const response = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store', signal: controller.signal })
-    if (!isCompleteAudio(response)) throw new Error('لم يرجع المصدر ملف صوت كاملًا.')
-    const blob = await response.blob()
-    if (!blob.size) throw new Error('الملف الصوتي فارغ.')
-    return blob
-  } finally { window.clearTimeout(timer) }
+/**
+ * Transfer control used by one audio download or a Quran batch.
+ * Retains downloaded bytes during retries and uses HTTP Range when supported.
+ * Partial content is never written into the offline audio stores.
+ */
+type AudioTransferOptions = {
+  signal?: AbortSignal
+  onProgress?: (received: number, total: number | null) => void
 }
 
-async function storeAudio(item: PlayerItem): Promise<void> {
+const MAX_AUDIO_FILE_BYTES = 180 * 1024 * 1024
+const AUDIO_TRANSFER_ATTEMPTS = 4
+const AUDIO_STALL_MS = 35000
+
+function abortTransferError(): Error {
+  return new Error('تم إلغاء التنزيل.')
+}
+
+async function sleepBeforeRetry(milliseconds: number, signal?: AbortSignal) {
+  if (signal?.aborted) throw abortTransferError()
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, milliseconds)
+    const onAbort = () => {
+      window.clearTimeout(timeout)
+      reject(abortTransferError())
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+  })
+}
+
+async function fetchAudioBlob(url: string, options: AudioTransferOptions = {}): Promise<Blob> {
+  if (!url || navigator.onLine === false) {
+    throw new Error('لا يوجد اتصال لتنزيل هذا الملف الصوتي.')
+  }
+
+  const chunks: Uint8Array[] = []
+  let received = 0
+  let total: number | null = null
+  let validator: string | null = null
+  let mime = 'audio/mpeg'
+  let lastError: Error = new Error('تعذر تنزيل التسجيل.')
+
+  for (let attempt = 0; attempt < AUDIO_TRANSFER_ATTEMPTS; attempt += 1) {
+    if (options.signal?.aborted) throw abortTransferError()
+
+    const controller = new AbortController()
+    let stallTimer: number | null = null
+    let fatal = false
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+    const onExternalAbort = () => controller.abort()
+    options.signal?.addEventListener('abort', onExternalAbort, { once: true })
+
+    const refreshStall = () => {
+      if (stallTimer !== null) window.clearTimeout(stallTimer)
+      stallTimer = window.setTimeout(() => {
+        controller.abort()
+      }, AUDIO_STALL_MS)
+    }
+
+    try {
+      const headers = new Headers()
+      if (received > 0) {
+        headers.set('Range', `bytes=${received}-`)
+        // Cross-origin If-Range can force a CORS preflight. Avoid it
+        // for external Quran audio servers; verify their validator below.
+        if (validator && new URL(url, location.href).origin === location.origin) {
+          headers.set('If-Range', validator)
+        }
+      }
+
+      refreshStall()
+      const response = await fetch(url, {
+        headers,
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      refreshStall()
+
+      if (response.status === 429 || response.status >= 500) {
+        throw new Error(`المصدر مشغول (${response.status}).`)
+      }
+      if (!response.ok) {
+        fatal = true
+        throw new Error(`رفض مصدر الصوت التنزيل (${response.status}).`)
+      }
+
+      if (response.status !== 200 && response.status !== 206) {
+        fatal = true
+        throw new Error('المصدر لم يرجع ملفًا صوتيًا كاملًا.')
+      }
+
+      const contentType = (response.headers.get('content-type') || '').toLowerCase()
+      if (/(?:text\/html|application\/(?:json|xml))/.test(contentType)) {
+        fatal = true
+        throw new Error('المصدر أرجع صفحة أو رسالة خطأ بدل الصوت.')
+      }
+      if (contentType.startsWith('audio/')) mime = contentType.split(';')[0]
+
+      if (response.status === 206) {
+        const range = response.headers.get('content-range')
+        const parsed = range?.match(/^bytes (\d+)-(\d+)\/(\d+)$/i)
+        if (!parsed || Number(parsed[1]) !== received) {
+          fatal = true
+          throw new Error('المصدر أرجع جزءًا غير مطابق من الملف.')
+        }
+        total = Number(parsed[3])
+        if (Number(parsed[2]) >= total) {
+          fatal = true
+          throw new Error('حجم المقطع الصوتي غير صحيح.')
+        }
+      } else {
+        // Source ignored Range or the file has changed: restart safely.
+        if (received > 0) {
+          chunks.length = 0
+          received = 0
+          options.onProgress?.(0, total)
+        }
+        const headerLength = response.headers.get('content-length')
+        total = headerLength && /^\d+$/.test(headerLength)
+          ? Number(headerLength) : null
+      }
+
+      const nextValidator = response.headers.get('etag') || response.headers.get('last-modified')
+      if (response.status === 206 && validator && nextValidator && validator !== nextValidator) {
+        // Prevent joining bytes from two revisions of the same recording.
+        chunks.length = 0
+        received = 0
+        total = null
+        validator = nextValidator
+        throw new Error('تغيّر الملف في المصدر؛ إعادة التنزيل من البداية.')
+      }
+      if (nextValidator && !validator) validator = nextValidator
+
+      if (total !== null && (!Number.isSafeInteger(total) || total > MAX_AUDIO_FILE_BYTES)) {
+        fatal = true
+        throw new Error('حجم التسجيل أكبر من الحد الآمن للتنزيل على الجهاز.')
+      }
+
+      if (!response.body) {
+        throw new Error('المصدر لم يوفر بيانات صوتية للقراءة.')
+      }
+
+      reader = response.body.getReader()
+      for (;;) {
+        if (options.signal?.aborted) throw abortTransferError()
+        const piece = await reader.read()
+        if (piece.done) break
+        if (!piece.value?.byteLength) continue
+        received += piece.value.byteLength
+        if (received > MAX_AUDIO_FILE_BYTES || (total !== null && received > total)) {
+          fatal = true
+          throw new Error('حجم الملف الصوتي غير صالح أو تجاوز الحد الآمن.')
+        }
+        chunks.push(piece.value)
+        options.onProgress?.(received, total)
+        refreshStall()
+      }
+
+      if (received === 0) throw new Error('الملف الصوتي فارغ.')
+      if (total !== null && received !== total) {
+        throw new Error('اتصال التنزيل انتهى قبل اكتمال حجم التسجيل.')
+      }
+
+      return new Blob(chunks as BlobPart[], { type: mime })
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('تعذر تنزيل الصوت.')
+      if (options.signal?.aborted) throw abortTransferError()
+      if (fatal) throw lastError
+      if (attempt === AUDIO_TRANSFER_ATTEMPTS - 1) break
+      // Retry with backoff; existing bytes are kept for resumable servers.
+      await sleepBeforeRetry(600 * (attempt + 1) * (attempt + 1), options.signal)
+    } finally {
+      if (stallTimer !== null) window.clearTimeout(stallTimer)
+      options.signal?.removeEventListener('abort', onExternalAbort)
+      if (reader) {
+        void reader.cancel().catch(() => undefined)
+        try { reader.releaseLock() } catch { /* reader may still be closing */ }
+      }
+    }
+  }
+  throw lastError
+}
+
+async function storeAudio(item: PlayerItem, options: AudioTransferOptions = {}): Promise<'saved' | 'existing'> {
   if (item.isStream) throw new Error('البث المباشر لا يمكن حفظه.')
-  const blob = await getSavedBlob(item) ?? await fetchAudioBlob(item.audioUrl)
+  if (options.signal?.aborted) throw abortTransferError()
+
+  const existing = await getSavedBlob(item)
+  if (existing) {
+    rememberAudio(item)
+    return 'existing'
+  }
+
+  const blob = await fetchAudioBlob(item.audioUrl, options)
+  if (options.signal?.aborted) throw abortTransferError()
+
   if (item.kind === 'quran' && item.audioUrl && typeof caches !== 'undefined') {
     try {
       const cache = await caches.open(SAMEE3_QURAN_AUDIO_CACHE)
       await cache.put(item.audioUrl, new Response(blob, {
-        status: 200, headers: { 'Content-Type': blob.type || 'audio/mpeg', 'Content-Length': String(blob.size) },
+        status: 200,
+        headers: {
+          'Content-Type': blob.type || 'audio/mpeg',
+          'Content-Length': String(blob.size),
+        },
       }))
-      // نحتفظ بالنسخ القديمة ولا نحذفها أثناء الترحيل.
       rememberAudio(item)
-      return
-    } catch { /* نخزن في IndexedDB إذا تعذر Cache Storage. */ }
+      return 'saved'
+    } catch { /* fall back to IndexedDB without discarding the blob */ }
   }
-  await putOffline({ key: offlineKeyFor(item), title: item.title, subtitle: item.subtitle, blob, savedAt: Date.now(), item })
+  await putOffline({
+    key: offlineKeyFor(item), title: item.title,
+    subtitle: item.subtitle, blob, savedAt: Date.now(), item,
+  })
   rememberAudio(item)
+  return 'saved'
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -580,6 +772,9 @@ export default function AudioPage() {
   const [zipBusy, setZipBusy] = useState(false)
 
   const [quranZipProgress, setQuranZipProgress] = useState(0)
+  const [batchKind, setBatchKind] = useState<'zip' | 'offline' | null>(null)
+  const [batchStatus, setBatchStatus] = useState('')
+  const batchAbortRef = useRef<AbortController | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const objectUrlRef = useRef<string | null>(null)
@@ -1335,32 +1530,59 @@ export default function AudioPage() {
     } finally { setOfflineBusyKey(null); operationBusyRef.current = false }
   }
 
+  const stopQuranBatch = () => {
+    batchAbortRef.current?.abort()
+    setBatchStatus('جارٍ إيقاف التنزيل دون حذف ما اكتمل حفظه…')
+  }
+
   const downloadQuranZip = async () => {
     if (operationBusyRef.current) { notify('انتظر انتهاء العملية الحالية.'); return }
     if (!selectedReciter || !selectedRiwaya || !quranQueue.length) {
       notify('اختر القارئ والرواية أولًا.'); return
     }
     operationBusyRef.current = true
+    const controller = new AbortController()
+    batchAbortRef.current = controller
+    setBatchKind('zip')
     setZipBusy(true)
     setQuranZipProgress(0)
+    setBatchStatus('تجهيز ملف ZIP…')
     try {
       const zip = new JSZip()
       const total = quranQueue.length
       const failed: string[] = []
       let added = 0
+      let estimatedZipBytes = 0
+      const zipMemoryLimit = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+        ? 450 * 1024 * 1024 : 1500 * 1024 * 1024
       for (let index = 0; index < total; index += 1) {
+        if (controller.signal.aborted) throw abortTransferError()
         const item = quranQueue[index]
+        setBatchStatus(`تجهيز ${arabicDigits(index + 1)} من ${arabicDigits(total)}: ${item.title}`)
         try {
-          const blob = await getSavedBlob(item) ?? await fetchAudioBlob(item.audioUrl)
+          const blob = await getSavedBlob(item) ?? await fetchAudioBlob(item.audioUrl, { signal: controller.signal })
+          if (controller.signal.aborted) throw abortTransferError()
+          estimatedZipBytes += blob.size
+          if (estimatedZipBytes > zipMemoryLimit) {
+            throw new Error('الملف المضغوط كبير جدًا لذاكرة هذا الجهاز. استخدم «حفظ المصحف دون نت» لتنزيل التلاوات بأمان وبشكل متدرج.')
+          }
           zip.file(`${pad3(item.surahId || index + 1)} - ${safeFileName(item.title)}.mp3`, blob)
           added += 1
-        } catch { failed.push(item.title) }
+        } catch (error) {
+          if (controller.signal.aborted) throw abortTransferError()
+          if (error instanceof Error && error.message.includes('الملف المضغوط كبير جدًا')) throw error
+          failed.push(item.title)
+        }
         setQuranZipProgress(Math.round(((index + 1) / total) * 90))
       }
       if (!added) throw new Error('لم يمكن تجهيز أي سورة.')
       if (failed.length) zip.file('السور-غير-المضمنة.txt', failed.join('\n'))
-      const content = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: true },
-        (metadata) => setQuranZipProgress(90 + Math.round(metadata.percent / 10)))
+      setBatchStatus('جارٍ تجميع ملف ZIP النهائي…')
+      const content = await zip.generateAsync(
+        { type: 'blob', compression: 'STORE', streamFiles: true },
+        (metadata) => setQuranZipProgress(90 + Math.round(metadata.percent / 10)),
+      )
+      if (controller.signal.aborted) throw abortTransferError()
       const blobUrl = URL.createObjectURL(content)
       const anchor = document.createElement('a')
       anchor.href = blobUrl
@@ -1369,28 +1591,100 @@ export default function AudioPage() {
       anchor.click()
       anchor.remove()
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
-      notify(failed.length ? `تم تجهيز ${arabicDigits(added)} سورة؛ تعذر تضمين ${arabicDigits(failed.length)} سورة.` : `تم تجهيز جميع السور المختارة (${arabicDigits(added)}) في ZIP.`)
-    } catch { notify('تعذر إنشاء ZIP. تحقق من الاتصال والمساحة المتاحة.') }
-    finally { setZipBusy(false); setQuranZipProgress(0); operationBusyRef.current = false }
+      notify(failed.length
+        ? `تم تجهيز ${arabicDigits(added)} سورة؛ تعذر تضمين ${arabicDigits(failed.length)}.`
+        : `تم تجهيز ${arabicDigits(added)} سورة في ZIP.`)
+    } catch (error) {
+      notify(controller.signal.aborted
+        ? 'تم إيقاف تجهيز ZIP.'
+        : error instanceof Error ? error.message : 'تعذر إنشاء ZIP. تحقق من المساحة.')
+    } finally {
+      setZipBusy(false)
+      setBatchKind(null)
+      setBatchStatus('')
+      setQuranZipProgress(0)
+      batchAbortRef.current = null
+      operationBusyRef.current = false
+    }
   }
 
   const saveWholeQuranOffline = async () => {
     if (operationBusyRef.current) { notify('انتظر انتهاء العملية الحالية.'); return }
     if (!quranQueue.length) { notify('اختر القارئ والرواية أولًا.'); return }
+
     operationBusyRef.current = true
+    const controller = new AbortController()
+    batchAbortRef.current = controller
+    setBatchKind('offline')
     setZipBusy(true)
     setQuranZipProgress(0)
+
+    const total = quranQueue.length
+    let completed = 0
     let saved = 0
+    let skipped = 0
     let failed = 0
-    try {
-      for (let index = 0; index < quranQueue.length; index += 1) {
-        try { await storeAudio(quranQueue[index]); saved += 1 }
-        catch { failed += 1 }
-        setQuranZipProgress(Math.round(((index + 1) / quranQueue.length) * 100))
+    let nextIndex = 0
+
+    const network = (navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string }
+    }).connection
+    const constrained = network?.saveData ||
+      network?.effectiveType === '2g' || network?.effectiveType === 'slow-2g'
+    // Bounded parallelism makes a large Quran download noticeably faster
+    // without saturating mobile memory or overwhelming MP3Quran servers.
+    const workerCount = constrained ? 1 : /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 2 : 3
+
+    const updateStatus = () => {
+      setQuranZipProgress(Math.round(completed / total * 100))
+      setBatchStatus(
+        `اكتمل ${arabicDigits(completed)} من ${arabicDigits(total)} — جديد ${arabicDigits(saved)}، موجود سابقًا ${arabicDigits(skipped)}، تعذّر ${arabicDigits(failed)}`,
+      )
+    }
+
+    const worker = async () => {
+      while (!controller.signal.aborted) {
+        const index = nextIndex++
+        if (index >= total) return
+        const item = quranQueue[index]
+        try {
+          const result = await storeAudio(item, { signal: controller.signal })
+          if (result === 'existing') skipped += 1
+          else saved += 1
+        } catch (error) {
+          if (controller.signal.aborted) return
+          console.warn('SAMEE3 audio download:', item.title, error)
+          failed += 1
+        } finally {
+          completed += 1
+          updateStatus()
+        }
       }
+    }
+
+    try {
+      updateStatus()
+      await Promise.all(
+        Array.from({ length: Math.min(workerCount, total) }, () => worker()),
+      )
       await loadOfflineIndex()
-      notify(failed ? `المحفوظ ${arabicDigits(saved)} من ${arabicDigits(quranQueue.length)} سورة. تعذر حفظ ${arabicDigits(failed)}؛ يمكنك إعادة المحاولة.` : `اكتمل حفظ جميع السور المختارة (${arabicDigits(saved)}) دون إنترنت.`)
-    } finally { setZipBusy(false); setQuranZipProgress(0); operationBusyRef.current = false }
+      if (controller.signal.aborted) {
+        notify(`توقف التنزيل. محفوظ ${arabicDigits(saved + skipped)} سورة، ويمكنك الاستكمال بإعادة الضغط لاحقًا.`)
+      } else {
+        notify(failed
+          ? `جاهز ${arabicDigits(saved + skipped)} من ${arabicDigits(total)}. فشل ${arabicDigits(failed)}؛ إعادة المحاولة تتخطى المحفوظ.`
+          : `اكتمل تجهيز ${arabicDigits(total)} سورة للاستماع دون إنترنت.`)
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'تعذر حفظ المصحف الصوتي.')
+    } finally {
+      setZipBusy(false)
+      setBatchKind(null)
+      setBatchStatus('')
+      setQuranZipProgress(0)
+      batchAbortRef.current = null
+      operationBusyRef.current = false
+    }
   }
 
   const resetSelection = () => {
@@ -1905,10 +2199,8 @@ export default function AudioPage() {
                           )
                         }
                         label={
-                          zipBusy
-                            ? `جاري التجهيز ${arabicDigits(
-                                quranZipProgress
-                              )}%`
+                          batchKind === 'zip'
+                            ? `جاري تجهيز ZIP ${arabicDigits(quranZipProgress)}%`
                             : 'تحميل المصحف ZIP'
                         }
                         onClick={downloadQuranZip}
@@ -1920,8 +2212,8 @@ export default function AudioPage() {
                         }
                       />
                       <ActionButton
-                        icon={<WifiOff size={16} />}
-                        label="حفظ المصحف دون نت"
+                        icon={batchKind === 'offline' ? <Loader2 className="animate-spin" size={16} /> : <WifiOff size={16} />}
+                        label={batchKind === 'offline' ? `حفظ التلاوات ${arabicDigits(quranZipProgress)}%` : 'حفظ المصحف دون نت'}
                         onClick={saveWholeQuranOffline}
                         disabled={
                           zipBusy ||
@@ -1930,13 +2222,19 @@ export default function AudioPage() {
                           !availableSurahs.length
                         }
                       />
+                      {zipBusy && (
+                        <button type="button" onClick={stopQuranBatch}
+                          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
+                          إيقاف التنزيل
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {zipBusy && quranZipProgress > 0 && (
+                  {zipBusy && (
                     <div className="mt-4">
                       <div className="mb-2 flex items-center justify-between text-[11px] font-bold text-gray-500">
-                        <span>تجهيز ملفات الصوت</span>
+                        <span>{batchStatus || 'تجهيز ملفات الصوت'}</span>
                         <span>{arabicDigits(quranZipProgress)}%</span>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-mushaf-paper">
