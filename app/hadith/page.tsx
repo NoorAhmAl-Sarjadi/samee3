@@ -5,7 +5,7 @@ import Link from 'next/link'
 import JSZip from 'jszip'
 import {
   ArrowLeft, ArrowRight, BookOpen, BookMarked, Bookmark,
-  ChevronLeft, ChevronRight, Copy, Download, Heart,
+  ChevronLeft, ChevronRight, Copy, Download, Heart, ExternalLink, ClipboardCheck, Info,
   Image as ImageIcon, Library, List, Loader2, Menu, Moon, RefreshCw,
   Search, Share2, ShieldCheck, Sun, Type, WifiOff, X,
 } from 'lucide-react'
@@ -221,6 +221,33 @@ async function searchCachedHadithCorpus(
 
 const digit = (value: string | number) => String(value).replace(/\d/g, (n) => '٠١٢٣٤٥٦٧٨٩'[Number(n)])
 const favoriteKey = (bookId: string, number: number) => `${bookId}:${number}`
+
+// البحث في الموسوعات الخارجية وسيلة للمراجعة البشرية، ولا يعتبر حكمًا على الحديث.
+const HADITH_VERIFICATION_URL = 'https://dorar.net/hadith'
+const HADITH_ALTERNATIVE_LIBRARY_URL = 'https://sunnah.com/'
+
+function hadithVerificationPhrase(text: string): string {
+  const collapsed = text.replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/\s+/g, ' ').trim()
+  if (!collapsed) return ''
+  const starts = [
+    'قال رسول الله صلى الله عليه وسلم',
+    'أن رسول الله صلى الله عليه وسلم',
+    'عن رسول الله صلى الله عليه وسلم',
+    'قال النبي صلى الله عليه وسلم',
+    'أن النبي صلى الله عليه وسلم',
+  ]
+  let start = 0
+  for (const cue of starts) {
+    const found = collapsed.indexOf(cue)
+    if (found >= 0) { start = found; break }
+  }
+  return collapsed.slice(start, start + 140).trim()
+}
+
+function hadithBibliographicReference(book: HadithBook, chapter: HadithChapter | null, hadith: HadithRecord): string {
+  const chapterTitle = chapter?.name_ar || `الباب رقم ${hadith.chapterId}`
+  return `${book.name_ar}، ${chapterTitle}، رقم الحديث في المصدر الرقمي: ${hadith.idInBook}.\nالبيانات النصية: Al Furqan Hadith API\n${HADITH_SOURCE.documentation}\nتنبيه: قد تختلف الترقيمات بين الطبعات.`
+}
 const within = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value))
 
 function readStorage<T>(key: string, fallback: T): T {
@@ -384,6 +411,7 @@ export default function HadithPage() {
   const [resume, setResume] = useState<Resume | null>(null)
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [showNotes, setShowNotes] = useState(false)
+  const [showReferences, setShowReferences] = useState(false)
   const [showChapters, setShowChapters] = useState(true)
   const [appearance, setAppearance] = useState<Appearance>('cream')
   const [fontSize, setFontSize] = useState(27)
@@ -423,6 +451,7 @@ export default function HadithPage() {
   const activeHadith = displayedHadiths[hadithIndex] || null
   const activeKey = selectedBook && activeHadith ? favoriteKey(selectedBook.id, activeHadith.idInBook) : ''
   const activeIsFavorite = favoriteIds.includes(activeKey)
+  const verificationPhrase = useMemo(() => activeHadith ? hadithVerificationPhrase(activeHadith.arabic) : '', [activeHadith?.arabic])
   const bg = appearance === 'night'
   const baseColor = bg ? 'bg-[#101e22] text-[#eae5d8]' : 'bg-[#f7f3e9] text-[#243e40]'
   const surface = bg ? 'bg-[#192b2e] border-[#a58e60]/20' : 'bg-white border-[#d1b781]/20'
@@ -818,6 +847,35 @@ export default function HadithPage() {
     })
   }, [globalText, globalBook])
 
+  const copyVerificationPhrase = useCallback(async () => {
+    if (!verificationPhrase) return
+    try {
+      await navigator.clipboard.writeText(verificationPhrase)
+      setFeedback('تم نسخ عبارة من نص الحديث للبحث في الموسوعة. يجب مطابقة النتيجة مع النص والمصدر.')
+    } catch {
+      try {
+        window.prompt('انسخ عبارة البحث التالية:', verificationPhrase)
+      } catch { /* The browser may block prompts. */ }
+    }
+  }, [verificationPhrase])
+
+  const copyReferenceDetails = useCallback(async () => {
+    if (!selectedBook || !activeHadith) return
+    const reference = hadithBibliographicReference(selectedBook, currentChapter, activeHadith)
+    try {
+      await navigator.clipboard.writeText(reference)
+      setFeedback('تم نسخ بيانات الكتاب والباب ورقم الحديث والمصدر الرقمي.')
+    } catch {
+      try {
+        window.prompt('انسخ معلومات المصدر:', reference)
+      } catch { /* The browser may block prompts. */ }
+    }
+  }, [selectedBook, currentChapter, activeHadith])
+
+  useEffect(() => {
+    setShowReferences(false)
+  }, [activeKey])
+
   const activeNote = activeKey ? notes[activeKey] || '' : ''
   const updateNote = (value: string) => {
     if (!activeKey) return
@@ -1030,7 +1088,75 @@ export default function HadithPage() {
                     <div className="px-5 py-7 sm:px-9 sm:py-10">
                       <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><span className={`text-xs ${quiet}`}>{sectionOrigin === 'cache' ? 'نص محفوظ على الجهاز' : 'نص مكتبة الحديث'}</span><div className="flex items-center gap-2"><Type size={16} className={quiet} /><button aria-label="تصغير الخط" onClick={() => setFontSize((n) => within(n - 2, 19, 38))} className={`flex h-9 w-9 items-center justify-center rounded-lg ${softSurface}`}>−</button><span className={`text-xs ${quiet}`}>{digit(fontSize)}</span><button aria-label="تكبير الخط" onClick={() => setFontSize((n) => within(n + 2, 19, 38))} className={`flex h-9 w-9 items-center justify-center rounded-lg ${softSurface}`}>+</button></div></div>
                       <p dir="rtl" lang="ar" className="whitespace-pre-line break-words font-serif font-medium leading-[2.15] selection:bg-[#cbaa6e]/35" style={{ fontSize: `${fontSize}px`, overflowWrap: 'anywhere' }}>{activeHadith.arabic}</p>
-                      <div className={`mt-8 border-t pt-5 ${bg ? 'border-white/10' : 'border-[#bfa267]/20'}`}><div className="flex items-start gap-2"><ShieldCheck size={18} className="mt-0.5 shrink-0 text-[#aa8950]" /><div><p className="text-xs font-bold">المصدر: {selectedBook.name_ar}، حديث {digit(activeHadith.idInBook)}</p><p className={`mt-2 text-[11px] leading-6 ${quiet}`}>لا تُعرض درجة صحة أو شرح للحديث إلا عند توفر مرجع موثوق لها. النص شامل الإسناد كما ورد في المصدر الرقمي، دون فصلٍ تخميني بين الإسناد والمتن.</p></div></div></div>
+                      <div className={`mt-8 border-t pt-5 ${bg ? 'border-white/10' : 'border-[#bfa267]/20'}`}>
+                        <button
+                          type="button"
+                          aria-expanded={showReferences}
+                          aria-controls="hadith-scholarly-reference"
+                          onClick={() => setShowReferences((value) => !value)}
+                          className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-4 text-right transition ${bg ? 'border-white/10 bg-[#20373a]' : 'border-[#c2a66e]/25 bg-[#faf5ea]'}`}
+                        >
+                          <span className="flex min-w-0 items-center gap-3">
+                            <ShieldCheck size={21} className="shrink-0 text-[#aa8950]" />
+                            <span className="min-w-0">
+                              <strong className="block text-sm font-black">المصدر والتخريج والمراجعة</strong>
+                              <span className={`mt-1 block truncate text-xs ${quiet}`}>{selectedBook.name_ar} · حديث {digit(activeHadith.idInBook)}</span>
+                            </span>
+                          </span>
+                          <ChevronLeft size={19} className={`shrink-0 text-[#aa8950] transition-transform ${showReferences ? '-rotate-90' : ''}`} />
+                        </button>
+                        {showReferences && (
+                          <div id="hadith-scholarly-reference" className={`mt-3 overflow-hidden rounded-2xl border ${bg ? 'border-white/10' : 'border-[#c2a66e]/25'}`}>
+                            <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
+                              <div className={`rounded-xl p-3 ${softSurface}`}><p className={`text-[11px] ${quiet}`}>الكتاب</p><p className="mt-1 text-sm font-bold leading-7">{selectedBook.name_ar}</p></div>
+                              <div className={`rounded-xl p-3 ${softSurface}`}><p className={`text-[11px] ${quiet}`}>الباب</p><p className="mt-1 text-sm font-bold leading-7">{currentChapter?.name_ar || `رقم ${digit(activeHadith.chapterId)}`}</p></div>
+                              <div className={`rounded-xl p-3 ${softSurface}`}><p className={`text-[11px] ${quiet}`}>رقم الحديث داخل الكتاب</p><p className="mt-1 text-sm font-bold">{digit(activeHadith.idInBook)}</p></div>
+                              <div className={`rounded-xl p-3 ${softSurface}`}><p className={`text-[11px] ${quiet}`}>رقم السجل في المصدر</p><p className="mt-1 text-sm font-bold">{digit(activeHadith.id)}</p></div>
+                              {activeHadith.english?.narrator && (
+                                <div className={`rounded-xl p-3 sm:col-span-2 ${softSurface}`}>
+                                  <p className={`text-[11px] ${quiet}`}>الراوي بحسب البيانات الإنجليزية للمصدر</p>
+                                  <p dir="auto" className="mt-1 text-sm font-medium leading-7">{activeHadith.english.narrator}</p>
+                                </div>
+                              )}
+                            </div>
+                            <div className={`border-t px-4 py-4 sm:px-5 ${bg ? 'border-white/10' : 'border-[#c2a66e]/25'}`}>
+                              <p className="flex items-center gap-2 text-sm font-black"><Info size={17} className="text-[#aa8950]" /> معلومات التوثيق</p>
+                              <p className={`mt-3 text-xs leading-8 ${quiet}`}>
+                                <strong className="font-black">درجة الحديث:</strong> غير مذكورة في البيانات المتاحة لهذا الحديث. لا يُستنتج حكم خاص من مجرد وجوده في هذا الكتاب.
+                              </p>
+                              <p className={`mt-1 text-xs leading-8 ${quiet}`}>
+                                <strong className="font-black">الشرح والتخريج التفصيلي:</strong> لا يتوفران داخل هذا المصدر بصيغة موثقة مرتبطة بهذا النص.
+                              </p>
+                              <p className={`mt-1 text-xs leading-8 ${quiet}`}>
+                                <strong className="font-black">المصدر الرقمي:</strong> واجهة الفرقان للأحاديث. الأرقام تخص ترقيم المصدر الرقمي، وقد تختلف عن طبعات أخرى؛ والإسناد والمتن معروضان دون فصل تخميني.
+                              </p>
+                            </div>
+                            <div className={`border-t p-4 sm:p-5 ${bg ? 'border-white/10' : 'border-[#c2a66e]/25'}`}>
+                              <p className="text-sm font-black">التحقق من الحديث في المصادر العلمية</p>
+                              <p className={`mt-2 text-xs leading-7 ${quiet}`}>
+                                انسخ عبارة من الحديث، وافتح الموسوعة الحديثية ثم الصقها في البحث. طابق نص الحديث وراويه ومصدره قبل اعتماد أي حكم أو شرح؛ نتائج البحث ليست توثيقًا تلقائيًا للرواية الحالية.
+                              </p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button type="button" onClick={() => void copyVerificationPhrase()} disabled={!verificationPhrase} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold disabled:opacity-45 ${softSurface}`}>
+                                  <Copy size={16} /> نسخ عبارة البحث
+                                </button>
+                                <a href={HADITH_VERIFICATION_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-[#1c5c60] px-3 py-2.5 text-xs font-bold text-white">
+                                  <ExternalLink size={16} /> الموسوعة الحديثية
+                                </a>
+                                <a href={HADITH_ALTERNATIVE_LIBRARY_URL} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${softSurface}`}>
+                                  <ExternalLink size={16} /> مرجع إضافي
+                                </a>
+                                <a href={HADITH_SOURCE.documentation} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${softSurface}`}>
+                                  <ExternalLink size={16} /> توثيق مصدر النص
+                                </a>
+                                <button type="button" onClick={() => void copyReferenceDetails()} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${softSurface}`}>
+                                  <ClipboardCheck size={16} /> نسخ المرجع
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div className={`grid grid-cols-4 gap-2 border-t px-4 py-4 sm:px-7 ${bg ? 'border-white/10' : 'border-[#bfa267]/20'}`}>
                       <button onClick={() => void copyHadith()} className={`flex flex-col items-center gap-2 rounded-xl p-2 text-xs font-bold ${softSurface}`}><Copy size={19} /> نسخ</button>
