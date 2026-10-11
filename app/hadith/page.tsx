@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type TouchEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type TouchEvent } from 'react'
 import Link from 'next/link'
 import JSZip from 'jszip'
 import {
@@ -16,6 +16,7 @@ import {
   getHadithBook,
   getHadithBooks,
   getHadithChapter,
+  parseChapterHadiths,
   normalizeHadithSearch,
   type HadithBook,
   type HadithChapter,
@@ -31,12 +32,192 @@ const CATEGORIES = ['الكتب التسعة', 'الأربعينات', 'كتب �
 
 type Appearance = 'cream' | 'night'
 type DesignStyle = 'gold' | 'emerald' | 'midnight'
-type Screen = 'library' | 'reader' | 'favorites'
+type Screen = 'library' | 'reader' | 'favorites' | 'search'
 
 type Resume = { bookId: string; chapterId: number; hadithId: number; savedAt: number }
 type SavedItem = { key: string; bookId: string; bookTitle: string; chapterId: number; number: number; excerpt: string }
 type DownloadState = { bookId: string; done: number; total: number; active: boolean; error: string; complete: boolean }
 type RequestedPosition = { bookId: string; chapterId: number; hadithId?: number } | null
+
+// البحث الشامل يقرأ الأبواب الموجودة مسبقًا في Cache Storage فقط.
+// لا يبدأ تنزيل أي كتاب أو باب جديد أثناء البحث.
+type GlobalHit = {
+  key: string
+  bookId: string
+  chapterId: number
+  idInBook: number
+  excerpt: string
+}
+type GlobalProgress = {
+  total: number
+  checked: number
+  skipped: number
+  matches: number
+}
+type GlobalPhase = 'idle' | 'running' | 'complete' | 'cancelled' | 'error'
+const GLOBAL_SEARCH_LIMIT = 160
+const CACHE_JSON_LIMIT = 20 * 1024 * 1024
+const EMPTY_GLOBAL_PROGRESS: GlobalProgress = { total: 0, checked: 0, skipped: 0, matches: 0 }
+
+function normalizeGlobalQuery(value: string): string {
+  return normalizeHadithSearch(value)
+    .replace(/[٠-٩]/g, (c) => String(c.charCodeAt(0) - 1632))
+    .replace(/[۰-۹]/g, (c) => String(c.charCodeAt(0) - 1776))
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function matchesGlobalHadith(text: string, number: number, search: string): boolean {
+  if (/^\d+$/.test(search)) return number === Number(search)
+  const words = search.split(' ').filter(Boolean)
+  const content = normalizeGlobalQuery(text)
+  return words.length > 0 && words.every((word) => content.includes(word))
+}
+
+function globalSnippet(text: string, search: string): string {
+  const word = search.split(' ')[0] || ''
+  let position = 0
+  if (word && !/^\d+$/.test(word)) {
+    const positions: number[] = []
+    let stripped = ''
+    for (let i = 0; i < text.length; i++) {
+      const value = normalizeGlobalQuery(text[i])
+      for (const char of value) {
+        positions.push(i)
+        stripped += char
+      }
+    }
+    const match = stripped.indexOf(word)
+    if (match >= 0) position = positions[match] || 0
+  }
+  const from = Math.max(0, position - 62)
+  const to = Math.min(text.length, Math.max(position + 200, 260))
+  return `${from ? '…' : ''}${text.slice(from, to)}${to < text.length ? '…' : ''}`
+}
+
+function markedGlobalExcerpt(text: string, search: string): ReactNode[] {
+  const word = normalizeGlobalQuery(search).split(' ')[0] || ''
+  if (!word || /^\d+$/.test(word)) return [text]
+  let normalized = ''
+  const positionMap: number[] = []
+  for (let i = 0; i < text.length; i++) {
+    const mapped = normalizeGlobalQuery(text[i])
+    for (const char of mapped) { normalized += char; positionMap.push(i) }
+  }
+  const found = normalized.indexOf(word)
+  if (found < 0) return [text]
+  const from = positionMap[found]
+  const to = (positionMap[found + word.length - 1] || from) + 1
+  return [
+    text.slice(0, from),
+    <mark key="match" className="rounded-sm bg-[#d4ab63]/35 px-0.5 font-bold text-inherit">{text.slice(from, to)}</mark>,
+    text.slice(to),
+  ]
+}
+
+async function cachedJsonText(response: Response, signal: AbortSignal): Promise<string> {
+  const claimed = Number(response.headers.get('content-length') || 0)
+  if (claimed > CACHE_JSON_LIMIT) throw new Error('oversized-cache-entry')
+  if (!response.body) throw new Error('empty-cache-entry')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const blocks: string[] = []
+  let count = 0
+  let complete = false
+  try {
+    while (true) {
+      if (signal.aborted) throw new Error('search-cancelled')
+      const packet = await reader.read()
+      if (packet.done) { complete = true; break }
+      if (!packet.value) continue
+      count += packet.value.byteLength
+      if (count > CACHE_JSON_LIMIT) throw new Error('oversized-cache-entry')
+      blocks.push(decoder.decode(packet.value, { stream: true }))
+    }
+    if (signal.aborted) throw new Error('search-cancelled')
+    blocks.push(decoder.decode())
+    return blocks.join('')
+  } finally {
+    if (!complete) { try { await reader.cancel() } catch { /* ignore */ } }
+    reader.releaseLock()
+  }
+}
+
+async function searchCachedHadithCorpus(
+  query: string,
+  filterBook: string,
+  signal: AbortSignal,
+  onProgress: (progress: GlobalProgress, hits: readonly GlobalHit[]) => void,
+): Promise<{ hits: GlobalHit[]; progress: GlobalProgress }> {
+  const needle = normalizeGlobalQuery(query)
+  if (!needle) return { hits: [], progress: { ...EMPTY_GLOBAL_PROGRESS } }
+  if (typeof caches === 'undefined' || typeof window === 'undefined') {
+    throw new Error('التخزين المحلي غير متاح في هذا المتصفح.')
+  }
+  const names = await caches.keys()
+  if (signal.aborted) throw new Error('search-cancelled')
+  if (!names.includes(HADITH_SOURCE.cacheName)) {
+    return { hits: [], progress: { ...EMPTY_GLOBAL_PROGRESS } }
+  }
+  const cache = await caches.open(HADITH_SOURCE.cacheName)
+  const requests = await cache.keys()
+  if (signal.aborted) throw new Error('search-cancelled')
+  const found = new Map<string, { request: Request; bookId: string; chapterId: number }>()
+  for (const request of requests) {
+    if (request.method !== 'GET') continue
+    const url = new URL(request.url)
+    if (url.origin !== window.location.origin || url.search || url.hash) continue
+    const match = /^\/api\/hadith\/([a-z0-9_]+)\/chapter\/(0|[1-9]\d{0,5})$/.exec(url.pathname)
+    if (!match) continue
+    const bookId = match[1]
+    const chapterId = Number(match[2])
+    if (filterBook && filterBook !== bookId) continue
+    if (!HADITH_BOOKS.some((book) => book.id === bookId)) continue
+    const key = `${bookId}:${chapterId}`
+    if (!found.has(key)) found.set(key, { request, bookId, chapterId })
+  }
+  const progress: GlobalProgress = { total: found.size, checked: 0, skipped: 0, matches: 0 }
+  const hits: GlobalHit[] = []
+  onProgress({ ...progress }, hits)
+  for (const entry of Array.from(found.values())) {
+    if (signal.aborted) throw new Error('search-cancelled')
+    try {
+      const response = await cache.match(entry.request)
+      if (!response?.ok) throw new Error('invalid-response')
+      const text = await cachedJsonText(response, signal)
+      const parsed: unknown = JSON.parse(text) as unknown
+      const hadiths = parseChapterHadiths(parsed)
+      if (!hadiths.length || hadiths.some((hadith) => hadith.chapterId !== entry.chapterId)) {
+        throw new Error('invalid-chapter-content')
+      }
+      for (const hadith of hadiths) {
+        if (matchesGlobalHadith(hadith.arabic, hadith.idInBook, needle)) {
+          progress.matches++
+          if (hits.length < GLOBAL_SEARCH_LIMIT) {
+            hits.push({
+              key: `${entry.bookId}:${entry.chapterId}:${hadith.idInBook}`,
+              bookId: entry.bookId,
+              chapterId: entry.chapterId,
+              idInBook: hadith.idInBook,
+              excerpt: globalSnippet(hadith.arabic, needle),
+            })
+          }
+        }
+      }
+    } catch (error) {
+      if (signal.aborted) throw error
+      progress.skipped++
+    }
+    progress.checked++
+    if (progress.checked % 3 === 0 || progress.checked === progress.total) {
+      onProgress({ ...progress }, [...hits])
+      // لا نجمّد الرسم في Safari أثناء فحص كتب كبيرة محفوظة.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+  }
+  if (signal.aborted) throw new Error('search-cancelled')
+  return { hits, progress }
+}
 
 const digit = (value: string | number) => String(value).replace(/\d/g, (n) => '٠١٢٣٤٥٦٧٨٩'[Number(n)])
 const favoriteKey = (bookId: string, number: number) => `${bookId}:${number}`
@@ -214,11 +395,20 @@ export default function HadithPage() {
   const [cachedCount, setCachedCount] = useState(0)
   const [ready, setReady] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
+  const [globalText, setGlobalText] = useState('')
+  const [globalBook, setGlobalBook] = useState('')
+  const [globalHits, setGlobalHits] = useState<GlobalHit[]>([])
+  const [globalPhase, setGlobalPhase] = useState<GlobalPhase>('idle')
+  const [globalProgress, setGlobalProgress] = useState<GlobalProgress>(EMPTY_GLOBAL_PROGRESS)
+  const [globalError, setGlobalError] = useState('')
+  const [lastGlobalQuery, setLastGlobalQuery] = useState('')
 
   const initialPosition = useRef<RequestedPosition>(null)
   const readerScroll = useRef<HTMLDivElement | null>(null)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
   const downloadController = useRef<AbortController | null>(null)
+  const globalController = useRef<AbortController | null>(null)
+  const globalSession = useRef(0)
   const bookController = useRef<AbortController | null>(null)
   const chapterController = useRef<AbortController | null>(null)
   const savedResumeRef = useRef<Resume | null>(null)
@@ -277,6 +467,7 @@ export default function HadithPage() {
       bookController.current?.abort()
       chapterController.current?.abort()
       downloadController.current?.abort()
+      globalController.current?.abort()
     }
   }, [])
 
@@ -315,6 +506,8 @@ export default function HadithPage() {
 
   const chooseBook = useCallback((nextId: string, requested?: { chapterId: number; hadithId?: number }) => {
     stopDownload()
+    globalController.current?.abort()
+    setGlobalPhase((previous) => previous === 'running' ? 'cancelled' : previous)
     const progress = savedResumeRef.current
     initialPosition.current = requested
       ? { bookId: nextId, ...requested }
@@ -343,6 +536,8 @@ export default function HadithPage() {
 
   const goLibrary = useCallback(() => {
     stopDownload()
+    globalController.current?.abort()
+    setGlobalPhase((previous) => previous === 'running' ? 'cancelled' : previous)
     bookController.current?.abort()
     chapterController.current?.abort()
     initialPosition.current = null
@@ -580,6 +775,49 @@ export default function HadithPage() {
     } finally { if (downloadController.current === controller) downloadController.current = null }
   }, [bookId, chapters])
 
+  const stopGlobalSearch = useCallback(() => {
+    globalSession.current++
+    globalController.current?.abort()
+    globalController.current = null
+    setGlobalPhase((previous) => previous === 'running' ? 'cancelled' : previous)
+  }, [])
+
+  const beginGlobalSearch = useCallback((event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault()
+    const search = normalizeGlobalQuery(globalText)
+    if (!search) { setGlobalError('اكتب كلمة من الحديث أو رقمه أولًا.'); return }
+    globalController.current?.abort()
+    const controller = new AbortController()
+    globalController.current = controller
+    const session = ++globalSession.current
+    setGlobalError('')
+    setLastGlobalQuery(globalText.trim())
+    setGlobalHits([])
+    setGlobalProgress({ ...EMPTY_GLOBAL_PROGRESS })
+    setGlobalPhase('running')
+    void searchCachedHadithCorpus(
+      search, globalBook, controller.signal,
+      (progress, hits) => {
+        if (!controller.signal.aborted && globalSession.current === session && mountedRef.current) {
+          setGlobalProgress(progress)
+          setGlobalHits([...hits])
+        }
+      },
+    ).then(({ hits, progress }) => {
+      if (!controller.signal.aborted && globalSession.current === session && mountedRef.current) {
+        setGlobalHits(hits)
+        setGlobalProgress(progress)
+        setGlobalPhase('complete')
+      }
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || globalSession.current !== session || !mountedRef.current) return
+      setGlobalPhase('error')
+      setGlobalError(message(error, 'تعذر البحث في الكتب المحفوظة.'))
+    }).finally(() => {
+      if (globalController.current === controller) globalController.current = null
+    })
+  }, [globalText, globalBook])
+
   const activeNote = activeKey ? notes[activeKey] || '' : ''
   const updateNote = (value: string) => {
     if (!activeKey) return
@@ -620,8 +858,9 @@ export default function HadithPage() {
               </div>
             </section>
             <div className="mt-5 flex flex-wrap gap-2">
-              <button onClick={() => setScreen('library')} className={`rounded-2xl px-5 py-3 text-sm font-black transition ${screen === 'library' ? 'bg-[#1b5a60] text-white' : `${surface} border`}`}><Library size={17} className="ml-2 inline" />كل الكتب</button>
-              <button onClick={() => setScreen('favorites')} className={`rounded-2xl px-5 py-3 text-sm font-black transition ${screen === 'favorites' ? 'bg-[#1b5a60] text-white' : `${surface} border`}`}><Heart size={17} className="ml-2 inline" />المفضلة ({digit(favoriteIds.length)})</button>
+              <button onClick={() => { stopGlobalSearch(); setScreen('library') }} className={`rounded-2xl px-5 py-3 text-sm font-black transition ${screen === 'library' ? 'bg-[#1b5a60] text-white' : `${surface} border`}`}><Library size={17} className="ml-2 inline" />كل الكتب</button>
+              <button onClick={() => { stopGlobalSearch(); setScreen('favorites') }} className={`rounded-2xl px-5 py-3 text-sm font-black transition ${screen === 'favorites' ? 'bg-[#1b5a60] text-white' : `${surface} border`}`}><Heart size={17} className="ml-2 inline" />المفضلة ({digit(favoriteIds.length)})</button>
+              <button onClick={() => setScreen('search')} className={`rounded-2xl px-5 py-3 text-sm font-black transition ${screen === 'search' ? 'bg-[#1b5a60] text-white' : `${surface} border`}`}><Search size={17} className="ml-2 inline" />البحث الشامل</button>
             </div>
           </>
         )}
@@ -634,6 +873,7 @@ export default function HadithPage() {
               <ChevronLeft size={19} className="text-[#bb9959]" />
             </button>}
             <div className={`flex items-center gap-3 rounded-2xl border px-4 py-4 ${surface}`}><Search size={20} className="text-[#b18e51]" /><input aria-label="البحث عن كتاب" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="ابحث عن اسم كتاب أو مؤلف..." value={bookSearch} onChange={(e: ChangeEvent<HTMLInputElement>) => setBookSearch(e.target.value)} />{bookSearch && <button aria-label="مسح البحث" onClick={() => setBookSearch('')}><X size={18} /></button>}</div>
+            <button onClick={() => setScreen('search')} className={`flex w-full items-center justify-between rounded-2xl border border-[#b99a5c]/40 bg-[#b99a5c]/10 px-5 py-4 text-right text-sm font-bold ${bg ? 'text-[#ecd8ae]' : 'text-[#48625c]'}`}><span className="flex items-center gap-3"><Search className="text-[#b18e51]" size={20} />ابحث داخل أحاديث جميع الكتب المحفوظة على جهازك</span><ChevronLeft size={18} /></button>
             {booksSource === 'catalogue' && <p className={`text-xs ${quiet}`}>تظهر أسماء الكتب من الفهرس، وقد تتطلب بعض الأبواب اتصالًا عند فتحها لأول مرة.</p>}
             {CATEGORIES.map((category) => {
               const group = filteredBooks.filter((b) => b.category === category)
@@ -651,6 +891,59 @@ export default function HadithPage() {
             {!filteredBooks.length && <div className={`rounded-3xl border p-8 text-center ${surface}`}>لا توجد كتب تطابق البحث.</div>}
             <p className={`text-center text-xs leading-6 ${quiet}`}>التسجيلات البشرية للكتب قد تكون متاحة بشكل مستقل في المكتبة الصوتية. لا يوجد تشغيل صوت داخل قسم الحديث.</p>
           </div>
+        )}
+
+        {screen === 'search' && (
+          <section className={`mt-6 overflow-hidden rounded-[28px] border p-5 shadow-sm sm:p-7 ${surface}`}>
+            <div className="flex items-start gap-3">
+              <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-[#b99452] ${softSurface}`}><Search size={23} /></span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-xl font-black">بحث شامل في الأحاديث المحفوظة</h2>
+                <p className={`mt-2 text-xs leading-7 ${quiet}`}>ابحث في جميع الكتب التي نزّلت أبوابها سابقًا. لا يحتاج البحث إلى الإنترنت، ولا يجلب أحاديث من الشبكة. دعم البحث بالتشكيل وبدونه، وبالراوي ضمن نص الحديث، وبرقم الحديث داخل كتابه.</p>
+              </div>
+            </div>
+            <form onSubmit={beginGlobalSearch} className="mt-6 space-y-3">
+              <label htmlFor="hadith-global-search" className="block text-sm font-bold">كلمة أو عبارة أو رقم حديث</label>
+              <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${softSurface} ${bg ? 'border-white/10' : 'border-[#d2be94]/35'}`}>
+                <Search size={20} className="shrink-0 text-[#b48e50]" />
+                <input id="hadith-global-search" type="search" autoComplete="off" value={globalText} onChange={(event: ChangeEvent<HTMLInputElement>) => setGlobalText(event.target.value)} placeholder="مثال: إنما الأعمال بالنيات" className="w-full min-w-0 bg-transparent text-sm leading-7 outline-none" />
+                {!!globalText && <button type="button" aria-label="مسح العبارة" onClick={() => { setGlobalText(''); setGlobalError('') }}><X size={17} /></button>}
+              </div>
+              <label htmlFor="hadith-global-book" className="block text-sm font-bold">نطاق البحث</label>
+              <select id="hadith-global-book" value={globalBook} onChange={(event: ChangeEvent<HTMLSelectElement>) => setGlobalBook(event.target.value)} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none ${bg ? 'border-white/10 bg-[#20383a]' : 'border-[#d2be94]/35 bg-[#fbf9f3]'}`}>
+                <option value="">جميع الكتب المحفوظة</option>
+                {books.map((book) => <option key={book.id} value={book.id}>{book.name_ar}</option>)}
+              </select>
+              <div className="flex flex-wrap gap-2">
+                <button type="submit" disabled={globalPhase === 'running'} className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#1b5b60] px-5 py-3.5 text-sm font-black text-white disabled:opacity-60">{globalPhase === 'running' ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}{globalPhase === 'running' ? 'جارٍ فحص المحفوظ...' : 'ابحث في الأحاديث'}</button>
+                {globalPhase === 'running' && <button type="button" onClick={stopGlobalSearch} className={`rounded-2xl border px-4 py-3 text-sm font-bold ${surface}`}>إيقاف</button>}
+              </div>
+            </form>
+            {globalError && <p role="alert" className="mt-4 rounded-xl border border-amber-400/30 bg-amber-300/10 p-4 text-xs leading-7 text-amber-600">{globalError}</p>}
+            {globalPhase !== 'idle' && <div className={`mt-5 rounded-2xl p-4 ${softSurface}`} role="status" aria-live="polite">
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-bold">
+                <span>{globalPhase === 'running' ? 'جارٍ الفحص المحلي' : globalPhase === 'complete' ? 'اكتمل البحث' : globalPhase === 'cancelled' ? 'أُوقف البحث' : 'تعذر إكمال البحث'}</span>
+                <span>{digit(globalProgress.checked)} / {digit(globalProgress.total)} باب</span>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#b99a5c]/20"><div className="h-full rounded-full bg-[#b99a5c] transition-all" style={{ width: `${globalProgress.total ? within(globalProgress.checked / globalProgress.total * 100, 0, 100) : 0}%` }} /></div>
+              <p className={`mt-3 text-xs leading-6 ${quiet}`}>مطابقات: {digit(globalProgress.matches)} · أبواب تعذّر قراءتها: {digit(globalProgress.skipped)}{globalProgress.matches > GLOBAL_SEARCH_LIMIT ? ` · تُعرض أول ${digit(GLOBAL_SEARCH_LIMIT)} نتيجة` : ''}</p>
+            </div>}
+            {globalHits.length > 0 && <div className="mt-6 space-y-3">
+              <h3 className="font-black">نتائج {lastGlobalQuery ? `«${lastGlobalQuery}»` : 'البحث'}</h3>
+              {globalHits.map((hit) => {
+                const foundBook = books.find((b) => b.id === hit.bookId) || HADITH_BOOKS.find((b) => b.id === hit.bookId)
+                return <button key={hit.key} onClick={() => chooseBook(hit.bookId, { chapterId: hit.chapterId, hadithId: hit.idInBook })} className={`block w-full rounded-2xl border p-4 text-right transition hover:border-[#b99557] ${bg ? 'border-white/10 bg-white/5' : 'border-[#d6c2a1]/35 bg-[#fcfaf5]'}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{foundBook?.name_ar || hit.bookId}</strong><span className="text-xs font-bold text-[#b18f50]">الحديث {digit(hit.idInBook)}</span></div>
+                  <p className={`mt-1 text-[11px] ${quiet}`}>الباب {digit(hit.chapterId)}</p>
+                  <p className={`mt-2 whitespace-pre-wrap break-words text-sm leading-8 ${quiet}`}>{markedGlobalExcerpt(hit.excerpt, lastGlobalQuery)}</p>
+                  <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#ae8951]">فتح الحديث <ChevronLeft size={14} /></span>
+                </button>
+              })}
+            </div>}
+            {globalPhase === 'complete' && globalProgress.total === 0 && <div className={`mt-5 rounded-2xl p-5 text-sm leading-8 ${softSurface}`}>لا توجد أبواب محفوظة ضمن نطاق البحث. افتح الكتاب أثناء الاتصال واضغط «تنزيل الأبواب» أولًا، ثم أعد البحث.</div>}
+            {globalPhase === 'complete' && globalProgress.total > 0 && !globalHits.length && <div className={`mt-5 rounded-2xl p-5 text-sm leading-8 ${softSurface}`}>{globalProgress.skipped === globalProgress.total ? 'لم يمكن قراءة أي باب محفوظ؛ افتح أحد الكتب واتركه يُعيد حفظ الأبواب.' : 'لم يظهر حديث مطابق في الأبواب التي أمكن فحصها. جرّب كلمة أقل أو اختر نطاقًا أوسع.'}</div>}
+            <p className={`mt-5 text-xs leading-7 ${quiet}`}>أسماء الكتب المعروضة في القائمة لا تعني أنها محفوظة. النتائج تغطي الأبواب الموجودة بالفعل في تخزين المتصفح فقط. إذا حذف الجهاز التخزين المحلي، يلزم تنزيل الأبواب مجددًا.</p>
+          </section>
         )}
 
         {screen === 'favorites' && (
