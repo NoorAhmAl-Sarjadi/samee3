@@ -1,612 +1,464 @@
-
-import { NextResponse } from 'next/server'
-
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+export const maxDuration = 60
 
-/**
- * SAMEE3 — Adhkar Audio Proxy
- * Path: app/api/adhkar-audio/route.ts
- *
- * Secure audio streaming for Adhkar pages.
- * Supports Range, HEAD, approved redirects,
- * streaming and connection cancellation.
- */
+const MAX_AUDIO_BYTES = 180 * 1024 * 1024
+const MAX_REDIRECTS = 4
+const CONNECT_TIMEOUT_MS = 14000
+const FIRST_BYTE_TIMEOUT_MS = 15000
+const IDLE_TIMEOUT_MS = 25000
+const MAX_ATTEMPTS = 2
 
-const MAX_URL_LENGTH = 4096
-const MAX_REDIRECTS = 5
-const HEADERS_TIMEOUT_MS = 15000
+const AUDIO_EXTENSION = /\.(?:mp3|m4a|aac|ogg|wav)$/i
+const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504])
+const REDIRECTS = new Set([301, 302, 303, 307, 308])
 
-const SOURCE_HOSTS = [
-  'download.tvquran.com',
-  'd1.islamhouse.com',
-  'cdn.jsdelivr.net',
-  'archive.org',
-  'www.archive.org',
-]
-
-function isTrustedHost(host: string): boolean {
-  return (
-    SOURCE_HOSTS.includes(host) ||
-    /^ia\d+\.us\.archive\.org$/.test(host)
-  )
+function jsonError(message: string, status: number): Response {
+  return new Response(JSON.stringify({ ok: false, error: message }), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
 }
 
-function parseTrustedUrl(value: string): URL | null {
-  if (!value || value.length > MAX_URL_LENGTH) {
-    return null
-  }
+/** Restrict to known Adhkar audio repositories, not arbitrary external URLs. */
+function allowedAudioUrl(input: string): URL | null {
+  if (!input || input.length > 1800) return null
 
   try {
-    const url = new URL(value)
-
+    const url = new URL(input)
     if (
       url.protocol !== 'https:' ||
-      url.port !== '' ||
-      url.username !== '' ||
-      url.password !== '' ||
-      url.hash !== '' ||
-      !isTrustedHost(url.hostname.toLowerCase())
-    ) {
-      return null
+      url.username ||
+      url.password ||
+      url.port ||
+      url.hash ||
+      url.search.length > 200 ||
+      /%(?:2f|5c|00)/i.test(url.pathname) ||
+      !AUDIO_EXTENSION.test(url.pathname)
+    ) return null
+
+    const host = url.hostname.toLowerCase()
+    const path = url.pathname
+
+    if (host === 'cdn.jsdelivr.net') {
+      return /^\/gh\/rn0x\/Adhkar-json@(?:main|master|[a-f0-9]{7,40})\/audio\/[a-z0-9_./-]+\.(?:mp3|m4a|aac|ogg|wav)$/i.test(path) &&
+        !path.includes('..') ? url : null
     }
 
-    return url
+    // Fallback for the same public Adhkar-json recordings.
+    if (host === 'raw.githubusercontent.com') {
+      return /^\/rn0x\/Adhkar-json\/(?:main|master|[a-f0-9]{7,40})\/audio\/[a-z0-9_./-]+\.(?:mp3|m4a|aac|ogg|wav)$/i.test(path) &&
+        !path.includes('..') ? url : null
+    }
+
+    if (host === 'download.tvquran.com') {
+      return /^\/download\/TvQuran\.com__Athkar\/[a-z0-9_.-]+\.mp3$/i.test(path) ? url : null
+    }
+
+    if (/^d\d+\.islamhouse\.com$/.test(host)) {
+      return /^\/data\/ar\/ih_sounds\/[a-z0-9_./-]+\.mp3$/i.test(path) &&
+        !path.includes('..') ? url : null
+    }
+
+    if (host === 'archive.org' || host === 'www.archive.org') {
+      return /^\/download\/[a-z0-9_.-]+\/[a-z0-9_./%-]+\.mp3$/i.test(path) &&
+        !path.includes('..') ? url : null
+    }
+
+    // Internet Archive's redirect targets for archive.org/download links.
+    if (/^ia\d+\.us\.archive\.org$/.test(host)) {
+      return /^\/\d+\/items\/[a-z0-9_./%-]+\.mp3$/i.test(path) &&
+        !path.includes('..') ? url : null
+    }
+
+    return null
   } catch {
     return null
   }
 }
 
-function isValidRange(value: string | null): boolean {
-  if (value === null) return true
-  if (value.length > 80) return false
-
-  const match = /^bytes=(\d*)-(\d*)$/.exec(
-    value.trim(),
+function fallbackFor(url: URL): URL | null {
+  if (url.hostname !== 'cdn.jsdelivr.net') return null
+  const match = url.pathname.match(
+    /^\/gh\/rn0x\/Adhkar-json@([^/]+)\/(audio\/.*)$/i,
   )
-
-  if (!match || (!match[1] && !match[2])) {
-    return false
-  }
-
-  const start = match[1] ? Number(match[1]) : null
-  const end = match[2] ? Number(match[2]) : null
-
-  return (
-    (start === null || Number.isSafeInteger(start)) &&
-    (end === null || Number.isSafeInteger(end)) &&
-    (start === null || end === null || start <= end) &&
-    !(start === null && end === 0)
+  if (!match) return null
+  return allowedAudioUrl(
+    `https://raw.githubusercontent.com/rn0x/Adhkar-json/${match[1]}/${match[2]}`,
   )
 }
 
-function looksLikeAudio(
-  response: Response,
-  url: URL,
-): boolean {
-  const raw = response.headers.get('content-type')
+function validRange(value: string | null): boolean {
+  return !value || /^bytes=(?:\d+-\d*|-\d+)$/i.test(value.trim())
+}
 
-  const mime =
-    raw?.split(';')[0].trim().toLowerCase() || ''
-
-  if (mime.startsWith('audio/')) {
-    return true
-  }
+function safeMime(value: string | null): string | null {
+  if (!value) return 'audio/mpeg'
+  const mime = value.toLowerCase().split(';')[0].trim()
+  if (
+    mime.startsWith('text/') ||
+    mime.includes('json') ||
+    mime.includes('html') ||
+    mime.includes('xml') ||
+    mime.includes('javascript') ||
+    mime.includes('svg')
+  ) return null
 
   if (
-    mime === 'video/mp4' ||
-    mime === 'video/webm'
-  ) {
-    return true
+    mime.startsWith('audio/') ||
+    mime === 'application/octet-stream' ||
+    mime === 'binary/octet-stream' ||
+    mime === 'application/x-download' ||
+    mime === 'application/force-download'
+  ) return mime
+
+  return null
+}
+
+/** Guard against upstream partial files that claim a different byte size. */
+function consistentRange(
+  requested: string,
+  actual: string | null,
+  length: number | null,
+): boolean {
+  const parsed = /^bytes (\d+)-(\d+)\/(\d+|\*)$/i.exec(actual || '')
+  if (!parsed) return false
+
+  const start = Number(parsed[1])
+  const end = Number(parsed[2])
+  const total = parsed[3] === '*' ? null : Number(parsed[3])
+
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    (total !== null && (!Number.isSafeInteger(total) || end >= total)) ||
+    (length !== null && end - start + 1 !== length)
+  ) return false
+
+  const client = /^bytes=(\d*)-(\d*)$/i.exec(requested.trim())
+  if (!client) return false
+
+  if (client[1]) {
+    if (start !== Number(client[1])) return false
+    if (client[2] && end > Number(client[2])) return false
+  } else if (client[2]) {
+    const suffix = Number(client[2])
+    if (!suffix || end - start + 1 > suffix) return false
   }
 
-  const audioFile =
-    /\.(mp3|m4a|aac|ogg|opus|wav|flac|webm|mp4)$/i.test(
-      url.pathname,
-    )
-
-  return (
-    audioFile &&
-    (
-      !mime ||
-      mime === 'application/octet-stream' ||
-      mime === 'binary/octet-stream'
-    )
-  )
+  return true
 }
 
-function errorResponse(
-  message: string,
-  status: number,
-): NextResponse {
-  return NextResponse.json(
-    {
-      ok: false,
-      error: message,
-    },
-    {
-      status,
-      headers: {
-        'Cache-Control': 'no-store',
-      },
-    },
-  )
-}
-
-function copyHeader(
-  source: Headers,
-  output: Headers,
-  key: string,
-): void {
-  const value = source.get(key)
-
-  if (value !== null) {
-    output.set(key, value)
-  }
-}
-
-function makeUpstreamHeaders(
-  range: string | null,
-): Headers {
-  const headers = new Headers({
-    Accept:
-      'audio/*,application/octet-stream;q=0.9,*/*;q=0.2',
-    'Accept-Encoding': 'identity',
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error('Aborted'))
+      return
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', interrupted)
+      resolve()
+    }, ms)
+    const interrupted = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', interrupted)
+      reject(new Error('Aborted'))
+    }
+    signal.addEventListener('abort', interrupted, { once: true })
   })
-
-  if (range) {
-    headers.set('Range', range)
-  }
-
-  return headers
 }
 
-async function closeResponse(
-  response: Response,
-): Promise<void> {
-  try {
-    await response.body?.cancel()
-  } catch {
-    // The connection may already be closed.
-  }
-}
-
-type Upstream = {
+type FetchResult = {
   response: Response
   finalUrl: URL
-  controller: AbortController
-  cleanup: () => void
 }
 
-/**
- * Connect to approved media servers.
- * Every redirect is validated independently.
- * A timeout applies while waiting for headers,
- * not during playback of the full recording.
- */
-async function connect(
+/** Never automatically follow a redirect to an unapproved server. */
+async function fetchApproved(
   initial: URL,
-  method: 'GET' | 'HEAD',
-  range: string | null,
-  clientSignal: AbortSignal,
-): Promise<Upstream> {
-  const controller = new AbortController()
-
-  const onClientAbort = () => {
-    controller.abort()
-  }
-
-  clientSignal.addEventListener(
-    'abort',
-    onClientAbort,
-    { once: true },
-  )
-
-  const cleanup = () => {
-    clientSignal.removeEventListener(
-      'abort',
-      onClientAbort,
-    )
-  }
-
+  headers: Headers,
+  signal: AbortSignal,
+): Promise<FetchResult> {
   let current = initial
-  const visited = new Set<string>()
 
-  try {
-    if (clientSignal.aborted) {
-      controller.abort()
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const response = await fetch(current.href, {
+      method: 'GET',
+      headers,
+      redirect: 'manual',
+      cache: 'no-store',
+      signal,
+    })
+
+    if (!REDIRECTS.has(response.status)) {
+      return { response, finalUrl: current }
     }
 
-    for (
-      let hops = 0;
-      hops <= MAX_REDIRECTS;
-      hops += 1
-    ) {
-      if (visited.has(current.href)) {
-        throw new Error('redirect-loop')
-      }
+    const location = response.headers.get('Location')
+    await response.body?.cancel().catch(() => undefined)
+    if (!location) throw new Error('Redirect without Location')
 
-      visited.add(current.href)
-
-      let response: Response
-      let timedOut = false
-
-      const timeout = setTimeout(() => {
-        timedOut = true
-        controller.abort()
-      }, HEADERS_TIMEOUT_MS)
-
-      try {
-        response = await fetch(current.href, {
-          method,
-          headers: makeUpstreamHeaders(range),
-          redirect: 'manual',
-          credentials: 'omit',
-          cache: 'no-store',
-          signal: controller.signal,
-        })
-      } catch (error) {
-        if (
-          timedOut &&
-          !clientSignal.aborted
-        ) {
-          throw new Error('upstream-timeout')
-        }
-
-        throw error
-      } finally {
-        clearTimeout(timeout)
-      }
-
-      if (
-        [301, 302, 303, 307, 308].includes(
-          response.status,
-        )
-      ) {
-        const location =
-          response.headers.get('location')
-
-        await closeResponse(response)
-
-        if (
-          !location ||
-          hops === MAX_REDIRECTS
-        ) {
-          throw new Error('redirect-limit')
-        }
-
-        let destination: URL | null = null
-
-        try {
-          destination = parseTrustedUrl(
-            new URL(location, current).href,
-          )
-        } catch {
-          destination = null
-        }
-
-        if (!destination) {
-          throw new Error('redirect-untrusted')
-        }
-
-        current = destination
-        continue
-      }
-
-      return {
-        response,
-        finalUrl: current,
-        controller,
-        cleanup,
-      }
-    }
-
-    throw new Error('redirect-limit')
-  } catch (error) {
-    cleanup()
-    controller.abort()
-    throw error
+    const resolved = allowedAudioUrl(new URL(location, current.href).href)
+    if (!resolved) throw new Error('Unapproved audio redirect')
+    current = resolved
   }
+
+  throw new Error('Too many redirects')
 }
 
-/**
- * Streams media with backpressure.
- * Disconnects from the upstream server
- * when the client cancels the audio request.
- */
-function forwardStream(
-  upstream: Upstream,
-): ReadableStream<Uint8Array> | null {
-  if (!upstream.response.body) {
-    upstream.cleanup()
-    return null
-  }
-
-  const reader =
-    upstream.response.body.getReader()
-
-  let closed = false
+/** Stream with backpressure and an upper size bound. */
+function limitedStream(
+  upstream: ReadableStream<Uint8Array>,
+  abort: AbortController,
+  dispose: () => void,
+  limit: number,
+): ReadableStream<Uint8Array> {
+  const reader = upstream.getReader()
+  let total = 0
+  let finished = false
 
   const finish = () => {
-    if (closed) return
-
-    closed = true
-    upstream.cleanup()
+    if (finished) return
+    finished = true
+    dispose()
   }
 
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const result = await reader.read()
-
-        if (result.done) {
+        const idleTimer = setTimeout(() => abort.abort(), IDLE_TIMEOUT_MS)
+        let chunk: ReadableStreamReadResult<Uint8Array>
+        try {
+          chunk = await reader.read()
+        } finally {
+          clearTimeout(idleTimer)
+        }
+        if (chunk.done) {
           finish()
           controller.close()
-        } else {
-          controller.enqueue(result.value)
+          return
         }
+        total += chunk.value.byteLength
+        if (total > limit) {
+          abort.abort()
+          finish()
+          controller.error(new Error('Audio exceeds safety limit'))
+          return
+        }
+        controller.enqueue(chunk.value)
       } catch (error) {
         finish()
         controller.error(error)
       }
     },
-
     async cancel(reason) {
-      finish()
-      upstream.controller.abort()
-
+      abort.abort()
       try {
         await reader.cancel(reason)
       } catch {
-        // The network may already be closed.
+        // Already aborted by the requester.
+      } finally {
+        finish()
       }
     },
   })
 }
 
-/**
- * Main HTTP request handler.
- * Compatible with existing:
- * /api/adhkar-audio?url=...
- */
-async function handle(
-  request: Request,
-): Promise<Response> {
-  const incomingUrl = new URL(request.url)
-
-  const input =
-    incomingUrl.searchParams.get('url') || ''
-
-  const source = parseTrustedUrl(input)
-
+export async function GET(request: Request): Promise<Response> {
+  const incoming = new URL(request.url)
+  const source = allowedAudioUrl(incoming.searchParams.get('url') || '')
   if (!source) {
-    return errorResponse(
-      'رابط الصوت غير صالح أو غير معتمد.',
-      400,
-    )
+    return jsonError('رابط التسجيل الصوتي غير مسموح أو غير صحيح.', 400)
   }
 
-  const range = request.headers.get('range')
-
-  if (!isValidRange(range)) {
-    return errorResponse(
-      'صيغة Range غير صالحة.',
-      416,
-    )
+  const range = request.headers.get('Range')
+  if (!validRange(range)) {
+    return jsonError('طلب المدى الصوتي غير صالح.', 416)
   }
 
-  const method =
-    request.method === 'HEAD'
-      ? 'HEAD'
-      : 'GET'
+  const upstreamHeaders = new Headers({
+    Accept: 'audio/mpeg,audio/*;q=0.9,application/octet-stream;q=0.8',
+    'Accept-Encoding': 'identity',
+  })
+  if (range) upstreamHeaders.set('Range', range)
+  const ifRange = request.headers.get('If-Range')
+  if (range && ifRange && ifRange.length <= 200) {
+    upstreamHeaders.set('If-Range', ifRange)
+  }
 
-  let upstream: Upstream
+  const choices = [source]
+  const backup = fallbackFor(source)
+  if (backup) choices.push(backup)
+
+  let lastStatus = 502
 
   try {
-    upstream = await connect(
-      source,
-      method,
-      range,
-      request.signal,
-    )
-  } catch (error) {
-    const reason =
-      error instanceof Error
-        ? error.message
-        : ''
+    for (const candidate of choices) {
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+        if (request.signal.aborted) {
+          return jsonError('تم إلغاء طلب التسجيل.', 499)
+        }
 
-    if (reason === 'redirect-untrusted') {
-      return errorResponse(
-        'تم رفض تحويل الصوت إلى مصدر غير معتمد.',
-        502,
-      )
-    }
+        // A fresh abort controller for every attempt: a timed-out
+        // source must not prevent a retry or use of the backup CDN.
+        const attemptAbort = new AbortController()
+        const onClientAbort = () => attemptAbort.abort()
+        request.signal.addEventListener('abort', onClientAbort, { once: true })
+        let disposed = false
+        const dispose = () => {
+          if (disposed) return
+          disposed = true
+          request.signal.removeEventListener('abort', onClientAbort)
+        }
 
-    if (
-      reason === 'redirect-limit' ||
-      reason === 'redirect-loop'
-    ) {
-      return errorResponse(
-        'تعذر إكمال تحويلات مصدر الصوت.',
-        502,
-      )
-    }
+        const connectTimer = setTimeout(
+          () => attemptAbort.abort(),
+          CONNECT_TIMEOUT_MS,
+        )
+        let result: FetchResult
 
-    if (reason === 'upstream-timeout') {
-      return errorResponse(
-        'انتهت مهلة الاتصال بمصدر الصوت.',
-        504,
-      )
+        try {
+          result = await fetchApproved(
+            candidate,
+            upstreamHeaders,
+            attemptAbort.signal,
+          )
+        } catch {
+          clearTimeout(connectTimer)
+          dispose()
+          if (request.signal.aborted) {
+            return jsonError('تم إلغاء طلب التسجيل.', 499)
+          }
+          if (attempt + 1 < MAX_ATTEMPTS) {
+            await wait(400 * (attempt + 1), request.signal)
+          }
+          continue
+        }
+        clearTimeout(connectTimer)
+
+        const upstream = result.response
+        lastStatus = upstream.status
+
+        if (upstream.status === 416) {
+          const responseHeaders = new Headers({
+            'Cache-Control': 'no-store',
+            'Accept-Ranges': 'bytes',
+          })
+          const contentRange = upstream.headers.get('Content-Range')
+          if (contentRange) responseHeaders.set('Content-Range', contentRange)
+          await upstream.body?.cancel().catch(() => undefined)
+          dispose()
+          return new Response(null, { status: 416, headers: responseHeaders })
+        }
+
+        if (upstream.status !== 200 && upstream.status !== 206) {
+          await upstream.body?.cancel().catch(() => undefined)
+          dispose()
+          if (RETRYABLE.has(upstream.status) && attempt + 1 < MAX_ATTEMPTS) {
+            const retryAfter = Number(upstream.headers.get('Retry-After'))
+            const delay = Number.isFinite(retryAfter) && retryAfter > 0
+              ? Math.min(retryAfter * 1000, 1800)
+              : 450 * (attempt + 1)
+            await wait(delay, request.signal)
+            continue
+          }
+          break
+        }
+
+        const mime = safeMime(upstream.headers.get('Content-Type'))
+        const stated = upstream.headers.get('Content-Length')
+        const length = stated && /^\d+$/.test(stated) ? Number(stated) : null
+        const contentRange = upstream.headers.get('Content-Range')
+
+        // Reject errors disguised as MP3 and inconsistent range metadata.
+        if (
+          !mime ||
+          !upstream.body ||
+          (length !== null && (!Number.isSafeInteger(length) || length > MAX_AUDIO_BYTES)) ||
+          (upstream.status === 206 && (!range || !consistentRange(range, contentRange, length))) ||
+          (upstream.status === 200 && Boolean(contentRange))
+        ) {
+          await upstream.body?.cancel().catch(() => undefined)
+          dispose()
+          lastStatus = 502
+          break
+        }
+
+        const responseHeaders = new Headers({
+          'Content-Type': mime,
+          'Content-Disposition': 'inline',
+          'X-Content-Type-Options': 'nosniff',
+          'Accept-Ranges': upstream.headers.get('Accept-Ranges') || (upstream.status === 206 ? 'bytes' : 'none'),
+          'Cache-Control': upstream.status === 206 ? 'private, no-store' : 'public, max-age=3600',
+          Vary: 'Range',
+        })
+        if (length !== null) responseHeaders.set('Content-Length', String(length))
+        if (contentRange) responseHeaders.set('Content-Range', contentRange)
+        for (const header of ['ETag', 'Last-Modified']) {
+          const value = upstream.headers.get(header)
+          if (value) responseHeaders.set(header, value)
+        }
+
+        // Stream without loading the MP3 into memory. Once bytes have
+        // been sent, the client must retry using a fresh HTTP request.
+        const firstByteTimer = setTimeout(
+          () => attemptAbort.abort(),
+          FIRST_BYTE_TIMEOUT_MS,
+        )
+        const stream = limitedStream(upstream.body, attemptAbort, dispose, MAX_AUDIO_BYTES)
+        const reader = stream.getReader()
+        try {
+          // Wait for the first audio bytes before replying with HTTP 200.
+          const first = await reader.read()
+          clearTimeout(firstByteTimer)
+          if (first.done || !first.value.byteLength) {
+            await reader.cancel().catch(() => undefined)
+            lastStatus = 502
+            continue
+          }
+
+          const output = new ReadableStream<Uint8Array>({
+            start(controller) { controller.enqueue(first.value) },
+            async pull(controller) {
+              try {
+                const next = await reader.read()
+                if (next.done) controller.close()
+                else controller.enqueue(next.value)
+              } catch (error) {
+                controller.error(error)
+              }
+            },
+            async cancel(reason) {
+              try { await reader.cancel(reason) } catch { /* already cancelled */ }
+            },
+          })
+          return new Response(output, { status: upstream.status, headers: responseHeaders })
+        } catch {
+          clearTimeout(firstByteTimer)
+          await reader.cancel().catch(() => undefined)
+          if (request.signal.aborted) {
+            return jsonError('تم إلغاء طلب التسجيل.', 499)
+          }
+          lastStatus = 502
+        }
+      }
     }
 
     if (request.signal.aborted) {
-      return errorResponse(
-        'أُلغِي طلب الصوت.',
-        503,
-      )
+      return jsonError('تم إلغاء طلب التسجيل.', 499)
     }
-
-    return errorResponse(
-      'تعذر الاتصال بمصدر الصوت.',
-      502,
-    )
+    if (lastStatus === 404 || lastStatus === 410) {
+      return jsonError('التسجيل غير موجود لدى المصدر الصوتي.', 404)
+    }
+    return jsonError('مصدر التسجيل غير متاح حاليًا. حاول مجددًا.', 502)
+  } catch {
+    return jsonError('تعذر الاتصال بمصدر التسجيل.', request.signal.aborted ? 499 : 502)
   }
-
-  const {
-    response,
-    finalUrl,
-    cleanup,
-  } = upstream
-
-  const headers = new Headers({
-    'Cache-Control': 'private, no-store',
-    'X-Content-Type-Options': 'nosniff',
-    'Cross-Origin-Resource-Policy': 'same-origin',
-  })
-
-  // Preserve HTTP Range Not Satisfiable.
-  if (response.status === 416) {
-    copyHeader(
-      response.headers,
-      headers,
-      'Content-Range',
-    )
-
-    copyHeader(
-      response.headers,
-      headers,
-      'Accept-Ranges',
-    )
-
-    await closeResponse(response)
-    cleanup()
-
-    return new Response(null, {
-      status: 416,
-      headers,
-    })
-  }
-
-  if (
-    response.status !== 200 &&
-    response.status !== 206
-  ) {
-    const status =
-      response.status === 404
-        ? 404
-        : 502
-
-    await closeResponse(response)
-    cleanup()
-
-    return errorResponse(
-      status === 404
-        ? 'التسجيل غير موجود في المصدر.'
-        : 'فشل المصدر في تقديم التسجيل الصوتي.',
-      status,
-    )
-  }
-
-  const encoding = response.headers
-    .get('content-encoding')
-    ?.toLowerCase()
-
-  if (
-    !looksLikeAudio(response, finalUrl) ||
-    (encoding && encoding !== 'identity')
-  ) {
-    await closeResponse(response)
-    cleanup()
-
-    return errorResponse(
-      'المصدر لم يرجع ملفًا صوتيًا صالحًا.',
-      502,
-    )
-  }
-
-  // Forward only playback-related headers.
-  copyHeader(
-    response.headers,
-    headers,
-    'Content-Type',
-  )
-
-  copyHeader(
-    response.headers,
-    headers,
-    'Content-Length',
-  )
-
-  copyHeader(
-    response.headers,
-    headers,
-    'Content-Range',
-  )
-
-  copyHeader(
-    response.headers,
-    headers,
-    'Accept-Ranges',
-  )
-
-  copyHeader(
-    response.headers,
-    headers,
-    'ETag',
-  )
-
-  copyHeader(
-    response.headers,
-    headers,
-    'Last-Modified',
-  )
-
-  if (!headers.has('Content-Type')) {
-    headers.set(
-      'Content-Type',
-      'audio/mpeg',
-    )
-  }
-
-  // HEAD requests return metadata only.
-  if (method === 'HEAD') {
-    await closeResponse(response)
-    cleanup()
-
-    return new Response(null, {
-      status: response.status,
-      headers,
-    })
-  }
-
-  if (!response.body) {
-    cleanup()
-
-    return errorResponse(
-      'لم يرسل مصدر الصوت أي بيانات.',
-      502,
-    )
-  }
-
-  // Stream audio without buffering the full file.
-  return new Response(
-    forwardStream(upstream),
-    {
-      status: response.status,
-      headers,
-    },
-  )
-}
-
-export async function GET(
-  request: Request,
-): Promise<Response> {
-  return handle(request)
-}
-
-export async function HEAD(
-  request: Request,
-): Promise<Response> {
-  return handle(request)
 }
