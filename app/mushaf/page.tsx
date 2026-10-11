@@ -922,6 +922,12 @@ type Samee3AudioElement = HTMLAudioElement & {
   __samee3Timings?: AyahTiming[]
   __samee3LastPersist?: number
   __samee3PersistentHandlersInstalled?: boolean
+  /** True only while the listener expressly wants continuous Quran playback. */
+  __samee3Continue?: boolean
+  /** Global audio generation: cancels next-surah fetches across route remounts. */
+  __samee3Serial?: number
+  /** Prevent transient pause events during a reciter/surah switch from canceling intent. */
+  __samee3Switching?: boolean
   __samee3ObjectUrl?: string
 }
 
@@ -1743,10 +1749,9 @@ function MushafDownloadStartup({
           اختر تنزيل حفص، أو رواية معينة، أو الروايات السبع كاملة. تظل كلمات كل رواية ورسمها من مصادرها الأصلية؛ والتحميل للصفحات فقط دون تلاوات صوتية.
         </p>
 
-        {choice === 'checking' ? (
-          <div className="mt-6 flex items-center justify-center gap-2 py-10 text-sm font-bold text-[#16546c]"><Loader2 size={19} className="animate-spin" /> جارٍ فحص الصفحات الموجودة…</div>
-        ) : (
-          <>
+        {/* Checking is intentionally hidden by the early return above.
+            Never display an automatic loading notice on repeat visits. */}
+        <>
             <div className="mt-4 grid gap-2">
               {([
                 { id: 'hafs' as MushafDownloadMode, title: 'تحميل حفص كاملة', detail: '٦٠٤ صفحات من رواية حفص عن عاصم' },
@@ -1820,8 +1825,7 @@ function MushafDownloadStartup({
             <p className="mt-3 text-center text-[11px] leading-6 text-slate-500">
               لا يُحذف أي تنزيل سابق. الاحتفاظ الدائم بالصفحات يعتمد على مساحة جهازك وسياسة المتصفح. للتحقق من العمل دون اتصال جرّب صفحات متعددة في وضع الطيران.
             </p>
-          </>
-        )}
+        </>
       </section>
     </div>
   )
@@ -1966,6 +1970,8 @@ export default function MushafPage() {
   const readingRestoreAttemptedRef = useRef(false)
   const audioOperationRef = useRef(0)
   const audioToggleBusyRef = useRef(false)
+  // An explicit user stop must never be undone by query-param autoplay.
+  const audioUserStoppedRef = useRef(false)
 
 
   // Screen Wake Lock is a best-effort browser capability. It requires HTTPS
@@ -4225,19 +4231,19 @@ export default function MushafPage() {
         currentTime >= nextStart - 0.05
       ) {
         repeatSeekGuardRef.current = true
-        const audio = audioRef.current
+        const audio = audioRef.current as Samee3AudioElement | null
         const remaining = repeatRemainingRef.current
         if (remaining !== null && remaining <= 1) {
           repeatRemainingRef.current = null
           setRepeatAyahNumber(null)
+          if (audio) audio.__samee3Continue = false
           audio?.pause()
           setIsPlaying(false)
           triggerToast('اكتمل تكرار الآية بالعدد المحدد.')
         } else {
           if (remaining !== null) repeatRemainingRef.current = remaining - 1
-          if (audio) {
+          if (audio && audio.__samee3Continue && !audio.paused) {
             audio.currentTime = repeatStart
-            void audio.play().catch(() => {})
           }
         }
         window.setTimeout(() => {
@@ -4269,6 +4275,14 @@ export default function MushafPage() {
     }
 
     const operationId = ++audioOperationRef.current
+    // Store the requested intent before any await. A Stop click will invalidate
+    // this operation and all of its pending network/metadata work.
+    const existing = audioRef.current as Samee3AudioElement | null
+    if (existing) {
+      existing.__samee3Continue = shouldPlay
+      existing.__samee3Serial = Number(existing.__samee3Serial || 0) + 1
+      existing.__samee3Switching = true
+    }
     setAudioLoading(true)
     setAudioError('')
 
@@ -4277,6 +4291,8 @@ export default function MushafPage() {
       let activeReciter = reciterOverride || selectedReciter
 
       if (activeReciter?.surahIds?.length && !activeReciter.surahIds.includes(surahNumber)) {
+        const currentAudio = audioRef.current as Samee3AudioElement | null
+        if (currentAudio) currentAudio.__samee3Continue = false
         triggerToast(`السورة ${SURAH_LIST.find((item) => item.id === surahNumber)?.name || ''} غير متاحة لهذا القارئ. اختر سورة متاحة من القائمة.`)
         setAudioLoading(false)
         return
@@ -4320,7 +4336,10 @@ export default function MushafPage() {
       if (!audio) return
 
       const cachedSource = await getCachedAudioSource(networkUrl)
-      if (operationId !== audioOperationRef.current) return
+      if (operationId !== audioOperationRef.current) {
+        if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
+        return
+      }
 
       if (cachedSource) {
         await releaseCachedObjectUrl(audio)
@@ -4380,6 +4399,8 @@ export default function MushafPage() {
       if (operationId !== audioOperationRef.current) return
 
       audio.pause()
+      // pause() emits an asynchronous event on some WebKit builds.
+      // __samee3Switching keeps that transient event from revoking playback.
       audio.src = finalUrl
       audio.preload = 'auto'
       audio.load()
@@ -4419,7 +4440,7 @@ export default function MushafPage() {
               done,
             )
 
-            seekToTarget()
+            if (operationId === audioOperationRef.current) seekToTarget()
             resolve()
           }
 
@@ -4474,10 +4495,17 @@ export default function MushafPage() {
       })
 
       if (shouldPlay) {
+        if (!audio.__samee3Continue || operationId !== audioOperationRef.current) return
         try {
           await audio.play()
+          if (!audio.__samee3Continue || operationId !== audioOperationRef.current) {
+            audio.pause()
+            return
+          }
         } catch (playError) {
           if (operationId !== audioOperationRef.current) return
+          audio.__samee3Continue = false
+          audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
           console.error(playError)
           setIsPlaying(false)
           const message = playError instanceof Error ? playError.message : ''
@@ -4496,7 +4524,8 @@ export default function MushafPage() {
         void cacheAudioForOffline(networkUrl)
       }
 
-      // نجهز السورة التالية مسبقًا حتى تستمر التلاوة حتى بدون إنترنت.
+      // Prefetch is useful only when continuous playback was requested.
+      if (!audio.__samee3Continue || operationId !== audioOperationRef.current) return
       const preferredIds = activeReciter?.surahIds?.length
         ? activeReciter.surahIds
         : SURAH_LIST.map((item) => item.id)
@@ -4507,6 +4536,8 @@ export default function MushafPage() {
       }
     } catch (error) {
       if (operationId !== audioOperationRef.current) return
+      const failedAudio = audioRef.current as Samee3AudioElement | null
+      if (failedAudio) failedAudio.__samee3Continue = false
       console.error(error)
       const message = error instanceof Error ? error.message : ''
       if (/not allowed|not supported|operation is not supported|user agent/i.test(message)) {
@@ -4517,6 +4548,8 @@ export default function MushafPage() {
       }
     } finally {
       if (operationId === audioOperationRef.current) {
+        const currentAudio = audioRef.current as Samee3AudioElement | null
+        if (currentAudio) currentAudio.__samee3Switching = false
         setAudioLoading(false)
       }
     }
@@ -4597,6 +4630,11 @@ export default function MushafPage() {
     win.__samee3PersistentAudio = audio
     audioRef.current = audio
     audio.preload = 'auto'
+    // Keep the audio element alive across Next.js route navigation, but never
+    // restore the "continue" intention from an earlier browser session.
+    if (typeof audio.__samee3Continue !== 'boolean') {
+      audio.__samee3Continue = Boolean(audio.src && !audio.paused)
+    }
 
     const getRuntime = () => win.__samee3AudioRuntimeRef?.current || null
 
@@ -4607,12 +4645,24 @@ export default function MushafPage() {
      */
     if (!audio.__samee3PersistentHandlersInstalled) {
       const persistentPlay = () => {
+        audio.__samee3Continue = true
         persistAudioSnapshotFromElement(audio, true)
         const networkUrl = audio.__samee3NetworkUrl || ''
         if (networkUrl) void cacheAudioForOffline(networkUrl)
       }
 
       const persistentPause = () => {
+        // At the end of a surah HTMLAudioElement can emit "pause" just before
+        // "ended". Do NOT treat this natural transition as a user Stop.
+        const duration = Number(audio.duration)
+        const naturallyFinished = audio.ended || (
+          Number.isFinite(duration) && duration > 0 &&
+          audio.currentTime >= duration - 0.3
+        )
+        if (!naturallyFinished && !audio.__samee3Switching) {
+          audio.__samee3Continue = false
+          audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
+        }
         persistAudioSnapshotFromElement(audio, false)
       }
 
@@ -4629,6 +4679,11 @@ export default function MushafPage() {
       }
 
       const persistentEnded = () => {
+        // Stop is authoritative, including a Stop during an ended/next-surah
+        // race. An ended file must never silently restart a stopped recitation.
+        if (!audio.__samee3Continue) return
+        const endOperation = audioOperationRef.current
+        const endSerial = Number(audio.__samee3Serial || 0)
         const runtime = getRuntime()
 
         // التكرار الصريح للآية يظل أعلى أولوية.
@@ -4642,11 +4697,13 @@ export default function MushafPage() {
             if (remaining !== null && remaining <= 1) {
               repeatRemainingRef.current = null
               setRepeatAyahNumber(null)
+              audio.__samee3Continue = false
               audio.pause()
               setIsPlaying(false)
               return
             }
             if (remaining !== null) repeatRemainingRef.current = remaining - 1
+            if (!audio.__samee3Continue) return
             audio.currentTime = repeatStart
             audio.__samee3CurrentAyah = runtime.repeatAyahNumber
             persistAudioSnapshotFromElement(audio, true)
@@ -4678,6 +4735,7 @@ export default function MushafPage() {
         const nextPage = SURAH_LIST.find((item) => item.id === nextSurah)?.page || 1
 
         if (runtime) {
+          if (!audio.__samee3Continue) return
           setPlayingAyahNumber(null)
           runtime.updateRouteAudioSelection(
             runtime.riwaya,
@@ -4700,23 +4758,31 @@ export default function MushafPage() {
         if (!server) return
 
         const nextUrl = `${server.replace(/\/$/, '')}/${String(nextSurah).padStart(3, '0')}.mp3`
-        audio.pause()
-        audio.__samee3NetworkUrl = nextUrl
-        audio.__samee3Surah = nextSurah
-        audio.__samee3Page = nextPage
-        audio.__samee3CurrentAyah = 1
-        audio.__samee3Server = server.replace(/\/$/, '')
-        audio.__samee3Timings = []
-
         const playNextCached = async () => {
           const cachedSource = await getCachedAudioSource(nextUrl)
+          if (!audio.__samee3Continue || endOperation !== audioOperationRef.current || endSerial !== Number(audio.__samee3Serial || 0)) {
+            if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
+            return
+          }
 
           if (!cachedSource && isBrowserOffline()) {
-            persistAudioSnapshotFromElement(audio, false, nextPage)
+            audio.__samee3Continue = false
+            persistAudioSnapshotFromElement(audio, false)
             return
           }
 
           await releaseCachedObjectUrl(audio)
+          if (!audio.__samee3Continue || endOperation !== audioOperationRef.current || endSerial !== Number(audio.__samee3Serial || 0)) {
+            if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
+            return
+          }
+
+          audio.__samee3NetworkUrl = nextUrl
+          audio.__samee3Surah = nextSurah
+          audio.__samee3Page = nextPage
+          audio.__samee3CurrentAyah = 1
+          audio.__samee3Server = server.replace(/\/$/, '')
+          audio.__samee3Timings = []
 
           const sourceUrl = cachedSource?.src || nextUrl
           audio.__samee3ObjectUrl = cachedSource?.objectUrl || undefined
@@ -4733,6 +4799,7 @@ export default function MushafPage() {
             audio.__samee3Timings = cachedTimings
           }
 
+          if (!audio.__samee3Continue || endOperation !== audioOperationRef.current || endSerial !== Number(audio.__samee3Serial || 0)) return
           void cacheAudioForOffline(nextUrl)
           void audio.play().catch(() => {})
 
@@ -4991,10 +5058,16 @@ export default function MushafPage() {
     audio.__samee3CurrentAyah = saved.ayah
     audio.__samee3Server = extractServerFromNetworkUrl(saved.networkUrl)
 
+    const restoreSerial = Number(audio.__samee3Serial || 0)
     const restoreAudioSource = async () => {
       if (sameLoadedAudio) return true
-
+      // Never overwrite the source of a new player request.
+      if (audio.__samee3Continue) return false
       const cachedSource = await getCachedAudioSource(saved.networkUrl)
+      if (restoreSerial !== Number(audio.__samee3Serial || 0) || audio.__samee3Continue) {
+        if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
+        return false
+      }
       if (!cachedSource && isBrowserOffline()) {
         setAudioError('التلاوة المحفوظة غير متاحة بالكامل بدون اتصال على هذا الجهاز.')
         setAudioDisplayUrl(saved.networkUrl)
@@ -5002,6 +5075,10 @@ export default function MushafPage() {
       }
 
       await releaseCachedObjectUrl(audio)
+      if (restoreSerial !== Number(audio.__samee3Serial || 0) || audio.__samee3Continue) {
+        if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
+        return false
+      }
       const sourceUrl = cachedSource?.src || saved.networkUrl
       audio.__samee3ObjectUrl = cachedSource?.objectUrl || undefined
       audio.src = sourceUrl
@@ -5010,6 +5087,8 @@ export default function MushafPage() {
     }
 
     const restorePosition = () => {
+      if (restoreSerial !== Number(audio.__samee3Serial || 0)) return
+      if (audio.__samee3NetworkUrl !== saved.networkUrl) return
       try {
         if (!sameLoadedAudio && saved.currentTime > 0) {
           audio.currentTime = saved.currentTime
@@ -5091,8 +5170,11 @@ export default function MushafPage() {
     void restorePromise.then((ready) => {
       if (!ready) return
       setAudioDisplayUrl(saved.networkUrl)
-      if (saved.playing && audio.paused && !sameLoadedAudio) {
-        void audio.play().catch(() => {})
+      // Restore the saved position, never auto-start a new listening session.
+      // An existing live Audio element remains playing across in-app routes.
+      if (!sameLoadedAudio && restoreSerial === Number(audio.__samee3Serial || 0)) {
+        audio.__samee3Continue = false
+        writePersistentAudioState({ ...saved, playing: false })
       }
     })
   }, [
@@ -5169,6 +5251,7 @@ export default function MushafPage() {
   useEffect(() => {
     if (
       !autoplayRequested ||
+      audioUserStoppedRef.current ||
       autoplayConsumedRef.current ||
       !pageData?.ayahs?.length ||
       !reciterApiId
@@ -5199,22 +5282,53 @@ export default function MushafPage() {
     requestedSurah,
   ])
 
+  /**
+   * An explicit Stop wins over metadata loading, previous play() promises,
+   * auto-surah transitions, repeats and restored state. The last position
+   * remains saved so a later Play can resume it deliberately.
+   */
+  const stopAudioNow = useCallback(() => {
+    audioUserStoppedRef.current = true
+    autoplayConsumedRef.current = true
+    audioOperationRef.current += 1
+    audioToggleBusyRef.current = false
+    const audio = audioRef.current as Samee3AudioElement | null
+    if (audio) {
+      audio.__samee3Continue = false
+      audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
+      audio.__samee3Switching = false
+      audio.pause()
+      persistAudioSnapshotFromElement(audio, false)
+    }
+    repeatRemainingRef.current = null
+    repeatSeekGuardRef.current = false
+    setRepeatAyahNumber(null)
+    setIsPlaying(false)
+    setAudioLoading(false)
+    setPlayingAyahNumber(null)
+  }, [])
+
   const toggleAudio = async () => {
+    const audio = audioRef.current as Samee3AudioElement | null
+
+    // Always allow Stop, including while a previous Play is still loading.
+    // Inspect this BEFORE the busy guard and BEFORE selected-ayah seeking.
+    if (audio && (audio.__samee3Continue || !audio.paused)) {
+      stopAudioNow()
+      return
+    }
+
     if (audioToggleBusyRef.current) return
     audioToggleBusyRef.current = true
+    audioUserStoppedRef.current = false
 
     try {
-      const audio = audioRef.current
-
       const selectedSurah = selectedAyah?.surah?.number
         ? Number(selectedAyah.surah.number)
         : 0
-
       const selectedLocalAyah = selectedAyah?.numberInSurah
         ? Number(selectedAyah.numberInSurah)
         : 0
-
-      const selectedAyahGlobalNumber = selectedAyah?.number ?? null
 
       if (selectedSurah && selectedLocalAyah) {
         const loadedSurah = Number(audioSurahRef.current || 0)
@@ -5222,15 +5336,10 @@ export default function MushafPage() {
           !audio ||
           !audio.src ||
           loadedSurah !== selectedSurah ||
-          playingAyahNumber === null ||
-          (selectedAyahGlobalNumber !== null && playingAyahNumber !== selectedAyahGlobalNumber)
+          (selectedLocalAyah > 0 && Number(audio.__samee3CurrentAyah || 0) !== selectedLocalAyah)
 
         if (mustSeekToSelectedAyah) {
-          await loadAudioForSurah(
-            selectedSurah,
-            true,
-            selectedLocalAyah,
-          )
+          await loadAudioForSurah(selectedSurah, true, selectedLocalAyah)
           return
         }
       }
@@ -5240,25 +5349,24 @@ export default function MushafPage() {
         return
       }
 
-      if (audio.paused) {
-        try {
-          await audio.play()
-        } catch (error) {
-          console.error(error)
-          setIsPlaying(false)
-          setAudioError('تعذر بدء التلاوة. اضغط تشغيل مرة أخرى.')
-        }
-      } else {
-        audio.pause()
+      audio.__samee3Continue = true
+      try {
+        await audio.play()
+        if (!audio.__samee3Continue) audio.pause()
+      } catch (error) {
+        audio.__samee3Continue = false
+        console.error(error)
+        setIsPlaying(false)
+        setAudioError('تعذر بدء التلاوة. اضغط تشغيل مرة أخرى.')
       }
     } finally {
       audioToggleBusyRef.current = false
     }
   }
 
-
   const playSelectedAyah = useCallback(async () => {
     if (!selectedAyah?.surah?.number) return
+    audioUserStoppedRef.current = false
     setRepeatAyahNumber(null)
     repeatRemainingRef.current = null
     repeatSeekGuardRef.current = false
@@ -5286,6 +5394,7 @@ export default function MushafPage() {
       return
     }
 
+    audioUserStoppedRef.current = false
     setRepeatAyahNumber(localAyah)
     repeatRemainingRef.current = null
     repeatSeekGuardRef.current = false
@@ -5302,6 +5411,7 @@ export default function MushafPage() {
   const repeatAyahForStudy = useCallback(async (times: number) => {
     if (!selectedAyah?.surah?.number) return
     if (!Number.isInteger(times) || times < 1 || times > 10) return
+    audioUserStoppedRef.current = false
     repeatRemainingRef.current = times
     repeatSeekGuardRef.current = false
     setRepeatAyahNumber(selectedAyah.numberInSurah)
@@ -5312,7 +5422,11 @@ export default function MushafPage() {
     if (!hasTiming) {
       repeatRemainingRef.current = null
       setRepeatAyahNumber(null)
-      audioRef.current?.pause()
+      const audio = audioRef.current as Samee3AudioElement | null
+      if (audio) {
+        audio.__samee3Continue = false
+        audio.pause()
+      }
       triggerToast('التكرار المحدد يحتاج توقيت آيات دقيقًا؛ اختر قارئًا يدعم التزامن.')
       return
     }
@@ -5805,9 +5919,9 @@ export default function MushafPage() {
 
             <div className="samee3-bottom-shell" onClick={(event) => event.stopPropagation()}>
               <div className="samee3-audio-toolbar">
-                <button type="button" onClick={() => void toggleAudio()} disabled={audioLoading} className="samee3-play-button">
-                  {audioLoading ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} /> : <Play size={20} />}
-                  <span>{isPlaying ? 'إيقاف' : 'تشغيل'}</span>
+                <button type="button" onClick={() => void toggleAudio()} className="samee3-play-button" aria-label={isPlaying || audioLoading ? 'إيقاف التلاوة فورًا' : 'تشغيل التلاوة'}>
+                  {isPlaying || audioLoading ? <Pause size={20} /> : <Play size={20} />}
+                  <span>{isPlaying || audioLoading ? 'إيقاف' : 'تشغيل'}</span>
                 </button>
 
                 <div className={`samee3-picker ${openPicker === 'reciter' ? 'is-open' : ''}`}>
