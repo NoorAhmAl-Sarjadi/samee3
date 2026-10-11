@@ -12,7 +12,7 @@ import {
 } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { adhkarCitation, loadAdhkarCatalog, readCachedAdhkar } from '@/lib/adhkar-catalog'
+import { adhkarCitation, findAdhkarCategory, loadAdhkarCatalog, readCachedAdhkar } from '@/lib/adhkar-catalog'
 import {
   ArrowRight,
   BookOpen,
@@ -69,8 +69,6 @@ type AudioMode = 'item' | 'section' | null
 
 type ProgressRecord = { counts: Record<string, number>; savedAt: number }
 
-const DATA_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json'
-const DATA_CACHE = 'samee3-adhkar-data-v1'
 const SETTINGS_KEY = 'samee3_adhkar_read_settings_v1'
 const AUDIO_CACHE = 'samee3-adhkar-audio-v1'
 const AUDIO_BASE = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main'
@@ -119,52 +117,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function categoriesFrom(value: unknown): AdhkarCategory[] {
-  const array = Array.isArray(value) ? value
-    : isObject(value) && Array.isArray(value.data) ? value.data
-    : isObject(value) && Array.isArray(value.adhkar) ? value.adhkar
-    : isObject(value) && Array.isArray(value.categories) ? value.categories
-    : []
-
-  return array.map((raw, categoryIndex): AdhkarCategory | null => {
-    if (!isObject(raw) || typeof raw.category !== 'string' || !Array.isArray(raw.array)) return null
-    const items: AdhkarItem[] = raw.array.map((entry: unknown, index: number): AdhkarItem | null => {
-      if (!isObject(entry) || typeof entry.text !== 'string' || !entry.text.trim()) return null
-      const parsedId = Number(entry.id)
-      const parsedCount = Number(entry.count)
-      return {
-        id: Number.isFinite(parsedId) && parsedId > 0 ? Math.floor(parsedId) : index + 1,
-        text: entry.text.trim(),
-        count: Number.isFinite(parsedCount) && parsedCount > 0 ? Math.floor(parsedCount) : 1,
-        ...(typeof entry.audio === 'string' && entry.audio.trim() ? { audio: entry.audio.trim() } : {}),
-        ...(typeof entry.filename === 'string' && entry.filename.trim() ? { filename: entry.filename.trim() } : {}),
-        ...(typeof entry.source === 'string' && entry.source.trim() ? { source: entry.source.trim() } : {}),
-        ...(typeof entry.reference === 'string' && entry.reference.trim() ? { reference: entry.reference.trim() } : {}),
-        ...(typeof entry.benefit === 'string' && entry.benefit.trim() ? { benefit: entry.benefit.trim() } : {}),
-      }
-    }).filter((entry: AdhkarItem | null): entry is AdhkarItem => entry !== null)
-    const id = Number(raw.id)
-    return items.length ? {
-      id: Number.isFinite(id) && id > 0 ? Math.floor(id) : categoryIndex + 1,
-      category: raw.category.trim(),
-      array: items,
-    } : null
-  }).filter((entry): entry is AdhkarCategory => entry !== null)
-}
-
-function validCorpus(categories: AdhkarCategory[]): boolean {
-  return categories.length >= 5 &&
-    categories.reduce((sum, category) => sum + category.array.length, 0) >= 20
-}
-
-function categoryFor(categories: AdhkarCategory[], id: number, type: AdhkarType) {
+function categoryFor(categories: AdhkarCategory[], id: number, type: AdhkarType): AdhkarCategory | null {
   if (id > 0) return categories.find((entry) => entry.id === id) ?? null
-  return categories.find((entry) => {
-    const name = entry.category
-    if (type === 'sleep') return name.includes('النوم')
-    if (type === 'waking') return name.includes('الاستيقاظ')
-    return name.includes('الصباح') && name.includes('المساء')
-  }) ?? categories.find((entry) => entry.category.includes(type === 'morning' ? 'الصباح' : type === 'evening' ? 'المساء' : type === 'sleep' ? 'النوم' : 'الاستيقاظ')) ?? null
+  return findAdhkarCategory(categories, type)
 }
 
 function categoryLabel(name: string, type: AdhkarType, explicitId: number) {
@@ -191,17 +146,6 @@ function sourceUrl(url: string): string {
 
 function getItemUrl(item: AdhkarItem): string {
   return item.audio ? sourceUrl(item.audio) : ''
-}
-
-async function loadCachedCategories(): Promise<AdhkarCategory[]> {
-  if (typeof caches === 'undefined') return []
-  try {
-    const cache = await caches.open(DATA_CACHE)
-    const response = await cache.match(DATA_URL)
-    if (!response) return []
-    const parsed = categoriesFrom(await response.json())
-    return validCorpus(parsed) ? parsed : []
-  } catch { return [] }
 }
 
 async function readSavedAudio(url: string): Promise<string | null> {
@@ -596,19 +540,18 @@ function ReadAdhkarContent() {
     }
 
     void (async () => {
-      const standardizedCache = await readCachedAdhkar()
-      const cached = standardizedCache && standardizedCache.length ? standardizedCache : await loadCachedCategories()
-      const foundCached = apply(cached, true)
-      if (navigator.onLine === false && foundCached) { window.clearTimeout(timeout); return }
+      const cached = await readCachedAdhkar()
+      if (disposed) return
+      const foundCached = Boolean(cached?.length && apply(cached, true))
       try {
-        const result = await loadAdhkarCatalog({ refresh: true, signal: controller.signal })
-        if (!apply(result.categories, result.origin === 'cache') && !foundCached) {
+        const result = await loadAdhkarCatalog({ signal: controller.signal })
+        if (!apply(result.categories, result.origin === 'cache' || result.origin === 'local') && !foundCached) {
           throw new Error('Data unavailable')
         }
       } catch {
         if (!disposed && !foundCached) {
           setLoading(false)
-          setError('تعذّر تحميل الأذكار. افتح القسم مرة أثناء الاتصال ليُحفظ على الجهاز.')
+          setError('تعذّر تحميل الأذكار. تأكد من وجود /data/adhkar.json أو افتح القسم أثناء الاتصال.')
         }
       } finally { window.clearTimeout(timeout) }
     })()
