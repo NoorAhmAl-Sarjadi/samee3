@@ -1,1093 +1,774 @@
-"use client"
+'use client'
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import Link from "next/link"
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type TouchEvent } from 'react'
+import Link from 'next/link'
+import JSZip from 'jszip'
 import {
-  ArrowRight,
-  BookOpen,
-  Bookmark,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  Download,
-  ImageIcon,
-  Loader2,
-  Search,
-  Share2,
-  X,
-} from "lucide-react"
+  ArrowLeft, ArrowRight, BookOpen, BookMarked, Bookmark,
+  ChevronLeft, ChevronRight, Copy, Download, Heart,
+  Image as ImageIcon, Library, List, Loader2, Menu, Moon, RefreshCw,
+  Search, Share2, ShieldCheck, Sun, Type, WifiOff, X,
+} from 'lucide-react'
+import {
+  HADITH_BOOKS,
+  HADITH_SOURCE,
+  getCachedHadithChapters,
+  getHadithBook,
+  getHadithBooks,
+  getHadithChapter,
+  normalizeHadithSearch,
+  type HadithBook,
+  type HadithChapter,
+  type HadithRecord,
+} from '@/lib/hadith-catalog'
 
-type HadithBook = {
-  id: string
-  name_ar: string
-  name_en?: string
-  category?: string
-  hadithCount?: number
-  author_ar?: string
-  author_en?: string
-  introduction?: string
-  description?: string
-}
+const FAV_KEY = 'samee3_hadith_favorites'
+const SAVED_KEY = 'samee3_hadith_saved_v2'
+const RESUME_KEY = 'samee3_hadith_resume'
+const SETTINGS_KEY = 'samee3_hadith_reader_settings_v2'
+const NOTES_KEY = 'samee3_hadith_notes_v1'
+const CATEGORIES = ['الكتب التسعة', 'الأربعينات', 'كتب أخرى'] as const
 
-type HadithChapter = {
-  id: string | number
-  name_ar?: string
-  name_en?: string
-  hadithCount?: number
-  firstHadith?: number
-  lastHadith?: number
-}
+type Appearance = 'cream' | 'night'
+type DesignStyle = 'gold' | 'emerald' | 'midnight'
+type Screen = 'library' | 'reader' | 'favorites'
 
-type Hadith = {
-  id: number
-  idInBook?: number
-  chapterId?: number
-  bookId?: number
-  arabic?: string
-  english?: {
-    narrator?: string
-    text?: string
+type Resume = { bookId: string; chapterId: number; hadithId: number; savedAt: number }
+type SavedItem = { key: string; bookId: string; bookTitle: string; chapterId: number; number: number; excerpt: string }
+type DownloadState = { bookId: string; done: number; total: number; active: boolean; error: string; complete: boolean }
+type RequestedPosition = { bookId: string; chapterId: number; hadithId?: number } | null
+
+const digit = (value: string | number) => String(value).replace(/\d/g, (n) => '٠١٢٣٤٥٦٧٨٩'[Number(n)])
+const favoriteKey = (bookId: string, number: number) => `${bookId}:${number}`
+const within = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value))
+
+function readStorage<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) as T : fallback
+  } catch {
+    return fallback
   }
 }
-
-type ResumeState = {
-  bookId: string
-  chapterId: string | number
-  hadithId: number
-  savedAt: number
+function saveStorage(key: string, value: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* private mode */ }
 }
-
-const API_BASE = "/api/hadith"
-const FAVORITES_KEY = "samee3_hadith_favorites"
-const RESUME_KEY = "samee3_hadith_resume"
-
-const FALLBACK_BOOKS: HadithBook[] = [
-  { id: "bukhari", name_ar: "صحيح البخاري", name_en: "Sahih al-Bukhari", category: "الكتب التسعة" },
-  { id: "muslim", name_ar: "صحيح مسلم", name_en: "Sahih Muslim", category: "الكتب التسعة" },
-  { id: "abudawud", name_ar: "سنن أبي داود", name_en: "Sunan Abu Dawud", category: "الكتب التسعة" },
-  { id: "nasai", name_ar: "سنن النسائي", name_en: "Sunan an-Nasa'i", category: "الكتب التسعة" },
-  { id: "tirmidhi", name_ar: "جامع الترمذي", name_en: "Jami at-Tirmidhi", category: "الكتب التسعة" },
-  { id: "ibnmajah", name_ar: "سنن ابن ماجه", name_en: "Sunan Ibn Majah", category: "الكتب التسعة" },
-  { id: "malik", name_ar: "موطأ مالك", name_en: "Muwatta Malik", category: "الكتب التسعة" },
-  { id: "darimi", name_ar: "سنن الدارمي", name_en: "Sunan ad-Darimi", category: "الكتب التسعة" },
-  { id: "ahmed", name_ar: "مسند أحمد", name_en: "Musnad Ahmad", category: "الكتب التسعة" },
-  { id: "nawawi40", name_ar: "الأربعون النووية", name_en: "An-Nawawi's Forty Hadith", category: "الأربعينات" },
-  { id: "qudsi40", name_ar: "الأربعون حديثًا قدسيًا", name_en: "Forty Hadith Qudsi", category: "الأربعينات" },
-  { id: "riyad_assalihin", name_ar: "رياض الصالحين", name_en: "Riyad as-Salihin", category: "كتب أخرى" },
-  { id: "mishkat_almasabih", name_ar: "مشكاة المصابيح", name_en: "Mishkat al-Masabih", category: "كتب أخرى" },
-  { id: "bulugh_almaram", name_ar: "بلوغ المرام", name_en: "Bulugh al-Maram", category: "كتب أخرى" },
-  { id: "aladab_almufrad", name_ar: "الأدب المفرد", name_en: "Al-Adab Al-Mufrad", category: "كتب أخرى" },
-  { id: "shamail_muhammadiyah", name_ar: "الشمائل المحمدية", name_en: "Shamail Muhammadiyah", category: "كتب أخرى" },
-]
-
-const BOOK_CATEGORY_ORDER = ["الكتب التسعة", "الأربعينات", "كتب أخرى"]
-
-function arabicDigits(value: string | number) {
-  return String(value).replace(/\d/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)])
+function validResume(value: unknown): Resume | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, unknown>
+  const chapter = Number(raw.chapterId)
+  const hadith = Number(raw.hadithId)
+  if (typeof raw.bookId !== 'string' || !HADITH_BOOKS.some((b) => b.id === raw.bookId)) return null
+  if (!Number.isSafeInteger(chapter) || chapter < 0 || !Number.isSafeInteger(hadith) || hadith < 1) return null
+  return { bookId: raw.bookId, chapterId: chapter, hadithId: hadith, savedAt: Number(raw.savedAt) || Date.now() }
 }
-
-function normalizeArabic(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[ًٌٍَُِّْـ]/g, "")
-    .replace(/[أإآ]/g, "ا")
-    .replace(/ة/g, "ه")
-    .replace(/ى/g, "ي")
+function hadithShareText(book: HadithBook, hadith: HadithRecord) {
+  return `${hadith.arabic}\n\n${book.name_ar} — الحديث رقم ${digit(hadith.idInBook)}\nمصحف سميع`
 }
-
-function normalizeBookCategory(category: unknown) {
-  const value = String(category || "").trim().toLowerCase()
-  if (["the_9_books", "the 9 books", "nine books", "الكتب التسعة"].includes(value)) return "الكتب التسعة"
-  if (["forties", "forty hadith", "the forties", "الأربعينات"].includes(value)) return "الأربعينات"
-  return "كتب أخرى"
+function message(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message && !/abort|cancel/i.test(error.message)) return error.message
+  return fallback
 }
-
-function getBookDisplayCount(book: HadithBook) {
-  return book.hadithCount && book.hadithCount > 0 ? `${arabicDigits(book.hadithCount)} حديث` : null
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000)
 }
-
-function extractBooks(payload: unknown): HadithBook[] {
-  const data = payload as any
-  const source = data?.books || data?.data?.books || data?.collections || data?.data || []
-  if (!Array.isArray(source)) return []
-
-  return source
-    .map((book: any) => ({
-      id: String(book.id ?? book.bookId ?? book.slug ?? ""),
-      name_ar: String(book.name_ar ?? book.nameArabic ?? book.arabicName ?? book.arabic?.name ?? book.name ?? ""),
-      name_en: book.name_en ?? book.nameEnglish ?? book.englishName ?? book.english?.name ?? "",
-      category: normalizeBookCategory(book.category ?? book.category_id ?? book.group ?? book.collection),
-      hadithCount: Number(book.hadithCount ?? book.hadith_count ?? book.numberOfHadith ?? book.total_hadiths ?? book.count ?? 0),
-      author_ar: book.author_ar ?? book.authorArabic ?? "",
-      author_en: book.author_en ?? book.authorEnglish ?? "",
-      introduction: book.introduction ?? book.intro ?? book.preface ?? book.preamble ?? "",
-      description: book.description ?? book.summary ?? book.about ?? "",
-    }))
-    .filter((book: HadithBook) => book.id && book.name_ar)
+function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('تعذر حفظ صورة الحديث.')), 'image/png')
+  })
 }
-
-function extractChapters(payload: unknown): HadithChapter[] {
-  const data = payload as any
-  const source = data?.chapters || data?.data?.chapters || data?.book?.chapters || []
-  if (!Array.isArray(source)) return []
-
-  return source
-    .map((chapter: any, index: number) => {
-      const range = Array.isArray(chapter.hadith_range) ? chapter.hadith_range : []
-      const id = chapter.id ?? chapter.chapterId ?? chapter.number ?? index + 1
-      return {
-        id,
-        name_ar: chapter.name_ar ?? chapter.nameArabic ?? chapter.arabicName ?? chapter.arabic ?? chapter.name ?? "",
-        name_en: chapter.name_en ?? chapter.nameEnglish ?? chapter.english ?? "",
-        hadithCount: Number(chapter.hadithCount ?? chapter.hadith_count ?? chapter.count ?? 0),
-        firstHadith: Number(chapter.firstHadith ?? chapter.first_hadith ?? chapter.start ?? chapter.startHadith ?? range[0] ?? 0),
-        lastHadith: Number(chapter.lastHadith ?? chapter.last_hadith ?? chapter.end ?? chapter.endHadith ?? range[1] ?? 0),
+function breakText(ctx: CanvasRenderingContext2D, content: string, maxWidth: number): string[] {
+  const rows: string[] = []
+  for (const paragraph of content.replace(/\r/g, '').split('\n')) {
+    if (!paragraph.trim()) { rows.push(''); continue }
+    let line = ''
+    for (const word of paragraph.split(/\s+/)) {
+      const candidate = line ? `${line} ${word}` : word
+      if (ctx.measureText(candidate).width <= maxWidth) { line = candidate; continue }
+      if (line) rows.push(line)
+      line = word
+      if (ctx.measureText(line).width > maxWidth) {
+        let part = ''
+        for (const char of word) {
+          if (ctx.measureText(part + char).width > maxWidth && part) { rows.push(part); part = char }
+          else part += char
+        }
+        line = part
       }
-    })
-    .filter((chapter: HadithChapter) => chapter.id !== undefined && chapter.id !== null)
+    }
+    if (line) rows.push(line)
+  }
+  return rows
 }
+async function renderHadithImages(book: HadithBook, hadith: HadithRecord, design: DesignStyle) {
+  if (document.fonts?.ready) await document.fonts.ready
+  const width = 1080
+  const height = 1520
+  const font = '42px "Amiri", "Amiri Quran", serif'
+  const probe = document.createElement('canvas').getContext('2d')
+  if (!probe) throw new Error('المتصفح لا يدعم تصميم الصور.')
+  probe.font = font
+  const lines = breakText(probe, hadith.arabic, width - 150)
+  const perPage = 18
+  const pages: Blob[] = []
+  const total = Math.max(1, Math.ceil(lines.length / perPage))
+  const colors = design === 'midnight'
+    ? { background: '#10292d', surface: '#18383d', border: '#bd9a5b', text: '#f5edda', muted: '#c9bb9e' }
+    : design === 'emerald'
+      ? { background: '#e9f0e9', surface: '#ffffff', border: '#327267', text: '#164c47', muted: '#66766e' }
+      : { background: '#f4eee1', surface: '#fffcf6', border: '#b79a60', text: '#36433f', muted: '#81745c' }
 
-function extractHadiths(payload: unknown): Hadith[] {
-  const data = payload as any
-  const source = data?.hadiths || data?.data?.hadiths || data?.data || []
-  if (!Array.isArray(source)) return []
-
-  return source
-    .map((hadith: any) => ({
-      id: Number(hadith.id ?? hadith.idInBook ?? hadith.number ?? 0),
-      idInBook: Number(hadith.idInBook ?? hadith.number ?? hadith.id ?? 0),
-      chapterId: Number(hadith.chapterId ?? hadith.chapter_id ?? 0),
-      bookId: Number(hadith.bookId ?? hadith.book_id ?? 0),
-      arabic: hadith.arabic ?? hadith.arab ?? hadith.text_ar ?? hadith.text ?? "",
-      english: {
-        narrator: hadith.english?.narrator ?? hadith.narrator ?? "",
-        text: hadith.english?.text ?? hadith.text_en ?? "",
-      },
-    }))
-    .filter((hadith: Hadith) => hadith.id > 0)
-}
-
-function getHadithNumber(hadith: Hadith) {
-  return hadith.idInBook || hadith.id
-}
-
-function getFavoriteKey(book: HadithBook, hadith: Hadith) {
-  return `${book.id}:${getHadithNumber(hadith)}`
-}
-
-function getShareText(book: HadithBook, hadith: Hadith) {
-  return `${hadith.arabic || ""}\n\n${book.name_ar} — حديث ${arabicDigits(getHadithNumber(hadith))}`
+  for (let page = 0; page < total; page++) {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('تعذر تهيئة صورة الحديث.')
+    ctx.fillStyle = colors.background
+    ctx.fillRect(0, 0, width, height)
+    ctx.fillStyle = colors.surface
+    ctx.fillRect(38, 38, width - 76, height - 76)
+    ctx.strokeStyle = colors.border
+    ctx.lineWidth = 2
+    ctx.strokeRect(55, 55, width - 110, height - 110)
+    ctx.strokeRect(67, 67, width - 134, height - 134)
+    ctx.direction = 'rtl'
+    ctx.textAlign = 'center'
+    ctx.fillStyle = colors.border
+    ctx.font = 'bold 35px "Amiri", serif'
+    ctx.fillText('❖  مـصـحـف سـمـيـع  ❖', width / 2, 148)
+    ctx.fillStyle = colors.muted
+    ctx.font = '26px "Amiri", serif'
+    ctx.fillText(book.name_ar, width / 2, 201)
+    ctx.fillStyle = colors.border
+    ctx.fillRect(150, 224, width - 300, 2)
+    ctx.textAlign = 'right'
+    ctx.fillStyle = colors.text
+    ctx.font = font
+    const batch = lines.slice(page * perPage, (page + 1) * perPage)
+    const lineHeight = 58
+    let top = 296
+    for (const line of batch) {
+      ctx.fillText(line, width - 120, top)
+      top += lineHeight
+    }
+    ctx.fillStyle = colors.border
+    ctx.fillRect(150, height - 188, width - 300, 2)
+    ctx.fillStyle = colors.muted
+    ctx.textAlign = 'center'
+    ctx.font = '27px "Amiri", serif'
+    ctx.fillText(`الحديث رقم ${digit(hadith.idInBook)} — ${digit(page + 1)} / ${digit(total)}`, width / 2, height - 136)
+    ctx.fillText('مصحف سميع | المكتبة الحديثية', width / 2, height - 95)
+    pages.push(await canvasBlob(canvas))
+  }
+  if (pages.length === 1) {
+    saveBlob(pages[0], `samee3-hadith-${book.id}-${hadith.idInBook}.png`)
+  } else {
+    const zip = new JSZip()
+    pages.forEach((blob, index) => zip.file(`hadith-${hadith.idInBook}-page-${index + 1}.png`, blob))
+    const archive = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
+    saveBlob(archive, `samee3-hadith-${book.id}-${hadith.idInBook}.zip`)
+  }
+  return pages.length
 }
 
 export default function HadithPage() {
-  const [books, setBooks] = useState<HadithBook[]>(FALLBACK_BOOKS)
-  const [selectedBook, setSelectedBook] = useState<HadithBook | null>(null)
+  const [books, setBooks] = useState<HadithBook[]>(() => HADITH_BOOKS.map((b) => ({ ...b })))
+  const [booksSource, setBooksSource] = useState<'network' | 'cache' | 'catalogue'>('catalogue')
+  const [screen, setScreen] = useState<Screen>('library')
+  const [bookId, setBookId] = useState<string | null>(null)
   const [chapters, setChapters] = useState<HadithChapter[]>([])
-  const [selectedChapterId, setSelectedChapterId] = useState<string | number | null>(null)
-  const [hadiths, setHadiths] = useState<Hadith[]>([])
-  const [selectedHadith, setSelectedHadith] = useState<Hadith | null>(null)
-
-  const [bookSearch, setBookSearch] = useState("")
-  const [chapterSearch, setChapterSearch] = useState("")
-  const [hadithSearch, setHadithSearch] = useState("")
-
-  const [booksLoading, setBooksLoading] = useState(true)
-  const [chaptersLoading, setChaptersLoading] = useState(false)
-  const [hadithsLoading, setHadithsLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [bookError, setBookError] = useState("")
-
+  const [chapterId, setChapterId] = useState<number | null>(null)
+  const [hadiths, setHadiths] = useState<HadithRecord[]>([])
+  const [loadedChapterKey, setLoadedChapterKey] = useState('')
+  const [hadithIndex, setHadithIndex] = useState(0)
+  const [bookSearch, setBookSearch] = useState('')
+  const [chapterSearch, setChapterSearch] = useState('')
+  const [hadithSearch, setHadithSearch] = useState('')
+  const [loadingBook, setLoadingBook] = useState(false)
+  const [loadingChapter, setLoadingChapter] = useState(false)
+  const [bookError, setBookError] = useState('')
+  const [chapterError, setChapterError] = useState('')
+  const [sectionOrigin, setSectionOrigin] = useState<'network' | 'cache'>('network')
   const [favoriteIds, setFavoriteIds] = useState<string[]>([])
-  const [copied, setCopied] = useState(false)
-  const [resumeState, setResumeState] = useState<ResumeState | null>(null)
+  const [savedItems, setSavedItems] = useState<SavedItem[]>([])
+  const [resume, setResume] = useState<Resume | null>(null)
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const [showNotes, setShowNotes] = useState(false)
+  const [showChapters, setShowChapters] = useState(true)
+  const [appearance, setAppearance] = useState<Appearance>('cream')
+  const [fontSize, setFontSize] = useState(27)
+  const [design, setDesign] = useState<DesignStyle>('gold')
+  const [designBusy, setDesignBusy] = useState(false)
+  const [designNotice, setDesignNotice] = useState('')
+  const [feedback, setFeedback] = useState('')
+  const [downloadState, setDownloadState] = useState<DownloadState | null>(null)
+  const [cachedCount, setCachedCount] = useState(0)
+  const [ready, setReady] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
 
-  const [designUrl, setDesignUrl] = useState<string | null>(null)
-  const [designLoading, setDesignLoading] = useState(false)
-  const [designError, setDesignError] = useState("")
-  const [designFileName, setDesignFileName] = useState("samee3-hadith.png")
+  const initialPosition = useRef<RequestedPosition>(null)
+  const readerScroll = useRef<HTMLDivElement | null>(null)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const downloadController = useRef<AbortController | null>(null)
+  const bookController = useRef<AbortController | null>(null)
+  const chapterController = useRef<AbortController | null>(null)
+  const savedResumeRef = useRef<Resume | null>(null)
+  const mountedRef = useRef(true)
+  const requestedFromEndRef = useRef(false)
+  const [bookRetry, setBookRetry] = useState(0)
+  const [chapterRetry, setChapterRetry] = useState(0)
 
-  const fetchJson = useCallback(async (url: string) => {
-    const response = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    })
-
-    const text = await response.text()
-    let payload: any = null
-    try {
-      payload = text ? JSON.parse(text) : null
-    } catch {
-      throw new Error("استجابة غير صالحة من مصدر الأحاديث.")
-    }
-
-    if (!response.ok) throw new Error(payload?.error || payload?.message || `HTTP ${response.status}`)
-    return payload
-  }, [])
-
-  const currentChapter = useMemo(
-    () => chapters.find((chapter) => String(chapter.id) === String(selectedChapterId)) || null,
-    [chapters, selectedChapterId],
-  )
-
-  const filteredBooks = useMemo(() => {
-    const query = normalizeArabic(bookSearch.trim())
-    if (!query) return books
-    return books.filter((book) => normalizeArabic(`${book.name_ar} ${book.name_en || ""} ${book.author_ar || ""}`).includes(query))
-  }, [books, bookSearch])
-
-  const groupedBooks = useMemo(() => {
-    const groups = BOOK_CATEGORY_ORDER.map((category) => ({
-      category,
-      books: filteredBooks.filter((book) => (book.category || "كتب أخرى") === category),
-    })).filter((group) => group.books.length)
-
-    const unknown = filteredBooks.filter((book) => !BOOK_CATEGORY_ORDER.includes(book.category || ""))
-    if (unknown.length) groups.push({ category: "كتب أخرى", books: unknown })
-    return groups
-  }, [filteredBooks])
-
-  const filteredChapters = useMemo(() => {
-    const query = normalizeArabic(chapterSearch.trim())
-    if (!query) return chapters
-    return chapters.filter((chapter) => normalizeArabic(`${chapter.name_ar || ""} ${chapter.name_en || ""} ${chapter.id}`).includes(query))
-  }, [chapterSearch, chapters])
-
-  const filteredHadiths = useMemo(() => {
-    const query = normalizeArabic(hadithSearch.trim())
-    if (!query) return hadiths
-    return hadiths.filter((hadith) => normalizeArabic(`${hadith.arabic || ""} ${hadith.english?.narrator || ""} ${hadith.english?.text || ""} ${getHadithNumber(hadith)}`).includes(query))
-  }, [hadithSearch, hadiths])
-
-  const visibleHadith = useMemo(() => {
-    if (!filteredHadiths.length) return null
-    if (selectedHadith) {
-      const same = filteredHadiths.find((hadith) => getHadithNumber(hadith) === getHadithNumber(selectedHadith))
-      if (same) return same
-    }
-    return filteredHadiths[0]
-  }, [filteredHadiths, selectedHadith])
-
-  const currentHadithIndex = useMemo(() => {
-    if (!visibleHadith) return -1
-    return filteredHadiths.findIndex((hadith) => getHadithNumber(hadith) === getHadithNumber(visibleHadith))
-  }, [filteredHadiths, visibleHadith])
-
-  const selectedIsFavorite = Boolean(
-    selectedBook && visibleHadith && favoriteIds.includes(getFavoriteKey(selectedBook, visibleHadith)),
-  )
-
-  const loadBooks = useCallback(async () => {
-    setBooksLoading(true)
-    setBookError("")
-    try {
-      const payload = await fetchJson(`${API_BASE}/list`)
-      const remoteBooks = extractBooks(payload)
-      if (remoteBooks.length) setBooks(remoteBooks)
-      else setBookError("تعذر قراءة قائمة الكتب من مصدر البيانات؛ تم استخدام القائمة الاحتياطية.")
-    } catch (err) {
-      console.error(err)
-      setBookError("تعذر الاتصال بمصدر كتب الحديث حاليًا؛ تظهر لك القائمة الاحتياطية.")
-    } finally {
-      setBooksLoading(false)
-    }
-  }, [fetchJson])
+  const selectedBook = useMemo(() => books.find((b) => b.id === bookId) || HADITH_BOOKS.find((b) => b.id === bookId) || null, [books, bookId])
+  const currentChapter = useMemo(() => chapters.find((c) => c.id === chapterId) || null, [chapters, chapterId])
+  const displayedHadiths = useMemo(() => loadedChapterKey === `${bookId}:${chapterId}` ? hadiths : [], [bookId, chapterId, hadiths, loadedChapterKey])
+  const activeHadith = displayedHadiths[hadithIndex] || null
+  const activeKey = selectedBook && activeHadith ? favoriteKey(selectedBook.id, activeHadith.idInBook) : ''
+  const activeIsFavorite = favoriteIds.includes(activeKey)
+  const bg = appearance === 'night'
+  const baseColor = bg ? 'bg-[#101e22] text-[#eae5d8]' : 'bg-[#f7f3e9] text-[#243e40]'
+  const surface = bg ? 'bg-[#192b2e] border-[#a58e60]/20' : 'bg-white border-[#d1b781]/20'
+  const quiet = bg ? 'text-[#aebdb8]' : 'text-[#75817c]'
+  const softSurface = bg ? 'bg-[#20383a]' : 'bg-[#f7f3e9]'
 
   useEffect(() => {
-    void loadBooks()
-
-    try {
-      const raw = localStorage.getItem(FAVORITES_KEY)
-      const parsed = raw ? JSON.parse(raw) : []
-      setFavoriteIds(Array.isArray(parsed) ? parsed : [])
-    } catch {
-      setFavoriteIds([])
+    mountedRef.current = true
+    const favorites = readStorage<unknown>(FAV_KEY, [])
+    setFavoriteIds(Array.isArray(favorites) ? favorites.filter((v): v is string => typeof v === 'string') : [])
+    const saved = readStorage<unknown>(SAVED_KEY, [])
+    setSavedItems(Array.isArray(saved) ? saved.filter((v): v is SavedItem => !!v && typeof v.key === 'string' && typeof v.bookId === 'string' && Number.isInteger(v.chapterId)) : [])
+    const progress = validResume(readStorage<unknown>(RESUME_KEY, null))
+    setResume(progress)
+    savedResumeRef.current = progress
+    const preferences = readStorage<{ appearance?: Appearance; fontSize?: number; design?: DesignStyle }>(SETTINGS_KEY, {})
+    if (preferences.appearance === 'night') setAppearance('night')
+    if (typeof preferences.fontSize === 'number') setFontSize(within(preferences.fontSize, 19, 38))
+    if (preferences.design === 'emerald' || preferences.design === 'midnight') setDesign(preferences.design)
+    const oldNotes = readStorage<unknown>(NOTES_KEY, {})
+    if (oldNotes && typeof oldNotes === 'object' && !Array.isArray(oldNotes)) setNotes(oldNotes as Record<string, string>)
+    const query = new URLSearchParams(window.location.search)
+    const initialBook = query.get('book')
+    const initialChapter = Number(query.get('chapter'))
+    const initialHadith = Number(query.get('hadith'))
+    if (initialBook && HADITH_BOOKS.some((b) => b.id === initialBook)) {
+      initialPosition.current = query.has('chapter') && Number.isSafeInteger(initialChapter) && initialChapter >= 0
+        ? { bookId: initialBook, chapterId: initialChapter, hadithId: initialHadith > 0 ? initialHadith : undefined }
+        : null
+      setBookId(initialBook)
+      setScreen('reader')
     }
-
-    try {
-      const raw = localStorage.getItem(RESUME_KEY)
-      const parsed = raw ? JSON.parse(raw) : null
-      if (parsed?.bookId && parsed?.chapterId !== undefined && parsed?.hadithId) setResumeState(parsed as ResumeState)
-    } catch {
-      setResumeState(null)
+    const syncNetwork = () => setIsOffline(!navigator.onLine)
+    syncNetwork()
+    window.addEventListener('online', syncNetwork)
+    window.addEventListener('offline', syncNetwork)
+    setReady(true)
+    return () => {
+      mountedRef.current = false
+      window.removeEventListener('online', syncNetwork)
+      window.removeEventListener('offline', syncNetwork)
+      bookController.current?.abort()
+      chapterController.current?.abort()
+      downloadController.current?.abort()
     }
-  }, [loadBooks])
+  }, [])
 
-  const loadBookChapters = useCallback(async (book: HadithBook) => {
-    setChaptersLoading(true)
-    setError("")
+  useEffect(() => {
+    if (!ready) return
+    saveStorage(SETTINGS_KEY, { appearance, fontSize, design })
+  }, [appearance, fontSize, design, ready])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void getHadithBooks({ signal: controller.signal }).then((result) => {
+      if (controller.signal.aborted) return
+      setBooks(result.books)
+      setBooksSource(result.origin)
+    }).catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+
+  const updateUrl = useCallback((nextBookId: string | null, nextChapterId?: number | null, nextHadith?: number) => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('book')
+    url.searchParams.delete('chapter')
+    url.searchParams.delete('hadith')
+    if (nextBookId) url.searchParams.set('book', nextBookId)
+    if (nextBookId && nextChapterId != null) url.searchParams.set('chapter', String(nextChapterId))
+    if (nextHadith && nextChapterId != null) url.searchParams.set('hadith', String(nextHadith))
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+  }, [])
+
+  const stopDownload = useCallback(() => {
+    downloadController.current?.abort()
+    downloadController.current = null
+    setDownloadState((prev) => prev?.active ? { ...prev, active: false, error: 'تم إيقاف التنزيل؛ الأبواب المحفوظة لن تُحذف.' } : prev)
+  }, [])
+
+  const chooseBook = useCallback((nextId: string, requested?: { chapterId: number; hadithId?: number }) => {
+    stopDownload()
+    const progress = savedResumeRef.current
+    initialPosition.current = requested
+      ? { bookId: nextId, ...requested }
+      : progress?.bookId === nextId
+        ? { bookId: nextId, chapterId: progress.chapterId, hadithId: progress.hadithId }
+        : null
+    setBookId(nextId)
+    setScreen('reader')
+    setChapterId(null)
     setChapters([])
     setHadiths([])
-    setSelectedHadith(null)
-    setSelectedChapterId(null)
-    setChapterSearch("")
-    setHadithSearch("")
+    setLoadedChapterKey('')
+    setHadithIndex(0)
+    setBookError('')
+    setChapterError('')
+    setChapterSearch('')
+    setHadithSearch('')
+    setCachedCount(0)
+    setFeedback('')
+    setShowNotes(false)
+    requestedFromEndRef.current = false
+    setBookRetry((n) => n + 1)
+    updateUrl(nextId)
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }, [stopDownload, updateUrl])
 
-    try {
-      const payload = await fetchJson(`${API_BASE}/${encodeURIComponent(book.id)}`)
-      const nextChapters = extractChapters(payload)
-      if (!nextChapters.length) throw new Error("No chapters found")
-
-      const payloadBook = payload?.book || payload?.data?.book || payload?.data || {}
-      const updatedBook: HadithBook = {
-        ...book,
-        name_ar: payloadBook?.name_ar || book.name_ar,
-        name_en: payloadBook?.name_en || book.name_en,
-        category: normalizeBookCategory(payloadBook?.category || book.category),
-        hadithCount: Number(payloadBook?.total_hadiths ?? payload?.total_hadiths ?? book.hadithCount ?? 0),
-        author_ar: payloadBook?.author_ar || book.author_ar,
-        author_en: payloadBook?.author_en || book.author_en,
-        introduction: payloadBook?.introduction ?? payloadBook?.intro ?? payloadBook?.preface ?? payloadBook?.preamble ?? book.introduction ?? "",
-        description: payloadBook?.description ?? payloadBook?.summary ?? book.description ?? "",
-      }
-
-      setSelectedBook(updatedBook)
-      setBooks((current) => current.map((item) => (item.id === updatedBook.id ? updatedBook : item)))
-      setChapters(nextChapters)
-
-      const savedChapter = resumeState?.bookId === book.id ? resumeState.chapterId : null
-      const chapterToOpen = savedChapter !== null && nextChapters.some((chapter) => String(chapter.id) === String(savedChapter))
-        ? savedChapter
-        : nextChapters[0].id
-      setSelectedChapterId(chapterToOpen)
-    } catch (err) {
-      console.error(err)
-      setError("تعذر تحميل أبواب هذا الكتاب حاليًا.")
-    } finally {
-      setChaptersLoading(false)
-    }
-  }, [fetchJson, resumeState])
-
-  const loadChapterHadiths = useCallback(async (book: HadithBook, chapterId: string | number) => {
-    setHadithsLoading(true)
-    setError("")
+  const goLibrary = useCallback(() => {
+    stopDownload()
+    bookController.current?.abort()
+    chapterController.current?.abort()
+    initialPosition.current = null
+    setBookId(null)
+    setChapterId(null)
+    setChapters([])
     setHadiths([])
-    setSelectedHadith(null)
-    try {
-      const payload = await fetchJson(`${API_BASE}/${encodeURIComponent(book.id)}/chapter/${encodeURIComponent(String(chapterId))}`)
-      const nextHadiths = extractHadiths(payload)
-      setHadiths(nextHadiths)
-
-      if (!nextHadiths.length) {
-        setError("لم يتم العثور على أحاديث في هذا الباب.")
-        return
-      }
-
-      const savedHadithId = resumeState?.bookId === book.id && String(resumeState.chapterId) === String(chapterId)
-        ? resumeState.hadithId
-        : null
-
-      const saved = savedHadithId
-        ? nextHadiths.find((hadith) => getHadithNumber(hadith) === savedHadithId)
-        : null
-      setSelectedHadith(saved || nextHadiths[0])
-    } catch (err) {
-      console.error(err)
-      setError("تعذر تحميل أحاديث الباب حاليًا.")
-    } finally {
-      setHadithsLoading(false)
-    }
-  }, [fetchJson, resumeState])
+    setLoadedChapterKey('')
+    setScreen('library')
+    updateUrl(null)
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }, [stopDownload, updateUrl])
 
   useEffect(() => {
-    if (selectedBook && selectedChapterId !== null) void loadChapterHadiths(selectedBook, selectedChapterId)
-  }, [loadChapterHadiths, selectedBook, selectedChapterId])
+    if (!ready || !bookId) return
+    bookController.current?.abort()
+    const controller = new AbortController()
+    bookController.current = controller
+    setLoadingBook(true)
+    setBookError('')
+    setChapters([])
+    setChapterId(null)
+    setHadiths([])
+    setLoadedChapterKey('')
+    void getHadithBook(bookId, { signal: controller.signal }).then((data) => {
+      if (controller.signal.aborted || !mountedRef.current) return
+      const ordered = data.chapters
+      setChapters(ordered)
+      setBooks((prev) => prev.map((book) => book.id === bookId ? { ...book, ...data.book } : book))
+      const requested = initialPosition.current
+      const wantedChapter = requested?.bookId === bookId
+        ? ordered.find((c) => c.id === requested.chapterId)
+        : null
+      const chosen = wantedChapter || ordered[0]
+      setChapterId(chosen.id)
+      updateUrl(bookId, chosen.id, wantedChapter ? requested?.hadithId : undefined)
+      void getCachedHadithChapters(bookId).then((ids) => {
+        if (!controller.signal.aborted) setCachedCount(ids.filter((id) => ordered.some((c) => c.id === id)).length)
+      })
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setBookError(message(error, 'تعذر تحميل أبواب الكتاب.'))
+    }).finally(() => { if (!controller.signal.aborted) setLoadingBook(false) })
+    return () => controller.abort()
+  }, [bookId, ready, updateUrl, bookRetry])
 
-  const selectBook = useCallback((book: HadithBook) => {
-    setDesignError("")
-    setSelectedBook(book)
-    setBookSearch("")
-    void loadBookChapters(book)
-  }, [loadBookChapters])
+  useEffect(() => {
+    if (!ready || !bookId || chapterId === null) return
+    chapterController.current?.abort()
+    const controller = new AbortController()
+    chapterController.current = controller
+    setLoadingChapter(true)
+    setChapterError('')
+    setLoadedChapterKey('')
+    setHadiths([])
+    setHadithIndex(0)
+    setHadithSearch('')
+    setShowNotes(false)
+    void getHadithChapter(bookId, chapterId, { signal: controller.signal }).then((data) => {
+      if (controller.signal.aborted || !mountedRef.current) return
+      const target = initialPosition.current
+      const wanted = target?.bookId === bookId && target.chapterId === chapterId ? target.hadithId : undefined
+      const nextIndex = wanted ? Math.max(0, data.hadiths.findIndex((hadith) => hadith.idInBook === wanted)) : requestedFromEndRef.current ? data.hadiths.length - 1 : 0
+      requestedFromEndRef.current = false
+      setHadiths(data.hadiths)
+      setHadithIndex(nextIndex)
+      setLoadedChapterKey(`${bookId}:${chapterId}`)
+      setSectionOrigin(data.origin)
+      initialPosition.current = null
+      void getCachedHadithChapters(bookId).then((ids) => {
+        if (!controller.signal.aborted) setCachedCount(ids.filter((id) => chapters.some((c) => c.id === id)).length)
+      })
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setChapterError(message(error, 'تعذر تحميل أحاديث الباب.'))
+    }).finally(() => { if (!controller.signal.aborted) setLoadingChapter(false) })
+    return () => controller.abort()
+  }, [bookId, chapterId, ready, chapters, chapterRetry])
 
-  const selectChapter = useCallback((chapterId: string | number) => {
-    setSelectedChapterId(chapterId)
-    setHadithSearch("")
-  }, [])
+  useEffect(() => {
+    if (!ready || !bookId || chapterId === null || !activeHadith) return
+    const position: Resume = { bookId, chapterId, hadithId: activeHadith.idInBook, savedAt: Date.now() }
+    savedResumeRef.current = position
+    setResume(position)
+    saveStorage(RESUME_KEY, position)
+    updateUrl(bookId, chapterId, activeHadith.idInBook)
+  }, [bookId, chapterId, activeHadith?.idInBook, ready, updateUrl])
 
-  const openHadith = useCallback((hadith: Hadith) => {
-    if (!selectedBook || selectedChapterId === null) return
-    setSelectedHadith(hadith)
-    const nextResume: ResumeState = {
-      bookId: selectedBook.id,
-      chapterId: selectedChapterId,
-      hadithId: getHadithNumber(hadith),
-      savedAt: Date.now(),
-    }
-    setResumeState(nextResume)
-    localStorage.setItem(RESUME_KEY, JSON.stringify(nextResume))
-    setDesignError("")
-  }, [selectedBook, selectedChapterId])
+  const selectChapter = useCallback((id: number, fromEnd = false) => {
+    if (!bookId) return
+    if (id === chapterId && displayedHadiths.length) return
+    initialPosition.current = { bookId, chapterId: id, hadithId: undefined }
+    requestedFromEndRef.current = fromEnd
+    setChapterId(id)
+    setHadithIndex(fromEnd ? -1 : 0)
+    setFeedback('')
+    updateUrl(bookId, id)
+    readerScroll.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [bookId, chapterId, displayedHadiths.length, updateUrl])
 
-  const goToHadith = useCallback((direction: -1 | 1) => {
-    if (currentHadithIndex < 0) return
-    const target = filteredHadiths[currentHadithIndex + direction]
-    if (target) openHadith(target)
-  }, [currentHadithIndex, filteredHadiths, openHadith])
+  const selectHadith = useCallback((index: number) => {
+    if (index < 0 || index >= displayedHadiths.length) return
+    setHadithIndex(index)
+    setFeedback('')
+    setShowNotes(false)
+    readerScroll.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [displayedHadiths.length])
+
+  const advance = useCallback((direction: -1 | 1) => {
+    const next = hadithIndex + direction
+    if (next >= 0 && next < displayedHadiths.length) { selectHadith(next); return }
+    const chapterIndex = chapters.findIndex((c) => c.id === chapterId)
+    const nextChapter = chapters[chapterIndex + direction]
+    if (!nextChapter) return
+    initialPosition.current = { bookId: bookId || '', chapterId: nextChapter.id, hadithId: undefined }
+    requestedFromEndRef.current = direction === -1
+    setChapterId(nextChapter.id)
+    setHadithIndex(direction === -1 ? -1 : 0)
+    updateUrl(bookId, nextChapter.id)
+    readerScroll.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [hadithIndex, displayedHadiths.length, selectHadith, chapters, chapterId, bookId, updateUrl])
+
+  const filteredBooks = useMemo(() => {
+    const q = normalizeHadithSearch(bookSearch)
+    return q ? books.filter((b) => normalizeHadithSearch(`${b.name_ar} ${b.name_en || ''} ${b.author_ar || ''}`).includes(q)) : books
+  }, [bookSearch, books])
+  const filteredChapters = useMemo(() => {
+    const q = normalizeHadithSearch(chapterSearch)
+    return q ? chapters.filter((c) => normalizeHadithSearch(`${c.id} ${c.name_ar} ${c.name_en || ''}`).includes(q)) : chapters
+  }, [chapters, chapterSearch])
+  const matchedHadiths = useMemo(() => {
+    const q = normalizeHadithSearch(hadithSearch)
+    return q ? displayedHadiths.map((hadith, index) => ({ hadith, index })).filter(({ hadith }) => normalizeHadithSearch(`${hadith.idInBook} ${hadith.arabic}`).includes(q)) : []
+  }, [displayedHadiths, hadithSearch])
+
+  const toggleFavorite = useCallback(() => {
+    if (!selectedBook || chapterId === null || !activeHadith) return
+    const key = favoriteKey(selectedBook.id, activeHadith.idInBook)
+    const exists = favoriteIds.includes(key)
+    const nextFavorites = exists ? favoriteIds.filter((v) => v !== key) : [...favoriteIds, key]
+    const nextItems = exists
+      ? savedItems.filter((i) => i.key !== key)
+      : [
+          { key, bookId: selectedBook.id, bookTitle: selectedBook.name_ar, chapterId, number: activeHadith.idInBook, excerpt: activeHadith.arabic.slice(0, 240) },
+          ...savedItems.filter((i) => i.key !== key),
+        ]
+    setFavoriteIds(nextFavorites)
+    setSavedItems(nextItems)
+    saveStorage(FAV_KEY, nextFavorites)
+    saveStorage(SAVED_KEY, nextItems)
+    setFeedback(exists ? 'أزيل الحديث من المفضلة.' : 'تم حفظ الحديث في المفضلة.')
+  }, [selectedBook, chapterId, activeHadith, favoriteIds, savedItems])
 
   const copyHadith = useCallback(async () => {
-    if (!selectedBook || !visibleHadith) return
-    const text = getShareText(selectedBook, visibleHadith)
+    if (!selectedBook || !activeHadith) return
+    const text = hadithShareText(selectedBook, activeHadith)
     try {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text)
       else {
-        const textarea = document.createElement("textarea")
-        textarea.value = text
-        textarea.style.position = "fixed"
-        textarea.style.opacity = "0"
-        document.body.appendChild(textarea)
-        textarea.focus()
-        textarea.select()
-        document.execCommand("copy")
-        textarea.remove()
+        const field = document.createElement('textarea')
+        field.value = text
+        field.style.position = 'fixed'
+        field.style.opacity = '0'
+        document.body.appendChild(field)
+        field.select()
+        const ok = document.execCommand('copy')
+        field.remove()
+        if (!ok) throw new Error('تعذّر النسخ.')
       }
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1800)
-    } catch (err) {
-      console.error(err)
-    }
-  }, [selectedBook, visibleHadith])
+      setFeedback('تم نسخ الحديث مع اسم الكتاب ورقمه.')
+    } catch { setFeedback('تعذّر النسخ، حاول مجددًا.') }
+  }, [selectedBook, activeHadith])
 
   const shareHadith = useCallback(async () => {
-    if (!selectedBook || !visibleHadith) return
-    const text = getShareText(selectedBook, visibleHadith)
+    if (!selectedBook || !activeHadith) return
+    if (!navigator.share) { await copyHadith(); return }
     try {
-      if (navigator.share) await navigator.share({ title: selectedBook.name_ar, text })
-      else await copyHadith()
-    } catch (err) {
-      if ((err as DOMException)?.name !== "AbortError") console.error(err)
+      await navigator.share({ title: selectedBook.name_ar, text: hadithShareText(selectedBook, activeHadith) })
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setFeedback('تعذّرت المشاركة؛ يمكنك نسخ النص بدلًا منها.')
     }
-  }, [copyHadith, selectedBook, visibleHadith])
+  }, [selectedBook, activeHadith, copyHadith])
 
-  const toggleFavorite = useCallback(() => {
-    if (!selectedBook || !visibleHadith) return
-    const key = getFavoriteKey(selectedBook, visibleHadith)
-    const next = favoriteIds.includes(key)
-      ? favoriteIds.filter((item) => item !== key)
-      : [...favoriteIds, key]
-    setFavoriteIds(next)
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify(next))
-  }, [favoriteIds, selectedBook, visibleHadith])
-
-  const designHadithAsImage = useCallback(async () => {
-    if (!selectedBook || !visibleHadith?.arabic) return
-
-    setDesignLoading(true)
-    setDesignError("")
-
+  const makeImage = useCallback(async () => {
+    if (!selectedBook || !activeHadith || designBusy) return
+    setDesignBusy(true)
+    setDesignNotice('')
     try {
-      if (typeof document !== "undefined" && document.fonts?.ready) {
-        await document.fonts.ready
-      }
+      const count = await renderHadithImages(selectedBook, activeHadith, design)
+      setDesignNotice(count > 1 ? `تم تجهيز الحديث الطويل في ${digit(count)} صور داخل ملف ZIP.` : 'تم تجهيز صورة الحديث للحفظ.')
+    } catch (error) { setDesignNotice(message(error, 'تعذّر تصميم صورة الحديث.')) }
+    finally { setDesignBusy(false) }
+  }, [selectedBook, activeHadith, designBusy, design])
 
-      // قالب اجتماعي فاخر: عرض 1080px وارتفاع ديناميكي حتى لا يُقص الحديث الطويل.
-      const width = 1080
-      const outer = 28
-      const headerX = outer
-      const headerY = outer
-      const headerW = width - outer * 2
-      const headerH = 290
-      const cardX = 68
-      const cardY = 348
-      const cardWidth = width - cardX * 2
-      const textMaxWidth = 760
-      const footerHeight = 150
+  const refreshCurrent = useCallback(() => {
+    if (!bookId) return
+    chooseBook(bookId, chapterId === null ? undefined : { chapterId, hadithId: activeHadith?.idInBook })
+  }, [bookId, chapterId, activeHadith?.idInBook, chooseBook])
 
-      const cleanText = visibleHadith.arabic
-        .replace(/[\u200B-\u200D\uFEFF]/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-
-      const narrator = visibleHadith.english?.narrator?.trim() || ""
-      const chapterName = currentChapter?.name_ar?.trim() || ""
-      const bookName = selectedBook.name_ar.trim()
-      const hadithNumber = getHadithNumber(visibleHadith)
-
-      const measureCanvas = document.createElement("canvas")
-      const measureCtx = measureCanvas.getContext("2d")
-      if (!measureCtx) throw new Error("Canvas unavailable")
-
-      measureCtx.direction = "rtl"
-      measureCtx.textAlign = "center"
-      measureCtx.textBaseline = "alphabetic"
-
-      const makeLines = (fontSize: number) => {
-        measureCtx.font = `600 ${fontSize}px "Amiri Quran", "Amiri", "Noto Naskh Arabic", serif`
-
-        const words = cleanText.split(/\s+/)
-        const lines: string[] = []
-        let current = ""
-
-        for (const word of words) {
-          const candidate = current ? `${current} ${word}` : word
-
-          if (measureCtx.measureText(candidate).width <= textMaxWidth) {
-            current = candidate
-            continue
-          }
-
-          if (current) lines.push(current)
-
-          if (measureCtx.measureText(word).width <= textMaxWidth) {
-            current = word
-          } else {
-            let chunk = ""
-            for (const char of word) {
-              const candidateChunk = chunk + char
-              if (measureCtx.measureText(candidateChunk).width <= textMaxWidth) {
-                chunk = candidateChunk
-              } else {
-                if (chunk) lines.push(chunk)
-                chunk = char
-              }
-            }
-            current = chunk
-          }
+  const downloadWholeBook = useCallback(async () => {
+    if (!bookId || !chapters.length || downloadController.current) return
+    const controller = new AbortController()
+    downloadController.current = controller
+    const total = chapters.length
+    setDownloadState({ bookId, done: 0, total, active: true, error: '', complete: false })
+    try {
+      const saved = new Set(await getCachedHadithChapters(bookId))
+      let done = chapters.filter((c) => saved.has(c.id)).length
+      setDownloadState({ bookId, done, total, active: true, error: '', complete: false })
+      for (const chapter of chapters) {
+        if (controller.signal.aborted) throw new Error('تم إيقاف التنزيل.')
+        if (saved.has(chapter.id)) continue
+        await getHadithChapter(bookId, chapter.id, { signal: controller.signal })
+        if (controller.signal.aborted) throw new Error('تم إيقاف التنزيل.')
+        const verified = await getCachedHadithChapters(bookId)
+        if (!verified.includes(chapter.id)) throw new Error('المتصفح لم يحفظ أحد الأبواب؛ راجع مساحة تخزين الجهاز.')
+        saved.add(chapter.id)
+        done++
+        if (mountedRef.current) {
+          setCachedCount(done)
+          setDownloadState({ bookId, done, total, active: true, error: '', complete: false })
         }
-
-        if (current) lines.push(current)
-        return lines
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 750))
       }
-
-      let fontSize = 58
-      let lineHeight = 92
-      let lines = makeLines(fontSize)
-
-      while (lines.length > 15 && fontSize > 42) {
-        fontSize -= 2
-        lineHeight = Math.round(fontSize * 1.58)
-        lines = makeLines(fontSize)
+      const final = await getCachedHadithChapters(bookId)
+      const complete = chapters.every((chapter) => final.includes(chapter.id))
+      if (mountedRef.current) {
+        setCachedCount(chapters.filter((c) => final.includes(c.id)).length)
+        setDownloadState({ bookId, done: chapters.filter((c) => final.includes(c.id)).length, total, active: false, complete, error: complete ? '' : 'لم تكتمل كل الأبواب في ذاكرة التخزين.' })
       }
-
-      const textBlockHeight = Math.max(lineHeight, lines.length * lineHeight)
-      const narratorBlock = narrator ? 82 : 0
-      const cardHeight = Math.max(650, textBlockHeight + narratorBlock + 340)
-      const footerY = cardY + cardHeight
-      const height = footerY + footerHeight + outer
-
-      const canvas = document.createElement("canvas")
-      canvas.width = width
-      canvas.height = height
-
-      const ctx = canvas.getContext("2d")
-      if (!ctx) throw new Error("Canvas unavailable")
-
-      ctx.direction = "rtl"
-      ctx.textAlign = "center"
-      ctx.textBaseline = "alphabetic"
-      ctx.imageSmoothingEnabled = true
-
-      const roundedRectPath = (
-        context: CanvasRenderingContext2D,
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        r: number,
-      ) => {
-        const radius = Math.min(r, w / 2, h / 2)
-        context.beginPath()
-        context.moveTo(x + radius, y)
-        context.lineTo(x + w - radius, y)
-        context.quadraticCurveTo(x + w, y, x + w, y + radius)
-        context.lineTo(x + w, y + h - radius)
-        context.quadraticCurveTo(x + w, y + h, x + w - radius, y + h)
-        context.lineTo(x + radius, y + h)
-        context.quadraticCurveTo(x, y + h, x, y + h - radius)
-        context.lineTo(x, y + radius)
-        context.quadraticCurveTo(x, y, x + radius, y)
-        context.closePath()
+    } catch (error) {
+      if (mountedRef.current && !controller.signal.aborted) {
+        const count = (await getCachedHadithChapters(bookId)).filter((id) => chapters.some((c) => c.id === id)).length
+        setCachedCount(count)
+        setDownloadState({ bookId, done: count, total, active: false, complete: false, error: message(error, 'تعذر إكمال تنزيل الكتاب؛ الأبواب المحفوظة باقية.') })
       }
+    } finally { if (downloadController.current === controller) downloadController.current = null }
+  }, [bookId, chapters])
 
-      const drawPill = (
-        text: string,
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        fill: string,
-        textColor: string,
-        font: string,
-      ) => {
-        roundedRectPath(ctx, x, y, w, h, h / 2)
-        ctx.fillStyle = fill
-        ctx.fill()
-        ctx.fillStyle = textColor
-        ctx.font = font
-        ctx.fillText(text, x + w / 2, y + h * 0.67)
-      }
-
-      const drawStar = (cx: number, cy: number, outerRadius: number, innerRadius: number) => {
-        ctx.beginPath()
-        for (let i = 0; i < 16; i += 1) {
-          const radius = i % 2 === 0 ? outerRadius : innerRadius
-          const angle = -Math.PI / 2 + (i * Math.PI) / 8
-          const x = cx + Math.cos(angle) * radius
-          const y = cy + Math.sin(angle) * radius
-          if (i === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
-        }
-        ctx.closePath()
-      }
-
-      // الخلفية
-      const background = ctx.createLinearGradient(0, 0, width, height)
-      background.addColorStop(0, "#F5F0E6")
-      background.addColorStop(0.42, "#FFFDF8")
-      background.addColorStop(1, "#E8DFCD")
-      ctx.fillStyle = background
-      ctx.fillRect(0, 0, width, height)
-
-      // زخرفة هندسية خافتة.
-      ctx.save()
-      ctx.globalAlpha = 0.035
-      ctx.strokeStyle = "#164C53"
-      ctx.lineWidth = 1.5
-      for (let x = -80; x < width + 120; x += 120) {
-        for (let y = -80; y < height + 120; y += 120) {
-          drawStar(x + 60, y + 60, 34, 15)
-          ctx.stroke()
-          ctx.beginPath()
-          ctx.arc(x + 60, y + 60, 7, 0, Math.PI * 2)
-          ctx.stroke()
-        }
-      }
-      ctx.restore()
-
-      // الإطار الخارجي.
-      ctx.strokeStyle = "#B7904E"
-      ctx.lineWidth = 3
-      ctx.strokeRect(outer, outer, width - outer * 2, height - outer * 2)
-      ctx.strokeStyle = "rgba(183,144,78,0.34)"
-      ctx.lineWidth = 1
-      ctx.strokeRect(outer + 12, outer + 12, width - (outer + 12) * 2, height - (outer + 12) * 2)
-
-      // الهيدر.
-      const headerGradient = ctx.createLinearGradient(headerX, headerY, headerX + headerW, headerY + headerH)
-      headerGradient.addColorStop(0, "#0A363B")
-      headerGradient.addColorStop(0.55, "#124D54")
-      headerGradient.addColorStop(1, "#1E666D")
-
-      roundedRectPath(ctx, headerX, headerY, headerW, headerH, 34)
-      ctx.fillStyle = headerGradient
-      ctx.fill()
-
-      const glowLeft = ctx.createRadialGradient(130, 100, 0, 130, 100, 220)
-      glowLeft.addColorStop(0, "rgba(215,173,92,0.16)")
-      glowLeft.addColorStop(1, "rgba(215,173,92,0)")
-      ctx.fillStyle = glowLeft
-      ctx.fillRect(headerX, headerY, headerW, headerH)
-
-      const glowRight = ctx.createRadialGradient(width - 140, 180, 0, width - 140, 180, 230)
-      glowRight.addColorStop(0, "rgba(255,255,255,0.08)")
-      glowRight.addColorStop(1, "rgba(255,255,255,0)")
-      ctx.fillStyle = glowRight
-      ctx.fillRect(headerX, headerY, headerW, headerH)
-
-      ctx.save()
-      ctx.globalAlpha = 0.16
-      ctx.strokeStyle = "#E2BE73"
-      ctx.lineWidth = 2
-      drawStar(108, 105, 42, 18)
-      ctx.stroke()
-      drawStar(width - 108, 105, 42, 18)
-      ctx.stroke()
-      ctx.restore()
-
-      ctx.fillStyle = "#E7C984"
-      ctx.font = '700 48px "Aref Ruqaa", "Amiri", serif'
-      ctx.fillText("مصحف سَميع", width / 2, 102)
-
-      ctx.fillStyle = "rgba(255,255,255,0.92)"
-      ctx.font = '800 28px "Tajawal", Arial, sans-serif'
-      ctx.fillText("بطاقة حديث", width / 2, 150)
-
-      drawPill(
-        "مكتبة الأحاديث",
-        width / 2 - 148,
-        180,
-        296,
-        44,
-        "rgba(255,255,255,0.10)",
-        "rgba(255,255,255,0.86)",
-        '700 17px "Tajawal", Arial, sans-serif',
-      )
-
-      ctx.fillStyle = "rgba(255,255,255,0.65)"
-      ctx.font = '500 17px "Tajawal", Arial, sans-serif'
-      const headerContext = chapterName ? `${bookName}  •  ${chapterName}` : bookName
-      ctx.fillText(headerContext, width / 2, 255)
-
-      drawPill(
-        `حديث ${arabicDigits(hadithNumber)}`,
-        width / 2 - 118,
-        274,
-        236,
-        50,
-        "#D2AD62",
-        "#153F44",
-        '800 21px "Tajawal", Arial, sans-serif',
-      )
-
-      // البطاقة الرئيسية.
-      ctx.save()
-      ctx.shadowColor = "rgba(11,50,55,0.16)"
-      ctx.shadowBlur = 34
-      ctx.shadowOffsetY = 14
-      roundedRectPath(ctx, cardX, cardY, cardWidth, cardHeight, 38)
-      ctx.fillStyle = "rgba(255,255,255,0.97)"
-      ctx.fill()
-      ctx.restore()
-
-      roundedRectPath(ctx, cardX, cardY, cardWidth, cardHeight, 38)
-      ctx.fillStyle = "rgba(255,255,255,0.97)"
-      ctx.fill()
-      ctx.strokeStyle = "rgba(183,144,78,0.42)"
-      ctx.lineWidth = 2
-      ctx.stroke()
-
-      roundedRectPath(ctx, cardX + 16, cardY + 16, cardWidth - 32, cardHeight - 32, 30)
-      ctx.strokeStyle = "rgba(183,144,78,0.18)"
-      ctx.lineWidth = 1
-      ctx.stroke()
-
-      // زخرفة أعلى البطاقة.
-      ctx.fillStyle = "#C39A51"
-      drawStar(width / 2, cardY + 58, 17, 7)
-      ctx.fill()
-
-      // علامات اقتباس زخرفية شفافة.
-      ctx.fillStyle = "rgba(195,154,81,0.16)"
-      ctx.font = '700 150px Georgia, serif'
-      ctx.fillText("❞", cardX + 92, cardY + 172)
-
-      ctx.fillStyle = "rgba(195,154,81,0.11)"
-      ctx.font = '700 130px Georgia, serif'
-      ctx.fillText("❝", width - cardX - 88, footerY - 78)
-
-      // النص العربي.
-      ctx.fillStyle = "#263B3D"
-      ctx.font = `600 ${fontSize}px "Amiri Quran", "Amiri", "Noto Naskh Arabic", serif`
-      ctx.textBaseline = "alphabetic"
-
-      const textStartY =
-        cardY + 150 + Math.max(0, (cardHeight - 390 - textBlockHeight - narratorBlock) / 2)
-
-      let textY = textStartY
-      for (const line of lines) {
-        ctx.fillText(line, width / 2, textY)
-        textY += lineHeight
-      }
-
-      const separatorY = textStartY + textBlockHeight + 38
-      const separator = ctx.createLinearGradient(cardX + 180, 0, width - cardX - 180, 0)
-      separator.addColorStop(0, "rgba(183,144,78,0)")
-      separator.addColorStop(0.5, "rgba(183,144,78,0.58)")
-      separator.addColorStop(1, "rgba(183,144,78,0)")
-      ctx.strokeStyle = separator
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(cardX + 180, separatorY)
-      ctx.lineTo(width - cardX - 180, separatorY)
-      ctx.stroke()
-
-      if (narrator) {
-        ctx.fillStyle = "#847660"
-        ctx.font = '700 22px "Tajawal", Arial, sans-serif'
-        ctx.fillText(`الراوي: ${narrator}`, width / 2, separatorY + 58)
-      }
-
-      // التذييل.
-      const footerCenter = footerY + 83
-      ctx.fillStyle = "#174F56"
-      ctx.font = '800 22px "Tajawal", Arial, sans-serif'
-      ctx.fillText("مصحف سَميع", width / 2, footerCenter)
-
-      ctx.fillStyle = "#8A806F"
-      ctx.font = '500 16px "Tajawal", Arial, sans-serif'
-      const footerSource = chapterName
-        ? `${bookName}  •  ${chapterName}  •  حديث ${arabicDigits(hadithNumber)}`
-        : `${bookName}  •  حديث ${arabicDigits(hadithNumber)}`
-      ctx.fillText(footerSource, width / 2, footerCenter + 32)
-
-      ctx.fillStyle = "rgba(23,79,86,0.58)"
-      ctx.font = '500 13px "Tajawal", Arial, sans-serif'
-      ctx.fillText("بطاقة رقمية من مكتبة الأحاديث — مصحف سميع", width / 2, footerCenter + 57)
-
-      ctx.fillStyle = "#C39A51"
-      ctx.beginPath()
-      ctx.arc(width / 2 - 72, footerCenter + 52, 3, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(width / 2 + 72, footerCenter + 52, 3, 0, Math.PI * 2)
-      ctx.fill()
-
-      const dataUrl = canvas.toDataURL("image/png", 1)
-      setDesignUrl(dataUrl)
-      setDesignFileName(`samee3-hadith-${selectedBook.id}-${hadithNumber}-premium.png`)
-    } catch (err) {
-      console.error("Hadith design error:", err)
-      setDesignError("تعذر إنشاء صورة الحديث على هذا الجهاز.")
-    } finally {
-      setDesignLoading(false)
-    }
-  }, [currentChapter, selectedBook, visibleHadith])
-
-  const closeBook = useCallback(() => {
-    setSelectedBook(null)
-    setChapters([])
-    setHadiths([])
-    setSelectedChapterId(null)
-    setSelectedHadith(null)
-    setChapterSearch("")
-    setHadithSearch("")
-    setError("")
-    setDesignError("")
-  }, [])
-
-  const resumeBook = useMemo(
-    () => (resumeState ? books.find((book) => book.id === resumeState.bookId) || null : null),
-    [books, resumeState],
-  )
+  const activeNote = activeKey ? notes[activeKey] || '' : ''
+  const updateNote = (value: string) => {
+    if (!activeKey) return
+    const updated = { ...notes, [activeKey]: value }
+    setNotes(updated)
+    saveStorage(NOTES_KEY, updated)
+  }
+  const openSaved = (item: SavedItem) => chooseBook(item.bookId, { chapterId: item.chapterId, hadithId: item.number })
+  const resumeBook = resume && books.find((b) => b.id === resume.bookId)
 
   return (
-    <div dir="rtl" className="min-h-screen bg-[#F7F3E9] text-slate-800 pb-32">
-      <header className="sticky top-0 z-40 border-b border-[#C6A15A]/20 bg-[#F7F3E9]/95 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-4 sm:px-6">
-          <Link href="/" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[#185860] shadow-sm" aria-label="العودة للرئيسية">
-            <ChevronRight size={22} />
-          </Link>
-          <div className="min-w-0 flex-1 text-center">
-            <div className="flex items-center justify-center gap-2">
-              <BookOpen size={21} className="text-[#B5904C]" />
-              <h1 className="text-xl font-black text-[#183F43]">مكتبة الأحاديث</h1>
-            </div>
-            <p className="mt-1 text-xs font-medium text-slate-500">كتب الحديث، أبوابها، والأحاديث النبوية</p>
+    <div dir="rtl" className={`min-h-screen pb-32 ${baseColor}`}>
+      <header className={`sticky top-0 z-40 border-b backdrop-blur-xl ${bg ? 'border-white/10 bg-[#101e22]/95' : 'border-[#cbb078]/25 bg-[#f7f3e9]/95'}`}>
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <Link href="/" aria-label="الرئيسية" className={`flex h-11 w-11 items-center justify-center rounded-2xl border ${surface}`}><ArrowRight size={20} /></Link>
+          <div className="min-w-0 text-center">
+            <div className="flex items-center justify-center gap-2 text-[#ae8a4a]"><BookOpen size={20} /><span className={`truncate text-lg font-black ${bg ? 'text-[#f6ecd2]' : 'text-[#23484a]'}`}>المكتبة الحديثية</span></div>
+            <p className={`mt-0.5 text-[11px] ${quiet}`}>مصحف سميع · قراءة وتدبّر</p>
           </div>
-          <div className="w-11 shrink-0" />
+          <button aria-label={bg ? 'الوضع الفاتح' : 'الوضع الليلي'} onClick={() => setAppearance(bg ? 'cream' : 'night')} className={`flex h-11 w-11 items-center justify-center rounded-2xl border ${surface}`}>{bg ? <Sun size={20} /> : <Moon size={20} />}</button>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
-        {!selectedBook ? (
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+        {screen !== 'reader' && (
           <>
-            <section className="relative overflow-hidden rounded-[2rem] border border-[#C6A15A]/30 bg-gradient-to-br from-[#175A63] via-[#124950] to-[#0B3338] p-7 text-white shadow-xl sm:p-9">
-              <div className="absolute -left-12 -top-16 h-56 w-56 rounded-full bg-white/5 blur-3xl" />
-              <div className="absolute -bottom-24 -right-10 h-64 w-64 rounded-full bg-[#C6A15A]/10 blur-3xl" />
-              <div className="relative z-10 max-w-4xl">
-                <p className="mb-2 text-sm font-black text-[#E8CF93]">موسوعة الحديث</p>
-                <h2 className="font-uthmani text-3xl leading-[1.75] sm:text-4xl">تصفح الكتاب، ثم الباب، ثم حديثًا واحدًا في كل مرة.</h2>
-                <p className="mt-4 max-w-3xl text-sm leading-7 text-white/75">
-                  تصفح كتب الحديث وأبوابها وأحاديثها بسهولة، مع أدوات الحفظ والنسخ والمشاركة وتصميم الحديث كصورة عالية الدقة.
-                </p>
-              </div>
-            </section>
-
-            {resumeBook && resumeState && (
-              <button onClick={() => selectBook(resumeBook)} className="mt-5 w-full rounded-3xl border border-[#C6A15A]/30 bg-white p-5 text-right shadow-sm transition hover:shadow-md">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[#F7F3E9] text-[#B5904C]"><Bookmark size={22} fill="currentColor" /></div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] text-slate-400">متابعة آخر موضع</p>
-                    <h3 className="mt-1 truncate font-black text-[#183F43]">{resumeBook.name_ar}</h3>
-                    <p className="mt-1 text-xs text-slate-500">حديث {arabicDigits(resumeState.hadithId)}</p>
-                  </div>
-                  <ChevronLeft className="shrink-0 text-[#B5904C]" size={22} />
-                </div>
-              </button>
-            )}
-
-            <div className="mt-6 rounded-2xl border border-[#185860]/10 bg-white px-4 py-3 shadow-sm">
-              <div className="flex items-center gap-3">
-                <Search size={20} className="text-[#185860]" />
-                <input value={bookSearch} onChange={(e: any) => setBookSearch(e.target.value)} className="w-full bg-transparent text-sm font-bold outline-none" placeholder="ابحث عن كتاب حديث..." />
-                {bookSearch && <button onClick={() => setBookSearch("")} className="text-slate-400"><X size={18} /></button>}
-              </div>
-            </div>
-
-            {bookError && <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">{bookError}</div>}
-
-            {booksLoading ? (
-              <div className="flex flex-col items-center justify-center gap-3 py-20 text-[#185860]"><Loader2 size={35} className="animate-spin" /><span className="font-bold">جاري تحميل كتب الحديث...</span></div>
-            ) : (
-              <div className="mt-8 space-y-9">
-                {groupedBooks.map((group) => (
-                  <section key={group.category}>
-                    <div className="mb-4 flex items-end justify-between">
-                      <div>
-                        <h2 className="text-xl font-black text-[#183F43]">{group.category}</h2>
-                        <p className="mt-1 text-xs text-slate-400">{arabicDigits(group.books.length)} كتب</p>
-                      </div>
-                    </div>
-                    <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                      {group.books.map((book) => {
-                        return (
-                          <article key={book.id} className="rounded-3xl border border-[#185860]/10 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-[#C6A15A]/40 hover:shadow-md">
-                            <div className="flex items-start gap-3">
-                              <button onClick={() => selectBook(book)} className="min-w-0 flex-1 text-right">
-                                <div className="flex items-center gap-4">
-                                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[#C6A15A]/30 bg-[#F7F3E9] text-[#B5904C]"><BookOpen size={28} /></div>
-                                  <div className="min-w-0 flex-1">
-                                    <h3 className="truncate text-lg font-black text-[#183F43]">{book.name_ar}</h3>
-                                    {book.author_ar && <p className="mt-1 truncate text-xs text-slate-400">{book.author_ar}</p>}
-                                    {getBookDisplayCount(book) && <p className="mt-1 text-xs text-slate-500">{getBookDisplayCount(book)}</p>}
-                                    <p className="mt-3 rounded-xl bg-[#F7F3E9] px-3 py-2 text-[11px] font-bold leading-5 text-[#6D604D]">
-                                      للاستماع إلى هذا الكتاب، قد يكون تسجيله متوفرًا في المكتبة الصوتية.
-                                    </p>
-                                  </div>
-                                </div>
-                              </button>
-                            </div>
-                          </article>
-                        )
-                      })}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <section className="rounded-[2rem] border border-[#C6A15A]/25 bg-white p-5 shadow-sm sm:p-6">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={closeBook} className="inline-flex items-center gap-2 rounded-xl bg-[#F7F3E9] px-3 py-2 text-sm font-black text-[#185860]"><ArrowRight size={18} /> كل الكتب</button>
-                </div>
-                <div className="text-right lg:max-w-2xl">
-                  <p className="text-xs font-bold text-slate-400">الكتاب المحدد</p>
-                  <h2 className="mt-1 text-2xl font-black text-[#183F43]">{selectedBook.name_ar}</h2>
-                  <div className="mt-2 flex flex-wrap justify-end gap-2">
-                    {selectedBook.author_ar && <span className="rounded-full bg-[#F7F3E9] px-3 py-1 text-[11px] font-bold text-slate-500">{selectedBook.author_ar}</span>}
-                    {selectedBook.hadithCount ? <span className="rounded-full bg-[#F7F3E9] px-3 py-1 text-[11px] font-bold text-[#185860]">{arabicDigits(selectedBook.hadithCount)} حديث</span> : null}
-                  </div>
-                  <p className="mt-4 max-w-xl text-right text-xs font-bold leading-6 text-[#6D604D]">
-                    هذا القسم مخصص لقراءة الأحاديث فقط. إذا رغبت في الاستماع، فقد يكون التسجيل متوفرًا في المكتبة الصوتية.
-                  </p>
+            <section className="relative overflow-hidden rounded-[30px] border border-[#af9255]/35 bg-gradient-to-br from-[#20616a] via-[#17464b] to-[#0b3034] p-6 text-white shadow-xl sm:p-9">
+              <div className="pointer-events-none absolute -left-14 -top-20 h-72 w-72 rounded-full bg-[#d6af6c]/10 blur-3xl" />
+              <div className="relative z-10">
+                <div className="mb-2 flex items-center gap-2 text-xs font-bold text-[#e4cb95]"><Library size={17} /> مكتبة السُّنة النبوية</div>
+                <h1 className="font-serif text-3xl font-bold leading-relaxed sm:text-4xl">بين يديك كنوز الحديث النبوي</h1>
+                <p className="mt-2 max-w-2xl text-sm leading-8 text-white/75">كتب الحديث وأبوابها ونصوصها الأصلية، في تجربة قراءة هادئة مع المفضلة واستكمال القراءة وحفظ الأبواب دون اتصال.</p>
+                <div className="mt-5 flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-full border border-white/20 bg-white/10 px-4 py-2">{digit(HADITH_BOOKS.length)} كتابًا في الفهرس</span>
+                  <span className="rounded-full border border-white/20 bg-white/10 px-4 py-2">بدون مشغّل صوتي</span>
+                  {isOffline && <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200/30 bg-amber-500/15 px-4 py-2"><WifiOff size={14} /> وضع عدم الاتصال</span>}
                 </div>
               </div>
             </section>
-
-            {selectedBook.introduction && (
-              <section className="mt-5 rounded-[2rem] border border-[#C6A15A]/25 bg-white p-5 shadow-sm sm:p-7">
-                <div className="mb-3 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#B5904C]" /><h3 className="text-lg font-black text-[#183F43]">مقدمة الكتاب</h3></div>
-                <p className="whitespace-pre-line text-sm leading-8 text-slate-600">{selectedBook.introduction}</p>
-              </section>
-            )}
-
-            <div className="mt-5 grid gap-5 lg:grid-cols-[300px_1fr]">
-              <aside className="h-fit rounded-3xl border border-[#185860]/10 bg-white p-4 shadow-sm lg:sticky lg:top-24">
-                <div className="mb-3">
-                  <h3 className="font-black text-[#183F43]">الأبواب</h3>
-                  <p className="mt-1 text-[11px] text-slate-400">{arabicDigits(chapters.length)} باب</p>
-                </div>
-                <div className="mb-3 flex items-center gap-2 rounded-2xl bg-[#F7F3E9] px-3 py-2">
-                  <Search size={16} className="text-[#185860]" />
-                  <input value={chapterSearch} onChange={(e: any) => setChapterSearch(e.target.value)} className="w-full bg-transparent text-xs font-bold outline-none" placeholder="ابحث في الأبواب..." />
-                </div>
-                {chaptersLoading ? <div className="flex justify-center py-10 text-[#185860]"><Loader2 size={28} className="animate-spin" /></div> : (
-                  <div className="max-h-[62vh] space-y-2 overflow-y-auto pr-1">
-                    {filteredChapters.map((chapter) => {
-                      const active = String(selectedChapterId) === String(chapter.id)
-                      return (
-                        <div key={String(chapter.id)} className={`flex items-center gap-2 rounded-2xl border p-2 transition ${active ? "border-[#185860] bg-[#185860] text-white" : "border-slate-100 bg-white"}`}>
-                          <button onClick={() => selectChapter(chapter.id)} className="min-w-0 flex-1 text-right">
-                            <p className="truncate text-xs font-black">{chapter.name_ar || `الباب ${arabicDigits(chapter.id)}`}</p>
-                            {chapter.hadithCount ? <p className={`mt-1 text-[10px] ${active ? "text-white/60" : "text-slate-400"}`}>{arabicDigits(chapter.hadithCount)} حديث</p> : null}
-                          </button>
-                        </div>
-                      )
-                    })}
-                    {!filteredChapters.length && <p className="py-8 text-center text-xs font-bold text-slate-400">لا يوجد باب مطابق</p>}
-                  </div>
-                )}
-              </aside>
-
-              <section className="min-w-0">
-                <div className="rounded-[2rem] border border-[#185860]/10 bg-white p-4 shadow-sm sm:p-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-xs font-bold text-slate-400">الباب الحالي</p>
-                      <h3 className="mt-1 text-lg font-black text-[#183F43]">{currentChapter?.name_ar || "—"}</h3>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-xl bg-[#F7F3E9] px-3 py-2 text-xs font-bold text-[#185860]">حديث {currentHadithIndex >= 0 ? arabicDigits(currentHadithIndex + 1) : "—"} من {arabicDigits(filteredHadiths.length)}</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center gap-3 rounded-2xl bg-[#F7F3E9] px-4 py-3">
-                    <Search size={19} className="text-[#185860]" />
-                    <input value={hadithSearch} onChange={(e: any) => setHadithSearch(e.target.value)} className="w-full bg-transparent text-sm font-bold outline-none" placeholder="ابحث في أحاديث الباب أو برقم الحديث..." />
-                    {hadithSearch && <button onClick={() => setHadithSearch("")} className="text-slate-400"><X size={18} /></button>}
-                  </div>
-                </div>
-
-                {hadithsLoading ? (
-                  <div className="flex flex-col items-center gap-3 py-20 text-[#185860]"><Loader2 size={36} className="animate-spin" /><p className="font-bold">جاري تحميل الأحاديث...</p></div>
-                ) : error ? (
-                  <div className="mt-4 rounded-3xl border border-red-100 bg-red-50 p-5 text-center text-sm font-bold text-red-700">{error}</div>
-                ) : !visibleHadith ? (
-                  <div className="mt-4 rounded-3xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400">لا توجد نتائج مطابقة</div>
-                ) : (
-                  <article className="mt-4 overflow-hidden rounded-[2rem] border border-[#C6A15A]/25 bg-white shadow-lg">
-                    <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-[#FCFAF4] p-5 sm:p-6">
-                      <span className="rounded-full bg-[#F2E8D3] px-4 py-2 text-xs font-black text-[#9A763B]">حديث {arabicDigits(getHadithNumber(visibleHadith))}</span>
-                      <span className="text-xs font-bold text-slate-400">{arabicDigits(currentHadithIndex + 1)} من {arabicDigits(filteredHadiths.length)}</span>
-                    </div>
-
-                    <div className="p-5 sm:p-8">
-                      <div className="rounded-[1.75rem] border border-[#185860]/10 bg-gradient-to-br from-[#FFFEFB] to-[#F8F4EA] p-6 sm:p-9">
-                        <p className="font-uthmani text-2xl leading-[2.35] text-[#23383B] sm:text-[1.8rem]" dir="rtl">{visibleHadith.arabic || "لم يتوفر النص العربي لهذا الحديث."}</p>
-                        {visibleHadith.english?.narrator && <p className="mt-6 border-t border-[#C6A15A]/20 pt-4 text-xs font-bold text-[#7A705F]">الراوي: {visibleHadith.english.narrator}</p>}
-                      </div>
-
-                      <div className="mt-5 flex items-center justify-between gap-3">
-                        <button disabled={currentHadithIndex <= 0} onClick={() => goToHadith(-1)} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#F7F3E9] py-3 text-sm font-black text-[#185860] disabled:opacity-35"><ChevronRight size={18} /> السابق</button>
-                        <button disabled={currentHadithIndex < 0 || currentHadithIndex >= filteredHadiths.length - 1} onClick={() => goToHadith(1)} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#F7F3E9] py-3 text-sm font-black text-[#185860] disabled:opacity-35">التالي <ChevronLeft size={18} /></button>
-                      </div>
-
-                      <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-                        {filteredHadiths.slice(0, 80).map((hadith) => {
-                          const active = getHadithNumber(hadith) === getHadithNumber(visibleHadith)
-                          return <button key={getHadithNumber(hadith)} onClick={() => openHadith(hadith)} className={`shrink-0 rounded-xl px-3 py-2 text-xs font-black ${active ? "bg-[#185860] text-white" : "bg-[#F7F3E9] text-[#185860]"}`}>#{arabicDigits(getHadithNumber(hadith))}</button>
-                        })}
-                      </div>
-
-                      <div className="mt-5 grid gap-2 sm:grid-cols-3">
-                        <button onClick={() => void copyHadith()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#F7F3E9] py-3 text-sm font-black text-[#185860]">{copied ? <Check size={18} /> : <Copy size={18} />}{copied ? "تم النسخ" : "نسخ"}</button>
-                        <button onClick={() => void shareHadith()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#F7F3E9] py-3 text-sm font-black text-[#185860]"><Share2 size={18} /> مشاركة</button>
-                        <button onClick={toggleFavorite} className={`inline-flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-black ${selectedIsFavorite ? "bg-[#B5904C] text-white" : "bg-[#F7F3E9] text-[#9A763B]"}`}><Bookmark size={18} fill={selectedIsFavorite ? "currentColor" : "none"} /> {selectedIsFavorite ? "محفوظ" : "حفظ"}</button>
-                      </div>
-
-                      <button onClick={() => void designHadithAsImage()} disabled={designLoading} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-[#C6A15A]/30 bg-white py-3 text-sm font-black text-[#185860] disabled:opacity-50"><ImageIcon size={18} /> {designLoading ? "جاري تجهيز صورة كاملة..." : "تصميم الحديث كصورة عالية الدقة"}</button>
-
-                      {designError && <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-6 text-amber-800">{designError}</div>}
-                    </div>
-                  </article>
-                )}
-              </section>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button onClick={() => setScreen('library')} className={`rounded-2xl px-5 py-3 text-sm font-black transition ${screen === 'library' ? 'bg-[#1b5a60] text-white' : `${surface} border`}`}><Library size={17} className="ml-2 inline" />كل الكتب</button>
+              <button onClick={() => setScreen('favorites')} className={`rounded-2xl px-5 py-3 text-sm font-black transition ${screen === 'favorites' ? 'bg-[#1b5a60] text-white' : `${surface} border`}`}><Heart size={17} className="ml-2 inline" />المفضلة ({digit(favoriteIds.length)})</button>
             </div>
           </>
         )}
-      </main>
 
-      {designUrl && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm" onClick={() => setDesignUrl(null)}>
-          <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] bg-[#F7F3E9] shadow-2xl" onClick={(e: any) => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white p-4">
-              <div><p className="font-black text-[#183F43]">صورة الحديث</p><p className="mt-1 text-xs text-slate-400">صورة حديث منسقة بجودة عالية ويمكن تحميلها مباشرة.</p></div>
-              <div className="flex items-center gap-2">
-                <a href={designUrl} download={designFileName} className="inline-flex items-center gap-2 rounded-xl bg-[#185860] px-4 py-3 text-xs font-black text-white"><Download size={16} /> تحميل الصورة</a>
-                <button onClick={() => setDesignUrl(null)} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500"><X size={18} /></button>
-              </div>
-            </div>
-            <div className="min-h-0 overflow-auto bg-[#D9D2C3] p-3 sm:p-5">
-              <img src={designUrl} alt="تصميم الحديث" className="mx-auto block h-auto w-full max-w-3xl rounded-xl shadow-2xl" />
-            </div>
+        {screen === 'library' && (
+          <div className="mt-6 space-y-7">
+            {resumeBook && resume && <button onClick={() => chooseBook(resume.bookId, { chapterId: resume.chapterId, hadithId: resume.hadithId })} className={`flex w-full items-center gap-4 rounded-3xl border p-5 text-right shadow-sm transition hover:border-[#b99a5c] ${surface}`}>
+              <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-[#af8b50] ${softSurface}`}><Bookmark size={23} /></span>
+              <span className="min-w-0 flex-1"><span className={`block text-[11px] ${quiet}`}>متابعة من آخر موضع</span><strong className="mt-1 block truncate text-base">{resumeBook.name_ar}</strong><span className={`mt-1 block text-xs ${quiet}`}>الحديث {digit(resume.hadithId)}</span></span>
+              <ChevronLeft size={19} className="text-[#bb9959]" />
+            </button>}
+            <div className={`flex items-center gap-3 rounded-2xl border px-4 py-4 ${surface}`}><Search size={20} className="text-[#b18e51]" /><input aria-label="البحث عن كتاب" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="ابحث عن اسم كتاب أو مؤلف..." value={bookSearch} onChange={(e: ChangeEvent<HTMLInputElement>) => setBookSearch(e.target.value)} />{bookSearch && <button aria-label="مسح البحث" onClick={() => setBookSearch('')}><X size={18} /></button>}</div>
+            {booksSource === 'catalogue' && <p className={`text-xs ${quiet}`}>تظهر أسماء الكتب من الفهرس، وقد تتطلب بعض الأبواب اتصالًا عند فتحها لأول مرة.</p>}
+            {CATEGORIES.map((category) => {
+              const group = filteredBooks.filter((b) => b.category === category)
+              if (!group.length) return null
+              return <section key={category}>
+                <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-xl font-black">{category}</h2><span className={`text-xs ${quiet}`}>{digit(group.length)} كتب</span></div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {group.map((book) => <button key={book.id} onClick={() => chooseBook(book.id)} className={`group flex min-h-[126px] items-center gap-3 rounded-[24px] border p-4 text-right shadow-sm transition hover:-translate-y-0.5 hover:border-[#b99a5c] hover:shadow-lg ${surface}`}>
+                    <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[#bc9b60]/20 text-[#bd9859] ${softSurface}`}><BookMarked size={28} /></span>
+                    <span className="min-w-0 flex-1"><strong className="block text-base font-black leading-7">{book.name_ar}</strong>{book.author_ar && <span className={`mt-1 block truncate text-xs ${quiet}`}>{book.author_ar}</span>}{book.hadithCount != null && <span className={`mt-1 block text-xs ${quiet}`}>{digit(book.hadithCount)} حديث</span>}<span className="mt-2 block text-xs font-bold text-[#b48c4b]">قراءة الكتاب <ArrowLeft size={14} className="inline" /></span></span>
+                  </button>)}
+                </div>
+              </section>
+            })}
+            {!filteredBooks.length && <div className={`rounded-3xl border p-8 text-center ${surface}`}>لا توجد كتب تطابق البحث.</div>}
+            <p className={`text-center text-xs leading-6 ${quiet}`}>التسجيلات البشرية للكتب قد تكون متاحة بشكل مستقل في المكتبة الصوتية. لا يوجد تشغيل صوت داخل قسم الحديث.</p>
           </div>
-        </div>
-      )}
+        )}
+
+        {screen === 'favorites' && (
+          <section className={`mt-6 rounded-3xl border p-5 sm:p-7 ${surface}`}>
+            <div className="mb-5 flex items-center justify-between"><h2 className="text-xl font-black">الأحاديث المحفوظة</h2><span className={`text-xs ${quiet}`}>{digit(favoriteIds.length)} محفوظًا</span></div>
+            {!favoriteIds.length ? <p className={`py-10 text-center text-sm ${quiet}`}>لم تحفظ أي حديث بعد. افتح حديثًا واضغط علامة المفضلة.</p> : (
+              <div className="space-y-3">
+                {savedItems.filter((item) => favoriteIds.includes(item.key)).map((item) => <button key={item.key} onClick={() => openSaved(item)} className={`w-full rounded-2xl border p-4 text-right ${bg ? 'border-white/10 bg-white/5' : 'border-[#d2bf9c]/30 bg-[#fbf9f3]'}`}>
+                  <strong className="block text-sm">{item.bookTitle} — حديث {digit(item.number)}</strong>
+                  <p className={`mt-2 line-clamp-2 text-sm leading-7 ${quiet}`}>{item.excerpt}</p>
+                  <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#b18b50]">فتح الحديث <ChevronLeft size={14} /></span>
+                </button>)}
+                {savedItems.filter((item) => favoriteIds.includes(item.key)).length < favoriteIds.length && <p className={`rounded-2xl p-3 text-xs leading-6 ${softSurface}`}>بعض مفضلات النسخة القديمة محفوظة برقم الحديث فقط؛ ستظهر تفاصيلها بعد فتحها مرة أخرى وحفظها من جديد.</p>}
+              </div>
+            )}
+          </section>
+        )}
+
+        {screen === 'reader' && selectedBook && (
+          <>
+            <div className="mb-5 flex flex-wrap items-center gap-2">
+              <button onClick={goLibrary} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold ${surface}`}><ArrowRight size={17} /> كل الكتب</button>
+              <button onClick={refreshCurrent} disabled={loadingBook || loadingChapter} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold disabled:opacity-50 ${surface}`}><RefreshCw size={15} /> إعادة الفتح</button>
+              {isOffline && <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#9d733a]/15 px-3 py-2 text-xs text-[#bd9b61]"><WifiOff size={15} /> دون اتصال</span>}
+            </div>
+
+            <section className={`rounded-[28px] border p-5 shadow-sm sm:p-7 ${surface}`}>
+              <div className="flex items-start gap-3"><span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-[#b58e4f] ${softSurface}`}><BookOpen size={28} /></span><div className="flex-1"><p className={`text-xs ${quiet}`}>مكتبة الأحاديث النبوية</p><h1 className="mt-1 text-2xl font-black leading-snug">{selectedBook.name_ar}</h1><p className={`mt-2 text-xs ${quiet}`}>{chapters.length ? `${digit(chapters.length)} بابًا` : 'فهرس الأبواب'}{selectedBook.hadithCount ? ` · ${digit(selectedBook.hadithCount)} حديثًا` : ''}</p></div></div>
+              {selectedBook.introduction && <details className={`mt-5 rounded-2xl p-4 text-sm ${softSurface}`}><summary className="cursor-pointer font-bold">مقدمة الكتاب</summary><p className="mt-3 whitespace-pre-line leading-8">{selectedBook.introduction}</p></details>}
+              <div className={`mt-5 rounded-2xl p-4 ${softSurface}`}>
+                <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-black">حفظ الكتاب دون إنترنت</h2><p className={`mt-1 text-xs ${quiet}`}>{digit(cachedCount)} من {digit(chapters.length)} باب محفوظ</p></div><div className="flex flex-wrap gap-2">
+                  {downloadState?.active && downloadState.bookId === bookId ? <button onClick={stopDownload} className="rounded-xl border border-[#b28f58]/50 px-4 py-2.5 text-xs font-bold">إيقاف</button> : <button onClick={() => void downloadWholeBook()} disabled={!chapters.length || isOffline || cachedCount === chapters.length} className="inline-flex items-center gap-2 rounded-xl bg-[#1b5b60] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50"><Download size={16} />{cachedCount === chapters.length && chapters.length ? 'مكتمل' : 'تنزيل الأبواب'}</button>}
+                </div></div>
+                {chapters.length > 0 && <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#bca477]/20"><div className="h-full rounded-full bg-[#b5955b] transition-all" style={{ width: `${within((cachedCount / chapters.length) * 100, 0, 100)}%` }} /></div>}
+                {downloadState?.bookId === bookId && <p className={`mt-2 text-xs ${downloadState.error ? 'text-amber-600' : quiet}`}>{downloadState.active ? `جارٍ الحفظ: ${digit(downloadState.done)} من ${digit(downloadState.total)}` : downloadState.complete ? 'اكتمل حفظ جميع أبواب الكتاب في ذاكرة المتصفح.' : downloadState.error || 'التنزيل متوقف.'}</p>}
+                <p className={`mt-2 text-[11px] leading-6 ${quiet}`}>التنزيل إلى تخزين التطبيق، وليس ملفًا في مجلد التنزيلات. قد يحذف المتصفح النسخ المحفوظة عند نقص المساحة.</p>
+              </div>
+            </section>
+
+            {bookError && <section className="mt-4 rounded-2xl border border-amber-400/30 bg-amber-100/10 p-5 text-sm leading-7 text-amber-600">{bookError}<div className="mt-3"><button onClick={refreshCurrent} className="rounded-xl border border-amber-400/40 px-4 py-2">إعادة المحاولة</button></div></section>}
+            {loadingBook && <div className={`mt-4 flex items-center gap-3 rounded-2xl border p-5 ${surface}`}><Loader2 size={19} className="animate-spin text-[#b3925b]" /> جارٍ فتح فهرس الكتاب...</div>}
+
+            {chapters.length > 0 && <div className="mt-5 grid items-start gap-5 lg:grid-cols-[290px_minmax(0,1fr)]">
+              <aside className={`rounded-3xl border p-4 shadow-sm lg:sticky lg:top-24 ${surface}`}>
+                <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><List size={19} className="text-[#b18b50]" /><h2 className="font-black">فهرس الأبواب</h2></div><button onClick={() => setShowChapters((v) => !v)} className={`rounded-xl p-2 ${softSurface}`} aria-label={showChapters ? 'إخفاء الأبواب' : 'عرض الأبواب'}><Menu size={18} /></button></div>
+                {showChapters && <><div className={`mt-3 flex items-center gap-2 rounded-xl px-3 py-2 ${softSurface}`}><Search size={16} className="text-[#aa8850]" /><input aria-label="البحث في أسماء الأبواب" value={chapterSearch} onChange={(e: ChangeEvent<HTMLInputElement>) => setChapterSearch(e.target.value)} placeholder="ابحث في الأبواب..." className="w-full min-w-0 bg-transparent text-xs outline-none" /></div><div className="mt-3 max-h-80 space-y-1.5 overflow-y-auto lg:max-h-[60vh]">
+                  {filteredChapters.map((chapter) => <button key={chapter.id} onClick={() => selectChapter(chapter.id)} className={`w-full rounded-xl px-3 py-3 text-right text-xs font-bold leading-6 transition ${chapterId === chapter.id ? 'bg-[#1a5c60] text-white' : bg ? 'hover:bg-white/5' : 'hover:bg-[#f6f0e2]'}`}><span className="block">{chapter.name_ar}</span><span className={`mt-1 block text-[10px] ${chapterId === chapter.id ? 'text-white/70' : quiet}`}>باب {digit(chapter.id)}{chapter.hadithCount ? ` · ${digit(chapter.hadithCount)} حديث` : ''}</span></button>)}
+                  {!filteredChapters.length && <p className={`py-4 text-center text-xs ${quiet}`}>لا توجد أبواب مطابقة.</p>}
+                </div></>}
+              </aside>
+
+              <div className="min-w-0 space-y-4" ref={readerScroll}>
+                <section className={`rounded-3xl border p-4 sm:p-5 ${surface}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><p className={`text-[11px] ${quiet}`}>الباب الحالي</p><h3 className="mt-1 text-lg font-black leading-8">{currentChapter?.name_ar || '—'}</h3></div><div className={`rounded-xl px-3 py-2 text-xs font-bold ${softSurface}`}>{displayedHadiths.length ? `حديث ${digit(hadithIndex + 1)} من ${digit(displayedHadiths.length)}` : '—'}</div></div>
+                  <div className={`mt-4 flex items-center gap-2 rounded-xl px-3 py-3 ${softSurface}`}><Search size={17} className="text-[#b48e50]" /><input aria-label="البحث داخل الباب" value={hadithSearch} onChange={(e: ChangeEvent<HTMLInputElement>) => setHadithSearch(e.target.value)} placeholder="ابحث في أحاديث هذا الباب..." className="min-w-0 flex-1 bg-transparent text-sm outline-none" />{hadithSearch && <button aria-label="مسح البحث" onClick={() => setHadithSearch('')}><X size={17} /></button>}</div>
+                  {hadithSearch && <div className="mt-3 max-h-48 space-y-1.5 overflow-y-auto">{matchedHadiths.map(({ hadith, index }) => <button key={hadith.idInBook} onClick={() => { selectHadith(index); setHadithSearch('') }} className={`block w-full rounded-lg px-3 py-2 text-right text-xs ${softSurface}`}><strong>الحديث {digit(hadith.idInBook)}</strong><span className={`mt-1 block truncate ${quiet}`}>{hadith.arabic}</span></button>)}{!matchedHadiths.length && <p className={`py-3 text-center text-xs ${quiet}`}>لا يوجد حديث مطابق داخل هذا الباب.</p>}</div>}
+                </section>
+
+                {loadingChapter && <section className={`flex min-h-44 items-center justify-center gap-3 rounded-3xl border p-8 ${surface}`}><Loader2 className="animate-spin text-[#b18f53]" size={22} /><span className="text-sm">جارٍ فتح الباب...</span></section>}
+                {chapterError && !loadingChapter && <section className="rounded-3xl border border-amber-400/40 bg-amber-100/10 p-5 text-sm leading-7 text-amber-600"><p>{chapterError}</p><p className="mt-2 text-xs">تُفتح الأبواب المحفوظة فقط عند انقطاع الاتصال.</p><button onClick={() => setChapterRetry((n) => n + 1)} className="mt-3 rounded-xl border border-amber-400/40 px-4 py-2">إعادة المحاولة</button></section>}
+
+                {activeHadith && !loadingChapter && <>
+                  <article
+                    className={`overflow-hidden rounded-[28px] border shadow-sm ${surface}`}
+                    onTouchStart={(event: TouchEvent<HTMLElement>) => {
+                      const point = event.touches[0]
+                      if (point) touchStart.current = { x: point.clientX, y: point.clientY }
+                    }}
+                    onTouchEnd={(event: TouchEvent<HTMLElement>) => {
+                      const point = event.changedTouches[0]
+                      const start = touchStart.current
+                      touchStart.current = null
+                      if (!point || !start || hadithSearch) return
+                      const dx = point.clientX - start.x
+                      const dy = point.clientY - start.y
+                      if (Math.abs(dx) > 95 && Math.abs(dy) < 65) advance(dx < 0 ? 1 : -1)
+                    }}
+                    onTouchCancel={() => { touchStart.current = null }}
+                  >
+                    <div className={`flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4 ${bg ? 'border-white/10 bg-[#20383a]' : 'border-[#cbb078]/20 bg-[#f9f4e9]'}`}>
+                      <div><p className={`text-[11px] ${quiet}`}>حديث نبوي · نص المصدر كما ورد</p><h2 className="mt-1 text-lg font-black text-[#b39359]">الحديث رقم {digit(activeHadith.idInBook)}</h2></div>
+                      <button title={activeIsFavorite ? 'إزالة المفضلة' : 'حفظ بالمفضلة'} aria-label={activeIsFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة'} onClick={toggleFavorite} className={`flex h-11 w-11 items-center justify-center rounded-xl border ${bg ? 'border-white/10' : 'border-[#c9ad71]/25 bg-white'}`}><Heart size={21} className="text-[#b39359]" fill={activeIsFavorite ? 'currentColor' : 'none'} /></button>
+                    </div>
+                    <div className="px-5 py-7 sm:px-9 sm:py-10">
+                      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><span className={`text-xs ${quiet}`}>{sectionOrigin === 'cache' ? 'نص محفوظ على الجهاز' : 'نص مكتبة الحديث'}</span><div className="flex items-center gap-2"><Type size={16} className={quiet} /><button aria-label="تصغير الخط" onClick={() => setFontSize((n) => within(n - 2, 19, 38))} className={`flex h-9 w-9 items-center justify-center rounded-lg ${softSurface}`}>−</button><span className={`text-xs ${quiet}`}>{digit(fontSize)}</span><button aria-label="تكبير الخط" onClick={() => setFontSize((n) => within(n + 2, 19, 38))} className={`flex h-9 w-9 items-center justify-center rounded-lg ${softSurface}`}>+</button></div></div>
+                      <p dir="rtl" lang="ar" className="whitespace-pre-line break-words font-serif font-medium leading-[2.15] selection:bg-[#cbaa6e]/35" style={{ fontSize: `${fontSize}px`, overflowWrap: 'anywhere' }}>{activeHadith.arabic}</p>
+                      <div className={`mt-8 border-t pt-5 ${bg ? 'border-white/10' : 'border-[#bfa267]/20'}`}><div className="flex items-start gap-2"><ShieldCheck size={18} className="mt-0.5 shrink-0 text-[#aa8950]" /><div><p className="text-xs font-bold">المصدر: {selectedBook.name_ar}، حديث {digit(activeHadith.idInBook)}</p><p className={`mt-2 text-[11px] leading-6 ${quiet}`}>لا تُعرض درجة صحة أو شرح للحديث إلا عند توفر مرجع موثوق لها. النص شامل الإسناد كما ورد في المصدر الرقمي، دون فصلٍ تخميني بين الإسناد والمتن.</p></div></div></div>
+                    </div>
+                    <div className={`grid grid-cols-4 gap-2 border-t px-4 py-4 sm:px-7 ${bg ? 'border-white/10' : 'border-[#bfa267]/20'}`}>
+                      <button onClick={() => void copyHadith()} className={`flex flex-col items-center gap-2 rounded-xl p-2 text-xs font-bold ${softSurface}`}><Copy size={19} /> نسخ</button>
+                      <button onClick={() => void shareHadith()} className={`flex flex-col items-center gap-2 rounded-xl p-2 text-xs font-bold ${softSurface}`}><Share2 size={19} /> مشاركة</button>
+                      <button onClick={toggleFavorite} className={`flex flex-col items-center gap-2 rounded-xl p-2 text-xs font-bold ${softSurface}`}><Bookmark size={19} fill={activeIsFavorite ? 'currentColor' : 'none'} /> {activeIsFavorite ? 'محفوظ' : 'حفظ'}</button>
+                      <button onClick={() => setShowNotes((v) => !v)} className={`flex flex-col items-center gap-2 rounded-xl p-2 text-xs font-bold ${softSurface}`}><BookMarked size={19} /> ملاحظات</button>
+                    </div>
+                    {feedback && <div role="status" className={`px-5 pb-4 text-xs ${quiet}`}>{feedback}</div>}
+                  </article>
+                  {showNotes && <section className={`rounded-3xl border p-5 ${surface}`}><h3 className="font-black">ملاحظاتك الخاصة</h3><p className={`mt-1 text-xs ${quiet}`}>محفوظة على هذا الجهاز فقط، ولا تغيّر نص الحديث.</p><textarea rows={4} value={activeNote} onChange={(e: ChangeEvent<HTMLTextAreaElement>) => updateNote(e.target.value)} className={`mt-3 w-full resize-y rounded-xl border p-3 text-sm leading-7 outline-none ${bg ? 'border-white/10 bg-[#102326]' : 'border-[#cdb787]/30 bg-[#fcfaf5]'}`} placeholder="اكتب فوائدك وملاحظاتك هنا..." /></section>}
+                  <section className={`rounded-3xl border p-5 ${surface}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-black"><ImageIcon size={20} className="text-[#b5904f]" /> الحديث كصورة</h3><span className={`text-xs ${quiet}`}>بدون قص النص الطويل</span></div>
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-xs font-bold">
+                      {([['gold', 'ذهبي هادئ'], ['emerald', 'زمردي'], ['midnight', 'ليلي فاخر']] as const).map(([id, title]) => <button key={id} onClick={() => setDesign(id)} className={`rounded-xl border px-2 py-3 ${design === id ? 'border-[#b5965d] ring-1 ring-[#b5965d]' : bg ? 'border-white/10' : 'border-[#cbb078]/25'}`}>{title}</button>)}
+                    </div>
+                    <button disabled={designBusy} onClick={() => void makeImage()} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#1c5c60] px-5 py-3.5 text-sm font-black text-white disabled:opacity-60">{designBusy ? <Loader2 className="animate-spin" size={18} /> : <ImageIcon size={18} />} {designBusy ? 'جارٍ تجهيز الصورة...' : 'تصميم وحفظ صورة الحديث'}</button>
+                    {designNotice && <p role="status" className={`mt-3 text-xs leading-6 ${quiet}`}>{designNotice}</p>}
+                  </section>
+                  <nav aria-label="التنقل بين الأحاديث" className="grid grid-cols-2 gap-3">
+                    <button onClick={() => advance(-1)} disabled={hadithIndex === 0 && chapters.findIndex((c) => c.id === chapterId) <= 0} className={`inline-flex items-center justify-center gap-2 rounded-2xl border p-4 text-sm font-black disabled:opacity-35 ${surface}`}><ChevronRight size={20} /> السابق</button>
+                    <button onClick={() => advance(1)} disabled={hadithIndex >= displayedHadiths.length - 1 && chapters.findIndex((c) => c.id === chapterId) >= chapters.length - 1} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#1b5b60] p-4 text-sm font-black text-white disabled:opacity-35">التالي <ChevronLeft size={20} /></button>
+                  </nav>
+                </>}
+              </div>
+            </div>}
+          </>
+        )}
+        <footer className={`mx-auto mt-10 max-w-3xl text-center text-[11px] leading-7 ${quiet}`}>
+          مصدر النصوص: <a href={HADITH_SOURCE.documentation} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">واجهة الفرقان للأحاديث</a>. جميع الحقوق ونسبة البيانات حسب المصدر الأصلي. يُرجى الرجوع للنسخ العلمية المحققة عند الحاجة إلى التوثيق التفصيلي.
+        </footer>
+      </main>
     </div>
   )
 }
