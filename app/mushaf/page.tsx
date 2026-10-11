@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import AyahStudyTools from '@/components/mushaf/AyahStudyTools'
 import { getOfflineTafsir } from '@/lib/tafsir-offline'
+import { resolveOfflineAudio } from '@/lib/samee3-audio-offline'
 
 // MP3Quran: مشاري راشد العفاسي — القارئ الافتراضي للمصحف.
 // المعرّف الحالي لمشاري راشد العفاسي في كتالوج MP3Quran هو 123، وصوت حفص الكامل مصدره مسار afs.
@@ -993,47 +994,162 @@ function writeCachedAyahTimings(
   }
 }
 
+/**
+ * Read an already downloaded recitation, without a network request.
+ * The shared helper looks in the current/legacy Cache Storage names and in
+ * the audio-library IndexedDB using its saved catalog URL -> key mapping.
+ */
 async function getCachedAudioSource(
   networkUrl: string,
 ): Promise<{ src: string; objectUrl: string | null } | null> {
-  if (!networkUrl || typeof caches === 'undefined') return null
+  if (!networkUrl) return null
+  const source = await resolveOfflineAudio({ url: networkUrl, kind: 'quran' })
+  return source ? { src: source.src, objectUrl: source.objectUrl } : null
+}
 
+/** Preserve the reciter's actual riwaya-specific server for offline playback. */
+const SAMEE3_RECITER_SOURCES_PREFIX = 'samee3_reciter_sources_v1:'
+
+function readSavedReciterSources(riwayaId: Riwaya): LocalReciter[] {
   try {
-    const cache = await caches.open(SAMEE3_AUDIO_CACHE_NAME)
-    const cached = await cache.match(networkUrl)
-    if (!cached) return null
-
-    /*
-     * إذا كانت الاستجابة قابلة للقراءة، نحولها إلى Blob URL.
-     * هذا هو المسار الأقوى لأنه لا يعتمد على بقاء Service Worker حيًا.
-     */
-    if (cached.type !== 'opaque') {
-      const blob = await cached.blob()
-      if (blob.size > 0) {
-        const objectUrl = URL.createObjectURL(blob)
-        return { src: objectUrl, objectUrl }
-      }
-    }
-
-    /*
-     * الاستجابة opaque لا يمكن للصفحة قراءة body الخاص بها،
-     * لكن Service Worker يستطيع تقديمها عند طلب networkUrl.
-     */
-    return { src: networkUrl, objectUrl: null }
+    const raw = localStorage.getItem(`${SAMEE3_RECITER_SOURCES_PREFIX}${riwayaId}`)
+    if (!raw) return []
+    const entries: unknown = JSON.parse(raw)
+    if (!Array.isArray(entries)) return []
+    return entries.flatMap((entry: unknown): LocalReciter[] => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+      const row = entry as Record<string, unknown>
+      const server = typeof row.server === 'string' ? row.server : ''
+      const id = Number(row.apiId)
+      if (!Number.isInteger(id) || id <= 0 || !/^https?:\/\//i.test(server)) return []
+      const moshaf = row.moshafId === null ? null : Number(row.moshafId)
+      return [{
+        id: String(row.id || `${id}-${moshaf ?? 'default'}`),
+        apiId: id,
+        label: String(row.label || DEFAULT_RECITER_NAME),
+        moshafId: moshaf !== null && Number.isInteger(moshaf) && moshaf > 0 ? moshaf : null,
+        server: server.replace(/\/$/, ''),
+        surahIds: Array.isArray(row.surahIds)
+          ? row.surahIds.map(Number).filter((n: number) => Number.isInteger(n) && n >= 1 && n <= 114)
+          : [],
+      }]
+    })
   } catch {
-    return null
+    return []
   }
 }
 
+function saveReciterSources(riwayaId: Riwaya, entries: LocalReciter[]): void {
+  if (!entries.length) return
+  try {
+    // Keep the last successfully downloaded catalogue if this write fails.
+    localStorage.setItem(
+      `${SAMEE3_RECITER_SOURCES_PREFIX}${riwayaId}`,
+      JSON.stringify(entries),
+    )
+  } catch {
+    // Storage permissions/quota do not block normal playback.
+  }
+}
+
+/**
+ * If the listener downloaded a recitation from /audio before opening /mushaf,
+ * the library catalogue still remembers its actual URL. Match by reciter,
+ * riwaya AND surah so we never substitute another Quran reading.
+ * An explicit moshaf ID cannot be verified from the library catalogue and
+ * is therefore not silently replaced with a potentially different edition.
+ */
+function savedLibraryAudioUrl(
+  targetRiwaya: Riwaya,
+  targetReciterId: number,
+  targetSurah: number,
+  hasExplicitMoshaf: boolean,
+): string {
+  if (hasExplicitMoshaf) return ''
+  try {
+    const raw = localStorage.getItem('samee3_audio_saved_catalog_v1')
+    if (!raw) return ''
+    const entries: unknown = JSON.parse(raw)
+    if (!Array.isArray(entries)) return ''
+    const expectedReading = RIWAYA_REMOTE_IDS[targetRiwaya]
+    for (const value of entries) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+      const row = value as Record<string, unknown>
+      if (
+        row.kind !== 'quran' ||
+        Number(row.reciterId) !== targetReciterId ||
+        Number(row.riwayaId) !== expectedReading ||
+        Number(row.surahId) !== targetSurah ||
+        typeof row.audioUrl !== 'string'
+      ) continue
+      const url = new URL(row.audioUrl)
+      if (url.protocol === 'https:' && (url.hostname === 'mp3quran.net' || url.hostname.endsWith('.mp3quran.net')) && /\/\d{3}\.mp3$/i.test(url.pathname)) {
+        return url.href
+      }
+    }
+  } catch {
+    // Do not let invalid offline catalogue metadata break playback.
+  }
+  return ''
+}
+
+/**
+ * Only reuse a saved server when the requested reciter AND riwaya match.
+ * Never silently play the recording of a different reading.
+ */
+function savedServerForReciter(
+  targetRiwaya: Riwaya,
+  targetReciterId: number,
+  targetMoshafId: number | null,
+): string {
+  const saved = readSavedReciterSources(targetRiwaya)
+  const chosen = saved.find((item) =>
+    item.apiId === targetReciterId &&
+    (targetMoshafId === null || item.moshafId === targetMoshafId)
+  )
+  if (chosen?.server) return chosen.server
+
+  const persistent = readPersistentAudioState()
+  if (
+    persistent &&
+    persistent.riwaya === targetRiwaya &&
+    persistent.reciterId === targetReciterId &&
+    (targetMoshafId === null || persistent.moshafId === targetMoshafId)
+  ) {
+    return extractServerFromNetworkUrl(persistent.networkUrl)
+  }
+  return ''
+}
+
+const samee3AudioCacheInFlight = new Map<string, Promise<boolean>>()
+
 async function cacheAudioForOffline(networkUrl: string): Promise<boolean> {
-  if (!networkUrl || /^blob:/i.test(networkUrl) || typeof caches === 'undefined') {
+  if (!networkUrl || /^blob:/i.test(networkUrl) || typeof caches === 'undefined' || isBrowserOffline()) {
     return false
   }
 
+  const pending = samee3AudioCacheInFlight.get(networkUrl)
+  if (pending) return pending
+
+  const task = cacheAudioForOfflineOnce(networkUrl).finally(() => {
+    samee3AudioCacheInFlight.delete(networkUrl)
+  })
+  samee3AudioCacheInFlight.set(networkUrl, task)
+  return task
+}
+
+async function cacheAudioForOfflineOnce(networkUrl: string): Promise<boolean> {
   try {
+    const knownCaches = [SAMEE3_AUDIO_CACHE_NAME, 'samee3-v2-audio', 'samee-audio-v2']
+    const availableCaches = await caches.keys()
+    for (const cacheName of knownCaches) {
+      if (!availableCaches.includes(cacheName)) continue
+      const existing = await (await caches.open(cacheName)).match(networkUrl)
+      if (existing && (existing.type === 'opaque' || (existing.status === 200 && !existing.headers.has('Content-Range')))) {
+        return true
+      }
+    }
     const cache = await caches.open(SAMEE3_AUDIO_CACHE_NAME)
-    const existing = await cache.match(networkUrl)
-    if (existing) return true
 
     /*
      * المسار الأول: استجابة CORS كاملة يمكن إعادة استخدامها كـBlob URL.
@@ -1046,7 +1162,8 @@ async function cacheAudioForOffline(networkUrl: string): Promise<boolean> {
         credentials: 'omit',
       })
 
-      if (corsResponse.ok && corsResponse.status !== 206) {
+      const mime = (corsResponse.headers.get('Content-Type') || '').toLowerCase()
+      if (corsResponse.status === 200 && !corsResponse.headers.has('Content-Range') && !/(?:text\/html|application\/json)/.test(mime)) {
         await cache.put(networkUrl, corsResponse.clone())
         return true
       }
@@ -3520,6 +3637,14 @@ export default function MushafPage() {
     const requestId = ++recitersRequestRef.current
 
     setRecitersLoading(true)
+    const savedReciters = readSavedReciterSources(riwayaId)
+    if (isBrowserOffline()) {
+      if (requestId === recitersRequestRef.current) {
+        setReciters(savedReciters)
+        setRecitersLoading(false)
+      }
+      return savedReciters
+    }
 
     try {
       const remoteRiwayaId = RIWAYA_REMOTE_IDS[riwayaId]
@@ -3628,16 +3753,17 @@ export default function MushafPage() {
         return unique
       }
 
-      setReciters(unique)
-      return unique
+      if (unique.length) saveReciterSources(riwayaId, unique)
+      setReciters(unique.length ? unique : savedReciters)
+      return unique.length ? unique : savedReciters
     } catch (error) {
-      console.error(error)
+      console.warn('SAMEE3: using locally saved reciter sources.', error)
 
       if (requestId === recitersRequestRef.current) {
-        setReciters([])
+        setReciters(savedReciters)
       }
 
-      return []
+      return savedReciters
     } finally {
       if (requestId === recitersRequestRef.current) {
         setRecitersLoading(false)
@@ -4298,7 +4424,27 @@ export default function MushafPage() {
         return
       }
 
-      if (!server && reciterApiId) {
+      // First use the riwaya-specific server saved from a previous online visit.
+      // This is essential when a listener returns to the mushaf in airplane mode.
+      if (!server) {
+        server = savedServerForReciter(
+          riwaya,
+          activeReciter?.apiId || reciterApiId,
+          activeReciter?.moshafId ?? (requestedMoshafId > 0 ? requestedMoshafId : null),
+        )
+      }
+
+      if (!server && isBrowserOffline()) {
+        const libraryUrl = savedLibraryAudioUrl(
+          riwaya,
+          activeReciter?.apiId || reciterApiId,
+          surahNumber,
+          requestedMoshafId > 0,
+        )
+        if (libraryUrl) server = extractServerFromNetworkUrl(libraryUrl)
+      }
+
+      if (!server && reciterApiId && !isBrowserOffline()) {
         const remote = await fetch(
           `https://mp3quran.net/api/v3/reciters?language=ar&reciter=${reciterApiId}`,
           { cache: 'no-store' },
@@ -4325,7 +4471,7 @@ export default function MushafPage() {
       }
 
       if (!server) {
-        throw new Error('لا يوجد رابط صوتي صالح للقارئ المختار.')
+        throw new Error(isBrowserOffline() ? 'لم يُحفظ مصدر صوتي لهذا القارئ والرواية على هذا الجهاز. اتصل بالإنترنت مرة واحدة ثم أعد المحاولة.' : 'لا يوجد رابط صوتي صالح للقارئ المختار.')
       }
 
       const networkUrl = `${server}/${String(surahNumber).padStart(3, '0')}.mp3`
@@ -4648,7 +4794,8 @@ export default function MushafPage() {
         audio.__samee3Continue = true
         persistAudioSnapshotFromElement(audio, true)
         const networkUrl = audio.__samee3NetworkUrl || ''
-        if (networkUrl) void cacheAudioForOffline(networkUrl)
+        // A Blob URL already came from an offline store; don't download it again.
+        if (networkUrl && !audio.__samee3ObjectUrl) void cacheAudioForOffline(networkUrl)
       }
 
       const persistentPause = () => {
@@ -4800,7 +4947,7 @@ export default function MushafPage() {
           }
 
           if (!audio.__samee3Continue || endOperation !== audioOperationRef.current || endSerial !== Number(audio.__samee3Serial || 0)) return
-          void cacheAudioForOffline(nextUrl)
+          if (!cachedSource) void cacheAudioForOffline(nextUrl)
           void audio.play().catch(() => {})
 
           if (!isBrowserOffline()) {
