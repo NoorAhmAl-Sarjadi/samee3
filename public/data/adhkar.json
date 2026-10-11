@@ -1,0 +1,207 @@
+name: SAMEE3 Adhkar Snapshot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download and validate the original text
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { mkdir, readFile, writeFile } from 'node:fs/promises'
+          import { createHash } from 'node:crypto'
+          import { resolve } from 'node:path'
+
+          const SOURCES = [
+            'https://raw.githubusercontent.com/rn0x/Adhkar-json/main/adhkar.json',
+            'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json',
+          ]
+          const OUTPUT = resolve('public/data/adhkar.json')
+          const MAX_BYTES = 4 * 1024 * 1024
+          const MIN_CATEGORIES = 5
+          const MAX_CATEGORIES = 500
+          const MIN_ITEMS = 20
+          const MAX_ITEMS = 10000
+
+          function hash(value) {
+            return createHash('sha256').update(value).digest('hex')
+          }
+
+          function isObject(value) {
+            return value !== null && typeof value === 'object' && !Array.isArray(value)
+          }
+
+          function validateCorpus(data) {
+            if (!Array.isArray(data) || data.length < MIN_CATEGORIES || data.length > MAX_CATEGORIES) {
+              throw new Error('Invalid number of adhkar categories')
+            }
+
+            const categories = new Set()
+            let itemsCount = 0
+
+            for (const category of data) {
+              if (!isObject(category) ||
+                  !Number.isSafeInteger(category.id) || category.id < 1 ||
+                  typeof category.category !== 'string' || !category.category.trim() ||
+                  !Array.isArray(category.array) || !category.array.length) {
+                throw new Error('Invalid category in source')
+              }
+              if (categories.has(category.id)) {
+                throw new Error(`Duplicate category ID ${category.id}`)
+              }
+              categories.add(category.id)
+
+              const ids = new Set()
+              for (const item of category.array) {
+                if (!isObject(item) ||
+                    !Number.isSafeInteger(item.id) || item.id < 1 ||
+                    ids.has(item.id) ||
+                    typeof item.text !== 'string' || !item.text.trim() ||
+                    item.text.length > 30000 ||
+                    !Number.isSafeInteger(item.count) ||
+                    item.count < 1 || item.count > 1000) {
+                  throw new Error(`Invalid item in category ${category.id}`)
+                }
+                ids.add(item.id)
+                itemsCount += 1
+              }
+            }
+
+            if (itemsCount < MIN_ITEMS || itemsCount > MAX_ITEMS) {
+              throw new Error('Adhkar item count outside the allowed range')
+            }
+
+            return { categories: categories.size, items: itemsCount }
+          }
+
+          async function fetchCorpus(url) {
+            const controller = new AbortController()
+            const timeout = setTimeout(() => controller.abort(), 20000)
+            try {
+              const response = await fetch(url, {
+                cache: 'no-store',
+                redirect: 'error',
+                signal: controller.signal,
+                headers: { Accept: 'application/json' },
+              })
+              if (!response.ok || !response.body) {
+                throw new Error(`Source responded with HTTP ${response.status}`)
+              }
+
+              const declared = Number(response.headers.get('content-length') || 0)
+              if (declared > MAX_BYTES) {
+                throw new Error('Source exceeds size limit')
+              }
+
+              const reader = response.body.getReader()
+              let count = 0
+              const pieces = []
+              try {
+                while (true) {
+                  const { done, value } = await reader.read()
+                  if (done) break
+                  if (!value) continue
+                  count += value.byteLength
+                  if (count > MAX_BYTES) throw new Error('Source exceeds size limit')
+                  pieces.push(value)
+                }
+              } catch (error) {
+                await reader.cancel().catch(() => {})
+                throw error
+              } finally {
+                reader.releaseLock()
+              }
+
+              const bytes = new Uint8Array(count)
+              let offset = 0
+              for (const part of pieces) {
+                bytes.set(part, offset)
+                offset += part.byteLength
+              }
+              return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+            } finally {
+              clearTimeout(timeout)
+            }
+          }
+
+          let snapshot = null
+          let statistics = null
+          let lastError = null
+
+          for (const source of SOURCES) {
+            try {
+              const raw = await fetchCorpus(source)
+              const parsed = JSON.parse(raw)
+              const counts = validateCorpus(parsed)
+              snapshot = raw
+              statistics = counts
+              console.log(`Valid source: ${source}`)
+              break
+            } catch (error) {
+              lastError = error
+              console.warn(`Source unavailable or invalid: ${source}`)
+            }
+          }
+
+          if (!snapshot || !statistics) {
+            throw new Error(`No valid adhkar source: ${lastError?.message || 'unknown error'}`)
+          }
+
+          let previous = ''
+          try { previous = await readFile(OUTPUT, 'utf8') } catch {}
+
+          if (previous) {
+            // Prevent silent text changes when IDs have changed.
+            const oldData = JSON.parse(previous)
+            const newData = JSON.parse(snapshot)
+            validateCorpus(oldData)
+            for (const oldCategory of oldData) {
+              const latestCategory = newData.find(x => x.id === oldCategory.id)
+              if (!latestCategory || latestCategory.category !== oldCategory.category) {
+                throw new Error(`Category ${oldCategory.id} has been renamed or removed`)
+              }
+              for (const oldItem of oldCategory.array) {
+                const latestItem = latestCategory.array.find(x => x.id === oldItem.id)
+                if (!latestItem || latestItem.text !== oldItem.text || latestItem.count !== oldItem.count) {
+                  throw new Error(`Religious text/count changed at ${oldCategory.id}:${oldItem.id}; requires manual review`)
+                }
+              }
+            }
+          }
+
+          await mkdir(resolve('public/data'), { recursive: true })
+          await writeFile(OUTPUT, snapshot, 'utf8')
+          console.log(`Saved ${statistics.categories} categories and ${statistics.items} items`)
+          console.log(`SHA-256: ${hash(snapshot)}`)
+          NODE
+
+      - name: Commit checked snapshot
+        shell: bash
+        run: |
+          git add public/data/adhkar.json
+          if git diff --cached --quiet; then
+            echo 'Adhkar snapshot is already current.'
+            exit 0
+          fi
+          git config user.name 'SAMEE3 Content Snapshot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(adhkar): save validated local text snapshot'
+          git push origin HEAD:main
