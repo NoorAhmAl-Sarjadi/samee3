@@ -12,6 +12,7 @@ import {
 } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import { adhkarCitation, loadAdhkarCatalog, readCachedAdhkar } from '@/lib/adhkar-catalog'
 import {
   ArrowRight,
   BookOpen,
@@ -70,9 +71,7 @@ type ProgressRecord = { counts: Record<string, number>; savedAt: number }
 
 const DATA_URL = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main/adhkar.json'
 const DATA_CACHE = 'samee3-adhkar-data-v1'
-const DATA_BACKUP = 'https://raw.githubusercontent.com/rn0x/Adhkar-json/main/adhkar.json'
 const SETTINGS_KEY = 'samee3_adhkar_read_settings_v1'
-const MAX_DATA_BYTES = 2 * 1024 * 1024
 const AUDIO_CACHE = 'samee3-adhkar-audio-v1'
 const AUDIO_BASE = 'https://cdn.jsdelivr.net/gh/rn0x/Adhkar-json@main'
 const TVQURAN = 'https://download.tvquran.com/download/TvQuran.com__Athkar'
@@ -418,7 +417,7 @@ function ReadAdhkarContent() {
   const type: AdhkarType = rawType === 'evening' || rawType === 'sleep' || rawType === 'waking' ? rawType : 'morning'
   const requestedReader = params.get('reciter') || ''
   const progressKey = `samee3_adhkar_progress_v2_${categoryId || type}`
-  const isDaily = !categoryId && (type === 'morning' || type === 'evening')
+  const [isDaily, setIsDaily] = useState(false)
   const favoriteKey = `samee3_adhkar_favorites_${categoryId || type}`
 
   const [reciterId, setReciterId] = useState(RECITERS.some((reader) => reader.id === requestedReader) ? requestedReader : RECITERS[0].id)
@@ -472,7 +471,9 @@ function ReadAdhkarContent() {
   const canPlayItem = recordedItems.length > 0
   const hasAudio = Boolean(sectionTrack || canPlayItem)
   const complete = items.filter((item) => (counts[item.id] ?? item.count) === 0).length
-  const progress = items.length ? Math.round(complete / items.length * 100) : 0
+  const totalRepetitions = items.reduce((sum, item) => sum + item.count, 0)
+  const finishedRepetitions = items.reduce((sum, item) => sum + item.count - (counts[item.id] ?? item.count), 0)
+  const progress = totalRepetitions ? Math.round(finishedRepetitions / totalRepetitions * 100) : 0
   const activeItem = items.find((item) => item.id === activeId) || null
 
   useEffect(() => { itemsRef.current = items }, [items])
@@ -574,8 +575,10 @@ function ReadAdhkarContent() {
       if (disposed) return false
       const selected = categoryFor(categories, categoryId, type)
       if (!selected) return false
+      const daily = selected.category.includes('الصباح') || selected.category.includes('المساء')
+      setIsDaily(daily)
       if (loadKeyRef.current !== progressKey) {
-        const savedCounts = readProgress(progressKey, selected.array, isDaily)
+        const savedCounts = readProgress(progressKey, selected.array, daily)
         loadKeyRef.current = progressKey
         countsRef.current = savedCounts
         setCounts(savedCounts)
@@ -593,33 +596,15 @@ function ReadAdhkarContent() {
     }
 
     void (async () => {
-      const cached = await loadCachedCategories()
+      const standardizedCache = await readCachedAdhkar()
+      const cached = standardizedCache && standardizedCache.length ? standardizedCache : await loadCachedCategories()
       const foundCached = apply(cached, true)
       if (navigator.onLine === false && foundCached) { window.clearTimeout(timeout); return }
       try {
-        let fresh = false
-        for (const source of [DATA_URL, DATA_BACKUP]) {
-          if (controller.signal.aborted) break
-          try {
-            const response = await fetch(source, { cache: 'no-store', signal: controller.signal })
-            if (!response.ok) continue
-            const length = Number(response.headers.get('Content-Length') || 0)
-            if (length > MAX_DATA_BYTES) continue
-            const content = await response.text()
-            if (content.length > MAX_DATA_BYTES) continue
-            const parsed: unknown = JSON.parse(content)
-            const categories = categoriesFrom(parsed)
-            if (!validCorpus(categories)) continue
-            if (!apply(categories, false)) continue
-            if (!disposed && typeof caches !== 'undefined') {
-              const normalized = new Response(content, { headers: { 'Content-Type': 'application/json' } })
-              void caches.open(DATA_CACHE).then((cache) => cache.put(DATA_URL, normalized)).catch(() => undefined)
-            }
-            fresh = true
-            break
-          } catch { /* try the other known source */ }
+        const result = await loadAdhkarCatalog({ refresh: true, signal: controller.signal })
+        if (!apply(result.categories, result.origin === 'cache') && !foundCached) {
+          throw new Error('Data unavailable')
         }
-        if (!fresh && !foundCached) throw new Error('Data unavailable')
       } catch {
         if (!disposed && !foundCached) {
           setLoading(false)
@@ -628,7 +613,7 @@ function ReadAdhkarContent() {
       } finally { window.clearTimeout(timeout) }
     })()
     return () => { disposed = true; controller.abort(); window.clearTimeout(timeout) }
-  }, [categoryId, progressKey, stopAudio, type, isDaily])
+  }, [categoryId, progressKey, stopAudio, type])
 
   useEffect(() => {
     if (!isDaily) return
@@ -794,8 +779,22 @@ function ReadAdhkarContent() {
   }
 
   const changeCount = (item: AdhkarItem) => {
+    const remaining = countsRef.current[item.id] ?? item.count
+    if (remaining <= 0) return
+
+    // Manual tapping and the onended callback must never count
+    // the same audio repetition twice.
+    if (audioMode === 'item' && activeId === item.id) {
+      stopAudio()
+    }
+
     setActiveId(item.id)
-    updateCount(item, (countsRef.current[item.id] ?? item.count) - 1)
+    updateCount(item, remaining - 1)
+
+    // Optional tactile response on supported phones.
+    if (typeof navigator.vibrate === 'function') {
+      navigator.vibrate(12)
+    }
   }
 
   const resetOne = (item: AdhkarItem) => {
@@ -899,7 +898,7 @@ function ReadAdhkarContent() {
           </div>
         </div>
         <div className="mx-auto max-w-4xl px-5 pb-3">
-          <div className="mb-2 flex items-center justify-between text-xs font-bold"><span>الإنجاز — {numberAr(completed.length)} من {numberAr(items.length)}</span><span className="text-[#a47f43]">{numberAr(progress)}٪</span></div>
+          <div className="mb-2 flex items-center justify-between text-xs font-bold"><span>الإنجاز — {numberAr(finishedRepetitions)} من {numberAr(totalRepetitions)} تكرارًا</span><span className="text-[#a47f43]">{numberAr(progress)}٪</span></div>
           <div className="h-2 overflow-hidden rounded-full bg-[#e9e1d4]"><div className="h-full rounded-full bg-gradient-to-l from-[#c59c5b] to-[#1a6068] transition-all" style={{ width: `${progress}%` }} /></div>
         </div>
       </header>
@@ -950,7 +949,7 @@ function ReadAdhkarContent() {
           {!hasAudio && <p className="mt-3 text-xs leading-6 text-[#899394]">القارئ المختار لا يتوفر له تسجيل مطابق لهذا القسم حاليًا. يمكنك القراءة والعد بشكل طبيعي.</p>}
         </section>
 
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-black">{title}</h2><p className="mt-1 text-xs text-[#7a8b8c]">اضغط على نص الذكر للعد، وسيُحفظ تقدمك على هذا الجهاز.</p></div><div className="flex items-center gap-2"><button type="button" onClick={() => setOnlyFavorites((v) => !v)} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold ${onlyFavorites ? 'border-[#d9b77d] bg-[#f7ead5] text-[#755323]' : 'border-[#e9dece] bg-white text-[#5e777a]'}`}><ListFilter size={16} />{onlyFavorites ? 'كل الأذكار' : 'المفضلة'}</button><button type="button" onClick={resetAll} disabled={!items.length} className="inline-flex items-center gap-2 rounded-xl border border-[#e9dece] bg-white px-3 py-2.5 text-xs font-bold text-[#21464b] disabled:opacity-50"><RotateCcw size={16} />إعادة الكل</button></div></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-black">{title}</h2><p className="mt-1 text-xs text-[#7a8b8c]">اضغط على دائرة العد الذهبية بعد كل تكرار، وسينقص الرقم تلقائيًا ويُحفظ تقدمك.</p></div><div className="flex items-center gap-2"><button type="button" onClick={() => setOnlyFavorites((v) => !v)} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold ${onlyFavorites ? 'border-[#d9b77d] bg-[#f7ead5] text-[#755323]' : 'border-[#e9dece] bg-white text-[#5e777a]'}`}><ListFilter size={16} />{onlyFavorites ? 'كل الأذكار' : 'المفضلة'}</button><button type="button" onClick={resetAll} disabled={!items.length} className="inline-flex items-center gap-2 rounded-xl border border-[#e9dece] bg-white px-3 py-2.5 text-xs font-bold text-[#21464b] disabled:opacity-50"><RotateCcw size={16} />إعادة الكل</button></div></div>
 
         {loading && <div className="flex flex-col items-center justify-center gap-3 py-16"><Loader2 size={32} className="animate-spin text-[#ba965e]" /><p className="text-sm text-[#7a8b8c]">جارٍ تجهيز الأذكار…</p></div>}
         {!loading && !items.length && !error && <div className="rounded-2xl bg-white p-8 text-center text-sm text-[#7a8b8c]">لا توجد أذكار للعرض في هذا القسم.</div>}
@@ -967,14 +966,45 @@ function ReadAdhkarContent() {
             return (
               <article key={`${item.id}-${index}`} className={`rounded-[26px] border p-5 shadow-sm transition sm:p-6 ${darkMode ? 'border-[#435657] bg-[#203841] text-[#f5f1e8]' : done ? 'border-[#b9dbd0] bg-[#f5fbf7]' : active ? 'border-[#c7a56c] bg-white ring-1 ring-[#e8d7b8]' : 'border-[#e9dfd1] bg-white'}`}>
                 <div className="mb-4 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><span className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-black ${done ? 'bg-[#e4f4e9] text-[#31765d]' : 'bg-[#f4ede1] text-[#987645]'}`}>{done ? <Check size={20} /> : numberAr(index + 1)}</span><div><p className="text-[11px] text-[#8d9797]">العدد المطلوب</p><p className="text-sm font-black">{numberAr(item.count)} {item.count === 1 ? 'مرة' : 'مرات'}</p></div></div><button type="button" onClick={() => toggleFavorite(item.id)} aria-label={liked ? 'إزالة من المفضلة' : 'إضافة للمفضلة'} className={`rounded-xl p-2.5 ${liked ? 'bg-red-50 text-red-500' : 'bg-[#f9f6f1] text-[#aaa19a]'}`}><Heart size={19} fill={liked ? 'currentColor' : 'none'} /></button></div>
-                <button type="button" disabled={done} onClick={() => changeCount(item)} aria-label={`تسبيح ${index + 1}، المتبقي ${remaining}`} className="w-full text-right disabled:cursor-default"><p className={`font-uthmani leading-[2.15] ${darkMode ? 'text-[#f9f4e9]' : 'text-[#214349]'} ${done ? 'opacity-70' : ''}`} style={{ fontSize: `${fontSize}px` }}>{readingText(item.text)}</p></button>
+                <p className={`font-uthmani leading-[2.15] ${darkMode ? 'text-[#f9f4e9]' : 'text-[#214349]'} ${done ? 'opacity-75' : ''}`} style={{ fontSize: `${fontSize}px` }}>{readingText(item.text)}</p>
+
+                <div className={`mt-6 flex flex-col items-center gap-3 rounded-[24px] border px-4 py-5 ${darkMode ? 'border-white/10 bg-[#162d35]' : done ? 'border-[#cce3d6] bg-[#eff8f2]' : 'border-[#eee0ca] bg-gradient-to-b from-[#fffcf6] to-[#faf3e7]'}`}>
+                  <div className="text-center">
+                    <p className={`text-[11px] font-black tracking-wide ${darkMode ? 'text-[#dfc79b]' : 'text-[#987642]'}`}>{done ? 'اكتمل هذا الذكر' : 'عدّاد التكرار'}</p>
+                    <p className={`mt-1 text-xs ${darkMode ? 'text-white/60' : 'text-[#788381]'}`}>{done ? `أتممت ${numberAr(item.count)} ${item.count === 1 ? 'مرة' : 'مرات'}` : `اضغط بعد كل مرة — المطلوب ${numberAr(item.count)}`}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => changeCount(item)}
+                    disabled={done}
+                    aria-label={done ? `اكتمل الذكر رقم ${numberAr(index + 1)}` : `تسجيل تكرار للذكر رقم ${numberAr(index + 1)}، المتبقي ${numberAr(remaining)}، اضغط لتقليل العدد إلى ${numberAr(remaining - 1)}`}
+                    title={done ? 'اكتمل الذكر' : 'اضغط لاحتساب تكرار واحد'}
+                    className={`group relative flex h-[132px] w-[132px] shrink-0 items-center justify-center rounded-full p-[7px] shadow-[0_12px_32px_rgba(116,84,37,0.17)] transition-transform duration-150 active:scale-[0.94] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#c6a369] disabled:cursor-default disabled:active:scale-100 ${done ? 'shadow-[0_8px_26px_rgba(31,110,83,0.12)]' : ''}`}
+                    style={{ background: done ? '#73b89c' : `conic-gradient(#ba9254 ${((item.count - remaining) / item.count) * 100}%, #e7d5b4 0)` }}
+                  >
+                    <span className={`flex h-full w-full flex-col items-center justify-center rounded-full border-[3px] text-center shadow-inner ${done ? 'border-white bg-[#effaf3] text-[#287758]' : darkMode ? 'border-[#d7bf92] bg-[#203841] text-[#f5dfb2]' : 'border-[#fffaf2] bg-[#fffdf9] text-[#815d2d]'}`}>
+                      {done ? (
+                        <><CheckCheck size={39} strokeWidth={2.4} /><span className="mt-1 text-xs font-black">تمّ الذكر</span></>
+                      ) : (
+                        <><span className="text-[11px] font-bold opacity-75">المتبقي</span><span aria-live="polite" aria-atomic="true" className="mt-[-2px] text-[52px] font-black leading-none tabular-nums">{numberAr(remaining)}</span><span className="mt-1 text-[10px] font-bold opacity-75">اضغط للعدّ</span></>
+                      )}
+                    </span>
+                  </button>
+                  <div className={`flex w-full max-w-[260px] items-center justify-between gap-3 text-xs font-bold ${darkMode ? 'text-white/70' : 'text-[#796d59]'}`}>
+                    <span>أُنجز {numberAr(item.count - remaining)}</span>
+                    <span>المطلوب {numberAr(item.count)}</span>
+                  </div>
+                  <div className={`h-1.5 w-full max-w-[260px] overflow-hidden rounded-full ${darkMode ? 'bg-white/15' : 'bg-[#e8dcc7]'}`}>
+                    <div className={`h-full rounded-full transition-all duration-300 ${done ? 'bg-[#4ba17e]' : 'bg-[#b99052]'}`} style={{ width: `${((item.count - remaining) / item.count) * 100}%` }} />
+                  </div>
+                </div>
+
                 <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[#f0e8dc] pt-4">
                   {itemPlayable && <button type="button" onClick={() => { if (active && audioMode === 'item') togglePlayback(); else startItem(index) }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#175660] px-3 py-2.5 text-xs font-bold text-white">{active && playing && audioMode === 'item' ? <Pause size={16} /> : <Play size={16} />} تشغيل الذكر</button>}
                   <button type="button" onClick={() => void copyText(item)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#f5efe5] px-3 py-2.5 text-xs font-bold text-[#80613b]">{copied === item.id ? <CheckCheck size={16} /> : <Copy size={16} />}{copied === item.id ? 'تم النسخ' : 'نسخ'}</button>
                   <button type="button" onClick={() => resetOne(item)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#f5f6f5] px-3 py-2.5 text-xs font-bold text-[#6e7f80]"><RotateCcw size={16} />إعادة</button>
                   <button type="button" onClick={() => setSourceItem(item)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#edf4f1] px-3 py-2.5 text-xs font-bold text-[#396c5b]"><Info size={16} />المصدر</button>
                   <button type="button" onClick={() => setImageItem(item)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#e9f0f5] px-3 py-2.5 text-xs font-bold text-[#345b75]"><ImageIcon size={16} />صورة الذكر</button>
-                  <div className="mr-auto rounded-xl bg-[#f5efe5] px-3 py-2 text-center text-xs font-black text-[#8d6a36]">{done ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCheck size={16} /> تم</span> : <>المتبقي: {numberAr(remaining)}</>}</div>
                 </div>
               </article>
             )
@@ -985,9 +1015,10 @@ function ReadAdhkarContent() {
         {sourceItem && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4" onClick={() => setSourceItem(null)}>
           <section role="dialog" aria-modal="true" aria-label="مصدر الذكر" onClick={(event: MouseEvent<HTMLElement>) => event.stopPropagation()} className="w-full max-w-lg rounded-[25px] bg-[#fffdf8] p-6 text-[#1c4146] shadow-2xl">
             <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-lg font-black"><BookmarkCheck className="text-[#b28d52]" size={22} /> المصدر والفضل</h2><button type="button" onClick={() => setSourceItem(null)} aria-label="إغلاق"><X size={20} /></button></div>
-            <p className="mt-4 text-sm leading-8">{sourceItem.reference || sourceItem.source || 'هذا النص مدرج في مجموعة بيانات أذكار حصن المسلم المستخدمة بالمشروع. لم يُرفق المصدر بمرجع تفصيلي مستقل لهذا الذكر؛ لذلك لا ننسب إليه حديثًا محددًا من غير توثيق.'}</p>
+            <p className="mt-4 text-sm leading-8">{adhkarCitation(sourceItem).reference || adhkarCitation(sourceItem).source || adhkarCitation(sourceItem).clarification}</p>
             {sourceItem.benefit && <div className="mt-4 rounded-xl bg-[#f7f0e5] p-4"><h3 className="text-sm font-black">الفضل</h3><p className="mt-2 text-sm leading-7">{sourceItem.benefit}</p></div>}
             {!sourceItem.benefit && <p className="mt-3 text-xs leading-6 text-[#8b785c]">لا يتوفر شرح أو فضل موثّق بصورة منفصلة لهذا الذكر في البيانات الحالية.</p>}
+            {(sourceItem.source || sourceItem.reference) && <p className="mt-3 text-xs leading-6 text-[#8b785c]">{adhkarCitation(sourceItem).clarification}</p>}
           </section>
         </div>}
         {imageItem && <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/60 p-4" onClick={() => !makingImage && setImageItem(null)}>
