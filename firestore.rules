@@ -1,4 +1,3 @@
-
 rules_version = '2';
 
 service cloud.firestore {
@@ -114,17 +113,14 @@ service cloud.firestore {
           'lastReadReciterName'
         ])
         && validAccountIdentity()
-
         && (
           !isChanged('lastLoginAt')
           || request.resource.data.lastLoginAt == request.time
         )
-
         && (
           !isChanged('updatedAt')
           || request.resource.data.updatedAt == request.time
         )
-
         && (
           !isChanged('khatmaDays')
           || (
@@ -133,7 +129,6 @@ service cloud.firestore {
             && request.resource.data.khatmaDays <= 365
           )
         )
-
         && (
           !isChanged('khatmaStartDate')
           || (
@@ -143,7 +138,6 @@ service cloud.firestore {
             )
           )
         )
-
         && (
           !isChanged('khatmaPagesPerDay')
           || (
@@ -152,7 +146,6 @@ service cloud.firestore {
             && request.resource.data.khatmaPagesPerDay <= 604
           )
         )
-
         && (
           !isChanged('lastReadPage')
           || (
@@ -161,7 +154,6 @@ service cloud.firestore {
             && request.resource.data.lastReadPage <= 604
           )
         )
-
         && (
           !isChanged('lastReadSurahNumber')
           || (
@@ -170,7 +162,6 @@ service cloud.firestore {
             && request.resource.data.lastReadSurahNumber <= 114
           )
         )
-
         && (
           !isChanged('lastReadJuz')
           || (
@@ -179,7 +170,6 @@ service cloud.firestore {
             && request.resource.data.lastReadJuz <= 30
           )
         )
-
         && (
           !isChanged('lastReadAyahNumber')
           || (
@@ -188,35 +178,30 @@ service cloud.firestore {
             && request.resource.data.lastReadAyahNumber <= 286
           )
         )
-
         && (
           !isChanged('lastReadRiwayaId')
           || validText(
             request.resource.data.lastReadRiwayaId, 30
           )
         )
-
         && (
           !isChanged('lastReadSurahName')
           || validText(
             request.resource.data.lastReadSurahName, 100
           )
         )
-
         && (
           !isChanged('lastReadAyahKey')
           || validText(
             request.resource.data.lastReadAyahKey, 30
           )
         )
-
         && (
           !isChanged('lastReadReciterId')
           || validText(
             request.resource.data.lastReadReciterId, 100
           )
         )
-
         && (
           !isChanged('lastReadReciterName')
           || validText(
@@ -225,8 +210,43 @@ service cloud.firestore {
         );
     }
 
-    match /users/{userId} {
+    // =========================================
+    // Personal hadith data
+    // =========================================
+    // The client writes users/{uid}/hadithData/state.
+    // These records contain personal notes. Even an admin account
+    // is not granted access to another user's private notes.
 
+    function validHadithSyncState() {
+      return request.resource.data.keys().hasOnly([
+          'version', 'snapshot', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'version', 'snapshot', 'updatedAt'
+        ])
+        && request.resource.data.version == 1
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.snapshot is map
+        && request.resource.data.snapshot.keys().hasOnly([
+          'version', 'favorites', 'savedItems', 'notes', 'resume'
+        ])
+        && request.resource.data.snapshot.keys().hasAll([
+          'version', 'favorites', 'savedItems', 'notes', 'resume'
+        ])
+        && request.resource.data.snapshot.version == 1
+        && request.resource.data.snapshot.favorites is map
+        && request.resource.data.snapshot.savedItems is map
+        && request.resource.data.snapshot.notes is map
+        && (
+          request.resource.data.snapshot.resume == null
+          || request.resource.data.snapshot.resume is map
+        )
+        && request.resource.data.snapshot.favorites.size() <= 650
+        && request.resource.data.snapshot.savedItems.size() <= 650
+        && request.resource.data.snapshot.notes.size() <= 150;
+    }
+
+    match /users/{userId} {
       // The owner reads their own record.
       // The administrator can read any record.
       allow get: if isOwner(userId) || isAdmin();
@@ -247,6 +267,20 @@ service cloud.firestore {
         );
 
       allow delete: if isAdmin();
+
+      match /hadithData/{documentId} {
+        allow get: if documentId == 'state'
+          && isOwner(userId);
+
+        allow list: if false;
+
+        allow create, update: if documentId == 'state'
+          && isOwner(userId)
+          && validHadithSyncState();
+
+        allow delete: if documentId == 'state'
+          && isOwner(userId);
+      }
     }
 
     // =========================================
@@ -265,26 +299,20 @@ service cloud.firestore {
           'unreadForUser'
         ])
         && request.resource.data.get('userId', '') == userId
-
         && validName(
           request.resource.data.get(
             'userName',
             'مستخدم مصحف سميع'
           )
         )
-
         && request.resource.data.get('userEmail', '') is string
         && request.resource.data.get('userEmail', '').size() <= 320
-
         && request.resource.data.get('lastMessage', '') is string
         && request.resource.data.get('lastMessage', '').size() <= 5000
-
         && request.resource.data.get('lastSenderId', '') is string
         && request.resource.data.get('lastSenderId', '').size() <= 128
-
         && request.resource.data.get('unreadForAdmin', false) is bool
         && request.resource.data.get('unreadForUser', false) is bool
-
         && request.resource.data.get('updatedAt', request.time)
           == request.time;
     }
@@ -292,22 +320,17 @@ service cloud.firestore {
     function ownerConversationCreate(userId) {
       return isOwner(userId)
         && validConversation(userId)
-
         && request.resource.data.get('userEmail', '')
           == request.auth.token.get('email', '')
-
         && request.resource.data.get('lastSenderId', userId)
           == userId
-
         && request.resource.data.get('unreadForUser', false)
           == false;
     }
 
     function ownerConversationUpdate(userId) {
       return isOwner(userId)
-
         && request.resource.data.get('userId', '') == userId
-
         && request.resource.data
           .diff(resource.data)
           .affectedKeys()
@@ -320,22 +343,17 @@ service cloud.firestore {
             'unreadForAdmin',
             'unreadForUser'
           ])
-
         && validConversation(userId)
-
         && request.resource.data.get('userEmail', '')
           == request.auth.token.get('email', '')
-
         && (
           !isChanged('lastSenderId')
           || request.resource.data.lastSenderId == userId
         )
-
         && (
           !isChanged('unreadForAdmin')
           || request.resource.data.unreadForAdmin == true
         )
-
         && (
           !isChanged('unreadForUser')
           || request.resource.data.unreadForUser == false
@@ -354,7 +372,6 @@ service cloud.firestore {
           'createdAt',
           'read'
         ])
-
         && request.resource.data.keys().hasAll([
           'senderId',
           'senderName',
@@ -362,7 +379,6 @@ service cloud.firestore {
           'createdAt',
           'read'
         ])
-
         && request.resource.data.senderId == request.auth.uid
         && validName(request.resource.data.senderName)
         && validText(request.resource.data.text, 5000)
@@ -377,25 +393,20 @@ service cloud.firestore {
           isOwner(userId)
           || isAdmin()
         )
-
         && request.resource.data
           .diff(resource.data)
           .affectedKeys()
           .hasOnly(['read'])
-
         && request.resource.data
           .diff(resource.data)
           .affectedKeys()
           .hasAll(['read'])
-
         && resource.data.get('read', false) == false
         && request.resource.data.read == true
-
         && resource.data.senderId != request.auth.uid;
     }
 
     match /conversations/{userId} {
-
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
 
@@ -414,7 +425,6 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
-
         allow get, list: if isOwner(userId) || isAdmin();
 
         allow create: if signedIn()
@@ -436,14 +446,12 @@ service cloud.firestore {
     // =========================================
 
     match /islamicLibraryBooks/{bookId} {
-
       // Existing library queries require public reads.
       allow get, list: if true;
 
       allow create, update, delete: if isAdmin();
 
       match /videos/{videoId} {
-
         allow get, list: if true;
 
         allow create, update, delete: if isAdmin();
