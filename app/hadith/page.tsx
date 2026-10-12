@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type TouchEvent } from 'react'
 import Link from 'next/link'
 import JSZip from 'jszip'
+import { onAuthStateChanged } from 'firebase/auth'
+import { auth } from '@/lib/firebase'
 import {
   ArrowLeft, ArrowRight, BookOpen, BookMarked, Bookmark,
   ChevronLeft, ChevronRight, Copy, Download, Heart, ExternalLink, ClipboardCheck, Info,
@@ -26,6 +28,17 @@ import {
   getHadithExplanation,
   type HadithExplanationResult,
 } from '@/lib/hadith-explanations'
+import {
+  importLegacyHadithData,
+  readHadithUserData,
+  saveHadithUserChanges,
+  synchronizeHadithUserData,
+  watchHadithLocalUpdates,
+  type HadithUserData,
+  type HadithSavedItem,
+  type HadithResume,
+  type HadithSyncResult,
+} from '@/lib/hadith-user-sync'
 
 const FAV_KEY = 'samee3_hadith_favorites'
 const SAVED_KEY = 'samee3_hadith_saved_v2'
@@ -38,8 +51,9 @@ type Appearance = 'cream' | 'night'
 type DesignStyle = 'gold' | 'emerald' | 'midnight'
 type Screen = 'library' | 'reader' | 'favorites' | 'search'
 
-type Resume = { bookId: string; chapterId: number; hadithId: number; savedAt: number }
-type SavedItem = { key: string; bookId: string; bookTitle: string; chapterId: number; number: number; excerpt: string }
+type Resume = HadithResume
+type SavedItem = HadithSavedItem
+type CloudSyncStatus = 'guest' | 'idle' | 'syncing' | HadithSyncResult['status']
 type DownloadState = { bookId: string; done: number; total: number; active: boolean; error: string; complete: boolean }
 type RequestedPosition = { bookId: string; chapterId: number; hadithId?: number } | null
 
@@ -266,6 +280,56 @@ function readStorage<T>(key: string, fallback: T): T {
 function saveStorage(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* private mode */ }
 }
+function readGuestHadithData(): HadithUserData {
+  const favorites = readStorage<unknown>(FAV_KEY, [])
+  const saved = readStorage<unknown>(SAVED_KEY, [])
+  const rawNotes = readStorage<unknown>(NOTES_KEY, {})
+  const notes: Record<string, string> = {}
+  if (rawNotes && typeof rawNotes === 'object' && !Array.isArray(rawNotes)) {
+    for (const [key, value] of Object.entries(rawNotes as Record<string, unknown>)) {
+      if (typeof value === 'string' && /^[a-z0-9_-]{1,64}:[1-9]\d{0,7}$/i.test(key)) {
+        notes[key] = value
+      }
+    }
+  }
+  return {
+    favorites: Array.isArray(favorites)
+      ? favorites.filter((key): key is string => typeof key === 'string' && /^[a-z0-9_-]{1,64}:[1-9]\d{0,7}$/i.test(key))
+      : [],
+    savedItems: Array.isArray(saved)
+      ? saved.filter((item): item is SavedItem => !!item && typeof item.key === 'string' && typeof item.bookId === 'string' && Number.isSafeInteger(item.chapterId) && item.chapterId >= 0 && Number.isSafeInteger(item.number) && item.number > 0)
+      : [],
+    notes,
+    resume: validResume(readStorage<unknown>(RESUME_KEY, null)),
+  }
+}
+
+function hasGuestHadithData(): boolean {
+  const old = readGuestHadithData()
+  return old.favorites.length > 0 || old.savedItems.length > 0 ||
+    Object.keys(old.notes).length > 0 || old.resume !== null
+}
+
+// لا نعرض زر الاستيراد بعد إتمامه لنفس نسخة بيانات الضيف.
+// عند إضافة بيانات ضيف جديدة، يظهر الزر مرة أخرى لهذا الحساب فقط.
+const GUEST_IMPORT_MARKER = 'samee3_hadith_guest_imported_v1_'
+function guestDataFingerprint(): string {
+  const data = JSON.stringify(readGuestHadithData())
+  let hash = 2166136261
+  for (let i = 0; i < data.length; i++) {
+    hash = Math.imul(hash ^ data.charCodeAt(i), 16777619) >>> 0
+  }
+  return `${data.length}-${hash.toString(36)}`
+}
+function hasNewGuestDataFor(uid: string): boolean {
+  if (!hasGuestHadithData()) return false
+  try {
+    return localStorage.getItem(`${GUEST_IMPORT_MARKER}${uid}`) !== guestDataFingerprint()
+  } catch {
+    return true
+  }
+}
+
 function validResume(value: unknown): Resume | null {
   if (!value || typeof value !== 'object') return null
   const raw = value as Record<string, unknown>
@@ -410,6 +474,14 @@ export default function HadithPage() {
   const [bookError, setBookError] = useState('')
   const [chapterError, setChapterError] = useState('')
   const [sectionOrigin, setSectionOrigin] = useState<'network' | 'cache'>('network')
+  const [accountUid, setAccountUid] = useState<string | null>(null)
+  const [authResolved, setAuthResolved] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>('guest')
+  const [syncPending, setSyncPending] = useState(false)
+  const [syncNotice, setSyncNotice] = useState('')
+  const [syncRevision, setSyncRevision] = useState(0)
+  const [guestDataAvailable, setGuestDataAvailable] = useState(false)
+  const activeUidRef = useRef<string | null>(null)
   const [favoriteIds, setFavoriteIds] = useState<string[]>([])
   const [savedItems, setSavedItems] = useState<SavedItem[]>([])
   const [resume, setResume] = useState<Resume | null>(null)
@@ -466,21 +538,41 @@ export default function HadithPage() {
   const quiet = bg ? 'text-[#aebdb8]' : 'text-[#75817c]'
   const softSurface = bg ? 'bg-[#20383a]' : 'bg-[#f7f3e9]'
 
+  const applyPersonalData = useCallback((data: HadithUserData) => {
+    setFavoriteIds(data.favorites)
+    setSavedItems(data.savedItems)
+    setNotes(data.notes)
+    setResume(data.resume)
+    savedResumeRef.current = data.resume
+  }, [])
+
+  const scheduleCloudSync = useCallback(() => {
+    setSyncPending(true)
+    setSyncStatus(isOffline ? 'offline' : 'idle')
+    setSyncRevision((value) => value + 1)
+  }, [isOffline])
+
+  const cloudStatusLabel = !authResolved ? 'جارٍ التحقق من الحساب...' : !accountUid
+    ? 'حفظ محلي على هذا الجهاز'
+    : syncStatus === 'synced' && !syncPending ? 'تمت المزامنة مع الحساب'
+    : syncStatus === 'syncing' ? 'جارٍ مزامنة الأحاديث...'
+    : syncStatus === 'offline' ? 'محفوظ محليًا — سيُعاد الاتصال لاحقًا'
+    : syncStatus === 'permission-denied' ? 'المزامنة مرفوضة: راجع قواعد Firestore'
+    : syncStatus === 'error' ? 'تعذرت المزامنة — البيانات محفوظة محليًا'
+    : syncPending ? 'تغييرات محفوظة محليًا بانتظار المزامنة'
+    : 'المزامنة جاهزة'
+
+
   useEffect(() => {
     mountedRef.current = true
-    const favorites = readStorage<unknown>(FAV_KEY, [])
-    setFavoriteIds(Array.isArray(favorites) ? favorites.filter((v): v is string => typeof v === 'string') : [])
-    const saved = readStorage<unknown>(SAVED_KEY, [])
-    setSavedItems(Array.isArray(saved) ? saved.filter((v): v is SavedItem => !!v && typeof v.key === 'string' && typeof v.bookId === 'string' && Number.isInteger(v.chapterId)) : [])
-    const progress = validResume(readStorage<unknown>(RESUME_KEY, null))
-    setResume(progress)
-    savedResumeRef.current = progress
+    // عرض نسخة الضيف حتى يتم تحديد حالة تسجيل الدخول.
+    // لن تنقل هذه البيانات تلقائيًا إلى أي حساب.
+    applyPersonalData(readGuestHadithData())
+    setGuestDataAvailable(hasGuestHadithData())
     const preferences = readStorage<{ appearance?: Appearance; fontSize?: number; design?: DesignStyle }>(SETTINGS_KEY, {})
     if (preferences.appearance === 'night') setAppearance('night')
     if (typeof preferences.fontSize === 'number') setFontSize(within(preferences.fontSize, 19, 38))
     if (preferences.design === 'emerald' || preferences.design === 'midnight') setDesign(preferences.design)
-    const oldNotes = readStorage<unknown>(NOTES_KEY, {})
-    if (oldNotes && typeof oldNotes === 'object' && !Array.isArray(oldNotes)) setNotes(oldNotes as Record<string, string>)
     const query = new URLSearchParams(window.location.search)
     const initialBook = query.get('book')
     const initialChapter = Number(query.get('chapter'))
@@ -506,7 +598,88 @@ export default function HadithPage() {
       downloadController.current?.abort()
       globalController.current?.abort()
     }
-  }, [])
+  }, [applyPersonalData])
+
+  // يفصل تمامًا بين بيانات الضيف وبيانات كل حساب Firebase.
+  // لا يتم استيراد ملاحظات الضيف إلا بضغطة صريحة على زر الاستيراد.
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!mountedRef.current) return
+      const uid = user?.uid ?? null
+      activeUidRef.current = uid
+      setAuthResolved(false)
+      setAccountUid(uid)
+      setSyncNotice('')
+      try {
+        applyPersonalData(uid ? readHadithUserData(uid) : readGuestHadithData())
+        setSyncStatus(uid ? 'idle' : 'guest')
+        setSyncPending(Boolean(uid))
+      } catch (error) {
+        applyPersonalData({ favorites: [], savedItems: [], notes: {}, resume: null })
+        setSyncStatus(uid ? 'error' : 'guest')
+        setSyncPending(Boolean(uid))
+        setSyncNotice(message(error, 'تعذر قراءة بيانات الحساب على هذا الجهاز.'))
+      }
+      setGuestDataAvailable(uid ? hasNewGuestDataFor(uid) : hasGuestHadithData())
+      setAuthResolved(true)
+      setSyncRevision((value) => value + 1)
+    }, () => {
+      if (!mountedRef.current) return
+      activeUidRef.current = null
+      setAccountUid(null)
+      applyPersonalData(readGuestHadithData())
+      setSyncStatus('guest')
+      setAuthResolved(true)
+      setSyncNotice('تعذر التحقق من حالة تسجيل الدخول؛ يتم استخدام الحفظ المحلي فقط.')
+    })
+    return () => unsubscribe()
+  }, [applyPersonalData])
+
+  // المزامنة عند فتح الصفحة، تعديل البيانات، أو عودة الاتصال.
+  // التأخير يمنع إرسال طلب Firestore مع كل ضغطة حرف في الملاحظات.
+  useEffect(() => {
+    if (!authResolved || !accountUid) return
+    if (isOffline) {
+      setSyncStatus('offline')
+      setSyncPending(true)
+      return
+    }
+    const uid = accountUid
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      if (activeUidRef.current !== uid) return
+      setSyncStatus('syncing')
+      void synchronizeHadithUserData(uid).then((result) => {
+        if (cancelled || activeUidRef.current !== uid) return
+        applyPersonalData(readHadithUserData(uid))
+        setSyncStatus(result.status)
+        setSyncPending(result.status !== 'synced' || result.pending)
+        if (result.status === 'synced' && result.pending) {
+          setSyncRevision((value) => value + 1)
+        }
+      }).catch((error: unknown) => {
+        if (cancelled || activeUidRef.current !== uid) return
+        setSyncStatus('error')
+        setSyncPending(true)
+        setSyncNotice(message(error, 'تعذرت المزامنة؛ بياناتك محفوظة على الجهاز.'))
+      })
+    }, 1100)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [accountUid, authResolved, isOffline, syncRevision, applyPersonalData])
+
+  // تحديث التبويبات المفتوحة على نفس الجهاز، بدون نقل معلومات حساب لآخر.
+  useEffect(() => {
+    if (!authResolved || !accountUid) return
+    const uid = accountUid
+    return watchHadithLocalUpdates(uid, (data) => {
+      if (activeUidRef.current !== uid) return
+      applyPersonalData(data)
+      scheduleCloudSync()
+    })
+  }, [accountUid, authResolved, applyPersonalData, scheduleCloudSync])
 
   useEffect(() => {
     if (!ready) return
@@ -653,13 +826,24 @@ export default function HadithPage() {
   }, [bookId, chapterId, ready, chapters, chapterRetry])
 
   useEffect(() => {
-    if (!ready || !bookId || chapterId === null || !activeHadith) return
+    if (!ready || !authResolved || !bookId || chapterId === null || !activeHadith) return
     const position: Resume = { bookId, chapterId, hadithId: activeHadith.idInBook, savedAt: Date.now() }
-    savedResumeRef.current = position
-    setResume(position)
-    saveStorage(RESUME_KEY, position)
+    if (accountUid) {
+      try {
+        const saved = saveHadithUserChanges(accountUid, { resume: position })
+        savedResumeRef.current = saved.resume
+        setResume(saved.resume)
+        scheduleCloudSync()
+      } catch (error) {
+        setSyncNotice(message(error, 'تعذر حفظ موضع القراءة على الجهاز.'))
+      }
+    } else {
+      savedResumeRef.current = position
+      setResume(position)
+      saveStorage(RESUME_KEY, position)
+    }
     updateUrl(bookId, chapterId, activeHadith.idInBook)
-  }, [bookId, chapterId, activeHadith?.idInBook, ready, updateUrl])
+  }, [bookId, chapterId, activeHadith?.idInBook, ready, authResolved, accountUid, updateUrl, scheduleCloudSync])
 
   const selectChapter = useCallback((id: number, fromEnd = false) => {
     if (!bookId) return
@@ -709,22 +893,35 @@ export default function HadithPage() {
   }, [displayedHadiths, hadithSearch])
 
   const toggleFavorite = useCallback(() => {
-    if (!selectedBook || chapterId === null || !activeHadith) return
+    if (!authResolved || !selectedBook || chapterId === null || !activeHadith) return
     const key = favoriteKey(selectedBook.id, activeHadith.idInBook)
     const exists = favoriteIds.includes(key)
     const nextFavorites = exists ? favoriteIds.filter((v) => v !== key) : [...favoriteIds, key]
-    const nextItems = exists
-      ? savedItems.filter((i) => i.key !== key)
+    const nextItems: SavedItem[] = exists
+      ? savedItems.filter((item) => item.key !== key)
       : [
           { key, bookId: selectedBook.id, bookTitle: selectedBook.name_ar, chapterId, number: activeHadith.idInBook, excerpt: activeHadith.arabic.slice(0, 240) },
-          ...savedItems.filter((i) => i.key !== key),
+          ...savedItems.filter((item) => item.key !== key),
         ]
-    setFavoriteIds(nextFavorites)
-    setSavedItems(nextItems)
-    saveStorage(FAV_KEY, nextFavorites)
-    saveStorage(SAVED_KEY, nextItems)
-    setFeedback(exists ? 'أزيل الحديث من المفضلة.' : 'تم حفظ الحديث في المفضلة.')
-  }, [selectedBook, chapterId, activeHadith, favoriteIds, savedItems])
+    try {
+      if (accountUid) {
+        applyPersonalData(saveHadithUserChanges(accountUid, {
+          favorites: nextFavorites,
+          savedItems: nextItems,
+        }))
+        scheduleCloudSync()
+      } else {
+        setFavoriteIds(nextFavorites)
+        setSavedItems(nextItems)
+        saveStorage(FAV_KEY, nextFavorites)
+        saveStorage(SAVED_KEY, nextItems)
+        setGuestDataAvailable(true)
+      }
+      setFeedback(exists ? 'أزيل الحديث من المفضلة.' : 'تم حفظ الحديث في المفضلة.')
+    } catch (error) {
+      setFeedback(message(error, 'تعذر حفظ التعديل على الجهاز.'))
+    }
+  }, [authResolved, accountUid, selectedBook, chapterId, activeHadith, favoriteIds, savedItems, applyPersonalData, scheduleCloudSync])
 
   const copyHadith = useCallback(async () => {
     if (!selectedBook || !activeHadith) return
@@ -948,11 +1145,46 @@ export default function HadithPage() {
 
   const activeNote = activeKey ? notes[activeKey] || '' : ''
   const updateNote = (value: string) => {
-    if (!activeKey) return
-    const updated = { ...notes, [activeKey]: value }
-    setNotes(updated)
-    saveStorage(NOTES_KEY, updated)
+    if (!activeKey || !authResolved) return
+    if (value.length > 1400) {
+      setFeedback('الحد الأقصى للملاحظة ١٤٠٠ حرف.')
+      return
+    }
+    const updated = { ...notes }
+    if (value.trim()) updated[activeKey] = value
+    else delete updated[activeKey]
+    try {
+      if (accountUid) {
+        applyPersonalData(saveHadithUserChanges(accountUid, { notes: updated }))
+        scheduleCloudSync()
+      } else {
+        setNotes(updated)
+        saveStorage(NOTES_KEY, updated)
+        setGuestDataAvailable(true)
+      }
+    } catch (error) {
+      setFeedback(message(error, 'تعذر حفظ الملاحظة على الجهاز.'))
+    }
   }
+
+  const importGuestToAccount = () => {
+    if (!accountUid || !authResolved || activeUidRef.current !== accountUid) return
+    const confirmed = window.confirm('هل تريد إضافة مفضلة وملاحظات هذا الجهاز إلى حسابك؟ ستبقى نسخة الضيف على الجهاز ولن تُحذف. لا تُجرِ الاستيراد إن كانت البيانات تخص مستخدمًا آخر.')
+    if (!confirmed) return
+    try {
+      const merged = importLegacyHadithData(accountUid)
+      applyPersonalData(merged)
+      try {
+        localStorage.setItem(`${GUEST_IMPORT_MARKER}${accountUid}`, guestDataFingerprint())
+      } catch { /* Local storage may be restricted. */ }
+      setGuestDataAvailable(false)
+      setSyncNotice('تم استيراد بيانات الجهاز إلى حسابك وحفظها محليًا. ستُزامن عند توفر الاتصال.')
+      scheduleCloudSync()
+    } catch (error) {
+      setSyncNotice(message(error, 'تعذّر استيراد بيانات الجهاز.'))
+    }
+  }
+
   const openSaved = (item: SavedItem) => chooseBook(item.bookId, { chapterId: item.chapterId, hadithId: item.number })
   const resumeBook = resume && books.find((b) => b.id === resume.bookId)
 
@@ -970,6 +1202,27 @@ export default function HadithPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+        <section className={`mb-5 rounded-2xl border p-4 ${surface}`} aria-label="حالة مزامنة الأحاديث">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-black">{accountUid ? 'مكتبتك الخاصة' : 'حفظ الأحاديث على الجهاز'}</p>
+              <p role="status" className={`mt-1 text-xs leading-6 ${quiet}`}>{cloudStatusLabel}</p>
+              {accountUid && <p className={`mt-1 text-[11px] ${quiet}`}>المفضلة والملاحظات وموضع القراءة لكل حساب على حدة.</p>}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {accountUid && (
+                <button type="button" onClick={() => setSyncRevision((value) => value + 1)} disabled={!authResolved || syncStatus === 'syncing' || isOffline} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold disabled:opacity-45 ${surface}`}>
+                  <RefreshCw size={14} className={syncStatus === 'syncing' ? 'animate-spin' : ''} /> مزامنة الآن
+                </button>
+              )}
+              {!accountUid && <Link href="/auth" className="inline-flex items-center rounded-xl bg-[#1b5b60] px-4 py-2.5 text-xs font-bold text-white">تسجيل الدخول للمزامنة</Link>}
+              {accountUid && guestDataAvailable && (
+                <button type="button" onClick={importGuestToAccount} className="rounded-xl border border-[#b6965b]/50 px-3 py-2.5 text-xs font-bold text-[#b18b50]">استيراد مفضلة الجهاز إلى حسابي</button>
+              )}
+            </div>
+          </div>
+          {syncNotice && <p className={`mt-3 rounded-xl px-3 py-2 text-xs leading-6 ${softSurface}`}>{syncNotice}</p>}
+        </section>
         {screen !== 'reader' && (
           <>
             <section className="relative overflow-hidden rounded-[30px] border border-[#af9255]/35 bg-gradient-to-br from-[#20616a] via-[#17464b] to-[#0b3034] p-6 text-white shadow-xl sm:p-9">
@@ -1153,7 +1406,7 @@ export default function HadithPage() {
                   >
                     <div className={`flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4 ${bg ? 'border-white/10 bg-[#20383a]' : 'border-[#cbb078]/20 bg-[#f9f4e9]'}`}>
                       <div><p className={`text-[11px] ${quiet}`}>حديث نبوي · نص المصدر كما ورد</p><h2 className="mt-1 text-lg font-black text-[#b39359]">الحديث رقم {digit(activeHadith.idInBook)}</h2></div>
-                      <button title={activeIsFavorite ? 'إزالة المفضلة' : 'حفظ بالمفضلة'} aria-label={activeIsFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة'} onClick={toggleFavorite} className={`flex h-11 w-11 items-center justify-center rounded-xl border ${bg ? 'border-white/10' : 'border-[#c9ad71]/25 bg-white'}`}><Heart size={21} className="text-[#b39359]" fill={activeIsFavorite ? 'currentColor' : 'none'} /></button>
+                      <button title={activeIsFavorite ? 'إزالة المفضلة' : 'حفظ بالمفضلة'} aria-label={activeIsFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة'} onClick={toggleFavorite} disabled={!authResolved} className={`flex h-11 w-11 items-center justify-center rounded-xl border ${bg ? 'border-white/10' : 'border-[#c9ad71]/25 bg-white'}`}><Heart size={21} className="text-[#b39359]" fill={activeIsFavorite ? 'currentColor' : 'none'} /></button>
                     </div>
                     <div className="px-5 py-7 sm:px-9 sm:py-10">
                       <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><span className={`text-xs ${quiet}`}>{sectionOrigin === 'cache' ? 'نص محفوظ على الجهاز' : 'نص مكتبة الحديث'}</span><div className="flex items-center gap-2"><Type size={16} className={quiet} /><button aria-label="تصغير الخط" onClick={() => setFontSize((n) => within(n - 2, 19, 38))} className={`flex h-9 w-9 items-center justify-center rounded-lg ${softSurface}`}>−</button><span className={`text-xs ${quiet}`}>{digit(fontSize)}</span><button aria-label="تكبير الخط" onClick={() => setFontSize((n) => within(n + 2, 19, 38))} className={`flex h-9 w-9 items-center justify-center rounded-lg ${softSurface}`}>+</button></div></div>
@@ -1360,7 +1613,7 @@ export default function HadithPage() {
                     </div>
                     {feedback && <div role="status" className={`px-5 pb-4 text-xs ${quiet}`}>{feedback}</div>}
                   </article>
-                  {showNotes && <section className={`rounded-3xl border p-5 ${surface}`}><h3 className="font-black">ملاحظاتك الخاصة</h3><p className={`mt-1 text-xs ${quiet}`}>محفوظة على هذا الجهاز فقط، ولا تغيّر نص الحديث.</p><textarea rows={4} value={activeNote} onChange={(e: ChangeEvent<HTMLTextAreaElement>) => updateNote(e.target.value)} className={`mt-3 w-full resize-y rounded-xl border p-3 text-sm leading-7 outline-none ${bg ? 'border-white/10 bg-[#102326]' : 'border-[#cdb787]/30 bg-[#fcfaf5]'}`} placeholder="اكتب فوائدك وملاحظاتك هنا..." /></section>}
+                  {showNotes && <section className={`rounded-3xl border p-5 ${surface}`}><h3 className="font-black">ملاحظاتك الخاصة</h3><p className={`mt-1 text-xs ${quiet}`}>الملاحظات خاصة بك؛ تُحفظ على الجهاز وتُزامن مع حسابك عند تسجيل الدخول وتوفر الاتصال، ولا تغيّر نص الحديث.</p><textarea rows={4} value={activeNote} onChange={(e: ChangeEvent<HTMLTextAreaElement>) => updateNote(e.target.value)} maxLength={1400} disabled={!authResolved} className={`mt-3 w-full resize-y rounded-xl border p-3 text-sm leading-7 outline-none ${bg ? 'border-white/10 bg-[#102326]' : 'border-[#cdb787]/30 bg-[#fcfaf5]'}`} placeholder="اكتب فوائدك وملاحظاتك هنا..." /></section>}
                   <section className={`rounded-3xl border p-5 ${surface}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-black"><ImageIcon size={20} className="text-[#b5904f]" /> الحديث كصورة</h3><span className={`text-xs ${quiet}`}>بدون قص النص الطويل</span></div>
                     <div className="mt-4 grid grid-cols-3 gap-2 text-xs font-bold">
