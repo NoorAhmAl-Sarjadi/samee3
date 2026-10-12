@@ -362,8 +362,8 @@ export function importLegacyHadithData(uid: string): HadithUserData {
   }
 
   return saveHadithUserChanges(uid, {
-    favorites: [...favorites],
-    savedItems: [...savedByKey.values()],
+    favorites: Array.from(favorites),
+    savedItems: Array.from(savedByKey.values()),
     notes,
     resume: current.resume ?? validResume(oldResume),
   })
