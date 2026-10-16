@@ -12,6 +12,9 @@ import {
   Loader2,
   PlayCircle,
   Search,
+  Bookmark,
+  History,
+  X,
 } from 'lucide-react'
 import {
   collection,
@@ -19,6 +22,7 @@ import {
 } from 'firebase/firestore'
 
 import { db } from '@/lib/firebase'
+import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
 
 import {
   SUNNI_LIBRARY_BOOKS,
@@ -224,11 +228,35 @@ export default function IslamicLibraryPage() {
   ] =
     useState<SunniLibraryCategoryId>('aqidah')
 
-  const [query, setQuery] =
-    useState('')
+  const [query, setQuery] = useState('')
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const [bookmarks, setBookmarks] = useState<string[]>([])
+  const [recentIds, setRecentIds] = useState<string[]>([])
 
-  const [firestoreBooks, setFirestoreBooks] =
-    useState<LibraryBook[]>([])
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('samee3_islamic_bookmarks_v1') || '[]') as unknown
+      if (Array.isArray(saved)) setBookmarks(saved.filter((item): item is string => typeof item === 'string'))
+      const recent = JSON.parse(localStorage.getItem('samee3_islamic_recent_v1') || '[]') as unknown
+      if (Array.isArray(recent)) setRecentIds(recent.filter((item): item is string => typeof item === 'string'))
+    } catch { /* local storage can be unavailable */ }
+  }, [])
+
+  const toggleFavorite = (bookId: string) => {
+    const next = bookmarks.includes(bookId)
+      ? bookmarks.filter((id) => id !== bookId)
+      : [...bookmarks, bookId]
+    setBookmarks(next)
+    try { localStorage.setItem('samee3_islamic_bookmarks_v1', JSON.stringify(next)) } catch { /* private mode */ }
+  }
+  const registerRead = (bookId: string) => {
+    const next = [bookId, ...recentIds.filter((id) => id !== bookId)].slice(0, 12)
+    setRecentIds(next)
+    try { localStorage.setItem('samee3_islamic_recent_v1', JSON.stringify(next)) } catch { /* private mode */ }
+  }
+
+  const [firestoreBooks, setFirestoreBooks] = useState<LibraryBook[]>([])
+  const [hiddenBookIds, setHiddenBookIds] = useState<string[]>([])
 
   const [loadingBooks, setLoadingBooks] =
     useState(true)
@@ -252,6 +280,7 @@ export default function IslamicLibraryPage() {
         )
 
         const result: LibraryBook[] = []
+        const hidden: string[] = []
 
         snapshot.forEach((item) => {
           const data =
@@ -261,6 +290,7 @@ export default function IslamicLibraryPage() {
            * الكتاب المحذوف/المخفي لا يظهر للمستخدم.
            */
           if (data.deleted === true) {
+            hidden.push(item.id)
             return
           }
 
@@ -304,10 +334,7 @@ export default function IslamicLibraryPage() {
                 : '',
 
             readingUrl:
-              typeof data.readingUrl === 'string' &&
-              data.readingUrl.trim()
-                ? data.readingUrl.trim()
-                : null,
+              safeIslamicLibraryLink(data.readingUrl),
 
             readingLabel:
               typeof data.readingLabel === 'string' &&
@@ -315,11 +342,7 @@ export default function IslamicLibraryPage() {
                 ? data.readingLabel.trim()
                 : null,
 
-            downloadUrl:
-              typeof data.downloadUrl === 'string' &&
-              data.downloadUrl.trim()
-                ? data.downloadUrl.trim()
-                : null,
+            downloadUrl: safeIslamicLibraryLink(data.downloadUrl),
 
             downloadLabel:
               typeof data.downloadLabel === 'string' &&
@@ -339,11 +362,7 @@ export default function IslamicLibraryPage() {
                 ? data.sharhAuthor.trim()
                 : null,
 
-            sharhUrl:
-              typeof data.sharhUrl === 'string' &&
-              data.sharhUrl.trim()
-                ? data.sharhUrl.trim()
-                : null,
+            sharhUrl: safeIslamicLibraryLink(data.sharhUrl),
 
             sharhLabel:
               typeof data.sharhLabel === 'string' &&
@@ -362,6 +381,7 @@ export default function IslamicLibraryPage() {
 
         if (!cancelled) {
           setFirestoreBooks(result)
+          setHiddenBookIds(hidden)
         }
       } catch {
         if (!cancelled) {
@@ -373,6 +393,7 @@ export default function IslamicLibraryPage() {
             'تعذر تحديث الكتب المضافة من لوحة الإدارة حاليًا، وتم عرض المكتبة الأساسية.'
           )
           setFirestoreBooks([])
+          setHiddenBookIds([])
         }
       } finally {
         if (!cancelled) {
@@ -404,15 +425,13 @@ export default function IslamicLibraryPage() {
             description:
               book.description,
 
-            readingUrl:
-              book.readingUrl ||
-              null,
+            readingUrl: safeIslamicLibraryLink(book.readingUrl),
 
             readingLabel:
               book.readingLabel ||
               null,
 
-            downloadUrl: null,
+            downloadUrl: safeIslamicLibraryLink(book.downloadUrl),
             downloadLabel: null,
 
             sharhTitle:
@@ -423,9 +442,7 @@ export default function IslamicLibraryPage() {
               book.sharhAuthor ||
               null,
 
-            sharhUrl:
-              book.sharhUrl ||
-              null,
+            sharhUrl: safeIslamicLibraryLink(book.sharhUrl),
 
             sharhLabel:
               book.sharhLabel ||
@@ -452,16 +469,14 @@ export default function IslamicLibraryPage() {
       const merged = [
         ...staticBooks.filter(
           (book) =>
-            !firestoreIds.has(
-              book.id
-            )
+            !firestoreIds.has(book.id) && !hiddenBookIds.includes(book.id)
         ),
         ...firestoreBooks,
       ]
 
       return merged
     },
-    [firestoreBooks]
+    [firestoreBooks, hiddenBookIds]
   )
 
   const categoryCounts = useMemo(
@@ -589,7 +604,7 @@ export default function IslamicLibraryPage() {
       return allBooks.filter(
         (book) => {
           if (
-            activeLevel !==
+            !normalizedQuery && !favoritesOnly && activeLevel !==
               'الكل' &&
             normalizeLevel(
               book.level
@@ -598,16 +613,12 @@ export default function IslamicLibraryPage() {
             return false
           }
 
-          if (
-            book.category !==
-            activeCategory
-          ) {
+          if (!normalizedQuery && !favoritesOnly && book.category !== activeCategory) {
             return false
           }
 
-          if (!normalizedQuery) {
-            return true
-          }
+          if (favoritesOnly && !bookmarks.includes(book.id)) return false
+          if (!normalizedQuery) return true
 
           const searchable = normalizeText(
             [
@@ -635,6 +646,8 @@ export default function IslamicLibraryPage() {
       activeLevel,
       allBooks,
       query,
+      bookmarks,
+      favoritesOnly,
     ]
   )
 
@@ -779,6 +792,21 @@ export default function IslamicLibraryPage() {
           </div>
         </section>
 
+        {recentIds.some((id) => allBooks.some((book) => book.id === id)) && (
+          <section className="mt-5 rounded-3xl border border-mushaf-gold/20 bg-white p-4 sm:p-5">
+            <div className="flex items-center gap-2 text-mushaf-teal font-black text-sm"><History size={18} /> استكمال القراءة</div>
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+              {recentIds.map((id) => allBooks.find((book) => book.id === id)).filter((book): book is LibraryBook => Boolean(book)).slice(0, 6).map((book) => (
+                <Link key={book.id} href={`/islamic-library/book/${encodeURIComponent(book.id)}`}
+                  className="shrink-0 max-w-[230px] rounded-2xl bg-mushaf-paper px-4 py-3 border border-mushaf-border/20 text-xs font-black text-mushaf-teal hover:border-mushaf-gold/50">
+                  <span className="block truncate">{book.title}</span>
+                  <span className="block text-[10px] font-normal text-gray-500 mt-1">{book.author}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
         {loadError && (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-800">
             {loadError}
@@ -901,7 +929,7 @@ export default function IslamicLibraryPage() {
             </p>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3">
             {visibleCategories.map(
               (category) => {
                 const active =
@@ -992,10 +1020,7 @@ export default function IslamicLibraryPage() {
               </h3>
 
               <p className="mt-1 text-[11px] text-gray-500">
-                {activeLevel ===
-                'الكل'
-                  ? 'جميع المستويات'
-                  : currentLevelMeta?.label}
+                {query.trim() ? 'نتائج البحث في جميع المجالات والمستويات' : favoritesOnly ? 'كتبك المحفوظة في جميع المجالات' : activeLevel === 'الكل' ? 'جميع المستويات' : currentLevelMeta?.label}
               </p>
             </div>
 
@@ -1006,6 +1031,8 @@ export default function IslamicLibraryPage() {
               />
 
               <input
+                type="search"
+                aria-label="البحث الشامل في المكتبة الشرعية"
                 value={query}
                 onChange={(event) =>
                   setQuery(
@@ -1013,10 +1040,22 @@ export default function IslamicLibraryPage() {
                       .value
                   )
                 }
-                placeholder="ابحث باسم الكتاب أو المؤلف أو الشرح..."
+                placeholder="بحث شامل في كل الكتب والمؤلفين والشروح..."
                 className="w-full outline-none bg-transparent text-sm text-gray-800"
               />
             </label>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setFavoritesOnly((value) => !value)}
+              aria-pressed={favoritesOnly}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black border ${favoritesOnly ? 'bg-mushaf-teal border-mushaf-teal text-white' : 'bg-white border-gray-200 text-mushaf-teal'}`}>
+              <Bookmark size={15} /> المفضلة ({bookmarks.filter((id) => allBooks.some((book) => book.id === id)).length.toLocaleString('ar-EG')})
+            </button>
+            {(query || favoritesOnly) && (
+              <button type="button" onClick={() => {setQuery(''); setFavoritesOnly(false)}}
+                className="inline-flex items-center gap-1 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-600"><X size={15} /> مسح المرشحات</button>
+            )}
+            {query && <span aria-live="polite" className="text-xs text-gray-500">البحث يشمل كل التخصصات</span>}
           </div>
         </section>
 
@@ -1075,6 +1114,12 @@ export default function IslamicLibraryPage() {
                         </div>
                       </div>
                     </div>
+                    <button type="button" onClick={() => toggleFavorite(book.id)}
+                      aria-label={bookmarks.includes(book.id) ? `إزالة ${book.title} من المفضلة` : `حفظ ${book.title} بالمفضلة`}
+                      aria-pressed={bookmarks.includes(book.id)}
+                      className={`shrink-0 h-10 w-10 rounded-xl border flex items-center justify-center ${bookmarks.includes(book.id) ? 'bg-mushaf-gold/15 border-mushaf-gold text-mushaf-gold' : 'bg-white border-gray-200 text-gray-400'}`}>
+                      <Bookmark size={18} fill={bookmarks.includes(book.id) ? 'currentColor' : 'none'} />
+                    </button>
                   </div>
 
                   <p className="mt-5 text-sm leading-7 text-gray-600">
@@ -1092,7 +1137,7 @@ export default function IslamicLibraryPage() {
 
                     <p className="mt-2 text-sm leading-6 text-gray-700">
                       {book.sharhTitle ||
-                        'تتوفر مصادر شرح مرتبطة بالكتاب'}
+                        'لم يُضف شرح موثّق لهذا الكتاب بعد'}
                       {book.sharhAuthor
                         ? ` — ${book.sharhAuthor}`
                         : ''}
@@ -1116,6 +1161,7 @@ export default function IslamicLibraryPage() {
                       href={`/islamic-library/book/${encodeURIComponent(
                         book.id
                       )}`}
+                      onClick={() => registerRead(book.id)}
                       className="inline-flex items-center gap-2 rounded-xl bg-mushaf-teal text-white px-4 py-2.5 text-xs font-black hover:opacity-90"
                     >
                       قراءة الكتاب
@@ -1207,8 +1253,7 @@ export default function IslamicLibraryPage() {
             </h3>
 
             <p className="mt-2 text-sm leading-7 text-gray-500">
-              لا توجد كتب مطابقة للبحث داخل
-              المجال والمستوى المحددين حاليًا.
+              لا توجد كتب مطابقة للخيارات الحالية. جرّب كتابة اسم الكتاب أو المؤلف أو إلغاء المرشحات.
             </p>
 
             {query && (

@@ -5,6 +5,8 @@ export type SunniLibraryCategoryId =
   | 'usul-tafsir'
   | 'usul-fiqh'
   | 'usul-hadith'
+  | 'tafsir'
+  | 'hadith-books'
 
 export type SunniLibraryLevel =
   | 'مبتدئ'
@@ -102,6 +104,8 @@ export const SUNNI_LIBRARY_CATEGORIES: Array<{
     label: 'أصول الحديث',
     short: 'مصطلح الحديث وعلومه',
   },
+  { id: 'tafsir', label: 'التفسير', short: 'مدارس التفسير' },
+  { id: 'hadith-books', label: 'كتب السنة', short: 'كتب الحديث والشمائل' },
 ]
 
 /**
@@ -512,6 +516,46 @@ export const SUNNI_LIBRARY_BOOKS: SunniLibraryBook[] = [
     sharhUrl:
       'https://www.dar-alhadith.com/show_book/10',
     sharhLabel: 'مصدر تدريسي',
+  },
+  // مصادر قراءة فعلية تم التحقق من وجود صفحاتها. لا تُحمَّل النصوص من هذه الصفحات دون إذن.
+  {
+    id: 'tafsir-taysir-qattan', category: 'tafsir', title: 'تيسير التفسير',
+    author: 'إبراهيم القطان', level: 'مبتدئ',
+    description: 'تفسير باللغة العربية الميسرة، ويتيح المصدر النصوص المرتبطة بالآيات عبر واجهته الرسمية.',
+    quranpediaBookId: 1,
+    readingUrl: 'https://quranpedia.net/book/1', readingLabel: 'المصدر القرآني الرسمي',
+  },
+  {
+    id: 'tafsir-tabari', category: 'tafsir', title: 'جامع البيان في تأويل القرآن',
+    author: 'محمد بن جرير الطبري', level: 'متقدم',
+    description: 'تفسير بالمأثور مع أسانيد وآثار وأقوال المفسرين واللغة والترجيح.',
+    readingUrl: 'https://usul.ai/ar/t/tafsir-al-tabari-jami-al-bayan', readingLabel: 'قراءة التفسير',
+  },
+  {
+    id: 'tafsir-ibnkathir-mukhtasar', category: 'tafsir', title: 'مختصر تفسير ابن كثير',
+    author: 'محمد علي الصابوني (اختصارًا لتفسير ابن كثير)', level: 'متوسط',
+    description: 'اختصار لتفسير القرآن العظيم؛ تراجع طبعة المختصر وتوثيقها من المصدر.',
+    readingUrl: 'https://usul.ai/ar/t/mukhtasar-tafsir-ibn-kathir', readingLabel: 'قراءة المختصر',
+  },
+  {
+    id: 'hadith-sahih-bukhari', category: 'hadith-books', title: 'صحيح البخاري',
+    author: 'محمد بن إسماعيل البخاري', level: 'متقدم',
+    description: 'الجامع المسند الصحيح المختصر من أمور رسول الله ﷺ وسننه وأيامه.',
+    readingUrl: 'https://usul.ai/ar/t/sahih-al-bukhari', readingLabel: 'قراءة الكتاب',
+  },
+  {
+    id: 'hadith-riyad', category: 'hadith-books', title: 'رياض الصالحين',
+    author: 'يحيى بن شرف النووي', level: 'مبتدئ',
+    description: 'أبواب مختارة من الأحاديث النبوية في الآداب والعبادات والفضائل.',
+    readingUrl: 'https://usul.ai/ar/t/riyad-salihin', readingLabel: 'قراءة الكتاب',
+    sharhTitle: 'شرح رياض الصالحين', sharhAuthor: 'محمد بن صالح العثيمين',
+    sharhUrl: 'https://usul.ai/ar/t/sharh-riyad-al-salihin-1', sharhLabel: 'قراءة الشرح',
+  },
+  {
+    id: 'hadith-shamail', category: 'hadith-books', title: 'الشمائل المحمدية',
+    author: 'محمد بن عيسى الترمذي', level: 'متوسط',
+    description: 'كتاب في وصف هدي النبي ﷺ وشمائله وأخلاقه المروية.',
+    readingUrl: 'https://usul.ai/ar/t/shamail-muhammadiyya', readingLabel: 'قراءة الكتاب',
   },
 ]
 

@@ -39,6 +39,7 @@ interface DynamicBookFields {
   downloadUrl?: string | null
   quranpediaBookId?: number | null
   videos?: unknown
+  deleted?: boolean
   publication?: {
     publishYear?: string | number | null
     edition?: string | null
@@ -50,7 +51,7 @@ interface DynamicBookFields {
 function getQuranpediaId(
   book: SunniLibraryBook & DynamicBookFields
 ): number | null {
-  if (Number.isFinite(book.quranpediaBookId)) {
+  if (Number.isSafeInteger(book.quranpediaBookId) && Number(book.quranpediaBookId) > 0) {
     return Number(book.quranpediaBookId)
   }
 
@@ -62,7 +63,7 @@ function getQuranpediaId(
   for (const url of candidates) {
     const match = url.match(/quranpedia\.net\/book\/(\d+)/i)
 
-    if (match) {
+    if (match && Number.isSafeInteger(Number(match[1])) && Number(match[1]) > 0) {
       return Number(match[1])
     }
   }
@@ -93,9 +94,10 @@ function collectText(
     page?: number
     part?: number
     section?: string
-  } = {}
+  } = {},
+  depth = 0
 ) {
-  if (!value) {
+  if (!value || depth > 20 || output.length >= 12000) {
     return
   }
 
@@ -114,7 +116,7 @@ function collectText(
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      collectText(item, output, context)
+      collectText(item, output, context, depth + 1)
     }
 
     return
@@ -157,7 +159,7 @@ function collectText(
 
   for (const key of directKeys) {
     if (typeof obj[key] === 'string') {
-      collectText(obj[key], output, nextContext)
+      collectText(obj[key], output, nextContext, depth + 1)
     }
   }
 
@@ -182,28 +184,34 @@ function collectText(
       typeof child === 'object' &&
       child !== null
     ) {
-      collectText(child, output, nextContext)
+      collectText(child, output, nextContext, depth + 1)
     }
   }
 }
 
-async function fetchJson(
-  url: string,
-  signal: AbortSignal
-): Promise<any> {
+/** Only the documented Quranpedia API may supply remote book metadata or text. */
+export function safeQuranpediaUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' && parsed.hostname.toLowerCase() === 'api.quranpedia.net' &&
+      (parsed.port === '' || parsed.port === '443') && !parsed.username && !parsed.password
+  } catch { return false }
+}
+
+async function fetchJson(url: string, signal: AbortSignal): Promise<any> {
+  if (!safeQuranpediaUrl(url)) throw new Error('UNTRUSTED_CONTENT_URL')
   const response = await fetch(url, {
-    cache: 'no-store',
-    signal,
-    headers: {
-      Accept: 'application/json',
-    },
+    cache: 'no-store', signal, redirect: 'error',
+    headers: { Accept: 'application/json' },
   })
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`)
-  }
-
-  return response.json()
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const declaredSize = Number(response.headers.get('content-length') || 0)
+  const limit = 15 * 1024 * 1024
+  if (declaredSize > limit) throw new Error('BOOK_TOO_LARGE')
+  const raw = await response.text()
+  if (raw.length > limit) throw new Error('BOOK_TOO_LARGE')
+  try { return JSON.parse(raw) as unknown }
+  catch { throw new Error('INVALID_BOOK_JSON') }
 }
 
 function normalizeVideo(
@@ -409,8 +417,13 @@ export async function GET(
     const rawId =
       context.params?.id || ''
 
-    const bookId =
-      decodeURIComponent(rawId)
+    let bookId: string
+    try { bookId = decodeURIComponent(rawId) } catch {
+      return NextResponse.json({ success: false, error: 'INVALID_BOOK_ID' }, { status: 400 })
+    }
+    if (!/^[a-zA-Z0-9_-]{1,120}$/.test(bookId)) {
+      return NextResponse.json({ success: false, error: 'INVALID_BOOK_ID' }, { status: 400 })
+    }
 
     const staticBook =
       SUNNI_LIBRARY_BOOKS.find(
@@ -421,8 +434,7 @@ export async function GET(
       await loadFirestoreBook(bookId)
 
     if (
-      !staticBook &&
-      !firestoreResult.exists
+      (!staticBook && !firestoreResult.exists) || firestoreResult.book?.deleted === true
     ) {
       return NextResponse.json(
         {
@@ -616,13 +628,8 @@ export async function GET(
       section?: string
     }> = []
 
-    collectText(
-      rawContents ??
-        meta?.about ??
-        meta?.description ??
-        '',
-      sections
-    )
+    // A metadata blurb is not the book's actual text. Never label it as a complete edition.
+    if (rawContents) collectText(rawContents, sections)
 
     const deduped =
       sections.filter(
@@ -712,6 +719,7 @@ export async function GET(
       videos,
 
       contents: deduped,
+      message: deduped.length === 0 ? 'لم يتوفر نص الكتاب كاملًا لدى المصدر حاليًا. استخدم رابط القراءة الخارجي المتاح.' : null,
     })
   } catch (error) {
     const isTimeout =

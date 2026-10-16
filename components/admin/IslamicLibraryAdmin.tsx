@@ -1,5 +1,6 @@
 'use client'
 
+import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
 import {
   useEffect,
   useMemo,
@@ -728,6 +729,17 @@ export default function IslamicLibraryAdmin() {
         'اكتب وصف الكتاب.',
       )
       return
+    }
+
+    for (const [label, url] of [
+      ['رابط القراءة', bookForm.readingUrl],
+      ['رابط التحميل', bookForm.downloadUrl],
+      ['رابط الشرح', bookForm.sharhUrl],
+    ]) {
+      if (url.trim() && !safeIslamicLibraryLink(url.trim())) {
+        showError(`${label}: أدخل رابط HTTPS صالحًا وآمنًا.`)
+        return
+      }
     }
 
     try {

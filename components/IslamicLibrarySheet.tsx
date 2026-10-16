@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore'
 
 import { db } from '@/lib/firebase'
+import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
 
 import {
   SUNNI_LIBRARY_BOOKS,
@@ -187,6 +188,8 @@ export default function IslamicLibrarySheet({
   const [query, setQuery] =
     useState('')
 
+  const [hiddenBookIds, setHiddenBookIds] = useState<string[]>([])
+
   const [firestoreBooks, setFirestoreBooks] =
     useState<LibraryBook[]>([])
 
@@ -212,14 +215,14 @@ export default function IslamicLibrarySheet({
         )
 
         const result: LibraryBook[] = []
+        const hidden: string[] = []
 
         snapshot.forEach((docSnapshot) => {
           const data =
             docSnapshot.data() as FirestoreLibraryBook
 
-          if (
-            data.deleted === true
-          ) {
+          if (data.deleted === true) {
+            hidden.push(docSnapshot.id)
             return
           }
 
@@ -262,11 +265,7 @@ export default function IslamicLibrarySheet({
                 ? data.description.trim()
                 : '',
 
-            readingUrl:
-              typeof data.readingUrl === 'string' &&
-              data.readingUrl.trim()
-                ? data.readingUrl.trim()
-                : null,
+            readingUrl: safeIslamicLibraryLink(data.readingUrl),
 
             readingLabel:
               typeof data.readingLabel === 'string' &&
@@ -274,11 +273,7 @@ export default function IslamicLibrarySheet({
                 ? data.readingLabel.trim()
                 : null,
 
-            downloadUrl:
-              typeof data.downloadUrl === 'string' &&
-              data.downloadUrl.trim()
-                ? data.downloadUrl.trim()
-                : null,
+            downloadUrl: safeIslamicLibraryLink(data.downloadUrl),
 
             downloadLabel:
               typeof data.downloadLabel === 'string' &&
@@ -298,11 +293,7 @@ export default function IslamicLibrarySheet({
                 ? data.sharhAuthor.trim()
                 : null,
 
-            sharhUrl:
-              typeof data.sharhUrl === 'string' &&
-              data.sharhUrl.trim()
-                ? data.sharhUrl.trim()
-                : null,
+            sharhUrl: safeIslamicLibraryLink(data.sharhUrl),
 
             sharhLabel:
               typeof data.sharhLabel === 'string' &&
@@ -321,10 +312,12 @@ export default function IslamicLibrarySheet({
 
         if (!cancelled) {
           setFirestoreBooks(result)
+          setHiddenBookIds(hidden)
         }
       } catch {
         if (!cancelled) {
           setFirestoreBooks([])
+          setHiddenBookIds([])
         }
       } finally {
         if (!cancelled) {
@@ -357,15 +350,13 @@ export default function IslamicLibrarySheet({
               description:
                 book.description,
 
-              readingUrl:
-                book.readingUrl ||
-                null,
+              readingUrl: safeIslamicLibraryLink(book.readingUrl),
 
               readingLabel:
                 book.readingLabel ||
                 null,
 
-              downloadUrl: null,
+              downloadUrl: safeIslamicLibraryLink(book.downloadUrl),
               downloadLabel: null,
 
               sharhTitle:
@@ -376,9 +367,7 @@ export default function IslamicLibrarySheet({
                 book.sharhAuthor ||
                 null,
 
-              sharhUrl:
-                book.sharhUrl ||
-                null,
+              sharhUrl: safeIslamicLibraryLink(book.sharhUrl),
 
               sharhLabel:
                 book.sharhLabel ||
@@ -400,14 +389,12 @@ export default function IslamicLibrarySheet({
         return [
           ...staticBooks.filter(
             (book) =>
-              !firestoreIds.has(
-                book.id
-              )
+              !firestoreIds.has(book.id) && !hiddenBookIds.includes(book.id)
           ),
           ...firestoreBooks,
         ]
       },
-      [firestoreBooks]
+      [firestoreBooks, hiddenBookIds]
     )
 
   const books =
@@ -418,10 +405,7 @@ export default function IslamicLibrarySheet({
 
         return allBooks.filter(
           (book) => {
-            if (
-              book.category !==
-              activeCategory
-            ) {
+            if (!normalizedQuery && book.category !== activeCategory) {
               return false
             }
 
@@ -589,13 +573,15 @@ export default function IslamicLibrarySheet({
             />
 
             <input
+              type="search"
+              aria-label="البحث في جميع كتب المكتبة"
               value={query}
               onChange={(event) =>
                 setQuery(
                   event.target.value
                 )
               }
-              placeholder="ابحث باسم الكتاب أو المؤلف أو الشرح..."
+              placeholder="بحث شامل في كل مجالات المكتبة..."
               className="w-full outline-none bg-transparent text-sm text-gray-800"
             />
           </div>

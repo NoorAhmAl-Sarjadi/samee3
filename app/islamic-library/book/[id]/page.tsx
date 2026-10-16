@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { cacheLibraryBook, readCachedLibraryBook } from '@/lib/islamic/libraryOffline'
+import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
@@ -267,9 +269,7 @@ function normalizeVideo(
       value.href
   ).trim()
 
-  if (!url) {
-    return null
-  }
+  if (!safeIslamicLibraryLink(url)) return null
 
   const title =
     asString(
@@ -420,11 +420,7 @@ function normalizeReaderBook(
       fallback.description,
 
     readingUrl:
-      asNullableString(
-        value.readingUrl ??
-          value.readUrl ??
-          value.sourceUrl
-      ) ?? fallback.readingUrl,
+      safeIslamicLibraryLink(value.readingUrl ?? value.readUrl ?? value.sourceUrl) ?? safeIslamicLibraryLink(fallback.readingUrl),
 
     readingLabel:
       asNullableString(
@@ -433,11 +429,7 @@ function normalizeReaderBook(
       ) ?? fallback.readingLabel,
 
     downloadUrl:
-      asNullableString(
-        value.downloadUrl ??
-          value.downloadLink ??
-          value.fileUrl
-      ) ?? fallback.downloadUrl,
+      safeIslamicLibraryLink(value.downloadUrl ?? value.downloadLink ?? value.fileUrl) ?? safeIslamicLibraryLink(fallback.downloadUrl),
 
     downloadLabel:
       asNullableString(
@@ -458,10 +450,7 @@ function normalizeReaderBook(
       ) ?? fallback.sharhAuthor,
 
     sharhUrl:
-      asNullableString(
-        value.sharhUrl ??
-          value.explanationUrl
-      ) ?? fallback.sharhUrl,
+      safeIslamicLibraryLink(value.sharhUrl ?? value.explanationUrl) ?? safeIslamicLibraryLink(fallback.sharhUrl),
 
     sharhLabel:
       asNullableString(
@@ -508,16 +497,13 @@ function normalizeStaticBook(
     level: value.level,
     description: value.description,
 
-    readingUrl: value.readingUrl ?? null,
+    readingUrl: safeIslamicLibraryLink(value.readingUrl),
     readingLabel:
       typeof raw.readingLabel === 'string'
         ? raw.readingLabel
         : 'قراءة الكتاب',
 
-    downloadUrl:
-      typeof raw.downloadUrl === 'string'
-        ? raw.downloadUrl
-        : null,
+    downloadUrl: safeIslamicLibraryLink(raw.downloadUrl),
 
     downloadLabel:
       typeof raw.downloadLabel === 'string'
@@ -526,7 +512,7 @@ function normalizeStaticBook(
 
     sharhTitle: value.sharhTitle ?? null,
     sharhAuthor: value.sharhAuthor ?? null,
-    sharhUrl: value.sharhUrl ?? null,
+    sharhUrl: safeIslamicLibraryLink(value.sharhUrl),
 
     sharhLabel:
       typeof raw.sharhLabel === 'string'
@@ -637,8 +623,10 @@ export default function IslamicBookReaderPage() {
   const [payload, setPayload] =
     useState<ReaderPayload | null>(null)
 
-  const [loading, setLoading] =
-    useState(true)
+  const [loading, setLoading] = useState(true)
+  const [storageReady, setStorageReady] = useState(false)
+  const [cachedForOffline, setCachedForOffline] = useState(false)
+  const [showOfflineFallback, setShowOfflineFallback] = useState(false)
 
   const [loadError, setLoadError] =
     useState('')
@@ -700,23 +688,37 @@ export default function IslamicBookReaderPage() {
           throw new Error('INVALID_BOOK_ID')
         }
 
-        const response = await fetch(
-          `/api/islamic-library/book/${encodeURIComponent(bookId)}`,
-          {
-            cache: 'no-store',
-          }
-        )
-
-        const data: unknown =
-          await response.json()
-
-        if (
-          !response.ok ||
-          !isRecord(data) ||
-          data.success !== true
-        ) {
-          throw new Error('LOAD_FAILED')
+        // Network-first with an explicit, validated, public-text cache.
+        // Keep the previous book readable when offline or a provider is unavailable.
+        let data: unknown = null
+        let fromOffline = false
+        try {
+          const controller = new AbortController()
+          const timer = window.setTimeout(() => controller.abort(), 14000)
+          try {
+            const response = await fetch(
+              `/api/islamic-library/book/${encodeURIComponent(bookId)}`,
+              { cache: 'no-store', signal: controller.signal }
+            )
+            if (!response.ok) throw new Error('LOAD_FAILED')
+            data = await response.json()
+            if (!isRecord(data) || data.success !== true) throw new Error('INVALID_BOOK')
+            // A book with no text may have working external links; don't overwrite a cached text edition.
+            if (Array.isArray(data.contents) && data.contents.length) {
+              const stored = await cacheLibraryBook(bookId, data)
+              if (!cancelled) setCachedForOffline(stored)
+            } else {
+              const saved = await readCachedLibraryBook(bookId)
+              if (saved) { data = saved; fromOffline = true }
+            }
+          } finally { window.clearTimeout(timer) }
+        } catch {
+          const saved = await readCachedLibraryBook(bookId)
+          if (saved) { data = saved; fromOffline = true }
+          else throw new Error('LOAD_FAILED')
         }
+        if (!isRecord(data) || data.success !== true) throw new Error('INVALID_BOOK')
+        if (!cancelled) setShowOfflineFallback(fromOffline)
 
         const fallbackBook =
           staticBook ||
@@ -821,9 +823,13 @@ export default function IslamicBookReaderPage() {
   }, [bookId, staticBook])
 
   useEffect(() => {
-    if (!bookId) {
-      return
-    }
+    if (!bookId) return
+    setStorageReady(false)
+    try {
+      const recentRaw = JSON.parse(localStorage.getItem('samee3_islamic_recent_v1') || '[]') as unknown
+      const entries = Array.isArray(recentRaw) ? recentRaw.filter((id): id is string => typeof id === 'string') : []
+      localStorage.setItem('samee3_islamic_recent_v1', JSON.stringify([bookId, ...entries.filter((id) => id !== bookId)].slice(0, 12)))
+    } catch { /* local storage unavailable */ }
 
     try {
       const bookmarksRaw =
@@ -909,13 +915,13 @@ export default function IslamicBookReaderPage() {
       }
     } catch {
       // التخزين المحلي غير متاح أو يحتوي على بيانات غير صالحة.
+    } finally {
+      setStorageReady(true)
     }
   }, [bookId])
 
   useEffect(() => {
-    if (!bookId) {
-      return
-    }
+    if (!bookId || !storageReady) return
 
     try {
       const state: ReaderStorageState = {
@@ -940,6 +946,7 @@ export default function IslamicBookReaderPage() {
     notes,
     activeSection,
     selectedVideoId,
+    storageReady,
   ])
 
   const contents =
@@ -1324,6 +1331,15 @@ export default function IslamicBookReaderPage() {
             </button>
           </div>
         </header>
+
+        {showOfflineFallback && (
+          <p role="status" className="mt-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 px-4 py-3 text-xs leading-6">
+            لا يتوفر الاتصال بالمصدر حاليًا؛ يتم عرض نسخة النص المحفوظة على جهازك.
+          </p>
+        )}
+        {cachedForOffline && !showOfflineFallback && (
+          <p role="status" className="mt-3 text-xs text-mushaf-teal font-bold">تم حفظ نص هذا الكتاب للقراءة عند انقطاع الإنترنت (على هذا الجهاز).</p>
+        )}
 
         <div className="mt-6 flex flex-wrap gap-2">
           {book.readingUrl && (
