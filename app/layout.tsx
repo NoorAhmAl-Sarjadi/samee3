@@ -7,6 +7,7 @@ import type { ReactNode } from 'react'
 import { AuthProvider } from '@/context/AuthContext'
 import BottomNav from '@/components/BottomNav'
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
+import ConnectionBanner from '@/components/ConnectionBanner'
 
 export const metadata: Metadata = {
   title: {
@@ -105,6 +106,7 @@ export default function RootLayout({
           <main className="min-h-screen">{children}</main>
           <BottomNav />
           <ServiceWorkerRegistration />
+          <ConnectionBanner />
         </AuthProvider>
       </body>
     </html>

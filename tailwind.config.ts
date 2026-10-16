@@ -17,23 +17,23 @@ const config: Config = {
          */
         mushaf: {
           paper: '#FCFBF8',
-          gold: '#D97706',
-          teal: '#0284C7',
+          gold: '#A47A3E',
+          teal: '#235348',
           dark: '#0F172A',
-          border: '#0EA5E9',
+          border: '#B49763',
         },
 
         /* ألوان مباشرة مطابقة لـ globals.css */
         samee3: {
-          bg: '#F4F9FE',
-          primary: '#0284C7',
-          primaryDark: '#0369A1',
-          gold: '#D97706',
+          bg: '#FAF8F3',
+          primary: '#8A642D',
+          primaryDark: '#6F4C1F',
+          gold: '#A47A3E',
           paper: '#FCFBF8',
           text: '#0F172A',
           muted: '#64748B',
-          border: '#E2E8F0',
-          mushafBorder: '#0EA5E9',
+          border: '#E9E3D8',
+          mushafBorder: '#B49763',
         },
       },
 
@@ -64,7 +64,7 @@ const config: Config = {
           '0 10px 35px rgba(15, 23, 42, 0.12)',
 
         'soft-blue':
-          '0 4px 18px rgba(2, 132, 199, 0.14)',
+          '0 4px 18px rgba(138, 100, 45, 0.14)',
       },
 
       borderRadius: {

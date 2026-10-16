@@ -9,7 +9,10 @@
     "dev": "next dev",
     "build": "rm -rf .next && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "audit:static": "node scripts/audit-static.mjs",
+    "test:proxy": "node scripts/test-hadith-proxy.cjs",
+    "test:library": "node scripts/test-library.cjs"
   },
   "dependencies": {
     "firebase": "^10.8.0",

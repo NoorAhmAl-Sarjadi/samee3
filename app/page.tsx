@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import {
   BookOpen,
   List,
@@ -243,24 +244,27 @@ export default function HomePage() {
     <div className="min-h-screen bg-[var(--bg-main)] px-4 pb-32 pt-4 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl">
         <header className="mb-7 flex items-center justify-between gap-4 pt-1">
-          <div className="min-w-0">
-            <p className="mb-1 text-sm font-medium text-slate-500">
-              السلام عليكم،
-            </p>
+          <div className="flex min-w-0 items-center gap-3">
+            <Image src="/icon-192.png" alt="شعار مصحف سميع" width={58} height={58} priority className="h-14 w-14 shrink-0 rounded-2xl border border-[#d8bd88] shadow-sm" />
+            <div className="min-w-0">
+              <p className="mb-1 text-sm font-medium text-slate-500">
+                السلام عليكم،
+              </p>
 
-            <h1 className="truncate text-2xl font-extrabold tracking-tight text-[var(--text-main)]">
-              {displayName}
-            </h1>
+              <h1 className="truncate text-2xl font-extrabold tracking-tight text-[var(--text-main)]">
+                {displayName}
+              </h1>
 
-            <p className="mt-1 text-xs font-medium text-slate-400">
-              أهلاً بك في مصحف سميع
-            </p>
+              <p className="mt-1 text-xs font-medium text-slate-400">
+                أهلاً بك في مصحف سميع
+              </p>
+            </div>
           </div>
 
           <Link
             href="/profile"
             aria-label="فتح الحساب والإشعارات"
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[rgba(2,132,199,0.16)] bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[rgba(2,132,199,0.35)] hover:shadow-md active:scale-95"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#d9c8a8] bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#b99863] hover:shadow-md active:scale-95"
           >
             <Bell
               size={22}
@@ -277,7 +281,7 @@ export default function HomePage() {
         )}
 
         <section className="relative mb-8 overflow-hidden">
-          <div className="relative overflow-hidden rounded-[30px] border border-[rgba(14,165,233,0.18)] bg-gradient-to-br from-[var(--royal-blue)] to-[#0369A1] p-5 text-white shadow-[0_12px_35px_rgba(2,132,199,0.18)] sm:p-6">
+          <div className="relative overflow-hidden rounded-[30px] border border-[#c6aa72]/60 bg-gradient-to-br from-[#255348] via-[#1d473f] to-[#152f2b] p-5 text-white shadow-[0_12px_35px_rgba(20,57,47,0.18)] sm:p-6">
             <div
               aria-hidden="true"
               className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-white/10 blur-2xl"
@@ -285,7 +289,7 @@ export default function HomePage() {
 
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-cyan-200/10 blur-3xl"
+              className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-amber-200/10 blur-3xl"
             />
 
             <div className="relative z-10">
@@ -361,7 +365,7 @@ export default function HomePage() {
 
             <Link
               href="/surahs"
-              className="text-xs font-bold text-[var(--royal-blue)] transition-colors hover:text-[#0369A1]"
+              className="text-xs font-bold text-[var(--royal-blue)] transition-colors hover:text-[#6a4b20]"
             >
               فتح الفهرس
             </Link>

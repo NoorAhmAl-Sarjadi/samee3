@@ -7,16 +7,16 @@
    ========================================================= */
 
 :root {
-  --bg-main: #f4f9fe;
+  --bg-main: #faf8f3;
   --navbar-bg: #ffffff;
-  --royal-blue: #0284c7;
-  --gold-premium: #d97706;
+  --royal-blue: #8a642d;
+  --gold-premium: #a47a3e;
   --mushaf-paper: #fcfbf8;
-  --mushaf-border: #0ea5e9;
+  --mushaf-border: #b49763;
   --text-main: #0f172a;
   --text-muted: #64748b;
   --card-bg: #ffffff;
-  --border-light: #e2e8f0;
+  --border-light: #e9e3d8;
 
   /* =======================================================
      SAMEE3 — Live Ayah Highlight Tokens
@@ -114,12 +114,12 @@ select:focus-visible {
 }
 
 .thin-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(2, 132, 199, 0.25);
+  background: rgba(138, 100, 45, 0.25);
   border-radius: 999px;
 }
 
 .thin-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(2, 132, 199, 0.45);
+  background: rgba(138, 100, 45, 0.45);
 }
 
 /* =========================================================
@@ -152,7 +152,7 @@ select:focus-visible {
 .mushaf-page-frame {
   position: relative;
   background: var(--mushaf-paper);
-  border: 1px solid rgba(14, 165, 233, 0.28);
+  border: 1px solid rgba(164, 122, 62, 0.32);
   box-shadow:
     0 10px 30px rgba(15, 23, 42, 0.08),
     0 2px 8px rgba(15, 23, 42, 0.05);
@@ -524,5 +524,48 @@ select:focus-visible {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* SAMEE3 — accessible motion and elegant touch feedback. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::selection { background: rgba(178, 138, 74, 0.28); color: #253c32; }
+
+/* SAMEE3: tactile and accessible controls across all sections */
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid #a47a3e;
+  outline-offset: 3px;
+}
+:where(button, input, select, textarea):disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+:where(button, a) { -webkit-touch-callout: none; }
+:where(input, textarea, select) { min-width: 0; }
+:where(main, section, article, nav) { min-width: 0; }
+:where(a, button) { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  input, select, textarea { font-size: max(16px, 1rem); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .samee3-live-ayah-highlight,
+  .samee3-spread.is-turning.next,
+  .samee3-spread.is-turning.prev {
+    animation: none !important;
+  }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
   }
 }
