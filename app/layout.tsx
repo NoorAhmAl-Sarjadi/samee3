@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   },
 
   description:
-    'موقع ومنصة سميع القرآنية الشاملة. استمع وحمل القرآن الكريم بصوت جميع قراء العالم الإسلامي.',
+    'موقع ومنصة سميع القرآنية الشاملة. اقرأ القرآن الكريم بروايات متعددة، واستمع للتلاوات والأذكار، وتابع وردك واحفظ ما يتاح دون إنترنت.',
 
   applicationName: 'مصحف سميع',
 
@@ -56,7 +56,10 @@ export const metadata: Metadata = {
    * الخاص بـ apple-icon في Next.js يعتمد على PNG/JPG.
    */
   icons: {
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
     icon: [
+      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/icon-512.png', type: 'image/png', sizes: '512x512' },
       {
         url: '/icon.svg',
         type: 'image/svg+xml',
@@ -84,7 +87,7 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#0284C7',
+  themeColor: '#8A642D',
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
