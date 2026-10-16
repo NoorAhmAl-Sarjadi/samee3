@@ -29,7 +29,7 @@ test('Assessments: manager/supervisor delegation, assigned downloads, snapshots 
  r=await spec.call('/assessments/catalog');assert.equal(r.status,200)
  r=await spec.call('/assessments/access');assert.equal(r.can_evaluate,false);assert.equal(r.can_download,true)
  r=await other.call('/assessments');assert.equal(r.items.length,0)
- r=await mgr.call('/assessments/catalog');assert.equal(r.status,200);assert.equal(r.programs.length,6);assert.ok(r.domains.length>=10)
+ r=await mgr.call('/assessments/catalog');assert.equal(r.status,200);assert.equal(r.programs.length,6);assert.equal(r.domains,undefined)
  r=await mgr.call('/assessments','POST',{child_id:childId,program_id:'unified'});assert.equal(r.status,409)
  assert.ok(!(await mgr.call('/assessments/catalog')).programs.some(p=>p.id==='unified'))
  // Historic unified assessments stay readable while new ones are disabled.
@@ -67,7 +67,7 @@ test('Assessments: manager/supervisor delegation, assigned downloads, snapshots 
  r=await supervisor.call('/assessments/settings','PATCH',{specialist_id:spec.userId,can_evaluate:false});assert.equal(r.status,200)
  r=await spec.call('/assessments/access');assert.equal(r.can_evaluate,false);assert.equal(r.can_download,true)
  r=await spec.call('/assessments/'+id);assert.equal(r.status,403) // download-only specialists cannot inspect details
- r=await spec.call('/assessments');assert.equal(r.status,200);assert.ok(r.items.find(x=>x.id===id))
+ r=await spec.call('/assessments');assert.equal(r.status,200);assert.ok(!r.items.some(x=>x.id===id)) // retired assessments archived, not shown in live list
  r=await spec.call('/assessments/'+id+'/docx');assert.equal(r.status,200)
  r=await spec.call('/assessments/'+id+'/pdf');assert.equal(r.status,200)
  assert.equal(r.res.headers.get('content-type'),'text/html; charset=utf-8')

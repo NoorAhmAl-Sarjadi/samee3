@@ -1,4 +1,4 @@
-import {CATALOG_VERSION,PROGRAMS,DOMAINS,programById,programDomains,goalById} from './assessment-catalog.js'
+import {CATALOG_VERSION,PROGRAMS,DOMAINS,WORD_INVENTORY_PROGRAMS,programById,programForSavedRecord,programDomains} from './assessment-catalog.js'
 import {createAssessmentDocx} from './assessment-docx.js'
 import {createAssessmentPrintHtml} from './assessment-pdf.js'
 import {sourceProfileFor} from './assessment-sources.js'
@@ -10,9 +10,9 @@ const one = (db,sql,...args)=>db.prepare(sql).bind(...args).first()
 const must=(v,msg,code=400)=>{if(!v)throw error(msg,code)}
 const isManager=user=>['center_admin','supervisor'].includes(user.role)
 const schemaCache=new Map()
-const UPLOADED_PROGRAMS=new Set(['portage','help','lovaas','vbmapp','abllsr','esdm'])
-// Keep retired programs in the catalog source for historical records only.
-const RETIRED_PROGRAMS=new Set(PROGRAMS.map(p=>p.id).filter(id=>!UPLOADED_PROGRAMS.has(id)))
+const UPLOADED_PROGRAMS=new Set(WORD_INVENTORY_PROGRAMS)
+// Only explicitly configured programs are active. Archived records are preserved separately.
+const ACTIVE_PLACEHOLDERS=WORD_INVENTORY_PROGRAMS.map(()=>'?').join(',')
 const editablePlanFields=['baseline','objective','mastery','method','strategy','review_date','priority','assigned_specialist']
 export async function ensureAssessmentSchema(db,key=db){
  if(!schemaCache.has(key)){
@@ -67,10 +67,10 @@ export async function ensureAssessmentSchema(db,key=db){
    await exec(db,`CREATE INDEX IF NOT EXISTS idx_assessment_library_changes ON assessment_library_changes(program_id,goal_id,changed_at DESC)` )
    await exec(db,`CREATE TABLE IF NOT EXISTS assessment_catalog_snapshots (
       assessment_id TEXT PRIMARY KEY REFERENCES assessment_records(id),domains_json TEXT NOT NULL)`)
-   // Retired programmes are removed from both catalogs after upgrade.
-   // Never delete assessment_records, assessment_answers, plans or frozen snapshots.
-   await exec(db,"DELETE FROM assessment_global_library_items WHERE program_id IN ('teacch','carolina')")
-   await exec(db,"DELETE FROM assessment_library_items WHERE program_id IN ('teacch','carolina')")
+   // Remove all earlier seed catalogs and discontinued program content (not just renamed entries).
+   // NEVER delete assessment records/answers/plans or their historical snapshots.
+   await exec(db,`DELETE FROM assessment_global_library_items WHERE program_id NOT IN (${ACTIVE_PLACEHOLDERS})`,...WORD_INVENTORY_PROGRAMS)
+   await exec(db,`DELETE FROM assessment_library_items WHERE program_id NOT IN (${ACTIVE_PLACEHOLDERS})`,...WORD_INVENTORY_PROGRAMS)
   })().catch(e=>{schemaCache.delete(key);throw e})
   schemaCache.set(key,ready)
  }
@@ -131,7 +131,9 @@ function makePlan(a,answers,chosenDomains){
 // Editing the center library later never silently changes an ongoing evaluation.
 async function domainsForRecord(db,a){
  const snap=await one(db,'SELECT domains_json FROM assessment_catalog_snapshots WHERE assessment_id=?',a.id)
- return snap?JSON.parse(snap.domains_json):programDomains(a.program_id)
+ // Legacy unified assessments were stored without frozen snapshots in very early versions.
+ // Preserve read access to their original results without ever listing those sample goals for new evaluations.
+ return snap?JSON.parse(snap.domains_json):a.program_id==='unified'?DOMAINS:programDomains(a.program_id)
 }
 async function approvedGlobalDomains(db,programId){
  const items=await rows(db,`SELECT goal_id,domain_id,domain_name,title,source_page,source_paragraph,source_section,age_label,source_file,source_number,review_flags
@@ -166,7 +168,6 @@ async function handleLibrary(req,db,user,path,method){
  if(path===base+'/import'&&method==='POST'){
   must(user.role==='superadmin','استيراد المحتوى لمدير المنصة فقط',403)
   const b=await parse(req)
-  must(UPLOADED_PROGRAMS.has(String(b.program_id||'')),'البرنامج غير متاح')
   must(UPLOADED_PROGRAMS.has(String(b.program_id||'')),'هذا البرنامج غير متاح لاستيراد البنود')
   must(Array.isArray(b.items)&&b.items.length>=1&&b.items.length<=55,'أرسل من 1 إلى 55 بندًا في الدفعة')
   const autoPublish=b.publish===true
@@ -300,8 +301,8 @@ export async function assessmentRoute(req,env,user,path,method){
  if(user.role!=='superadmin')await canUse(db,user)
  else must(path==='/api/assessments/catalog'&&method==='GET','حساب مدير المنصة لا يصل إلى بيانات الأطفال',403)
  if(path==='/api/assessments/catalog'&&method==='GET'){
-  const counts=await rows(db,`SELECT program_id,review_status,COUNT(*) total,SUM(CASE WHEN review_flags<>'[]' THEN 1 ELSE 0 END) flagged FROM assessment_global_library_items GROUP BY program_id,review_status`)
-  return json({version:CATALOG_VERSION,programs:PROGRAMS.filter(p=>!RETIRED_PROGRAMS.has(p.id)).map(p=>({...p,sourceProfile:sourceProfileFor(p.id)})),domains:DOMAINS,approved_by_program:counts,notice:'البرامج الستة متاحة من مستندات Word المرفوعة. تفعيل البنود لا يعني مراجعتها علميًا أو إتاحة درجات معيارية رسمية؛ راجع جودة النص وحقوق النشر قبل الاستخدام.'})
+  const counts=await rows(db,`SELECT program_id,review_status,COUNT(*) total,SUM(CASE WHEN review_flags<>'[]' THEN 1 ELSE 0 END) flagged FROM assessment_global_library_items WHERE program_id IN (${ACTIVE_PLACEHOLDERS}) GROUP BY program_id,review_status`,...WORD_INVENTORY_PROGRAMS)
+  return json({version:CATALOG_VERSION,programs:PROGRAMS.map(p=>({...p,sourceProfile:sourceProfileFor(p.id)})),approved_by_program:counts,notice:'البرامج الستة متاحة من مستندات Word المرفوعة. تفعيل البنود لا يعني مراجعتها علميًا أو إتاحة درجات معيارية رسمية؛ راجع جودة النص وحقوق النشر قبل الاستخدام.'})
  }
  if(path==='/api/assessments'&&method==='GET'){
   const childId=new URL(req.url).searchParams.get('child_id')
@@ -316,6 +317,8 @@ export async function assessmentRoute(req,env,user,path,method){
     args.push(user.id)
    }else filter+=` AND a.status='approved'`
   }
+  // Previous sample evaluations remain in the database as history, but no longer clutter the live list.
+  filter+=` AND a.program_id IN (${ACTIVE_PLACEHOLDERS})`;args.push(...WORD_INVENTORY_PROGRAMS)
   if(childId){filter+=' AND a.child_id=?';args.push(childId)}
   const items=await rows(db,`SELECT a.id,a.child_id,a.program_id,a.status,a.created_at,a.updated_at,a.finalized_at,a.approved_at,a.created_by,c.name child_name,u.name assessor_name
     FROM assessment_records a JOIN children c ON c.id=a.child_id JOIN users u ON u.id=a.created_by WHERE ${filter} ORDER BY a.created_at DESC LIMIT 350`,...args)
@@ -326,7 +329,7 @@ export async function assessmentRoute(req,env,user,path,method){
   const b=await parse(req)
   const child=await accessibleChild(db,user,String(b.child_id||''))
   must(child.active,'ملف الطفل غير نشط',403)
-  const p=programById(String(b.program_id||''));must(p&&!RETIRED_PROGRAMS.has(p.id),'هذا التقييم القديم متوقف، اختر أحد البرامج المتاحة',409)
+  const p=programById(String(b.program_id||''));must(p&&UPLOADED_PROGRAMS.has(p.id),'هذا التقييم القديم متوقف، اختر أحد البرامج الستة المتاحة',409)
   const id=uuid()
   const imported=await approvedGlobalDomains(db,p.id)
   must(imported.length>0,'البرنامج لم يعتمد مدير المنصة بنوده بعد. يرجى التواصل مع إدارة تأهيل +',409)
@@ -342,7 +345,7 @@ export async function assessmentRoute(req,env,user,path,method){
  if(!cmd&&method==='GET'){
   await requireEvaluator(db,user)
   const [answers,history]=await Promise.all([rows(db,`SELECT goal_id,rating,note,updated_at FROM assessment_answers WHERE assessment_id=?`,a.id),rows(db,'SELECT actor_name,action,goal_id,created_at FROM assessment_edit_history WHERE assessment_id=? ORDER BY created_at DESC,rowid DESC LIMIT 80',a.id)])
-  return json({history,assessment:viewRecord(a),child,answers,program:programById(a.program_id),domains:await domainsForRecord(db,a),version:a.catalog_version})
+  return json({history,assessment:viewRecord(a),child,answers,program:programForSavedRecord(a.program_id),domains:await domainsForRecord(db,a),version:a.catalog_version})
  }
  if(cmd==='answer'&&method==='PATCH'){
   await requireEvaluator(db,user)
@@ -422,7 +425,7 @@ export async function assessmentRoute(req,env,user,path,method){
    one(db,'SELECT actor_name,created_at FROM assessment_edit_history WHERE assessment_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1',a.id),
    a.approved_by?one(db,'SELECT name FROM users WHERE id=? AND center_id=?',a.approved_by,user.center_id):Promise.resolve(null)
   ])
-  const meta={child,center,program:programById(a.program_id),assessor,assessment:a,lastEditor,reviewer}
+  const meta={child,center,program:programForSavedRecord(a.program_id),assessor,assessment:a,lastEditor,reviewer}
   if(cmd==='pdf'){
    // Browser-native Print > Save as PDF preserves Arabic glyph shaping without a paid PDF service.
    // This endpoint serves a print-ready HTML view, not a binary application/pdf response.

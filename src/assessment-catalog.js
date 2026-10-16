@@ -1,6 +1,6 @@
 // Original Arabic teaching targets. These are NOT official, normed, or licensed
 // items from any named proprietary assessment. Version IDs are immutable.
-export const CATALOG_VERSION = 'taheel-word-catalog-2026-10-six-v4'
+export const CATALOG_VERSION = 'taheel-six-clean-20261017-v5'
 const d = (id, name, goals) => ({ id, name, goals: goals.map((title, i) => ({ id: `${id}-${String(i + 1).padStart(2, '0')}`, title })) })
 export const DOMAINS = [
  d('cognitive','المهارات المعرفية والإدراكية',[
@@ -44,31 +44,24 @@ export const DOMAINS = [
  ])
 ]
 const prog = (id, name, kind, domainIds, reference) => ({id,name,kind,domainIds,reference,officialItems:false})
-export const PROGRAMS = [
+// Only these six programs can be selected or imported. All historical content is archived, not published.
+export const PROGRAMS = Object.freeze([
  prog('portage','بورتاج · Portage','منهج تدخل مبكر',['cognitive','receptive','expressive','social','selfcare','grossmotor','finemotor','play'], 'https://www.portage.org.uk/'),
- prog('lovaas','لوفاس · Lovaas','مدخل تدخل سلوكي',['attention','receptive','expressive','cognitive','social','selfcare','play'], 'https://asatonline.org/'),
  prog('help','هيلب · HELP','منهج نمائي',['cognitive','receptive','expressive','social','selfcare','grossmotor','finemotor','play'], 'https://www.vort.com/'),
- prog('teacch','تيتش · TEACCH','تعليم منظم',['attention','academic','adaptive','selfcare','communication','social'], 'https://teacch.com/'),
- prog('pecs','بيكس · PECS','تواصل بديل',['communication','social','expressive'], 'https://pecsusa.com/free-materials/'),
+ prog('lovaas','لوفاس · Lovaas','مدخل تدخل سلوكي',['attention','receptive','expressive','cognitive','social','selfcare','play'], 'https://asatonline.org/'),
  prog('vbmapp','VB-MAPP','أداة تقييم مرخصة',['receptive','expressive','communication','social','play','attention'], 'https://avbpress.com/'),
  prog('abllsr','ABLLS-R','أداة تقييم مرخصة',['receptive','expressive','communication','social','cognitive','attention','academic','selfcare','play'], 'https://partingtonbehavioranalysts.com/'),
- prog('afls','AFLS','أداة مهارات وظيفية مرخصة',['selfcare','adaptive','social','communication','regulation'], 'https://partingtonbehavioranalysts.com/'),
  prog('esdm','دنفر المبكر · ESDM','نموذج تدخل مبكر',['social','play','communication','receptive','expressive','cognitive','grossmotor','finemotor'], 'https://www.esdm.co/'),
- prog('prt','PRT','تدخل الاستجابة المحورية',['communication','social','play','attention'], 'https://afirm.fpg.unc.edu/'),
- prog('floortime','DIR / Floortime','نهج نمائي تفاعلي',['social','play','regulation','communication'], 'https://www.icdl.com/'),
- prog('hanen','هانن · Hanen','تطوير التواصل والأسرة',['receptive','expressive','communication','social','play'], 'https://www.hanen.org/'),
- prog('scerts','SCERTS','إطار التواصل والتنظيم',['social','communication','regulation','adaptive'], 'https://scerts.com/'),
- prog('jasper','JASPER','اللعب والانتباه المشترك',['play','social','communication','attention'], 'https://www.jaspertraining.org/'),
- prog('peak','PEAK','أداة تقييم وتدخل مرخصة',['cognitive','receptive','expressive','academic','attention'], 'https://emergentlearningpress.com/'),
- prog('verbal_behavior','السلوك اللفظي · Verbal Behavior','نهج تعليم اللغة',['receptive','expressive','communication','social','attention'], 'https://www.ncbi.nlm.nih.gov/pmc/'),
- prog('precision','التعليم الدقيق · Precision Teaching','منهج قياس الطلاقة',['academic','attention','cognitive'], 'https://www.ncbi.nlm.nih.gov/pmc/'),
- prog('social_stories','القصص الاجتماعية · Social Stories','استراتيجية تعليمية',['social','regulation','adaptive','communication'], 'https://www.autism.org.uk/'),
- prog('structured','التعليم المنظم · Structured Teaching','تنظيم بيئة التعلم',['attention','academic','adaptive','selfcare'], 'https://teacch.com/'),
- prog('task_analysis','تحليل المهمة · Task Analysis','استراتيجية تدريب',['selfcare','adaptive','finemotor','academic'], 'https://afirm.fpg.unc.edu/'),
- prog('sensory','المعالجة الحسية · Sensory Integration','مجال بالعلاج الوظيفي',['regulation','grossmotor','finemotor','selfcare'], 'https://www.aota.org/'),
- prog('carolina','منهج كارولينا · Carolina','منهج نمائي',['cognitive','receptive','expressive','social','selfcare','grossmotor','finemotor'], 'https://www.brookespublishing.com/'),
- prog('unified','التقييم الشامل الموحد','بنك أهداف عربي مستقل',DOMAINS.map(x=>x.id),'https://www.cdc.gov/act-early/')
-]
+])
+// Names are retained solely for already-stored plans: never show these as new options.
+const ARCHIVED_NAMES = Object.freeze({
+ teacch:'تيتش · TEACCH',pecs:'بيكس · PECS',afls:'AFLS',prt:'PRT',
+ floortime:'DIR / Floortime',hanen:'هانن · Hanen',scerts:'SCERTS',jasper:'JASPER',
+ peak:'PEAK',verbal_behavior:'السلوك اللفظي',precision:'التعليم الدقيق',
+ social_stories:'القصص الاجتماعية',structured:'التعليم المنظم',task_analysis:'تحليل المهمة',
+ sensory:'المعالجة الحسية',carolina:'كارولينا · Carolina',unified:'التقييم الشامل القديم',
+})
+export function programForSavedRecord(id){return programById(id)||{id,name:ARCHIVED_NAMES[id]||'برنامج سابق',kind:'تقييم تاريخي',domainIds:[],archived:true}}
 export const WORD_INVENTORY_PROGRAMS = Object.freeze(['portage','help','lovaas','vbmapp','abllsr','esdm'])
 export const programById = id => PROGRAMS.find(p=>p.id===id)
 export const domainById = id => DOMAINS.find(d=>d.id===id)

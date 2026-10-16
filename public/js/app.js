@@ -1,5 +1,5 @@
 import {api,csvDownload} from './api.js'
-import {assessmentAccess,assessmentAccessLoad,assessmentSelectChild,assessmentsLoad,assessmentPlatformLoad,assessmentPage,assessmentAction,assessmentChange} from './assessments.js?v=six-programs-20261017'
+import {assessmentAccess,assessmentAccessLoad,assessmentSelectChild,assessmentsLoad,assessmentPlatformLoad,assessmentPage,assessmentAction,assessmentChange} from './assessments.js?v=taheel-six-clean-20261017-v5'
 const root=document.querySelector('#app'),toastBox=document.querySelector('#toast')
 const cfg=()=>window.TAHEEL_CONTACT||{supportEmail:'abo3bdalr7man5080@gmail.com',displayedPhone:'01005080532',whatsappNumber:'201005080532'}
 const state={auth:null,page:'dashboard',staff:[],children:[],sessions:[],reports:[],centers:[],audit:[],month:localMonth(),detail:null,modal:'',busy:false,search:'',mobileOpen:false,loginMode:false}

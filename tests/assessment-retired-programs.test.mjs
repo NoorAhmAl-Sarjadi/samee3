@@ -8,7 +8,7 @@ import {sha256} from '../src/security.js'
 import {WORD_INVENTORY_PROGRAMS} from '../src/assessment-catalog.js'
 
 const allowed=['portage','help','lovaas','vbmapp','abllsr','esdm']
-const retired=['teacch','carolina']
+const retired=['teacch','carolina','unified','pecs','afls','prt']
 function dbFactory(){
  const sqlite=new DatabaseSync(':memory:')
  sqlite.exec(readFileSync(new URL('../schema.sql',import.meta.url),'utf8'))
@@ -35,7 +35,7 @@ test('only six supported programs, retired sources rejected, historical assessme
  await db.prepare('INSERT INTO assessment_records(id,center_id,child_id,program_id,catalog_version,created_by,status) VALUES(?,?,?,?,?,?,?)').bind(historic,center,child,'teacch','old-v1',manager.id,'approved').run()
  await db.prepare('INSERT INTO assessment_catalog_snapshots(assessment_id,domains_json) VALUES(?,?)').bind(historic,JSON.stringify([{id:'old',name:'قديم',goals:[{id:'teacch-g00001',title:'هدف محفوظ'}]}])).run()
  const cat=await manager.call('/assessments/catalog')
- assert.equal(cat.status,200);assert.deepEqual(new Set(cat.programs.map(x=>x.id)),new Set(allowed))
+ assert.equal(cat.status,200);assert.deepEqual(new Set(cat.programs.map(x=>x.id)),new Set(allowed));assert.equal('domains' in cat,false)
  for(const pid of retired){
   const a=await root.call('/assessments/library?program_id='+pid);assert.equal(a.status,400)
   const b=await root.call('/assessments/library/import','POST',{program_id:pid,source_file:'file.docx',items:[{id:pid+'-g00002',domain_id:pid+'-d0001',domain_name:'مجال',title:'هدف جديد',source_page:1}],publish:true,usage_rights_confirmed:true,source_quality_acknowledged:true});assert.equal(b.status,400)
@@ -43,6 +43,8 @@ test('only six supported programs, retired sources rejected, historical assessme
   const x=await db.prepare('SELECT COUNT(*) AS n FROM assessment_global_library_items WHERE program_id=?').bind(pid).first();assert.equal(x.n,0)
   const y=await db.prepare('SELECT COUNT(*) AS n FROM assessment_library_items WHERE program_id=?').bind(pid).first();assert.equal(y.n,0)
  }
+ const visible=await manager.call('/assessments');assert.equal(visible.status,200);assert.equal(visible.items.some(x=>x.id===historic),false)
  const saved=await db.prepare('SELECT * FROM assessment_records WHERE id=?').bind(historic).first();assert.equal(saved.program_id,'teacch')
+ const historicRecord=await manager.call('/assessments/'+historic);assert.equal(historicRecord.status,200);assert.equal(historicRecord.program.archived,true)
  const snap=await db.prepare('SELECT domains_json FROM assessment_catalog_snapshots WHERE assessment_id=?').bind(historic).first();assert.match(snap.domains_json,/هدف محفوظ/)
 })
