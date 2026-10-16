@@ -1,0 +1,76 @@
+// Original Arabic teaching targets. These are NOT official, normed, or licensed
+// items from any named proprietary assessment. Version IDs are immutable.
+export const CATALOG_VERSION = 'taheel-word-catalog-2026-10-six-v4'
+const d = (id, name, goals) => ({ id, name, goals: goals.map((title, i) => ({ id: `${id}-${String(i + 1).padStart(2, '0')}`, title })) })
+export const DOMAINS = [
+ d('cognitive','المهارات المعرفية والإدراكية',[
+  'يطابق صورتين متماثلتين من بين ثلاث صور', 'يصنف ستة أشياء إلى مجموعتين حسب اللون', 'يحدد ثلاثة أشكال هندسية عند تسميتها', 'يطابق الشيء الحقيقي بصورته', 'يرتب ثلاث صور وفق تسلسل حدث مألوف', 'يفرز الأشياء حسب الحجم كبير وصغير', 'يكمل نمطًا بسيطًا من عنصرين متكررين', 'يحدد وظيفة خمس أدوات مألوفة', 'يتعرف على مفهوم واحد وكثير باستخدام أشياء حقيقية', 'يحل لغزًا مصورًا من أربع قطع بمساعدة مناسبة'
+ ]),
+ d('receptive','اللغة الاستقبالية',[
+  'يلتفت عند مناداته باسمه في بيئة قليلة المشتتات', 'يشير إلى خمسة أجزاء من جسمه عند الطلب', 'ينفذ تعليمات من خطوة واحدة دون إشارة', 'يختار شيئًا مألوفًا من بين ثلاثة أشياء عند تسميته', 'ينفذ تعليمات تتضمن فعلًا واسمًا', 'يميز بين فوق وتحت باستخدام مجسمات', 'ينفذ تعليمات من خطوتين مرتبطتين', 'يحدد خمس صور أفعال عند سماع اسم الفعل', 'يستجيب لسؤال أين بالإشارة إلى المكان', 'يفهم تعليمات تتضمن النفي في موقف مألوف'
+ ]),
+ d('expressive','اللغة التعبيرية والتواصل',[
+  'يطلب شيئًا يفضله بوسيلة تواصل وظيفية', 'يسمي خمسة أشياء مألوفة بالوسيلة المناسبة', 'يعبر عن الرفض بطريقة تواصل مقبولة', 'يطلب المساعدة عند الحاجة', 'يجيب عن سؤال ماذا بشأن شيء حاضر', 'يستخدم كلمتين أو رمزين للتعبير عن طلب', 'يسمي خمسة أفعال من صور أو مواقف', 'يعبر عن احتياج أساسي دون سلوك غير مناسب', 'يصف سمة واحدة لشيء مألوف', 'يشارك بمعلومة قصيرة عن نشاط قام به'
+ ]),
+ d('social','المهارات الاجتماعية والتفاعل',[
+  'يستجيب لتحية مألوفة بالطريقة المناسبة له', 'يحافظ على مشاركة انتباه مع شخص حول لعبة', 'يشارك في تبادل دورين أثناء لعبة', 'يطلب الانضمام لنشاط جماعي بوسيلة تواصل', 'يقلد فعلًا اجتماعيًا بسيطًا أثناء اللعب', 'ينتظر دوره لمدة قصيرة وفق قدرته', 'يتعرف على مشاعر أساسية من صور واضحة', 'يتبع قاعدة واحدة متفقًا عليها في اللعب', 'يشارك أداة مع زميل عند التوجيه', 'يستخدم أسلوبًا مناسبًا لطلب التوقف عن نشاط'
+ ]),
+ d('selfcare','الاعتماد على النفس والعناية الذاتية',[
+  'يغسل يديه وفق تسلسل مصور مناسب', 'يجفف يديه بعد الغسل', 'يستخدم الملعقة أثناء تناول الطعام وفق قدرته', 'يشرب من كوب مناسب بصورة مستقلة', 'يرتدي قطعة ملابس سهلة بعد وضعها أمامه', 'يخلع الحذاء ويضعه في المكان المحدد', 'يعيد أدوات العناية الشخصية إلى أماكنها', 'يحدد حاجته لاستخدام دورة المياه بوسيلة مناسبة', 'يشارك في ترتيب حقيبته اليومية', 'ينظف مكانه بعد نشاط بسيط'
+ ]),
+ d('grossmotor','المهارات الحركية الكبرى',[
+  'يمشي على خط مستقيم قصير حسب قدرته الحركية', 'يقفز بكلتا القدمين عند الملاءمة البدنية', 'يصعد درجات مناسبة باستخدام المساندة اللازمة', 'يركل كرة كبيرة باتجاه هدف قريب', 'يحافظ على توازنه أثناء الوقوف القصير', 'يتجاوز عائقًا منخفضًا تحت إشراف آمن', 'يرمي كرة كبيرة نحو شخص قريب', 'يتبع مسارًا حركيًا من محطتين', 'يغير اتجاهه أثناء المشي استجابة لإشارة', 'يشارك في نشاط حركي جماعي مناسب لقدراته'
+ ]),
+ d('finemotor','المهارات الحركية الدقيقة',[
+  'يمسك أداة رسم ملائمة لقدراته', 'ينقل خمس قطع صغيرة بأمان من وعاء إلى آخر', 'يبني برجًا من أربع مكعبات', 'يرسم خطًا رأسيًا بالتقليد', 'يفتح ويغلق وعاء بسيطًا', 'يدخل قطعًا كبيرة في فتحاتها المناسبة', 'يقلب صفحات كتاب واحدة تلو الأخرى', 'يلضم قطعًا كبيرة في خيط آمن', 'يقص ورقًا بخط مستقيم بأداة مناسبة وتحت إشراف', 'ينسخ دائرة بسيطة حسب قدرته'
+ ]),
+ d('play','اللعب والترفيه',[
+  'يستكشف لعبة جديدة لمدة مناسبة', 'يستخدم لعبة بصورة وظيفية كما صممت', 'يقلد حركة واحدة في لعبة تمثيلية', 'ينفذ تسلسل لعب من خطوتين', 'يختار لعبة من بديلين بطريقة تواصل', 'يشارك شخصًا آخر في لعبة تبادلية', 'ينتقل بين لعبتين عند التهيئة المناسبة', 'يمثل موقفًا مألوفًا باستخدام دمية', 'ينهي النشاط بإعادة الأدوات لأماكنها', 'يستخدم وقت الفراغ في نشاط آمن اختاره'
+ ]),
+ d('academic','الاستعداد الأكاديمي',[
+  'يجلس في نشاط تعليمي لمدة مناسبة لخطة الطفل', 'يميز صورته أو رمزه الشخصي', 'يطابق رمزين بصريين متشابهين', 'يشير إلى العدد واحد عند تقديم مثال', 'يعد ثلاث قطع ملموسة بمساعدة مناسبة', 'يطابق كمية صغيرة مع رمزها', 'يميز أول حرف من اسمه عند التدريب', 'ينفذ نشاطًا ورقيًا قصيرًا بتعليمات واضحة', 'يفرز أدوات التعلم حسب نوعها', 'يكمل مهمة مألوفة حتى نهايتها'
+ ]),
+ d('attention','الانتباه والتقليد والتعلم',[
+  'ينتبه إلى نشاط يفضله لفترة يحددها خط الأساس', 'يقلد حركة كبرى واحدة عند عرض نموذج', 'يقلد حركة باستخدام أداة', 'ينتقل من نشاط مفضل إلى آخر مع تمهيد مناسب', 'يستجيب لإشارة توقف في سياق آمن', 'يكمل نشاطًا من خطوتين بمساعدة متدرجة', 'يختار معززًا أو نشاطًا يفضله', 'يستجيب لتعليمات من شخصين مختلفين', 'يطبق مهارة تعلمها في مكان ثان', 'يحافظ على المهارة بعد فترة مراجعة مناسبة'
+ ]),
+ d('adaptive','المهارات الحياتية الوظيفية',[
+  'يميز أدواته الشخصية من بين أدوات مشابهة', 'يستخدم جدولًا مصورًا للنشاط اليومي', 'يتبع قواعد أمان بسيطة داخل المركز', 'يختار منتجًا مطلوبًا من رف تدريبي', 'يسلم غرضًا للشخص الصحيح عند الطلب', 'يطلب استراحة بطريقة مناسبة', 'يرتب ثلاث خطوات لإنجاز مهمة حياتية', 'يتعرف على الأماكن المخصصة للأنشطة اليومية', 'يشارك في مهمة منزلية بسيطة وفق قدرته', 'يحافظ على ممتلكاته في المكان المحدد'
+ ]),
+ d('regulation','التنظيم الانفعالي والتكيف',[
+  'يحدد شعورًا أساسيًا باستخدام صورة أو رمز', 'يطلب استراحة أو مساعدة قبل تصاعد الانزعاج', 'يستخدم استراتيجية تهدئة مختارة مع مساعدة', 'ينتقل بين نشاطين مع تمهيد بصري', 'يتحمل انتظارًا قصيرًا بوسيلة دعم مناسبة', 'يستجيب لروتين متوقع عند تغيير المكان', 'يحدد بديلًا مناسبًا للتعبير عن الإحباط', 'يتبع إشارة بصرية لبدء النشاط وإنهائه', 'يشارك في إعداد خطة بسيطة لطلب الدعم', 'يعود إلى نشاط مناسب بعد فترة استراحة'
+ ]),
+ d('communication','التواصل البديل والوظيفي',[
+  'يختار رمزًا أو صورة لطلب شيء مفضل', 'يسلم أو يشير إلى رمز الطلب لشريك التواصل', 'يميز بين رمزين لشيئين يفضلهما', 'يبادر بطلب باستخدام وسيلته المختارة', 'يطلب المساعدة بوسيلة تواصل بديلة', 'يوضح عدم الرغبة باستخدام رمز أو إشارة', 'يستخدم الوسيلة مع شريكي تواصل مختلفين', 'ينتقل بوسيلة التواصل إلى مكان آخر', 'يجمع رمزين للتعبير عن طلب بسيط وفق جاهزيته', 'يستخدم وسيلة التواصل خلال نشاط طبيعي'
+ ])
+]
+const prog = (id, name, kind, domainIds, reference) => ({id,name,kind,domainIds,reference,officialItems:false})
+export const PROGRAMS = [
+ prog('portage','بورتاج · Portage','منهج تدخل مبكر',['cognitive','receptive','expressive','social','selfcare','grossmotor','finemotor','play'], 'https://www.portage.org.uk/'),
+ prog('lovaas','لوفاس · Lovaas','مدخل تدخل سلوكي',['attention','receptive','expressive','cognitive','social','selfcare','play'], 'https://asatonline.org/'),
+ prog('help','هيلب · HELP','منهج نمائي',['cognitive','receptive','expressive','social','selfcare','grossmotor','finemotor','play'], 'https://www.vort.com/'),
+ prog('teacch','تيتش · TEACCH','تعليم منظم',['attention','academic','adaptive','selfcare','communication','social'], 'https://teacch.com/'),
+ prog('pecs','بيكس · PECS','تواصل بديل',['communication','social','expressive'], 'https://pecsusa.com/free-materials/'),
+ prog('vbmapp','VB-MAPP','أداة تقييم مرخصة',['receptive','expressive','communication','social','play','attention'], 'https://avbpress.com/'),
+ prog('abllsr','ABLLS-R','أداة تقييم مرخصة',['receptive','expressive','communication','social','cognitive','attention','academic','selfcare','play'], 'https://partingtonbehavioranalysts.com/'),
+ prog('afls','AFLS','أداة مهارات وظيفية مرخصة',['selfcare','adaptive','social','communication','regulation'], 'https://partingtonbehavioranalysts.com/'),
+ prog('esdm','دنفر المبكر · ESDM','نموذج تدخل مبكر',['social','play','communication','receptive','expressive','cognitive','grossmotor','finemotor'], 'https://www.esdm.co/'),
+ prog('prt','PRT','تدخل الاستجابة المحورية',['communication','social','play','attention'], 'https://afirm.fpg.unc.edu/'),
+ prog('floortime','DIR / Floortime','نهج نمائي تفاعلي',['social','play','regulation','communication'], 'https://www.icdl.com/'),
+ prog('hanen','هانن · Hanen','تطوير التواصل والأسرة',['receptive','expressive','communication','social','play'], 'https://www.hanen.org/'),
+ prog('scerts','SCERTS','إطار التواصل والتنظيم',['social','communication','regulation','adaptive'], 'https://scerts.com/'),
+ prog('jasper','JASPER','اللعب والانتباه المشترك',['play','social','communication','attention'], 'https://www.jaspertraining.org/'),
+ prog('peak','PEAK','أداة تقييم وتدخل مرخصة',['cognitive','receptive','expressive','academic','attention'], 'https://emergentlearningpress.com/'),
+ prog('verbal_behavior','السلوك اللفظي · Verbal Behavior','نهج تعليم اللغة',['receptive','expressive','communication','social','attention'], 'https://www.ncbi.nlm.nih.gov/pmc/'),
+ prog('precision','التعليم الدقيق · Precision Teaching','منهج قياس الطلاقة',['academic','attention','cognitive'], 'https://www.ncbi.nlm.nih.gov/pmc/'),
+ prog('social_stories','القصص الاجتماعية · Social Stories','استراتيجية تعليمية',['social','regulation','adaptive','communication'], 'https://www.autism.org.uk/'),
+ prog('structured','التعليم المنظم · Structured Teaching','تنظيم بيئة التعلم',['attention','academic','adaptive','selfcare'], 'https://teacch.com/'),
+ prog('task_analysis','تحليل المهمة · Task Analysis','استراتيجية تدريب',['selfcare','adaptive','finemotor','academic'], 'https://afirm.fpg.unc.edu/'),
+ prog('sensory','المعالجة الحسية · Sensory Integration','مجال بالعلاج الوظيفي',['regulation','grossmotor','finemotor','selfcare'], 'https://www.aota.org/'),
+ prog('carolina','منهج كارولينا · Carolina','منهج نمائي',['cognitive','receptive','expressive','social','selfcare','grossmotor','finemotor'], 'https://www.brookespublishing.com/'),
+ prog('unified','التقييم الشامل الموحد','بنك أهداف عربي مستقل',DOMAINS.map(x=>x.id),'https://www.cdc.gov/act-early/')
+]
+export const WORD_INVENTORY_PROGRAMS = Object.freeze(['portage','help','lovaas','vbmapp','abllsr','esdm'])
+export const programById = id => PROGRAMS.find(p=>p.id===id)
+export const domainById = id => DOMAINS.find(d=>d.id===id)
+export function programDomains(id){const p=programById(id);return p?p.domainIds.map(domainById).filter(Boolean):[]}
+export function goalById(programId,goalId){return programDomains(programId).flatMap(x=>x.goals).find(x=>x.id===goalId)}
