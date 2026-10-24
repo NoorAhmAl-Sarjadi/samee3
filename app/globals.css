@@ -1,0 +1,570 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   Samee3 Quran — Global Styles
+   ========================================================= */
+
+:root {
+  --bg-main: #faf8f3;
+  --navbar-bg: #ffffff;
+  --royal-blue: #8a642d;
+  --gold-premium: #a47a3e;
+  --mushaf-paper: #fcfbf8;
+  --mushaf-border: #b49763;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --card-bg: #ffffff;
+  --border-light: #e9e3d8;
+
+  /* =======================================================
+     SAMEE3 — Live Ayah Highlight Tokens
+     ======================================================= */
+  --samee3-highlight-gold: #c7934f;
+  --samee3-highlight-gold-soft: rgba(199, 147, 79, 0.15);
+  --samee3-highlight-gold-border: rgba(199, 147, 79, 0.30);
+  --samee3-highlight-blue-soft: rgba(14, 153, 212, 0.13);
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-main);
+  color: var(--text-main);
+  direction: rtl;
+  font-family:
+    "Tajawal",
+    "Segoe UI",
+    Tahoma,
+    Arial,
+    sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  touch-action: manipulation;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--royal-blue);
+  outline-offset: 2px;
+}
+
+/* =========================================================
+   Scrollbar
+   ========================================================= */
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(138, 100, 45, 0.25);
+  border-radius: 999px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(138, 100, 45, 0.45);
+}
+
+/* =========================================================
+   Quran / Mushaf Font
+   ========================================================= */
+
+@font-face { font-family:'Tajawal'; src:url('/fonts/Tajawal-Regular.ttf') format('truetype'); font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:'Tajawal'; src:url('/fonts/Tajawal-Bold.ttf') format('truetype'); font-weight:600 900; font-style:normal; font-display:swap; }
+@font-face { font-family:'Amiri'; src:url('/fonts/Amiri-Regular.ttf') format('truetype'); font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:'Amiri Quran'; src:url('/fonts/AmiriQuran-Regular.ttf') format('truetype'); font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:'Aref Ruqaa'; src:url('/fonts/ArefRuqaa-Regular.ttf') format('truetype'); font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:'Samee3-sousi'; src:url('/fonts/sousi-source.ttf') format('truetype'); font-weight:400; font-display:block; }
+@font-face { font-family:'Samee3-bazzi'; src:url('/fonts/bazzi-source.otf') format('opentype'); font-weight:400; font-display:block; }
+@font-face { font-family:'KFGQPC Uthmanic Script HAFS'; src:url('/fonts/UthmanicHafs-v-3.0.ttf') format('truetype'); font-weight:400; font-display:swap; }
+
+.mushaf-font {
+  font-family: "KFGQPC Uthmanic Script HAFS", serif;
+}
+
+/* =========================================================
+   Mushaf Surface
+   ========================================================= */
+
+.mushaf-surface {
+  background: var(--mushaf-paper);
+  color: #1c1917;
+}
+
+.mushaf-page-frame {
+  position: relative;
+  background: var(--mushaf-paper);
+  border: 1px solid rgba(164, 122, 62, 0.32);
+  box-shadow:
+    0 10px 30px rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.05);
+}
+
+/* =========================================================
+   SAMEE3 — Printed Mushaf Art
+   ========================================================= */
+
+.samee3-page-art {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.samee3-page-art > svg {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.samee3-page-art svg {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* =========================================================
+   SAMEE3 — Highlight Layer
+   ========================================================= */
+
+.samee3-highlight-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none !important;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.samee3-highlight-layer .samee3-live-ayah-highlight {
+  pointer-events: none !important;
+}
+
+/* =========================================================
+   SAMEE3 — Live Ayah Highlight
+   ========================================================= */
+
+.samee3-live-ayah-highlight {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  pointer-events: none !important;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 252, 242, 0.10) 0%,
+      rgba(199, 147, 79, 0.08) 18%,
+      rgba(199, 147, 79, 0.18) 48%,
+      rgba(199, 147, 79, 0.13) 74%,
+      rgba(255, 252, 242, 0.08) 100%
+    );
+  border: 1px solid var(--samee3-highlight-gold-border);
+  mix-blend-mode: multiply;
+  box-shadow:
+    0 3px 10px rgba(120, 77, 24, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -2px 0 rgba(120, 77, 24, 0.07);
+  opacity: 0.92;
+  transform: translateZ(0) scale(var(--samee3-highlight-scale, 1));
+  transform-origin: center;
+  will-change: transform, opacity;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+  animation: samee3-ayah-highlight-pulse 2.15s ease-in-out infinite;
+}
+
+.samee3-live-ayah-highlight::after {
+  content: "";
+  position: absolute;
+  inset: 1px 13% 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.14) 42%,
+      rgba(255, 255, 255, 0.22) 50%,
+      rgba(255, 255, 255, 0.14) 58%,
+      transparent 100%
+    );
+  opacity: 0.88;
+}
+
+@keyframes samee3-ayah-highlight-pulse {
+  0%,
+  100% {
+    opacity: 0.78;
+    transform: translateZ(0) scale(0.995);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translateZ(0) scale(1.008);
+  }
+}
+
+/* =========================================================
+   SAMEE3 — Ayah Interaction States
+   ========================================================= */
+
+.samee3-page-art .ayahPolygon {
+  cursor: pointer;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    fill-opacity 120ms ease,
+    filter 120ms ease;
+}
+
+.samee3-page-art .ayahPolygon:hover {
+  filter: drop-shadow(0 2px 4px rgba(14, 153, 212, 0.08));
+}
+
+.samee3-page-art .ayahPolygon.samee3-pressed-ayah {
+  fill: #0e99d4 !important;
+  fill-opacity: 0.10 !important;
+  stroke: none !important;
+  filter: drop-shadow(0 2px 4px rgba(14, 153, 212, 0.12));
+}
+
+.samee3-page-art .ayahPolygon.samee3-playing-ayah {
+  fill: var(--samee3-highlight-gold) !important;
+  fill-opacity: 0.08 !important;
+  stroke: none !important;
+}
+
+.samee3-text-ayah {
+  display: inline;
+  cursor: pointer;
+  border-radius: 8px;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    filter 140ms ease,
+    color 140ms ease;
+}
+
+.samee3-text-ayah.samee3-pressed-ayah {
+  background: transparent !important;
+  box-shadow:
+    inset 0 -0.34em 0 rgba(14, 153, 212, 0.16),
+    0 3px 7px rgba(14, 153, 212, 0.10) !important;
+}
+
+.samee3-text-ayah.samee3-playing-ayah {
+  background: transparent !important;
+  box-shadow:
+    inset 0 -0.34em 0 rgba(199, 147, 79, 0.18),
+    0 3px 8px rgba(160, 105, 36, 0.10) !important;
+}
+
+/* =========================================================
+   SAMEE3 — Page Turning
+   ========================================================= */
+
+.samee3-spread {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.samee3-spread.is-turning {
+  pointer-events: none;
+}
+
+.samee3-spread.is-turning.next {
+  animation: samee3-page-turn-next 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.samee3-spread.is-turning.prev {
+  animation: samee3-page-turn-prev 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes samee3-page-turn-next {
+  0% {
+    opacity: 0.96;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    opacity: 0.88;
+    transform: translate3d(-8px, 0, 0) scale(0.995);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes samee3-page-turn-prev {
+  0% {
+    opacity: 0.96;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    opacity: 0.88;
+    transform: translate3d(8px, 0, 0) scale(0.995);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* =========================================================
+   Safe Areas — الهواتف الحديثة
+   ========================================================= */
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.safe-bottom-margin {
+  margin-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* =========================================================
+   Selection
+   ========================================================= */
+
+::selection {
+  background: rgba(2, 132, 199, 0.18);
+  color: var(--text-main);
+}
+
+/* =========================================================
+   Utility Animations
+   ========================================================= */
+
+@keyframes samee3-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes samee3-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes samee3-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.samee3-fade-in {
+  animation: samee3-fade-in 0.25s ease-out both;
+}
+
+.samee3-slide-up {
+  animation: samee3-slide-up 0.3s ease-out both;
+}
+
+.samee3-slide-down {
+  animation: samee3-slide-down 0.3s ease-out both;
+}
+
+/* =========================================================
+   Mobile Optimizations
+   ========================================================= */
+
+@media (max-width: 768px) {
+  html {
+    overflow-x: hidden;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+
+  .mushaf-page-frame {
+    box-shadow:
+      0 6px 18px rgba(15, 23, 42, 0.07),
+      0 1px 4px rgba(15, 23, 42, 0.04);
+  }
+
+  .samee3-live-ayah-highlight {
+    box-shadow:
+      0 2px 7px rgba(120, 77, 24, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  }
+
+  .samee3-page-art .ayahPolygon:hover {
+    filter: none;
+  }
+}
+
+/* =========================================================
+   Reduced Motion
+   ========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .samee3-live-ayah-highlight,
+  .samee3-spread.is-turning.next,
+  .samee3-spread.is-turning.prev {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* SAMEE3 — accessible motion and elegant touch feedback. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::selection { background: rgba(178, 138, 74, 0.28); color: #253c32; }
+
+/* SAMEE3: tactile and accessible controls across all sections */
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid #a47a3e;
+  outline-offset: 3px;
+}
+:where(button, input, select, textarea):disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+:where(button, a) { -webkit-touch-callout: none; }
+:where(input, textarea, select) { min-width: 0; }
+:where(main, section, article, nav) { min-width: 0; }
+:where(a, button) { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  input, select, textarea { font-size: max(16px, 1rem); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .samee3-live-ayah-highlight,
+  .samee3-spread.is-turning.next,
+  .samee3-spread.is-turning.prev {
+    animation: none !important;
+  }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
