@@ -1,0 +1,534 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================
+    // Authentication and administration
+    // =========================================
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn()
+        && request.auth.uid == userId;
+    }
+
+    // Admin privileges are assigned through Firebase,
+    // not by modifying the application interface.
+    function isAdmin() {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        )
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.get('role', 'user') == 'admin';
+    }
+
+    function validText(value, maximum) {
+      return value is string
+        && value.size() > 0
+        && value.size() <= maximum;
+    }
+
+    function validName(value) {
+      return validText(value, 100);
+    }
+
+    function accountEmailMatches() {
+      return signedIn()
+        && request.resource.data.get('email', '') is string
+        && request.resource.data.get('email', '')
+          == request.auth.token.get('email', '');
+    }
+
+    function validAccountIdentity() {
+      return validName(
+          request.resource.data.get('name', '')
+        )
+        && (
+          !request.resource.data.keys().hasAny(['displayName'])
+          || validName(request.resource.data.displayName)
+        )
+        && accountEmailMatches();
+    }
+
+    function isChanged(field) {
+      return request.resource.data
+        .diff(resource.data)
+        .affectedKeys()
+        .hasAny([field]);
+    }
+
+    // =========================================
+    // Users
+    // =========================================
+
+    function validUserCreate() {
+      return request.resource.data.keys().hasOnly([
+          'name',
+          'displayName',
+          'email',
+          'role',
+          'status',
+          'createdAt',
+          'lastLoginAt',
+          'updatedAt'
+        ])
+        && validAccountIdentity()
+        && request.resource.data.get('role', 'user') == 'user'
+        && request.resource.data.get('status', 'active') == 'active'
+        && request.resource.data.get('createdAt', request.time)
+          == request.time
+        && request.resource.data.get('lastLoginAt', request.time)
+          == request.time
+        && request.resource.data.get('updatedAt', request.time)
+          == request.time;
+    }
+
+    function validUserUpdate() {
+      return request.resource.data
+        .diff(resource.data)
+        .affectedKeys()
+        .hasOnly([
+          'name',
+          'displayName',
+          'email',
+          'lastLoginAt',
+          'updatedAt',
+          'khatmaDays',
+          'khatmaStartDate',
+          'khatmaPagesPerDay',
+          'lastReadPage',
+          'lastReadRiwayaId',
+          'lastReadSurahNumber',
+          'lastReadSurahName',
+          'lastReadJuz',
+          'lastReadAyahKey',
+          'lastReadAyahNumber',
+          'lastReadReciterId',
+          'lastReadReciterName',
+          'lastReadMoshafId'
+        ])
+        && validAccountIdentity()
+        && (
+          !isChanged('lastLoginAt')
+          || request.resource.data.lastLoginAt == request.time
+        )
+        && (
+          !isChanged('updatedAt')
+          || request.resource.data.updatedAt == request.time
+        )
+        && (
+          !isChanged('khatmaDays')
+          || (
+            request.resource.data.khatmaDays is int
+            && request.resource.data.khatmaDays >= 1
+            && request.resource.data.khatmaDays <= 365
+          )
+        )
+        && (
+          !isChanged('khatmaStartDate')
+          || (
+            request.resource.data.khatmaStartDate is string
+            && request.resource.data.khatmaStartDate.matches(
+              '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+            )
+          )
+        )
+        && (
+          !isChanged('khatmaPagesPerDay')
+          || (
+            request.resource.data.khatmaPagesPerDay is int
+            && request.resource.data.khatmaPagesPerDay >= 1
+            && request.resource.data.khatmaPagesPerDay <= 604
+          )
+        )
+        && (
+          !isChanged('lastReadPage')
+          || (
+            request.resource.data.lastReadPage is int
+            && request.resource.data.lastReadPage >= 1
+            && request.resource.data.lastReadPage <= 604
+          )
+        )
+        && (
+          !isChanged('lastReadSurahNumber')
+          || (
+            request.resource.data.lastReadSurahNumber is int
+            && request.resource.data.lastReadSurahNumber >= 1
+            && request.resource.data.lastReadSurahNumber <= 114
+          )
+        )
+        && (
+          !isChanged('lastReadJuz')
+          || (
+            request.resource.data.lastReadJuz is int
+            && request.resource.data.lastReadJuz >= 1
+            && request.resource.data.lastReadJuz <= 30
+          )
+        )
+        && (
+          !isChanged('lastReadAyahNumber')
+          || (
+            request.resource.data.lastReadAyahNumber is int
+            && request.resource.data.lastReadAyahNumber >= 1
+            && request.resource.data.lastReadAyahNumber <= 286
+          )
+        )
+        && (!isChanged('lastReadMoshafId') || (request.resource.data.lastReadMoshafId is int && request.resource.data.lastReadMoshafId > 0 && request.resource.data.lastReadMoshafId < 10000))
+        && (
+          !isChanged('lastReadRiwayaId')
+          || validText(
+            request.resource.data.lastReadRiwayaId, 30
+          )
+        )
+        && (
+          !isChanged('lastReadSurahName')
+          || validText(
+            request.resource.data.lastReadSurahName, 100
+          )
+        )
+        && (
+          !isChanged('lastReadAyahKey')
+          || validText(
+            request.resource.data.lastReadAyahKey, 30
+          )
+        )
+        && (
+          !isChanged('lastReadReciterId')
+          || validText(
+            request.resource.data.lastReadReciterId, 100
+          )
+        )
+        && (
+          !isChanged('lastReadReciterName')
+          || validText(
+            request.resource.data.lastReadReciterName, 100
+          )
+        );
+    }
+
+    // =========================================
+    // Personal hadith data
+    // =========================================
+    // The client writes users/{uid}/hadithData/state.
+    // These records contain personal notes. Even an admin account
+    // is not granted access to another user's private notes.
+
+    function validHadithSyncState() {
+      return request.resource.data.keys().hasOnly([
+          'version', 'snapshot', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'version', 'snapshot', 'updatedAt'
+        ])
+        && request.resource.data.version == 1
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.snapshot is map
+        && request.resource.data.snapshot.keys().hasOnly([
+          'version', 'favorites', 'savedItems', 'notes', 'resume'
+        ])
+        && request.resource.data.snapshot.keys().hasAll([
+          'version', 'favorites', 'savedItems', 'notes', 'resume'
+        ])
+        && request.resource.data.snapshot.version == 1
+        && request.resource.data.snapshot.favorites is map
+        && request.resource.data.snapshot.savedItems is map
+        && request.resource.data.snapshot.notes is map
+        && (
+          request.resource.data.snapshot.resume == null
+          || request.resource.data.snapshot.resume is map
+        )
+        && request.resource.data.snapshot.favorites.size() <= 650
+        && request.resource.data.snapshot.savedItems.size() <= 650
+        && request.resource.data.snapshot.notes.size() <= 150;
+    }
+
+
+    // Curriculum v1 is fixed: editable media metadata cannot change certificate requirements.
+    function curriculumBooks(levelId) {
+      return levelId == 'beginner' ? ['aq-lumat', 'fiqh-mulakhkhas', 'seerah-raheeq', 'usul-tafsir-hisan', 'usul-fiqh-waraqat', 'usul-hadith-bayquniyyah', 'tafsir-taysir-qattan', 'hadith-shamail']
+        : levelId == 'intermediate' ? ['aq-wasitiyyah', 'fiqh-bulugh', 'seerah-ibn-hisham', 'usul-tafsir-muqaddimah', 'usul-fiqh-usul', 'usul-hadith-nukhbah', 'tafsir-ibnkathir-mukhtasar', 'hadith-riyad']
+        : levelId == 'advanced' ? ['aq-tahawiyyah', 'fiqh-zad', 'seerah-zad-maad', 'usul-tafsir-itqan', 'usul-fiqh-rawdah', 'usul-hadith-tadrib', 'tafsir-tabari', 'hadith-sahih-bukhari'] : [];
+    }
+    function validLearningProgress() {
+      return request.resource.data.keys().hasOnly(['version', 'completedBookIds', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['version', 'completedBookIds', 'updatedAt'])
+        && request.resource.data.version == 1
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.completedBookIds is list
+        && request.resource.data.completedBookIds.size() <= 24
+        && request.resource.data.completedBookIds.hasOnly(['aq-lumat', 'fiqh-mulakhkhas', 'seerah-raheeq', 'usul-tafsir-hisan', 'usul-fiqh-waraqat', 'usul-hadith-bayquniyyah', 'tafsir-taysir-qattan', 'hadith-shamail', 'aq-wasitiyyah', 'fiqh-bulugh', 'seerah-ibn-hisham', 'usul-tafsir-muqaddimah', 'usul-fiqh-usul', 'usul-hadith-nukhbah', 'tafsir-ibnkathir-mukhtasar', 'hadith-riyad', 'aq-tahawiyyah', 'fiqh-zad', 'seerah-zad-maad', 'usul-tafsir-itqan', 'usul-fiqh-rawdah', 'usul-hadith-tadrib', 'tafsir-tabari', 'hadith-sahih-bukhari']);
+    }
+    function validLearningCertificate(userId, levelId) {
+      let expected = curriculumBooks(levelId);
+      let progress = get(/databases/$(database)/documents/users/$(userId)/libraryProgress/state).data;
+      return expected.size() == 8
+        && request.resource.data.keys().hasOnly(['levelId', 'name', 'serial', 'courseIds', 'curriculumVersion', 'issuedAt'])
+        && request.resource.data.keys().hasAll(['levelId', 'name', 'serial', 'courseIds', 'curriculumVersion', 'issuedAt'])
+        && request.resource.data.levelId == levelId
+        && validName(request.resource.data.name)
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.serial is string
+        && request.resource.data.serial.matches('^SM3-(BEG|INT|ADV)-[A-F0-9]{8}$')
+        && request.resource.data.curriculumVersion == 1
+        && request.resource.data.issuedAt == request.time
+        && request.resource.data.courseIds is list
+        && request.resource.data.courseIds.size() == 8
+        && request.resource.data.courseIds.hasAll(expected)
+        && request.resource.data.courseIds.hasOnly(expected)
+        && progress.version == 1
+        && progress.completedBookIds.hasAll(expected);
+    }
+
+    match /users/{userId} {
+      // The owner reads their own record.
+      // The administrator can read any record.
+      allow get: if isOwner(userId) || isAdmin();
+
+      // Only administrators can list all users.
+      allow list: if isAdmin();
+
+      // New accounts cannot assign themselves admin access.
+      allow create: if isOwner(userId)
+        && validUserCreate();
+
+      // Regular users can update only permitted fields.
+      // role, status and disabled remain admin-controlled.
+      allow update: if isAdmin()
+        || (
+          isOwner(userId)
+          && validUserUpdate()
+        );
+
+      allow delete: if isAdmin();
+
+      match /ayahStudy/{ayahId} {
+        allow get: if isOwner(userId);
+        allow list, delete: if false;
+        allow create, update: if isOwner(userId)
+          && ayahId.matches('^((warsh|qalun|douri|shubah|sousi|bazzi)_)?[0-9]{1,3}_[0-9]{1,3}$')
+          && request.resource.data.keys().hasOnly(['note', 'reviewCount', 'memorized', 'updatedAt'])
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.get('note', '') is string
+          && request.resource.data.get('note', '').size() <= 4000
+          && request.resource.data.get('reviewCount', 0) is int
+          && request.resource.data.get('reviewCount', 0) >= 0
+          && request.resource.data.get('reviewCount', 0) <= 100000
+          && request.resource.data.get('memorized', false) is bool;
+      }
+      match /libraryProgress/{documentId} {
+        allow get: if isOwner(userId) && documentId == 'state';
+        allow list, delete: if false;
+        allow create, update: if isOwner(userId) && documentId == 'state' && validLearningProgress();
+      }
+      match /libraryCertificates/{levelId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && validLearningCertificate(userId, levelId);
+        // A certificate cannot be renamed, replaced or deleted, even by an app admin.
+        allow update, delete: if false;
+      }
+
+      match /hadithData/{documentId} {
+        allow get: if documentId == 'state'
+          && isOwner(userId);
+
+        allow list: if false;
+
+        allow create, update: if documentId == 'state'
+          && isOwner(userId)
+          && validHadithSyncState();
+
+        allow delete: if documentId == 'state'
+          && isOwner(userId);
+      }
+    }
+
+    // =========================================
+    // Conversation metadata
+    // =========================================
+
+    function validConversation(userId) {
+      return request.resource.data.keys().hasOnly([
+          'userId',
+          'userName',
+          'userEmail',
+          'lastMessage',
+          'lastSenderId',
+          'updatedAt',
+          'unreadForAdmin',
+          'unreadForUser'
+        ])
+        && request.resource.data.get('userId', '') == userId
+        && validName(
+          request.resource.data.get(
+            'userName',
+            'مستخدم مصحف سميع'
+          )
+        )
+        && request.resource.data.get('userEmail', '') is string
+        && request.resource.data.get('userEmail', '').size() <= 320
+        && request.resource.data.get('lastMessage', '') is string
+        && request.resource.data.get('lastMessage', '').size() <= 5000
+        && request.resource.data.get('lastSenderId', '') is string
+        && request.resource.data.get('lastSenderId', '').size() <= 128
+        && request.resource.data.get('unreadForAdmin', false) is bool
+        && request.resource.data.get('unreadForUser', false) is bool
+        && request.resource.data.get('updatedAt', request.time)
+          == request.time;
+    }
+
+    function ownerConversationCreate(userId) {
+      return isOwner(userId)
+        && validConversation(userId)
+        && request.resource.data.get('userEmail', '')
+          == request.auth.token.get('email', '')
+        && request.resource.data.get('lastSenderId', userId)
+          == userId
+        && request.resource.data.get('unreadForUser', false)
+          == false;
+    }
+
+    function ownerConversationUpdate(userId) {
+      return isOwner(userId)
+        && request.resource.data.get('userId', '') == userId
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'userName',
+            'userEmail',
+            'lastMessage',
+            'lastSenderId',
+            'updatedAt',
+            'unreadForAdmin',
+            'unreadForUser'
+          ])
+        && validConversation(userId)
+        && request.resource.data.get('userEmail', '')
+          == request.auth.token.get('email', '')
+        && (
+          !isChanged('lastSenderId')
+          || request.resource.data.lastSenderId == userId
+        )
+        && (
+          !isChanged('unreadForAdmin')
+          || request.resource.data.unreadForAdmin == true
+        )
+        && (
+          !isChanged('unreadForUser')
+          || request.resource.data.unreadForUser == false
+        );
+    }
+
+    // =========================================
+    // Individual messages
+    // =========================================
+
+    function validMessageCreate() {
+      return request.resource.data.keys().hasOnly([
+          'senderId',
+          'senderName',
+          'text',
+          'createdAt',
+          'read'
+        ])
+        && request.resource.data.keys().hasAll([
+          'senderId',
+          'senderName',
+          'text',
+          'createdAt',
+          'read'
+        ])
+        && request.resource.data.senderId == request.auth.uid
+        && validName(request.resource.data.senderName)
+        && validText(request.resource.data.text, 5000)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.read == false;
+    }
+
+    // Read receipts move from false to true only.
+    // Senders cannot mark their own messages as read.
+    function validReadReceipt(userId) {
+      return (
+          isOwner(userId)
+          || isAdmin()
+        )
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasOnly(['read'])
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasAll(['read'])
+        && resource.data.get('read', false) == false
+        && request.resource.data.read == true
+        && resource.data.senderId != request.auth.uid;
+    }
+
+    match /conversations/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if ownerConversationCreate(userId)
+        || (
+          isAdmin()
+          && validConversation(userId)
+        );
+
+      allow update: if ownerConversationUpdate(userId)
+        || (
+          isAdmin()
+          && request.resource.data.get('userId', '') == userId
+        );
+
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow get, list: if isOwner(userId) || isAdmin();
+
+        allow create: if signedIn()
+          && (
+            isOwner(userId)
+            || isAdmin()
+          )
+          && validMessageCreate();
+
+        allow update: if signedIn()
+          && validReadReceipt(userId);
+
+        allow delete: if isAdmin();
+      }
+    }
+
+    // =========================================
+    // Islamic library
+    // =========================================
+
+    match /islamicLibraryBooks/{bookId} {
+      // Existing library queries require public reads.
+      allow get, list: if true;
+
+      allow create, update, delete: if isAdmin();
+
+      match /videos/{videoId} {
+        allow get, list: if true;
+
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    // =========================================
+    // Default deny
+    // =========================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
