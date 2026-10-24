@@ -1,0 +1,257 @@
+name: SAMEE3 Hadith Explanations First Batch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: samee3-hadith-explanations-drafts
+  cancel-in-progress: false
+
+jobs:
+  prepare-drafts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Generate five review-only drafts
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, mkdir, writeFile } from 'node:fs/promises'
+          import { createHash } from 'node:crypto'
+          import { resolve } from 'node:path'
+
+          const OUTPUT = resolve('data/hadith-explanations-review-queue.json')
+          const SOURCE_BASE = 'https://alfurqan.online/api/v1/hadith/nawawi40/hadith'
+          const TARGETS = [1, 2, 3, 4, 5]
+          const REQUEST_TIMEOUT_MS = 16000
+          const MAX_RESPONSE_BYTES = 200000
+          const MAX_QUEUE_BYTES = 2 * 1024 * 1024
+
+          const TITLES = {
+            1: 'الأعمال بالنيات',
+            2: 'الإسلام والإيمان والإحسان',
+            3: 'أركان الإسلام الخمسة',
+            4: 'مراحل خلق الإنسان',
+            5: 'رد ما أُحدث في الدين',
+          }
+
+          // Original editorial study-note drafts: NOT scholarly-approved explanations.
+          const INITIAL_DRAFTS = {
+            1: 'يدور الحديث حول أثر القصد والنية في الأعمال، ويعرض مثال الهجرة لبيان اختلاف المقاصد مع تشابه الصورة الظاهرة للفعل.',
+            2: 'يعرض الحديث حوارًا تُبيَّن فيه معاني الإسلام والإيمان والإحسان، ويُظهر طريقة التعليم بالسؤال والجواب.',
+            3: 'يسرد الحديث الأركان الخمسة التي يقوم عليها الإسلام، فيجمعها في صياغة موجزة واضحة.',
+            4: 'يذكر الحديث مراحل من خلق الإنسان، وما ورد فيه من كتابة أمور تتعلق بحياته، ويحتاج شرحه التفصيلي إلى الرجوع لكتب العلماء.',
+            5: 'يتناول الحديث مبدأ رد ما أُحدث في أمر الدين مما ليس منه، وتفاصيل تطبيقه الفقهي تحتاج إلى الرجوع لشرح معتمد.',
+          }
+
+          const isObject = (value) =>
+            value !== null && typeof value === 'object' && !Array.isArray(value)
+
+          const normalize = (value) => String(value)
+            .normalize('NFKC')
+            .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+            .replace(/[أإآٱ]/g, 'ا')
+            .replace(/ى/g, 'ي')
+            .replace(/ؤ/g, 'و')
+            .replace(/ئ/g, 'ي')
+            .replace(/ة/g, 'ه')
+            .replace(/[^\u0621-\u064Aa-zA-Z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+
+          const makeAnchor = (text) => {
+            const compact = text.trim().replace(/\s+/g, ' ')
+            const words = compact.split(' ')
+            let anchor = ''
+            for (const word of words) {
+              if (`${anchor} ${word}`.trim().length > 170) break
+              anchor = `${anchor} ${word}`.trim()
+            }
+            if (normalize(anchor).length < 18) {
+              throw new Error('Hadith text is too short for a reliable anchor')
+            }
+            if (!normalize(text).includes(normalize(anchor))) {
+              throw new Error('Hadith text anchor is not present in source text')
+            }
+            return anchor
+          }
+
+          async function getHadith(number) {
+            const controller = new AbortController()
+            const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+            try {
+              const url = `${SOURCE_BASE}/${number}`
+              const response = await fetch(url, {
+                headers: { Accept: 'application/json' },
+                redirect: 'error',
+                signal: controller.signal,
+              })
+              if (!response.ok || !response.body) {
+                throw new Error(`Hadith ${number}: HTTP ${response.status}`)
+              }
+              const reader = response.body.getReader()
+              const chunks = []
+              let size = 0
+              try {
+                for (;;) {
+                  const { done, value } = await reader.read()
+                  if (done) break
+                  if (!value) continue
+                  size += value.byteLength
+                  if (size > MAX_RESPONSE_BYTES) {
+                    throw new Error(`Hadith ${number}: response too large`)
+                  }
+                  chunks.push(value)
+                }
+              } finally {
+                reader.releaseLock()
+              }
+              const bytes = new Uint8Array(size)
+              let offset = 0
+              for (const chunk of chunks) {
+                bytes.set(chunk, offset)
+                offset += chunk.byteLength
+              }
+              const payload = JSON.parse(new TextDecoder('utf-8', {
+                fatal: true,
+              }).decode(bytes))
+              const hadith = payload?.hadith
+              const book = payload?.book
+              if (
+                !isObject(book) || book.id !== 'nawawi40' ||
+                !isObject(hadith) ||
+                hadith.idInBook !== number ||
+                !Number.isSafeInteger(hadith.chapterId) ||
+                hadith.chapterId < 0 ||
+                typeof hadith.arabic !== 'string' ||
+                hadith.arabic.trim().length < 40
+              ) {
+                throw new Error(`Hadith ${number}: unexpected book, number or text`)
+              }
+              return {
+                number,
+                chapterId: hadith.chapterId,
+                arabic: hadith.arabic,
+                url,
+              }
+            } finally {
+              clearTimeout(timer)
+            }
+          }
+
+          let queue = {
+            version: 1,
+            purpose: 'human-review-only',
+            drafts: [],
+          }
+
+          try {
+            const saved = await readFile(OUTPUT)
+            if (saved.byteLength > MAX_QUEUE_BYTES) {
+              throw new Error('Existing review queue is too large')
+            }
+            const parsed = JSON.parse(new TextDecoder('utf-8', {
+              fatal: true,
+            }).decode(saved))
+            if (
+              !isObject(parsed) || parsed.version !== 1 ||
+              parsed.purpose !== 'human-review-only' ||
+              !Array.isArray(parsed.drafts)
+            ) {
+              throw new Error('Existing review queue has an unsupported format')
+            }
+            queue = parsed
+          } catch (error) {
+            if (error?.code !== 'ENOENT') throw error
+          }
+
+          const known = new Set()
+          for (const draft of queue.drafts) {
+            if (!isObject(draft) || typeof draft.id !== 'string' || known.has(draft.id)) {
+              throw new Error('Invalid or duplicated draft in existing review queue')
+            }
+            known.add(draft.id)
+          }
+
+          let added = 0
+          for (const number of TARGETS) {
+            const id = `nawawi40-${number}`
+            if (known.has(id)) {
+              console.log(`Preserving existing draft: ${id}`)
+              continue
+            }
+            const hadith = await getHadith(number)
+            const textAnchor = makeAnchor(hadith.arabic)
+            const sha256 = createHash('sha256')
+              .update(hadith.arabic, 'utf8').digest('hex')
+
+            queue.drafts.push({
+              id,
+              bookId: 'nawawi40',
+              chapterId: hadith.chapterId,
+              hadithNumber: number,
+              title: TITLES[number],
+              textAnchor,
+              hadithSource: {
+                title: 'الأربعون النووية — مصدر نص الحديث',
+                reference: `الحديث ${number}`,
+                url: hadith.url,
+                textSha256: sha256,
+              },
+              explanation: INITIAL_DRAFTS[number],
+              vocabulary: [],
+              benefits: [],
+              explanationSource: {
+                title: '',
+                author: '',
+                reference: '',
+                url: '',
+              },
+              editorial: {
+                status: 'pending-human-review',
+                note: 'مسودة شرح أصلية غير معتمدة؛ لا تُنشر قبل مراجعة علمية وتوثيق المصدر.',
+                reviewedBy: '',
+                reviewedAt: '',
+                rights: 'unverified',
+              },
+            })
+            added += 1
+            console.log(`Added ${id}, chapter ${hadith.chapterId}`)
+          }
+
+          if (!added) {
+            console.log('All five drafts already exist. No content overwritten.')
+            process.exit(0)
+          }
+
+          await mkdir(resolve('data'), { recursive: true })
+          await writeFile(OUTPUT, JSON.stringify(queue, null, 2) + '\n', 'utf8')
+          console.log(`Created ${added} review drafts; no explanations published.`)
+          NODE
+
+      - name: Commit review queue only
+        shell: bash
+        run: |
+          git add data/hadith-explanations-review-queue.json
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git config user.name 'SAMEE3 Review Drafts'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(hadith): prepare first five explanation review drafts'
+          git push origin HEAD:main
