@@ -1,6 +1,6 @@
 'use client'
 
-import { issueCertificate, type LearningCertificate } from './certificates'
+import { issueCertificate, learningError, type LearningCertificate } from './certificates'
 export type { LearningCertificate } from './certificates'
 import { useCallback, useEffect, useState } from 'react'
 import { collection, doc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore'
@@ -71,7 +71,7 @@ export function useLearningProgress() {
     let alive = true
     setStateOwner(owner); setState(readLocal(owner)); setCertificates({}); setReady(true); setCloudReady(!user); setError('')
     const refresh = () => { if (alive) setState(readLocal(owner)) }
-    const sync = () => { if (user) void flush(user.uid).catch((e: unknown) => { if (alive) setError(e instanceof Error ? e.message : 'تعذرت مزامنة التقدم.') }) }
+    const sync = () => { if (user) void flush(user.uid).catch((e: unknown) => { if (alive) setError(learningError(e)) }) }
     const changed = (event: Event) => { if (!(event instanceof CustomEvent) || event.detail === owner) refresh() }
     window.addEventListener(EVENT, changed); window.addEventListener('storage', refresh); window.addEventListener('online', sync)
     const unsubs: Array<() => void> = []
@@ -102,7 +102,7 @@ export function useLearningProgress() {
       local.completed = applyActions(local.completed, local.pending)
       persist(owner, local)
       if (user) await flush(user.uid)
-    } catch (e) { setError(e instanceof Error ? e.message : 'تعذر حفظ التقدم.') }
+    } catch (e) { setError(learningError(e)) }
     finally { setBusy(false) }
   }, [loading, busy, owner, user?.uid])
   const importGuest = useCallback(async () => {
@@ -115,15 +115,17 @@ export function useLearningProgress() {
       persist(owner, local)
       await flush(user.uid)
       persist('guest', { completed: [], pending: {} })
-    } catch(e) { setError(e instanceof Error ? e.message : 'تعذر استيراد تقدم الجهاز.') }
+    } catch(e) { setError(learningError(e)) }
     finally { setBusy(false) }
   }, [user?.uid, owner, loading, busy])
   const issue = useCallback(async (level: LevelId, enteredName: string): Promise<LearningCertificate> => {
     if (!user) throw new Error('سجّل الدخول لحفظ الشهادة باسمك.')
-    await flush(user.uid)
-    const certificate = await issueCertificate(db, user.uid, level, enteredName)
-    setCertificates((old) => ({ ...old, [level]: certificate }))
-    return certificate
+    try {
+      await flush(user.uid)
+      const certificate = await issueCertificate(db, user.uid, level, enteredName)
+      setCertificates((old) => ({ ...old, [level]: certificate }))
+      return certificate
+    } catch (error) { throw new Error(learningError(error)) }
   }, [user?.uid])
   return { completed: stateOwner === owner ? state.completed : [], pending: stateOwner === owner ? Object.keys(state.pending).length : 0, certificates: stateOwner === owner ? certificates : {}, ready: !loading && ready && stateOwner === owner, cloudReady, busy, error, toggle, issue, importGuest, guestAvailable: ready && typeof window !== 'undefined' && readLocal('guest').completed.length > 0, user, profile }
 }
