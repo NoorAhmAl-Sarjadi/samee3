@@ -1,3 +1,4 @@
+import { LIBRARY_MEDIA_HOSTS } from '@/lib/audio-catalog'
 import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
@@ -15,6 +16,7 @@ export const revalidate = 0
  */
 
 const TRUSTED_HOSTS = new Set([
+  ...LIBRARY_MEDIA_HOSTS,
   'd1.islamhouse.com',
   'archive.org',
   'www.archive.org',
@@ -129,6 +131,12 @@ function upstreamRequestHeaders(
 
   if (range) {
     headers.set('Range', range)
+  }
+
+  if (url.hostname === 'lecture-h9afefaff7fjc2h3.z01.azurefd.net' || url.hostname === 'audio.islamweb.net' || url.hostname === 'audio.islamweb.org') {
+    headers.set('Referer', 'https://audio.islamweb.net/')
+    headers.set('Origin', 'https://audio.islamweb.net')
+    headers.set('User-Agent', 'Mozilla/5.0 (compatible; SAMEE3 Audio)')
   }
 
   if (url.hostname === 'd1.islamhouse.com') {
@@ -346,6 +354,10 @@ async function proxyAudio(
       ?.trim() || ''
 
   const source = validSource(raw)
+
+  // This publisher serves its downloadable representation at the same file URL.
+  // Keep the public catalog URL stable for saved/offline recording identities.
+  if (source?.hostname === 'lecture-h9afefaff7fjc2h3.z01.azurefd.net') source.searchParams.set('download', '1')
 
   if (!source) {
     return NextResponse.json(
