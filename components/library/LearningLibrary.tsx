@@ -10,6 +10,7 @@ import { LEARNING_COURSES, LEARNING_LEVELS, completedInLevel, courseById, course
 import { useLearningProgress, type LearningCertificate } from '@/lib/islamic/learning-progress'
 import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
 import Modal from '@/components/Modal'
+import CourseStudyStudio from './CourseStudyStudio'
 import { cardBlob, downloadBlob, wrapCardText } from '@/lib/share-card'
 
 const ar = (n: number) => n.toLocaleString('ar-EG')
@@ -71,29 +72,30 @@ export function CategoryView({ levelId, categoryId }: { levelId: LevelId; catego
 function useBookResources(source: LearningCourse) {
   const [book, setBook] = useState(source)
   useEffect(() => {
-    setBook(source)
-    let overrides: Partial<LearningCourse> = {}, lessonUrl = ''
-    const publish = () => setBook({ ...source, ...overrides, ...(lessonUrl ? { videoUrl: lessonUrl } : {}) })
-    const stopBook = onSnapshot(doc(db, 'islamicLibraryBooks', source.id), (snapshot) => {
-      if (!snapshot.exists()) return
-      const data = snapshot.data(), updates: Partial<LearningCourse> = {}
-      for (const key of ['downloadUrl', 'readingUrl', 'sharhUrl', 'videoUrl', 'audioUrl', 'audioSourceUrl', 'videoDownloadUrl'] as const) {
-        const link = safeIslamicLibraryLink(data[key]); if (link) updates[key] = link
+    let overrides: Partial<LearningCourse> = {}, lessons: NonNullable<LearningCourse['videos']> = []
+    const publish = () => {
+      const videos = new Map<string, NonNullable<LearningCourse['videos']>[number]>()
+      for (const item of [...(source.videoUrl ? [{id:'bundled-playlist',title:source.videoAuthor ? `شرح ${source.videoAuthor}` : 'قائمة الشرح',url:source.videoUrl,order:0}] : []), ...(source.videos || []), ...(overrides.videos || []), ...lessons]) {
+        if (youtubeEmbed(item.url)) videos.set(item.url,item)
       }
-      if (Array.isArray(data.videos)) {
-        const first = data.videos.find((video: { url?: string }) => youtubeEmbed(video?.url))
-        if (first) updates.videoUrl = first.url
-      }
-      overrides = updates
-      publish()
-    }, () => { /* The verified bundled catalog remains usable if Firestore is unavailable. */ })
-    const stopLessons = onSnapshot(collection(db, 'islamicLibraryBooks', source.id, 'videos'), (snapshot) => {
-      const lessons = snapshot.docs.map((item) => item.data()).sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
-      lessonUrl = lessons.find((lesson) => youtubeEmbed(lesson.url))?.url || ''
-      publish()
-    }, () => {})
-    return () => { stopBook(); stopLessons() }
-  }, [source.id])
+      setBook({...source,...overrides,videos:Array.from(videos.values()).sort((a,b)=>(a.order||0)-(b.order||0))})
+    }
+    publish()
+    const stopBook = onSnapshot(doc(db,'islamicLibraryBooks',source.id),(snapshot)=>{
+      const data=snapshot.data() || {},updates:Partial<LearningCourse>={}
+      for(const key of ['downloadUrl','readingUrl','sharhUrl','videoUrl','audioUrl','audioSourceUrl','videoDownloadUrl'] as const){const link=safeIslamicLibraryLink(data[key]);if(link)updates[key]=link}
+      if(typeof data.videoAuthor==='string')updates.videoAuthor=data.videoAuthor.slice(0,150)
+      if(Array.isArray(data.videos))updates.videos=data.videos.filter((item: {url?:string})=>youtubeEmbed(item?.url)).map((item:{id?:string;title?:string;url:string;order?:number},i:number)=>({id:item.id||`stored-${i}`,title:item.title||`الدرس ${i+1}`,url:item.url,order:Number(item.order)||i+1}))
+      if(Array.isArray(data.pdfParts))updates.pdfParts=data.pdfParts.filter((part:{url?:string})=>safeIslamicLibraryLink(part?.url)).map((part:{label?:string;url:string},i:number)=>({label:part.label||`الجزء ${i+1}`,url:part.url}))
+      // A newly selected edition replaces the bundled PDF parts as one edition.
+      else if(updates.downloadUrl)updates.pdfParts=[{label:'نسخة الكتاب',url:updates.downloadUrl}]
+      overrides=updates;publish()
+    },()=>{})
+    const stopLessons=onSnapshot(collection(db,'islamicLibraryBooks',source.id,'videos'),(snapshot)=>{
+      lessons=snapshot.docs.map((item,i)=>({id:item.id,title:String(item.data().title||`الدرس ${i+1}`),url:String(item.data().url||''),order:Number(item.data().order)||i+1})).filter((item)=>youtubeEmbed(item.url));publish()
+    },()=>{})
+    return ()=>{stopBook();stopLessons()}
+  },[source.id])
   return book
 }
 
@@ -112,7 +114,7 @@ export function BookStudyView({ bookId }: { bookId: string }) {
     <div className="grid gap-6 lg:grid-cols-[1fr_300px]"><div>
       <section className="rounded-3xl border border-[#ded3bd] bg-white p-6 sm:p-8"><p className="mb-4 text-sm font-bold text-[#a17b43]">تأليف {book.author}</p><p className="text-sm leading-8 text-[#6a7c77]">{book.description}</p><div className="mt-6 grid gap-3 sm:grid-cols-2">
         <Link className={button} href={`/islamic-library/book/${book.id}/read`}><BookOpen size={20} />قراءة الكتاب</Link>
-        {embedded && <button className={`${button} !bg-[#1c5152] !text-white`} type="button" onClick={() => setMode('video')}><PlayCircle size={20} />تشغيل الشرح</button>}
+        {(embedded || book.downloadUrl || book.pdfParts?.length) && <button className={`${button} !bg-[#1c5152] !text-white`} type="button" onClick={() => setMode('video')}><PlayCircle size={20} />{embedded ? 'تشغيل الشرح والكتاب' : 'قراءة الكتاب PDF'}</button>}
         {resource(book.downloadUrl || book.readingUrl, book.downloadUrl ? 'تحميل الكتاب PDF' : 'مصدر الكتاب', <Download size={20} />)}
         {(book.audioUrl || book.audioSourceUrl) && <button type="button" className={button} onClick={() => setMode('audio')}><Headphones size={20} />الشرح الصوتي</button>}
         <button className={button} type="button" onClick={() => void share()}><Share2 size={19} />مشاركة رابط الكتاب</button>
@@ -122,7 +124,7 @@ export function BookStudyView({ bookId }: { bookId: string }) {
         {book.resourceNote && <p className="mt-4 rounded-xl bg-[#f2ecdf] p-3 text-xs leading-7 text-[#7d6e53]">{book.resourceNote}</p>}
       </section>
     </div><aside><section className="rounded-3xl bg-[#163f43] p-6 text-[#f6f0e1]"><GraduationCap className="mb-5 text-[#d3b77d]" size={32} /><h2 className="font-black">دراستك لهذا الكتاب</h2><p className="my-4 text-xs leading-7 text-[#bacbc6]">سجّل الإتمام بعد إنهاء الكتاب وشرحه. الشهادة توثق متابعة دراستك الذاتية، ولا تمثل إجازة علمية.</p><button type="button" disabled={!progress.ready || progress.busy} onClick={() => void progress.toggle(book.id)} className={`flex w-full items-center justify-center gap-2 rounded-2xl px-3 py-3.5 text-sm font-bold disabled:opacity-50 ${completed ? 'bg-[#e8d8b4] text-[#294b45]' : 'bg-white text-[#214b4a]'}`}>{progress.busy ? <Loader2 size={18} className="animate-spin" /> : completed ? <CheckCircle2 size={18} /> : <Check size={18} />}{completed ? 'أتممت الدراسة · تراجع' : 'أتممت دراسة الكتاب'}</button><div className="mt-6"><Progress count={completedInLevel(book.levelId, progress.completed)} total={coursesInLevel(book.levelId).length} /></div><Link href={`/islamic-library/level/${book.levelId}`} className="mt-5 inline-flex items-center gap-2 text-xs text-[#d9c28f]">عودة إلى المستوى<ChevronLeft size={16} /></Link></section><Status progress={progress} /></aside></div>
-    {mode && <Modal title={mode === 'video' ? 'شرح الكتاب' : 'الشرح الصوتي'} onClose={() => setMode(null)} wide><div className="mb-4 flex items-center justify-between"><h2 className="font-black">{book.title}</h2><button aria-label="إغلاق الشرح" type="button" className="p-2" onClick={() => setMode(null)}><X /></button></div>{mode === 'video' && embedded ? <><iframe title={`شرح ${book.title}`} src={embedded} className="aspect-video w-full rounded-2xl bg-black" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" /><div className="mt-4 flex flex-wrap gap-2">{resource(book.videoUrl, 'افتح الشرح في YouTube', <ExternalLink size={17} />)}{resource(book.videoDownloadUrl, 'تحميل الفيديو', <Download size={17} />)}</div></> : <div className="space-y-4">{book.audioUrl && <audio controls preload="none" src={safeIslamicLibraryLink(book.audioUrl) || undefined} className="w-full" />}{resource(book.audioSourceUrl || book.audioUrl, 'الاستماع وتحميل الصوت من المصدر', <Headphones size={20} />)}<p className="text-sm leading-7 text-slate-500">افتح مصدر الشرح لاختيار الدرس المطلوب وتنزيل تسجيلاته.</p></div>}</Modal>}
+    {mode && <Modal title={mode === 'video' ? 'شرح الكتاب' : 'الشرح الصوتي'} onClose={() => setMode(null)} wide><div className="mb-4 flex items-center justify-between"><h2 className="font-black">{book.title}</h2><button aria-label="إغلاق الشرح" type="button" className="p-2" onClick={() => setMode(null)}><X /></button></div>{mode === 'video' ? <CourseStudyStudio key={book.id} book={book} /> : <div className="space-y-4">{book.audioUrl && <audio controls preload="none" src={safeIslamicLibraryLink(book.audioUrl) || undefined} className="w-full" />}{resource(book.audioSourceUrl || book.audioUrl, 'الاستماع وتحميل الصوت من المصدر', <Headphones size={20} />)}<p className="text-sm leading-7 text-slate-500">افتح مصدر الشرح لاختيار الدرس المطلوب وتنزيل تسجيلاته.</p></div>}</Modal>}
   </Shell>
 }
 
@@ -166,7 +168,7 @@ function CertificateDialog({ levelId, existing, defaultName, signedIn, issue, on
     const page=window.open('','_blank');if(!page){setError('اسمح بفتح نافذة الطباعة لهذا الموقع.');return}
     // Only a generated local blob URL is inserted; names are already drawn on the canvas.
     page.document.write(`<!doctype html><html lang="ar"><head><title>شهادة سميع</title><style>@page{size:A4 landscape;margin:0}body{margin:0;background:white}img{width:100%;height:100vh;object-fit:contain}@media print{img{height:209mm;width:296mm}}</style></head><body><img alt="شهادة سميع" src="${preview}"></body></html>`);page.document.close()
-    const image=page.document.querySelector('img');if(image)image.onload=()=>{page.focus();page.print()}
+    const image=page.document.querySelector('img');const ready=()=>{page.focus();page.print()};if(image){if(image.complete)ready();else image.onload=ready}
   }
   return <Modal title="شهادة إتمام المستوى" onClose={() => {if(!busy)onClose()}} wide><div className="mb-5 flex justify-between"><h2 className="flex items-center gap-2 text-lg font-black"><Award className="text-[#b18b4f]" />شهادة {title}</h2><button type="button" aria-label="إغلاق" disabled={busy} onClick={onClose}><X /></button></div>
     {!signedIn ? <div className="rounded-2xl bg-white p-6 text-sm leading-8">سجّل الدخول ليُحفظ إصدار الشهادة في حسابك.<Link className={`${button} mt-4`} href={`/auth?next=/islamic-library/level/${levelId}`}>تسجيل الدخول</Link></div> : certificate ? <><p className="mb-4 text-xs text-[#7d826e]">صدرت هذه الشهادة باسم ثابت. يمكنك حفظ نسختها الأصلية مرة أخرى.</p>{preview ? <img src={preview} alt={`شهادة ${certificate.name}`} className="w-full rounded-xl border border-[#dcc9a4]" /> : <Loader2 className="mx-auto my-10 animate-spin" />}<div className="mt-5 flex flex-wrap gap-2"><button type="button" className={button} disabled={busy||!preview} onClick={() => void save()}><Download size={18} />حفظ صورة الشهادة</button><button type="button" className={button} disabled={!preview} onClick={print}>طباعة / حفظ PDF</button></div></> : <div className="mx-auto max-w-lg space-y-4 rounded-2xl bg-white p-6"><p className="text-sm leading-8">أتممت كتب المستوى. اكتب الاسم كما تريد ظهوره؛ لا يمكن تغييره أو إصدار شهادة ثانية لهذا المستوى.</p><label className="block text-sm font-bold">الاسم في الشهادة<input value={name} onChange={(event) => setName(event.target.value)} maxLength={100} autoComplete="name" className="mt-2 w-full rounded-xl border border-[#cdbb99] p-3" /></label><button type="button" disabled={busy||normalizeLearningName(name).length<2} onClick={() => void create()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d5555] p-4 font-bold text-white disabled:opacity-50">{busy?<Loader2 size={19} className="animate-spin" />:<Award size={19}/>}إصدار الشهادة بهذا الاسم</button></div>}{error&&<p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
