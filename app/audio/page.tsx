@@ -1,5 +1,6 @@
 'use client'
 
+import { KHUTBAH_SCHOLARS, libraryAudioSource } from '@/lib/audio-catalog'
 import {
   useCallback,
   useEffect,
@@ -453,7 +454,7 @@ async function fetchAudioBlob(url: string, options: AudioTransferOptions = {}): 
       }
 
       refreshStall()
-      const response = await fetch(url, {
+      const response = await fetch(libraryAudioSource(url), {
         headers,
         mode: 'cors',
         credentials: 'omit',
@@ -718,6 +719,9 @@ export default function AudioPage() {
   const [surahs, setSurahs] = useState<Surah[]>([])
   const [radios, setRadios] = useState<RadioStation[]>([])
 
+  const [khutbahScholarId, setKhutbahScholarId] = useState('')
+  const [khutbahHasMore, setKhutbahHasMore] = useState(false)
+  const [khutbahNextPage, setKhutbahNextPage] = useState(2)
   const [libraryItems, setLibraryItems] = useState<LibraryAudio[]>([])
   const [sunnahBooks, setSunnahBooks] = useState<SunnahBook[]>([])
   const [sunnahExtras, setSunnahExtras] = useState<LibraryAudio[]>([])
@@ -886,7 +890,8 @@ export default function AudioPage() {
 
       try {
         const params = new URLSearchParams({ section: tab })
-        if (bookId) params.set('book', bookId)
+        if (bookId) params.set(tab === 'khutbah' ? 'scholar' : 'book', bookId)
+        if (tab === 'khutbah') params.set('page', String(start))
         if (bookId && tab === 'sunnah') {
           params.set('start', String(start))
           params.set('limit', '50')
@@ -918,6 +923,7 @@ export default function AudioPage() {
         } else {
           const items = Array.isArray(result.items) ? result.items : []
           setLibraryItems((previous) => append ? [...previous, ...items.filter((item) => !previous.some((old) => old.id === item.id))] : items)
+          if (tab === 'khutbah') { setKhutbahHasMore(Boolean(result.hasMore)); setKhutbahNextPage(Number(result.nextStart || start + 1)) }
           if (tab === 'ruqyah') {
             setSelectedRuqyahId(items[0]?.id || null)
           }
@@ -1195,7 +1201,7 @@ export default function AudioPage() {
          * تحريك شريط الصوت. هذه الـeffect تعمل فقط عند تغيير الملف نفسه.
          */
         currentAudio.pause()
-        currentAudio.src = source
+        currentAudio.src = savedBlob ? source : libraryAudioSource(source)
         currentAudio.load()
 
         const playNow = async () => {
@@ -2154,6 +2160,8 @@ export default function AudioPage() {
                         setShowSurahs(false)
 
                         if (tab !== 'quran') {
+                          setKhutbahScholarId('')
+                          setKhutbahHasMore(false)
                           setSelectedSunnahBookId(null)
                           setLibraryItems([])
                           void loadLibraryContent(tab)
@@ -2705,6 +2713,8 @@ export default function AudioPage() {
                         {libraryItems.filter((item) => item.section === 'ruqyah').map((item) => {
                           const active = selectedRuqyahId === item.id
                           const playing = player?.kind === 'library' && player.libraryId === item.id
+                          const libraryPlayer: PlayerItem = { kind:'library',title:item.title,subtitle:item.subtitle,audioUrl:item.audioUrl,reciterName:item.authorName||item.subtitle,libraryId:item.id,sourceName:item.sourceName }
+                          const saved = offlineKeys.has(offlineKeyFor(libraryPlayer)), busy = offlineBusyKey === offlineKeyFor(libraryPlayer)
                           return (
                             <article
                               key={item.id}
@@ -2724,7 +2734,7 @@ export default function AudioPage() {
                                   <div className="min-w-0 flex-1">
                                     <p className="text-[10px] font-black text-mushaf-gold">رقية شرعية</p>
                                     <h3 className="mt-1 truncate text-base font-black text-mushaf-dark">{item.authorName || item.subtitle}</h3>
-                                    <p className="mt-1 text-[11px] text-gray-400">تسجيل مجاني منشور</p>
+                                    <p className="mt-1 text-[11px] text-gray-400">{item.sourceName}{saved ? " · محفوظ دون نت" : ""}</p>
                                   </div>
                                 </div>
                               </button>
@@ -2745,6 +2755,7 @@ export default function AudioPage() {
                                 >
                                   <Download size={16} />
                                 </button>
+                                <button type="button" disabled={busy || zipBusy || offlineBusyKey !== null} onClick={() => saved ? void removeOfflinePlayer(libraryPlayer) : void saveOfflinePlayer(libraryPlayer)} className={`flex h-11 w-11 items-center justify-center rounded-2xl disabled:opacity-40 ${saved ? 'bg-mushaf-gold text-white' : 'bg-mushaf-paper text-mushaf-teal'}`} aria-label={saved ? 'حذف النسخة المحفوظة من الرقية' : 'حفظ الرقية دون إنترنت'}>{busy ? <Loader2 size={16} className="animate-spin" /> : saved ? <Check size={16} /> : <WifiOff size={16} />}</button>
                               </div>
                             </article>
                           )
@@ -2918,7 +2929,7 @@ export default function AudioPage() {
                           <p className="text-xs font-black text-mushaf-gold">أرشيف الخطب</p>
                           <h2 className="mt-1 text-2xl font-black text-mushaf-dark">مكتبة الخطب والدروس الصوتية</h2>
                           <p className="mt-2 text-sm leading-7 text-gray-500">
-                            أرشيف واسع من خطب الجمعة مع ملفات MP3 عربية متاحة مجانًا عبر المصادر المفتوحة، مع الاحتفاظ برابط المصدر لكل مادة.
+                            اختر الشيخ لتصفح تسجيلاته المنشورة في إسلام ويب. يمكنك تنزيل الملف على الجهاز أو حفظه في التطبيق للاستماع دون إنترنت.
                           </p>
                         </div>
                         <div className="relative w-full lg:max-w-sm">
@@ -2928,19 +2939,27 @@ export default function AudioPage() {
                       </div>
                     </div>
 
-                    {libraryLoading ? (
+                    <div className="my-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+                      <label className="block text-sm font-bold text-mushaf-dark">اختر الشيخ
+                        <select aria-label="اختر شيخ الخطب والدروس" value={khutbahScholarId} onChange={(event) => { const id=event.target.value; setKhutbahScholarId(id); setSearch(''); setLibraryItems([]); setKhutbahHasMore(false); libraryRequestRef.current += 1; setLibraryLoading(false); if(id) void loadLibraryContent('khutbah',id) }} className="mt-2 w-full rounded-2xl border border-mushaf-gold/25 bg-white p-3">
+                          <option value="">اختر من {KHUTBAH_SCHOLARS.length} مشايخ</option>{KHUTBAH_SCHOLARS.map((scholar)=><option key={scholar.id} value={scholar.id}>{scholar.name}</option>)}
+                        </select>
+                      </label>
+                      {khutbahScholarId && <a href={KHUTBAH_SCHOLARS.find((scholar)=>scholar.id===khutbahScholarId)?.sourceUrl} target="_blank" rel="noopener noreferrer" className="self-end rounded-xl border bg-white p-3 text-xs font-bold text-mushaf-teal">صفحة الشيخ في المصدر</a>}
+                    </div>
+                    {libraryLoading && !libraryItems.length ? (
                       <div className="flex flex-col items-center justify-center gap-3 py-16 text-mushaf-teal">
                         <Loader2 size={36} className="animate-spin" />
                         <p className="font-black">جاري تحميل أرشيف الخطب...</p>
                       </div>
                     ) : libraryUnavailable ? (
                       <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 p-7 text-center">
-                        <p className="font-black text-amber-800">{libraryError || 'تعذر تحميل الخطب حاليًا.'}</p>
+                        <p className="font-black text-amber-800">{libraryError || 'تعذر تحميل الخطب حاليًا.'}</p><button type="button" className="mt-3 underline" onClick={() => void loadLibraryContent('khutbah',khutbahScholarId)}>إعادة المحاولة</button>
                       </div>
                     ) : filteredLibraryItems.length === 0 ? (
                       <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white py-14 text-center">
                         <Headphones size={30} className="mx-auto text-mushaf-teal" />
-                        <p className="mt-3 font-black text-mushaf-dark">لا توجد خطب مطابقة للبحث.</p>
+                        <p className="mt-3 font-black text-mushaf-dark">{khutbahScholarId ? 'لا توجد تسجيلات مطابقة في الصفحات المحملة. جرّب تحميل المزيد.' : 'اختر الشيخ لعرض الخطب والدروس.'}</p>
                       </div>
                     ) : (
                       <div className="mt-5 grid gap-3 lg:grid-cols-2">
@@ -2956,7 +2975,7 @@ export default function AudioPage() {
                                 <div className="min-w-0 flex-1">
                                   <h3 className="line-clamp-2 font-black text-mushaf-dark">{item.title}</h3>
                                   <p className="mt-1 truncate text-xs font-bold text-mushaf-teal">{item.authorName || item.subtitle}</p>
-                                  <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-400"><Clock3 size={12} />{formatDuration(item.duration)}<span>•</span>{item.sourceName}</div>
+                                  <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-400"><Clock3 size={12} />{formatDuration(item.duration)}<span>•</span><a href={item.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">{item.sourceName}</a></div>
                                 </div>
                               </div>
                               <div className="mt-3 grid grid-cols-4 gap-2">
@@ -2969,6 +2988,7 @@ export default function AudioPage() {
                         })}
                       </div>
                     )}
+                    {khutbahScholarId && khutbahHasMore && <button type="button" disabled={libraryLoading} onClick={() => void loadLibraryContent('khutbah',khutbahScholarId,khutbahNextPage,true)} className="mx-auto mt-5 flex items-center gap-2 rounded-2xl bg-mushaf-teal px-6 py-3 text-sm font-bold text-white disabled:opacity-50">{libraryLoading ? <Loader2 size={18} className="animate-spin" /> : <ChevronDown size={18} />}تحميل المزيد من تسجيلات الشيخ</button>}
                   </section>
                 )}
               </>
