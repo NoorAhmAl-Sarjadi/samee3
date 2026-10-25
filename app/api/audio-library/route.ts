@@ -1,3 +1,4 @@
+import { KHUTBAH_SCHOLARS, EXTRA_RUQYAH_ITEMS, parseScholarAudio } from '@/lib/audio-catalog'
 import { NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
@@ -22,12 +23,6 @@ type LibraryItem = {
   isSynthetic?: boolean
 }
 
-type KhutbahScholar = {
-  id: string
-  name: string
-  sourceUrl: string
-}
-
 type Book = {
   id: string
   name: string
@@ -36,32 +31,11 @@ type Book = {
   source: string
 }
 
-const ISLAMWAY_BASE = 'https://ar.islamway.net'
 const HADITH_API = 'https://api.hadith.to/v1'
 const ISLAMHOUSE_API = 'https://api.islamhouse.com/v1'
 const ISLAMHOUSE_API_KEY = process.env.ISLAMHOUSE_API_KEY || ''
 
 const REQUEST_TIMEOUT_MS = 15000
-const SCHOLAR_PAGE_COUNT = 4
-const MAX_KHUTBAH_ITEMS = 1200
-
-/**
- * المصادر المعتمدة هنا هي صفحات المشايخ في طريق الإسلام.
- * نعيد روابط الملفات المنشورة في المصدر ولا نعيد استضافة الصوت داخل سميع.
- */
-const ISLAMWAY_SCHOLARS: readonly KhutbahScholar[] = [
-  { id: '39', name: 'عبد الحميد كشك', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/39` },
-  { id: '28', name: 'محمد حسان', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/28` },
-  { id: '32', name: 'أبو إسحاق الحويني', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/32` },
-  { id: '76', name: 'محمد حسين يعقوب', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/76` },
-  { id: '16', name: 'عبد العزيز بن باز', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/16` },
-  { id: '50', name: 'محمد بن صالح العثيمين', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/50` },
-  { id: '125', name: 'محمد بن عبد الرحمن العريفي', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/125` },
-  { id: '323', name: 'صالح بن عواد المغامسي', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/323` },
-  { id: '99', name: 'صالح بن فوزان الفوزان', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/99` },
-  { id: '114', name: 'محمود المصري', sourceUrl: `${ISLAMWAY_BASE}/lessons/scholar/114` },
-] as const
-
 const RUQYAH_ITEMS: LibraryItem[] = [
   ['011', 'إدريس أبكر'],
   ['010', 'ماهر المعيقلي'],
@@ -212,78 +186,6 @@ function extractAudioUrls(value: string): string[] {
   return uniqueStrings(urls.map((url) => url.replace(/[),.;]+$/g, '')))
 }
 
-function extractLessonLinks(html: string): Array<{ url: string; title: string }> {
-  const results: Array<{ url: string; title: string }> = []
-  const anchorRegex = /<a\b[^>]*href=["']([^"']*\/lesson\/\d+[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi
-
-  let match: RegExpExecArray | null
-  while ((match = anchorRegex.exec(html)) !== null) {
-    const rawUrl = decodeHtml(match[1])
-    const title = stripHtml(match[2])
-    if (!title) continue
-
-    const absolute = rawUrl.startsWith('http')
-      ? rawUrl
-      : `${ISLAMWAY_BASE}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`
-
-    results.push({ url: absolute, title })
-  }
-
-  return unique(results)
-}
-
-function getNearbyTitle(html: string, audioUrl: string): string {
-  const index = html.indexOf(audioUrl)
-  if (index < 0) return getFilenameTitle(audioUrl)
-
-  const before = html.slice(Math.max(0, index - 5000), index)
-  const headings = Array.from(before.matchAll(/<(?:h2|h3|h4|a)\b[^>]*>([\s\S]*?)<\/(?:h2|h3|h4|a)>/gi))
-    .map((match) => stripHtml(match[1]))
-    .filter(Boolean)
-
-  return headings.at(-1) || getFilenameTitle(audioUrl)
-}
-
-function parseIslamwayScholarPage(
-  html: string,
-  scholar: KhutbahScholar,
-  pageUrl: string,
-): LibraryItem[] {
-  const items: LibraryItem[] = []
-  const pageLinks = extractLessonLinks(html)
-  const pageAudioUrls = extractAudioUrls(html)
-
-  const titleByLessonUrl = new Map(pageLinks.map((item) => [item.url, item.title]))
-
-  for (const audioUrl of pageAudioUrls) {
-    const surrounding = html.slice(Math.max(0, html.indexOf(audioUrl) - 7000), Math.min(html.length, html.indexOf(audioUrl) + 2500))
-    const lessonHref = surrounding.match(/href=["']([^"']*\/lesson\/\d+[^"']*)["']/i)?.[1]
-    const absoluteLessonUrl = lessonHref
-      ? lessonHref.startsWith('http')
-        ? decodeHtml(lessonHref)
-        : `${ISLAMWAY_BASE}${lessonHref.startsWith('/') ? '' : '/'}${decodeHtml(lessonHref)}`
-      : ''
-
-    const lessonTitle = (absoluteLessonUrl && titleByLessonUrl.get(absoluteLessonUrl)) || getNearbyTitle(html, audioUrl)
-    const cleanTitle = lessonTitle || 'محاضرة أو درس صوتي'
-
-    items.push({
-      id: `khutbah-${scholar.id}-${Buffer.from(audioUrl).toString('base64url')}`,
-      title: cleanTitle,
-      subtitle: 'خطب ومحاضرات ودروس',
-      audioUrl,
-      authorName: scholar.name,
-      section: 'khutbah',
-      sourceName: 'طريق الإسلام',
-      sourceUrl: absoluteLessonUrl || pageUrl,
-      downloadable: true,
-      isSynthetic: false,
-    })
-  }
-
-  return unique(items)
-}
-
 async function fetchWithTimeout(
   url: string,
   init: RequestInit = {},
@@ -308,13 +210,15 @@ async function fetchWithTimeout(
 }
 
 async function fetchHtml(url: string): Promise<string> {
-  const response = await fetchWithTimeout(url, {
-    cache: 'force-cache',
-    next: { revalidate: 1800 },
-  } as RequestInit & { next?: { revalidate?: number }})
-
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.text()
+  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const response = await fetch(url, { signal: controller.signal, next: { revalidate: 3600 }, headers: { Accept: 'text/html', 'User-Agent': 'Mozilla/5.0 (compatible; SAMEE3)' } })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    if (Number(response.headers.get('content-length') || 0) > 3_000_000) throw new Error('Catalog too large')
+    const html = await response.text()
+    if (html.length > 3_000_000) throw new Error('Catalog too large')
+    return html
+  } finally { clearTimeout(timeout) }
 }
 
 async function fetchJson<T>(
@@ -329,37 +233,6 @@ async function fetchJson<T>(
 
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return response.json() as Promise<T>
-}
-
-async function loadKhutbahsForScholar(scholar: KhutbahScholar): Promise<LibraryItem[]> {
-  const urls = Array.from({ length: SCHOLAR_PAGE_COUNT }, (_, index) =>
-    index === 0 ? scholar.sourceUrl : `${scholar.sourceUrl}?page=${index + 1}`,
-  )
-
-  const responses = await Promise.allSettled(urls.map(fetchHtml))
-  const items: LibraryItem[] = []
-
-  responses.forEach((result, index) => {
-    if (result.status !== 'fulfilled') return
-    items.push(...parseIslamwayScholarPage(result.value, scholar, urls[index]))
-  })
-
-  return unique(items)
-}
-
-async function loadKhutbahs(): Promise<LibraryItem[]> {
-  const results = await Promise.allSettled(
-    ISLAMWAY_SCHOLARS.map((scholar) => loadKhutbahsForScholar(scholar)),
-  )
-
-  const items: LibraryItem[] = []
-  results.forEach((result) => {
-    if (result.status === 'fulfilled') items.push(...result.value)
-  })
-
-  return unique(items)
-    .filter((item) => Boolean(item.audioUrl) && item.section === 'khutbah' && !item.isSynthetic)
-    .slice(0, MAX_KHUTBAH_ITEMS)
 }
 
 async function loadHadithBooks(): Promise<Book[]> {
@@ -503,8 +376,8 @@ export async function GET(request: Request) {
       return NextResponse.json({
         ok: true,
         section,
-        items: RUQYAH_ITEMS,
-        total: RUQYAH_ITEMS.length,
+        items: [...RUQYAH_ITEMS, ...EXTRA_RUQYAH_ITEMS],
+        total: RUQYAH_ITEMS.length + EXTRA_RUQYAH_ITEMS.length,
       })
     }
 
@@ -515,24 +388,32 @@ export async function GET(request: Request) {
         return NextResponse.json({
           ok: true,
           section,
-          scholars: ISLAMWAY_SCHOLARS,
+          scholars: KHUTBAH_SCHOLARS,
           items: [],
-          totalScholars: ISLAMWAY_SCHOLARS.length,
+          totalScholars: KHUTBAH_SCHOLARS.length,
           total: 0,
         })
       }
 
-      const scholar = ISLAMWAY_SCHOLARS.find((item) => item.id === scholarId)
+      const scholar = KHUTBAH_SCHOLARS.find((item) => item.id === scholarId)
       if (!scholar) {
         return NextResponse.json({ ok: false, error: 'Unknown scholar' }, { status: 404 })
       }
 
-      const items = await loadKhutbahsForScholar(scholar)
+      const rawPage = Number(searchParams.get('page') || '1')
+      if (!Number.isInteger(rawPage) || rawPage < 1 || rawPage > 200) return NextResponse.json({ ok: false, error: 'رقم الصفحة غير صالح.' }, { status: 400 })
+      const pageUrl = `${scholar.sourceUrl}&pageno=${rawPage}`
+      const html = await fetchHtml(pageUrl)
+      const items = parseScholarAudio(html, scholar)
+      if (!items.length && rawPage === 1) throw new Error('تعذر قراءة تسجيلات المصدر.')
+      const hasMore = Array.from(html.matchAll(/href=["']([^"']*pageno=([0-9]+)[^"']*)["']/gi)).some((match) => Number(match[2]) > rawPage)
 
       return NextResponse.json({
         ok: true,
         section,
-        scholar: { id: scholar.id, name: scholar.name, sourceUrl: scholar.sourceUrl },
+        scholar,
+        hasMore,
+        nextStart: rawPage + 1,
         items,
         total: items.length,
       })
