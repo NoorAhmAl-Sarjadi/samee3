@@ -1,1152 +1,1199 @@
-
 'use client'
 
 import {
-  useCallback, useEffect, useMemo, useRef, useState
+  useCallback, useEffect, useMemo, useRef, useState,
 } from 'react'
 import Link from 'next/link'
 import {
-  ArrowRight, Check, ChevronLeft, Download, Film,
-  ImagePlus, Loader2, Pause, Play, RefreshCcw,
-  Share2, Volume2, X
+  ArrowRight, Check, Download, ExternalLink, Film,
+  Loader2, Pause, Play, RefreshCcw, Share2, Upload,
+  Volume2, X,
 } from 'lucide-react'
 import {
-  VISUAL_SCENES, VISUAL_SURAHS, type VisualScene
-} from '@/lib/samee3-visual-scenes'
+  GROUPS, SCENES, type Scene,
+} from '@/lib/samee3-visual-library'
+import {
+  clipKeys, readClip, saveClip,
+} from '@/lib/samee3-visual-storage'
 
-type Surah = { id: number; name: string; count: number }
-type Ayah = { number: number; text: string; translation: string }
-type Clip = {
-  source: string; title: string; artist: string
-  license: string; mime: string; size: number; provider: string
+type Surah = {
+  id: number
+  name: string
+  count: number
 }
-type Render = {
-  ayahs: Ayah[]
+type Verse = {
+  number: number
+  text: string
+}
+type Prepared = {
+  verses: Verse[]
   buffers: AudioBuffer[]
   starts: number[]
   duration: number
 }
-type Result = { blob: Blob; url: string; name: string }
+type MadeVideo = {
+  blob: Blob
+  url: string
+  filename: string
+}
 
-const QARIS = [
+const names = 'الفاتحة|البقرة|آل عمران|النساء|المائدة|الأنعام|الأعراف|الأنفال|التوبة|يونس|هود|يوسف|الرعد|إبراهيم|الحجر|النحل|الإسراء|الكهف|مريم|طه|الأنبياء|الحج|المؤمنون|النور|الفرقان|الشعراء|النمل|القصص|العنكبوت|الروم|لقمان|السجدة|الأحزاب|سبأ|فاطر|يس|الصافات|ص|الزمر|غافر|فصلت|الشورى|الزخرف|الدخان|الجاثية|الأحقاف|محمد|الفتح|الحجرات|ق|الذاريات|الطور|النجم|القمر|الرحمن|الواقعة|الحديد|المجادلة|الحشر|الممتحنة|الصف|الجمعة|المنافقون|التغابن|الطلاق|التحريم|الملك|القلم|الحاقة|المعارج|نوح|الجن|المزمل|المدثر|القيامة|الإنسان|المرسلات|النبأ|النازعات|عبس|التكوير|الانفطار|المطففين|الانشقاق|البروج|الطارق|الأعلى|الغاشية|الفجر|البلد|الشمس|الليل|الضحى|الشرح|التين|العلق|القدر|البينة|الزلزلة|العاديات|القارعة|التكاثر|العصر|الهمزة|الفيل|قريش|الماعون|الكوثر|الكافرون|النصر|المسد|الإخلاص|الفلق|الناس'.split('|')
+
+const counts = [
+  7,286,200,176,120,165,206,75,129,109,123,111,
+  43,52,99,128,111,110,98,135,112,78,118,64,
+  77,227,93,88,69,60,34,30,73,54,45,83,182,
+  88,75,85,54,53,89,59,37,35,38,29,18,45,
+  60,49,62,55,78,96,29,22,24,13,14,11,11,
+  18,12,12,30,52,52,44,28,28,20,56,40,31,
+  50,40,46,42,29,19,36,25,22,17,19,26,30,
+  20,15,21,11,8,8,19,5,8,8,11,11,8,3,
+  9,5,4,7,3,6,3,5,4,5,6,
+]
+
+const fallbackSurahs: Surah[] = names.map(
+  (name, i) => ({
+    id: i + 1,
+    name,
+    count: counts[i],
+  })
+)
+
+const READERS = [
   { id: 'husary', name: 'محمود خليل الحصري' },
   { id: 'afasy', name: 'مشاري راشد العفاسي' },
   { id: 'minshawy', name: 'محمد صديق المنشاوي' },
   { id: 'basit', name: 'عبد الباسط عبد الصمد' },
-  { id: 'sudais', name: 'عبد الرحمن السديس' },
   { id: 'maher', name: 'ماهر المعيقلي' },
-  { id: 'hudhaify', name: 'علي الحذيفي' },
+  { id: 'sudais', name: 'عبد الرحمن السديس' },
 ]
 
-const GROUPS = [
-  'الكل', 'المياه', 'السماء',
-  'الورود', 'الطبيعة', 'مناظر'
-]
+const btn =
+  'inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold disabled:opacity-45'
+
+const primary = btn + ' bg-[#245343] text-white'
+const secondary =
+  btn + ' border border-[#e0d9c8] bg-white text-[#2a5446]'
 
 const input =
-  'mt-2 h-12 w-full rounded-2xl border border-[#e4dfd0] bg-white px-3 text-sm outline-none focus:border-[#baa36f] focus:ring-2 focus:ring-[#baa36f33]'
-
-const mainButton =
-  'inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-[#225242] px-5 py-3 text-sm font-bold text-white disabled:opacity-40'
-
-const secondaryButton =
-  'inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-[#e3dbcc] bg-white px-5 py-3 text-sm font-bold text-[#285344] disabled:opacity-40'
+  'mt-2 w-full rounded-2xl border border-[#e1d9c7] bg-white p-3 text-sm outline-none focus:border-[#aa8c4f]'
 
 const panel =
-  'rounded-[26px] border border-[#e6e0d2] bg-white p-5 shadow-sm'
+  'rounded-[26px] border border-[#e6dfd1] bg-white p-5 shadow-sm'
 
-const digits = (n: number) =>
+const ar = (n: number) =>
   n.toLocaleString('ar-EG', { useGrouping: false })
 
-const timeString = (s: number) =>
+const timerLabel = (s: number) =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-function createCanvasSize(ratio: string, quality: number) {
-  if (ratio === '1:1')
-    return { width: quality, height: quality }
-
-  if (ratio === '16:9')
-    return { width: Math.round(quality * 16 / 9), height: quality }
-
-  return {
-    width: quality,
-    height: Math.round(quality * 16 / 9),
-  }
-}
-
-function wrap(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  max: number,
-  lines = 9
-) {
-  const words = text.split(/\s+/).filter(Boolean)
-  const result: string[] = []
-  let line = ''
-
-  for (const word of words) {
-    const next = line ? line + ' ' + word : word
-
-    if (line && ctx.measureText(next).width > max) {
-      result.push(line)
-      line = word
-    } else {
-      line = next
-    }
-  }
-
-  if (line) result.push(line)
-  return result.slice(0, lines)
-}
-
-function rounded(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r: number
-) {
-  r = Math.max(0, Math.min(r, w / 2, h / 2))
-  ctx.beginPath()
-  ctx.moveTo(x + r, y)
-  ctx.lineTo(x + w - r, y)
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
-  ctx.lineTo(x + w, y + h - r)
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-  ctx.lineTo(x + r, y + h)
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
-  ctx.lineTo(x, y + r)
-  ctx.quadraticCurveTo(x, y, x + r, y)
-  ctx.closePath()
-}
-
-async function getJSON<T>(
-  url: string,
+async function api<T>(
+  params: Record<string, string>,
   signal?: AbortSignal
 ): Promise<T> {
-  const res = await fetch(url, {
-    signal,
-    cache: 'no-store',
-  })
+  const res = await fetch(
+    '/api/visual-ayahs?' + new URLSearchParams(params),
+    { signal, cache: 'no-store' }
+  )
   const body = await res.json()
-
-  if (!res.ok)
-    throw new Error(
-      body.error || 'تعذّر الاتصال بالخادم. حاول مرة أخرى.'
+  if (!res.ok) {
+    throw Error(
+      typeof body.error === 'string'
+        ? body.error
+        : 'تعذر تحميل البيانات'
     )
-
+  }
   return body as T
 }
 
-function silenceOtherAudio() {
-  document
-    .querySelectorAll<HTMLAudioElement>('audio')
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): string[] {
+  const rows: string[] = []
+  let row = ''
+
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const next = row ? row + ' ' + word : word
+    if (row && ctx.measureText(next).width > maxWidth) {
+      rows.push(row)
+      row = word
+    } else {
+      row = next
+    }
+  }
+  if (row) rows.push(row)
+  return rows
+}
+
+function hushAudio() {
+  document.querySelectorAll<HTMLAudioElement>('audio')
     .forEach(a => a.pause())
 
-  const win = window as Window & {
+  const w = window as Window & {
     __samee3PersistentAudio?:
       HTMLAudioElement & { __samee3Continue?: boolean }
   }
 
-  if (win.__samee3PersistentAudio) {
-    win.__samee3PersistentAudio.__samee3Continue = false
-    win.__samee3PersistentAudio.pause()
+  if (w.__samee3PersistentAudio) {
+    w.__samee3PersistentAudio.__samee3Continue = false
+    w.__samee3PersistentAudio.pause()
   }
 }
 
 export default function VisualAyahsPage() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const ctxRef = useRef<AudioContext | null>(null)
-  const nodesRef = useRef<AudioBufferSourceNode[]>([])
-  const animRef = useRef(0)
-
-  const selectedRef = useRef(VISUAL_SCENES[0])
-  const clipRef = useRef<Clip | null>(null)
-  const preparedRef = useRef<Render | null>(null)
-
-  const optionsRef = useRef({
-    ratio: '9:16',
-    quality: 720,
-    dim: 40,
-    color: '#fff8e9',
-    fontSize: 54,
-    signature: 'مصحف سميع',
-  })
-
-  const playRef = useRef({
-    playing: false,
-    at: 0,
-    start: 0,
-    ctxStart: 0,
-  })
-
-  const jobRef = useRef(0)
-  const mediaJobRef = useRef(0)
-  const blobURLRef = useRef<string | null>(null)
-  const resultURLRef = useRef<string | null>(null)
-  const mountedRef = useRef(true)
-  const exporter = useRef<{ cancel: () => void } | null>(null)
-
   const [step, setStep] = useState(1)
   const [group, setGroup] = useState('الكل')
-  const [scene, setScene] = useState<VisualScene>(VISUAL_SCENES[0])
-  const [surahs, setSurahs] = useState<Surah[]>(VISUAL_SURAHS)
+  const [scene, setScene] = useState<Scene>(SCENES[0])
+  const [cached, setCached] = useState<string[]>([])
+  const [sceneRevision, setSceneRevision] = useState(0)
+  const [backgroundReady, setBackgroundReady] = useState(false)
+  const [backgroundStatus, setBackgroundStatus] = useState('')
+  const [surahs, setSurahs] = useState<Surah[]>(fallbackSurahs)
   const [surah, setSurah] = useState(13)
-  const [from, setFrom] = useState(28)
-  const [to, setTo] = useState(28)
-  const [qari, setQari] = useState('husary')
-  const [translation, setTranslation] = useState('none')
-
-  const [mediaStatus, setMediaStatus] =
-    useState<'loading' | 'ready' | 'error'>('loading')
-  const [mediaMessage, setMediaMessage] = useState('')
-  const [clip, setClip] = useState<Clip | null>(null)
-  const [file, setFile] = useState<File | null>(null)
-  const [loadingSurahs, setLoadingSurahs] = useState(false)
-
+  const [verses, setVerses] = useState<Verse[]>([])
+  const [verseLoading, setVerseLoading] = useState(true)
+  const [verseError, setVerseError] = useState('')
+  const [verseRetry, setVerseRetry] = useState(0)
+  const [start, setStart] = useState(28)
+  const [end, setEnd] = useState(28)
+  const [reader, setReader] = useState('husary')
   const [busy, setBusy] =
     useState<'idle' | 'prepare' | 'export'>('idle')
+  const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
-  const [render, setRender] = useState<Render | null>(null)
+  const [prepared, setPrepared] = useState<Prepared | null>(null)
   const [playing, setPlaying] = useState(false)
   const [position, setPosition] = useState(0)
-  const [progress, setProgress] = useState(0)
-  const [result, setResult] = useState<Result | null>(null)
-
-  const [ratio, setRatio] = useState('9:16')
+  const [result, setResult] = useState<MadeVideo | null>(null)
+  const [ratio, setRatio] =
+    useState<'9:16' | '1:1' | '16:9'>('9:16')
   const [quality, setQuality] = useState(720)
-  const [dim, setDim] = useState(40)
-  const [color, setColor] = useState('#fff8e9')
-  const [fontSize, setFontSize] = useState(54)
+  const [shade, setShade] = useState(45)
   const [signature, setSignature] = useState('مصحف سميع')
-  const [videoActive, setVideoActive] = useState(false)
 
-  const choices = useMemo(
-    () => VISUAL_SCENES.filter(
-      s => group === 'الكل' || s.group === group
-    ),
-    [group]
-  )
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const audioRef = useRef<AudioContext | null>(null)
+  const sourcesRef = useRef<AudioBufferSourceNode[]>([])
+  const playingRef = useRef({
+    active: false,
+    at: 0,
+    ctxStart: 0,
+  })
+  const prepRef = useRef<Prepared | null>(null)
+  const dataRef = useRef({
+    verses, surahs, surah, start, end, scene,
+    reader, ratio, quality, shade, signature,
+  })
+  const resultURL = useRef<string | null>(null)
+  const requestRef = useRef(0)
+  const playerRAF = useRef(0)
+  const stopExportRef = useRef<(() => void) | null>(null)
 
-  const surahItem = surahs.find(s => s.id === surah)
-  const ratioStyle = ratio === '1:1'
-    ? '1 / 1'
-    : ratio === '16:9' ? '16 / 9' : '9 / 16'
-
-  selectedRef.current = scene
-  clipRef.current = clip
-  preparedRef.current = render
-  optionsRef.current = {
-    ratio, quality, dim, color, fontSize, signature
+  prepRef.current = prepared
+  dataRef.current = {
+    verses, surahs, surah, start, end, scene,
+    reader, ratio, quality, shade, signature,
   }
 
-  const locked = busy !== 'idle'
+  const selected = useMemo(
+    () => verses.filter(
+      v => v.number >= start && v.number <= end
+    ),
+    [verses, start, end]
+  )
 
-  const resetResult = useCallback(() => {
+  const chapter = surahs.find(s => s.id === surah)
+  const active = busy !== 'idle'
+
+  const aspect =
+    ratio === '9:16'
+      ? '9 / 16'
+      : ratio === '1:1' ? '1 / 1' : '16 / 9'
+
+  const visibleScenes = SCENES.filter(
+    s => group === 'الكل' || group === s.group
+  )
+
+  const clearResult = useCallback(() => {
+    if (resultURL.current) {
+      URL.revokeObjectURL(resultURL.current)
+    }
+    resultURL.current = null
     setResult(null)
-    if (resultURLRef.current)
-      URL.revokeObjectURL(resultURLRef.current)
-    resultURLRef.current = null
   }, [])
 
-  const stop = useCallback((reset = false) => {
-    const player = playRef.current
-    if (player.playing && ctxRef.current)
-      player.at = Math.max(
-        0, ctxRef.current.currentTime - player.ctxStart
-      )
+  const stopAudio = useCallback((reset = false) => {
+    const p = playingRef.current
 
-    player.playing = false
-    nodesRef.current.forEach(node => {
+    if (p.active && audioRef.current) {
+      p.at = Math.max(
+        0,
+        audioRef.current.currentTime - p.ctxStart
+      )
+    }
+
+    p.active = false
+    sourcesRef.current.forEach(n => {
       try {
-        node.stop()
-        node.disconnect()
+        n.stop()
+        n.disconnect()
       } catch {}
     })
-    nodesRef.current = []
+    sourcesRef.current = []
 
-    if (reset) player.at = 0
+    if (reset) p.at = 0
     setPlaying(false)
-    setPosition(player.at)
+    setPosition(p.at)
   }, [])
 
   const invalidate = useCallback(() => {
-    jobRef.current++
-    stop(true)
-    setRender(null)
-    setPosition(0)
-    resetResult()
+    requestRef.current++
+    stopAudio(true)
+    setPrepared(null)
+    clearResult()
     setError('')
-  }, [stop, resetResult])
+  }, [stopAudio, clearResult])
 
   useEffect(() => {
-    mountedRef.current = true
+    let canceled = false
+
+    void clipKeys()
+      .then(keys => {
+        if (!canceled) setCached(keys)
+      })
+      .catch(() => {})
+
     const controller = new AbortController()
 
-    getJSON<{ surahs: Surah[] }>(
-      '/api/visual-ayahs?kind=surahs',
+    void api<{ surahs: Surah[] }>(
+      { kind: 'surahs' },
       controller.signal
-    )
-      .then(data => {
-        if (data.surahs?.length === 114)
-          setSurahs(data.surahs)
-      })
-      .catch(() => {
-        // الفهرس المحلي موجود، ولن تصبح القائمة فارغة.
-      })
-      .finally(() => setLoadingSurahs(false))
+    ).then(data => {
+      if (!canceled && data.surahs.length === 114) {
+        setSurahs(data.surahs)
+      }
+    }).catch(() => {})
 
     return () => {
+      canceled = true
       controller.abort()
-      mountedRef.current = false
     }
   }, [])
 
-  const reloadSurahs = async () => {
-    setLoadingSurahs(true)
-    setError('')
-    try {
-      const data = await getJSON<{ surahs: Surah[] }>(
-        '/api/visual-ayahs?kind=surahs'
-      )
-      setSurahs(data.surahs)
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : 'تعذّر تحميل السور'
-      )
-    } finally {
-      setLoadingSurahs(false)
-    }
-  }
-
   useEffect(() => {
     const controller = new AbortController()
-    const job = ++mediaJobRef.current
 
-    setMediaStatus('loading')
-    setMediaMessage('جارٍ جلب الفيديو الطبيعي…')
-    setClip(null)
-    setVideoActive(false)
+    setVerseLoading(true)
+    setVerseError('')
+    setVerses([])
 
-    if (blobURLRef.current) {
-      URL.revokeObjectURL(blobURLRef.current)
-      blobURLRef.current = null
-    }
+    void api<{ ayahs: Verse[] }>(
+      { kind: 'verses', surah: String(surah) },
+      controller.signal
+    ).then(data => {
+      if (!controller.signal.aborted) {
+        setVerses(data.ayahs)
+      }
+    }).catch(e => {
+      if (!controller.signal.aborted) {
+        setVerseError(
+          e instanceof Error
+            ? e.message
+            : 'تعذر تحميل السورة'
+        )
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) {
+        setVerseLoading(false)
+      }
+    })
 
-    const video = videoRef.current
-    if (video) {
-      video.pause()
-      video.removeAttribute('src')
-      video.load()
-    }
+    return () => controller.abort()
+  }, [surah, verseRetry])
 
-    const work = async () => {
+  useEffect(() => {
+    let canceled = false
+    let ownedURL: string | null = null
+    const v = videoRef.current
+    if (!v) return
+
+    v.pause()
+    v.removeAttribute('src')
+    v.load()
+
+    setBackgroundReady(false)
+    setBackgroundStatus('جارٍ فحص الخلفية…')
+
+    const show = async () => {
       try {
-        let url: string
-        let metadata: Clip | null = null
+        const saved = await readClip(scene.id)
+          .catch(() => null)
 
-        if (file) {
-          if (!file.type.startsWith('video/'))
-            throw Error('ارفع ملف فيديو MP4 أو WebM.')
+        if (canceled) return
 
-          if (file.size > 80 * 1024 * 1024)
-            throw Error('الفيديو يجب أن يكون أقل من 80 ميجابايت.')
-
-          url = URL.createObjectURL(file)
+        if (saved) {
+          ownedURL = URL.createObjectURL(saved)
         } else {
-          const info = await getJSON<{ clip: Clip }>(
-            '/api/visual-ayahs?kind=scene&id=' +
-              encodeURIComponent(scene.id),
-            controller.signal
-          )
+          const url = scene.id === 'flowers-demo'
+            ? '/api/visual-ayahs?kind=demo'
+            : '/visual-backgrounds/' + scene.id + '.mp4'
 
-          metadata = info.clip
+          const head = await fetch(url, {
+            method: 'HEAD',
+            cache: 'no-store',
+          })
 
-          const res = await fetch(
-            '/api/visual-ayahs?kind=clip&id=' +
-              encodeURIComponent(scene.id),
-            { signal: controller.signal }
-          )
+          if (canceled) return
 
-          if (!res.ok) {
-            const data = await res.json()
-            throw Error(data.error || 'تعذّر فتح الفيديو')
+          if (
+            head.ok &&
+            (head.headers.get('content-type') || '')
+              .includes('video/')
+          ) {
+            ownedURL = url
           }
-
-          const blob = await res.blob()
-          if (blob.size < 2000)
-            throw Error('ملف الفيديو غير صالح')
-
-          url = URL.createObjectURL(blob)
         }
 
-        if (
-          controller.signal.aborted ||
-          job !== mediaJobRef.current
-        ) {
-          URL.revokeObjectURL(url)
+        if (!ownedURL) {
+          setBackgroundStatus(
+            'المقطع غير مثبت بعد. افتح المصدر، نزّل فيديو Free License ثم أضفه من زر «استيراد MP4».'
+          )
           return
         }
 
-        blobURLRef.current = url
-        setClip(metadata)
-
-        if (!video)
-          throw Error('مشغل الفيديو غير جاهز')
-
-        video.src = url
-        video.muted = true
-        video.loop = true
-        video.playsInline = true
-        video.load()
+        v.src = ownedURL
+        v.loop = true
+        v.muted = true
+        v.playsInline = true
+        v.load()
 
         await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(
-            () => reject(Error('مهلة تحميل الفيديو انتهت')),
-            16000
-          )
+          const cleanup = () => {
+            v.onloadeddata = null
+            v.onerror = null
+            clearTimeout(wait)
+          }
 
-          video.onloadeddata = () => {
-            clearTimeout(timer)
+          const wait = setTimeout(() => {
+            cleanup()
+            reject(Error('انتهت مهلة فتح الفيديو'))
+          }, 18000)
+
+          v.onloadeddata = () => {
+            cleanup()
             resolve()
           }
 
-          video.onerror = () => {
-            clearTimeout(timer)
+          v.onerror = () => {
+            cleanup()
             reject(
-              Error('صيغة الفيديو لا تعمل على هذا الجهاز. اختر مشهدًا آخر.')
+              Error('صيغة الفيديو غير مدعومة على جهازك')
             )
           }
         })
 
-        if (job !== mediaJobRef.current) return
+        if (canceled) return
 
-        await video.play().catch(() => {})
-        setMediaStatus('ready')
-        setMediaMessage('')
-        setVideoActive(true)
+        await v.play().catch(() => {})
+        setBackgroundReady(true)
+        setBackgroundStatus('')
       } catch (e) {
-        if (controller.signal.aborted) return
-
-        setMediaStatus('error')
-        setMediaMessage(
-          e instanceof Error
-            ? e.message
-            : 'تعذّر تشغيل المشهد'
-        )
+        if (!canceled) {
+          setBackgroundStatus(
+            e instanceof Error
+              ? e.message
+              : 'تعذّر تشغيل الخلفية'
+          )
+        }
       }
     }
 
-    void work()
+    void show()
 
     return () => {
-      controller.abort()
-      if (video) {
-        video.pause()
-        video.onerror = null
-        video.onloadeddata = null
+      canceled = true
+      v.pause()
+      v.onloadeddata = null
+      v.onerror = null
+      v.removeAttribute('src')
+
+      if (ownedURL?.startsWith('blob:')) {
+        URL.revokeObjectURL(ownedURL)
       }
     }
-  }, [scene, file])
+  }, [scene.id, sceneRevision])
 
-  const draw = useCallback((t: number) => {
+  const drawFrame = useCallback((now: number) => {
     const canvas = canvasRef.current
-    const video = videoRef.current
     if (!canvas) return
 
     const {
-      ratio, quality, dim, color, fontSize, signature
-    } = optionsRef.current
+      verses: all,
+      surahs: chapters,
+      surah: surahID,
+      start: first,
+      scene: sc,
+      ratio: r,
+      quality: q,
+      shade: dim,
+      signature: mark,
+      reader: reciter,
+    } = dataRef.current
 
-    const { width: W, height: H } =
-      createCanvasSize(ratio, quality)
+    const W = r === '16:9'
+      ? Math.round(q * 16 / 9)
+      : q
 
-    if (
-      canvas.width !== W ||
-      canvas.height !== H
-    ) {
+    const H = r === '9:16'
+      ? Math.round(q * 16 / 9)
+      : q
+
+    if (canvas.width !== W || canvas.height !== H) {
       canvas.width = W
       canvas.height = H
     }
 
-    const ctx = canvas.getContext('2d', { alpha: false })
+    const ctx = canvas.getContext('2d', {
+      alpha: false,
+    })
     if (!ctx) return
 
-    const scene = selectedRef.current
-    const grad = ctx.createLinearGradient(0, 0, W, H)
-    grad.addColorStop(0, scene.color)
-    grad.addColorStop(1, scene.shade)
-    ctx.fillStyle = grad
+    const gradient = ctx.createLinearGradient(0, 0, W, H)
+    gradient.addColorStop(0, sc.tint)
+    gradient.addColorStop(1, '#122f30')
+    ctx.fillStyle = gradient
     ctx.fillRect(0, 0, W, H)
+
+    const movie = videoRef.current
 
     if (
-      video &&
-      video.readyState >= 2 &&
-      video.videoWidth > 0
+      movie &&
+      movie.readyState >= 2 &&
+      movie.videoWidth
     ) {
-      const scale = Math.max(
-        W / video.videoWidth,
-        H / video.videoHeight
+      const k = Math.max(
+        W / movie.videoWidth,
+        H / movie.videoHeight
       )
-      const dw = video.videoWidth * scale
-      const dh = video.videoHeight * scale
+      const w = movie.videoWidth * k
+      const h = movie.videoHeight * k
 
-      ctx.drawImage(
-        video,
-        (W - dw) / 2,
-        (H - dh) / 2,
-        dw,
-        dh
-      )
-    } else {
-      // حركة مؤقتة أثناء تحميل الفيديو الحقيقي.
-      for (let i = 0; i < 8; i++) {
-        ctx.strokeStyle =
-          `rgba(255,255,255,${.035 + i * .006})`
-        ctx.lineWidth = H * .007
-        ctx.beginPath()
-
-        for (let x = 0; x <= W; x += 15) {
-          const y =
-            H * (.54 + i * .065) +
-            Math.sin(
-              (x / W) * Math.PI * 2 +
-              t * .0004 + i
-            ) * H * .012
-
-          if (x === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
-        }
-        ctx.stroke()
-      }
+      try {
+        ctx.drawImage(
+          movie,
+          (W - w) / 2,
+          (H - h) / 2,
+          w,
+          h
+        )
+      } catch {}
     }
 
-    ctx.fillStyle = `rgba(1,15,18,${dim / 100})`
+    ctx.fillStyle = `rgba(0,9,14,${dim / 100})`
     ctx.fillRect(0, 0, W, H)
 
-    const halo = ctx.createRadialGradient(
-      W / 2, H * .47, 0,
-      W / 2, H * .47, H * .57
+    const glow = ctx.createRadialGradient(
+      W / 2, H / 2, W * .05,
+      W / 2, H / 2, H * .68
     )
-    halo.addColorStop(0, 'rgba(0,0,0,.04)')
-    halo.addColorStop(1, 'rgba(0,0,0,.35)')
-    ctx.fillStyle = halo
+    glow.addColorStop(0, 'rgba(0,0,0,.03)')
+    glow.addColorStop(1, 'rgba(0,0,0,.32)')
+    ctx.fillStyle = glow
     ctx.fillRect(0, 0, W, H)
 
-    const border = Math.max(2, W * .003)
-    ctx.lineWidth = border
-    ctx.strokeStyle = 'rgba(221,193,134,.73)'
-    rounded(
-      ctx, W * .055, H * .04,
-      W * .89, H * .92, W * .025
+    ctx.strokeStyle = 'rgba(220,187,123,.75)'
+    ctx.lineWidth = Math.max(2, W * .002)
+    ctx.strokeRect(
+      W * .055, H * .043,
+      W * .89, H * .913
     )
-    ctx.stroke()
 
-    const prepared = preparedRef.current
-    const surahName =
-      surahs.find(s => s.id === surah)?.name ||
+    ctx.direction = 'rtl'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    const chapterName =
+      chapters.find(s => s.id === surahID)?.name ||
       'القرآن الكريم'
 
-    ctx.textAlign = 'center'
-    ctx.direction = 'rtl'
-    ctx.fillStyle = '#f0dcab'
+    ctx.fillStyle = '#e7c990'
     ctx.font =
-      `bold ${Math.round(W * .042)}px "Amiri",serif`
+      `bold ${Math.round(W * .039)}px Amiri,serif`
 
     ctx.fillText(
-      prepared ? 'تلاوة من ' + surahName : scene.name,
-      W / 2, H * .135, W * .8
+      'سورة ' + chapterName,
+      W / 2, H * .13, W * .8
     )
 
-    const reciter =
-      QARIS.find(q => q.id === qari)?.name || ''
+    const prep = prepRef.current
+    const p = playingRef.current
 
-    const total = prepared?.duration || 0
-    const player = playRef.current
-    let seconds = player.at
+    let seconds = p.at
 
-    if (player.playing && ctxRef.current) {
-      seconds = Math.min(
-        total,
-        ctxRef.current.currentTime - player.ctxStart
+    if (p.active && audioRef.current) {
+      seconds = Math.max(
+        0,
+        audioRef.current.currentTime - p.ctxStart
       )
     }
 
-    let index = 0
-    if (prepared) {
-      for (let i = 0; i < prepared.starts.length; i++) {
-        if (seconds >= prepared.starts[i]) index = i
+    let at = 0
+
+    if (prep) {
+      for (let i = 0; i < prep.starts.length; i++) {
+        if (seconds >= prep.starts[i]) {
+          at = i
+        }
       }
     }
 
-    const content =
-      prepared?.ayahs[index]?.text ||
-      'أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ'
+    const current =
+      prep?.verses[at] ||
+      all.find(v => v.number === first)
 
-    const translation =
-      prepared?.ayahs[index]?.translation || ''
+    const text = current?.text ||
+      'جارٍ تحميل آيات السورة…'
 
-    let size = Math.round(W * fontSize / 720)
-    let lines: string[] = []
+    let fontSize = W * .063
+    let rows: string[] = []
 
-    for (; size > W * .027; size -= 2) {
+    for (; fontSize > W * .025; fontSize -= 2) {
       ctx.font =
-        `${size}px "Amiri Quran","Amiri",serif`
+        `${fontSize}px "Amiri Quran",Amiri,serif`
 
-      lines = wrap(ctx, content, W * .78)
+      rows = wrapText(ctx, text, W * .77)
 
       if (
-        lines.length * size * 1.7 <
-          H * (translation ? .31 : .42) &&
-        lines.every(
-          l => ctx.measureText(l).width <= W * .8
+        rows.length * fontSize * 1.7 < H * .39 &&
+        rows.every(
+          line => ctx.measureText(line).width <= W * .79
         )
-      ) break
+      ) {
+        break
+      }
     }
 
-    const row = size * 1.73
-    const allH = lines.length * row
-    const centerY = H * (translation ? .445 : .50)
-    const boxY = centerY - allH / 2 - row * .6
+    const lineH = fontSize * 1.78
+    const top =
+      H * .51 - rows.length * lineH / 2
 
-    ctx.fillStyle = 'rgba(3,21,22,.31)'
-    rounded(
-      ctx, W * .08, boxY,
-      W * .84, allH + row * 1.15,
-      W * .035
+    ctx.fillStyle = 'rgba(0,21,23,.35)'
+    ctx.fillRect(
+      W * .075,
+      top - lineH * .75,
+      W * .85,
+      rows.length * lineH + lineH * 1.4
     )
-    ctx.fill()
 
-    ctx.fillStyle = color
+    ctx.fillStyle = '#fff7e8'
     ctx.font =
-      `${size}px "Amiri Quran","Amiri",serif`
+      `${fontSize}px "Amiri Quran",Amiri,serif`
 
-    lines.forEach((line, i) => {
+    rows.forEach((line, i) => {
       ctx.fillText(
-        line, W / 2,
-        centerY - allH / 2 + row * (i + .80),
+        line,
+        W / 2,
+        top + i * lineH + lineH / 2,
         W * .78
       )
     })
 
-    if (translation) {
-      ctx.font = `${Math.round(W * .029)}px sans-serif`
-      const trLines = wrap(
-        ctx, translation, W * .76, 4
-      )
-      ctx.fillStyle = '#f3e7c9'
-
-      trLines.forEach((line, i) => {
-        ctx.fillText(
-          line, W / 2,
-          H * .72 + i * W * .041,
-          W * .76
-        )
-      })
-    }
-
-    ctx.fillStyle = '#f0dcab'
+    ctx.fillStyle = '#dfc38b'
     ctx.font =
-      `${Math.round(W * .029)}px "Amiri",serif`
+      `${Math.round(W * .029)}px Amiri,serif`
 
-    ctx.fillText(
-      prepared
-        ? `الآية ${digits(prepared.ayahs[index].number)} · ${reciter}`
-        : 'مصحف سميع · آيات مرئية',
-      W / 2, H * .83, W * .79
-    )
-
-    ctx.fillStyle = 'rgba(232,206,158,.85)'
-    ctx.fillRect(
-      W * .36, H * .87,
-      W * .28, Math.max(1, W * .002)
-    )
-
-    ctx.font =
-      `${Math.round(W * .025)}px sans-serif`
-
-    ctx.fillText(
-      signature.slice(0, 45),
-      W / 2, H * .915, W * .8
-    )
-
-    if (clipRef.current) {
-      ctx.font =
-        `${Math.max(11, Math.round(W * .015))}px sans-serif`
-      ctx.fillStyle = 'rgba(255,255,255,.6)'
+    if (current) {
       ctx.fillText(
-        `المشهد: ${clipRef.current.provider} · ${clipRef.current.license}`,
-        W / 2, H * .976, W * .9
+        '﴿ ' + ar(current.number) + ' ﴾',
+        W / 2,
+        Math.min(
+          H * .77,
+          top + rows.length * lineH + lineH * .6
+        ),
+        W * .7
       )
     }
-  }, [surahs, surah, qari])
+
+    ctx.font =
+      `${Math.round(W * .031)}px Amiri,serif`
+
+    ctx.fillText(
+      READERS.find(x => x.id === reciter)?.name || '',
+      W / 2,
+      H * .855,
+      W * .78
+    )
+
+    ctx.font =
+      `${Math.round(W * .024)}px sans-serif`
+
+    ctx.fillText(
+      mark.slice(0, 45),
+      W / 2, H * .918, W * .8
+    )
+
+    void now
+  }, [])
 
   useEffect(() => {
     let last = 0
 
-    const frame = (now: number) => {
-      if (now - last >= 33) {
-        draw(now)
+    const loop = (now: number) => {
+      if (now - last >= 34) {
+        drawFrame(now)
         last = now
       }
 
-      const prep = preparedRef.current
-      const player = playRef.current
-      const c = ctxRef.current
+      const prep = prepRef.current
+      const p = playingRef.current
 
-      if (prep && player.playing && c) {
-        const t = Math.min(
-          prep.duration,
-          c.currentTime - player.ctxStart
+      if (prep && p.active && audioRef.current) {
+        const t = Math.max(
+          0,
+          audioRef.current.currentTime - p.ctxStart
         )
 
         if (t >= prep.duration) {
-          stop(true)
+          stopAudio(true)
           setPosition(prep.duration)
-        } else if (Math.abs(t - player.at) > .20) {
-          player.at = t
+        } else if (Math.abs(t - p.at) > .15) {
+          p.at = t
           setPosition(t)
         }
       }
 
-      animRef.current = requestAnimationFrame(frame)
+      playerRAF.current =
+        requestAnimationFrame(loop)
     }
 
-    animRef.current = requestAnimationFrame(frame)
-    return () => cancelAnimationFrame(animRef.current)
-  }, [draw, stop])
+    playerRAF.current =
+      requestAnimationFrame(loop)
+
+    return () =>
+      cancelAnimationFrame(playerRAF.current)
+  }, [drawFrame, stopAudio])
 
   useEffect(() => () => {
-    exporter.current?.cancel()
-    stop(true)
+    stopExportRef.current?.()
 
-    void ctxRef.current?.close().catch(() => {})
+    sourcesRef.current.forEach(n => {
+      try { n.stop() } catch {}
+    })
 
-    if (blobURLRef.current)
-      URL.revokeObjectURL(blobURLRef.current)
+    if (audioRef.current) {
+      void audioRef.current.close().catch(() => {})
+    }
 
-    if (resultURLRef.current)
-      URL.revokeObjectURL(resultURLRef.current)
-  }, [stop])
+    if (resultURL.current) {
+      URL.revokeObjectURL(resultURL.current)
+    }
+  }, [])
 
-  const selectScene = (next: VisualScene) => {
-    if (locked) return
-    stop(true)
-    resetResult()
-    setScene(next)
-    setFile(null)
+  const importVideo = async (file: File) => {
+    if (
+      !/\.(mp4|webm)$/i.test(file.name) ||
+      !file.type.startsWith('video/')
+    ) {
+      setError('اختر ملف MP4 أو WebM صالحًا.')
+      return
+    }
+
+    if (file.size > 40 * 1024 * 1024) {
+      setError('اختر فيديو أقل من 40 ميجابايت.')
+      return
+    }
+
+    setStatus('جارٍ حفظ الخلفية على جهازك…')
     setError('')
+
+    try {
+      await saveClip(scene.id, file)
+      setCached(keys =>
+        Array.from(new Set([...keys, scene.id]))
+      )
+      setSceneRevision(v => v + 1)
+      setStatus(
+        'تم حفظ الخلفية على هذا الجهاز فقط. لإتاحتها للجميع ارفعها إلى public/visual-backgrounds باسم القالب.'
+      )
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'تعذّر حفظ الفيديو'
+      )
+    }
+  }
+
+  const selectScene = (s: Scene) => {
+    if (active) return
+    stopAudio(true)
+    clearResult()
+    setScene(s)
+    setError('')
+    setStep(1)
+  }
+
+  const changeSurah = (id: number) => {
+    setSurah(id)
+    setStart(1)
+    setEnd(1)
+    invalidate()
+  }
+
+  const chooseStart = (n: number) => {
+    setStart(n)
+    setEnd(n)
+    invalidate()
+  }
+
+  const chooseEnd = (n: number) => {
+    if (n < start || n - start > 9) {
+      setError(
+        'اختر نهاية بعد البداية، وبحد أقصى 10 آيات.'
+      )
+      return
+    }
+
+    setEnd(n)
+    invalidate()
   }
 
   const prepare = async () => {
-    if (locked) return
-
-    if (!surahItem) {
-      setError('فهرس السور لم يكتمل.')
-      return
-    }
+    if (active) return
 
     if (
-      from < 1 ||
-      to < from ||
-      to > surahItem.count ||
-      to - from >= 10
+      !verses.length ||
+      !selected.length ||
+      end - start > 9
     ) {
-      setError(
-        'اختر من آية إلى عشر آيات ضمن السورة.'
-      )
+      setError('اختر آيات صحيحة أولًا.')
       return
     }
 
-    setError('')
-    setStatus('جارٍ تحميل الآيات…')
-    setBusy('prepare')
-    setRender(null)
-    stop(true)
-    resetResult()
-    silenceOtherAudio()
+    const ticket = ++requestRef.current
+    stopAudio(true)
+    setPrepared(null)
+    clearResult()
+    hushAudio()
 
-    const job = ++jobRef.current
+    setError('')
+    setStatus('جارٍ تجهيز الآيات…')
+    setBusy('prepare')
 
     try {
-      if (!ctxRef.current)
-        ctxRef.current = new AudioContext()
+      if (!audioRef.current) {
+        audioRef.current = new AudioContext()
+      }
 
-      await ctxRef.current.resume()
-
-      const info = await getJSON<{ ayahs: Ayah[] }>(
-        `/api/visual-ayahs?kind=ayahs&surah=${surah}&from=${from}&to=${to}&translation=${translation}`
-      )
-
-      if (info.ayahs.length !== to - from + 1)
-        throw Error('الآيات المستلمة غير مكتملة')
+      await audioRef.current.resume()
 
       const buffers: AudioBuffer[] = []
       const starts: number[] = []
       let duration = 0
 
-      for (let i = 0; i < info.ayahs.length; i++) {
-        if (job !== jobRef.current) return
+      for (let i = 0; i < selected.length; i++) {
+        if (ticket !== requestRef.current) return
 
         setStatus(
-          `تحميل التلاوة ${digits(i + 1)} من ${digits(info.ayahs.length)}`
+          `تحميل التلاوة ${ar(i + 1)} من ${ar(selected.length)}`
         )
 
-        const a = info.ayahs[i]
         const url =
-          `/api/visual-ayahs?kind=audio&surah=${surah}&ayah=${a.number}&reciter=${qari}`
+          '/api/visual-ayahs?' +
+          new URLSearchParams({
+            kind: 'audio',
+            surah: String(surah),
+            ayah: String(selected[i].number),
+            reciter: reader,
+          })
 
-        const res = await fetch(url)
+        const response = await fetch(url)
 
-        if (!res.ok) {
-          const json = await res.json().catch(() => null)
+        if (!response.ok) {
+          const body = await response.json()
+            .catch(() => ({}))
           throw Error(
-            json?.error || 'تعذّر تحميل التلاوة'
+            body.error || 'تعذّر تحميل التلاوة'
           )
         }
 
-        const bytes = await res.arrayBuffer()
         const buffer =
-          await ctxRef.current!.decodeAudioData(bytes)
+          await audioRef.current.decodeAudioData(
+            await response.arrayBuffer()
+          )
+
+        if (ticket !== requestRef.current) return
 
         starts.push(duration)
-        duration += buffer.duration
         buffers.push(buffer)
+        duration += buffer.duration
 
-        if (duration > 90)
+        if (duration > 90) {
           throw Error(
-            'طول التلاوة يزيد عن 90 ثانية. قلّل عدد الآيات.'
+            'اختر آيات لا تتجاوز تلاوتها 90 ثانية لتفادي الضغط على الآيفون.'
           )
+        }
       }
 
-      if (job !== jobRef.current) return
+      if (ticket !== requestRef.current) return
 
-      const next = {
-        ayahs: info.ayahs,
+      const next: Prepared = {
+        verses: selected,
         buffers,
         starts,
         duration,
       }
 
-      preparedRef.current = next
-      setRender(next)
-      playRef.current.at = 0
-      setPosition(0)
+      prepRef.current = next
+      setPrepared(next)
       setStep(3)
+      setPosition(0)
       setStatus('')
-      setError('')
     } catch (e) {
-      if (job === jobRef.current) {
+      if (ticket === requestRef.current) {
         setError(
           e instanceof Error
             ? e.message
-            : 'تعذّر تجهيز التلاوة'
+            : 'تعذر تجهيز التلاوة'
         )
       }
     } finally {
-      if (job === jobRef.current)
+      if (ticket === requestRef.current) {
         setBusy('idle')
+      }
     }
   }
 
-  const toggleAudio = async () => {
-    const prep = preparedRef.current
+  const playPause = async () => {
+    const prep = prepRef.current
+    if (!prep || active) return
 
-    if (!prep || busy !== 'idle') return
-
-    silenceOtherAudio()
-
-    if (playRef.current.playing) {
-      stop()
+    if (playingRef.current.active) {
+      stopAudio()
       return
     }
 
-    try {
-      if (!ctxRef.current)
-        ctxRef.current = new AudioContext()
+    hushAudio()
 
-      const ctx = ctxRef.current
+    try {
+      if (!audioRef.current) {
+        audioRef.current = new AudioContext()
+      }
+
+      const ctx = audioRef.current
       await ctx.resume()
 
-      const player = playRef.current
+      const p = playingRef.current
 
-      if (player.at >= prep.duration - .1)
-        player.at = 0
+      if (p.at >= prep.duration - .1) {
+        p.at = 0
+      }
 
-      const offset = player.at
-      const start = ctx.currentTime + .06
-      player.ctxStart = start - offset
+      const offset = p.at
+      const startAt = ctx.currentTime + .05
+      p.ctxStart = startAt - offset
 
       prep.buffers.forEach((buffer, i) => {
-        const begin = prep.starts[i]
-        const end = begin + buffer.duration
-
-        if (end <= offset) return
+        if (
+          prep.starts[i] + buffer.duration <= offset
+        ) return
 
         const node = ctx.createBufferSource()
         node.buffer = buffer
         node.connect(ctx.destination)
+
         node.start(
-          start + Math.max(0, begin - offset),
-          Math.max(0, offset - begin)
+          startAt +
+            Math.max(0, prep.starts[i] - offset),
+          Math.max(0, offset - prep.starts[i])
         )
 
-        nodesRef.current.push(node)
+        sourcesRef.current.push(node)
       })
 
-      player.playing = true
+      p.active = true
       setPlaying(true)
+      void videoRef.current?.play().catch(() => {})
     } catch {
       setError(
-        'تعذّر تشغيل الصوت. جرّب الضغط مرة أخرى.'
+        'تعذّر تشغيل الصوت. اضغط تشغيل التلاوة مرة أخرى.'
       )
     }
   }
 
   const exportVideo = async () => {
-    const prep = preparedRef.current
+    const prep = prepRef.current
     const canvas = canvasRef.current
-    const ctx = ctxRef.current
+    const context = audioRef.current
+    const video = videoRef.current
 
-    if (!prep || !canvas || !ctx || locked) return
+    if (
+      !prep || !canvas || !context ||
+      !video || active
+    ) return
 
-    stop(true)
-    resetResult()
-    silenceOtherAudio()
-    setError('')
-    setProgress(0)
-
-    if (mediaStatus !== 'ready') {
+    if (!backgroundReady || video.readyState < 2) {
       setError(
-        'انتظر تحميل الفيديو الطبيعي، أو اختر مشهدًا آخر.'
+        'يجب استيراد الخلفية المتحركة أولًا.'
       )
       return
     }
 
-    if (!canvas.captureStream || !window.MediaRecorder) {
+    if (
+      !canvas.captureStream ||
+      typeof MediaRecorder === 'undefined'
+    ) {
       setError(
-        'هذا المتصفح لا يدعم تصدير الفيديو من Canvas.'
+        'المتصفح الحالي لا يدعم تسجيل الفيديو من Canvas. جرّب Chrome على الكمبيوتر.'
       )
       return
     }
 
-    const types = [
+    const mime = [
       'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
       'video/mp4',
       'video/webm;codecs=vp8,opus',
       'video/webm',
-    ]
-
-    const mime = types.find(type =>
+    ].find(type =>
       MediaRecorder.isTypeSupported(type)
     )
 
     if (!mime) {
       setError(
-        'متصفحك لا يدعم MP4 أو WebM. حدّث Safari وجرّب مجددًا.'
+        'المتصفح لا يدعم التصدير إلى MP4 أو WebM.'
       )
       return
     }
 
+    stopAudio(true)
+    clearResult()
+    hushAudio()
+
+    setError('')
+    setProgress(0)
+    setStatus('جارٍ تجهيز الفيديو…')
     setBusy('export')
-    setStatus('جارٍ إنشاء الفيديو…')
 
-    let recorded: MediaRecorder | null = null
+    let recorder: MediaRecorder | null = null
+    let canvasStream: MediaStream | null = null
     let stream: MediaStream | null = null
-    let videoStream: MediaStream | null = null
-    let destination: MediaStreamAudioDestinationNode | null = null
-
-    const nodes: AudioBufferSourceNode[] = []
-    let ticker = 0
+    let output: MediaStreamAudioDestinationNode | null = null
+    let raf = 0
     let timeout = 0
     let canceled = false
-    let finished = false
 
-    const abort = () => {
-      canceled = true
-      if (recorded && recorded.state !== 'inactive')
-        recorded.stop()
-    }
-
-    exporter.current = { cancel: abort }
+    const nodes: AudioBufferSourceNode[] = []
 
     try {
-      await ctx.resume()
+      await context.resume()
+      video.currentTime = 0
+      await video.play()
 
-      const player = playRef.current
-      player.at = 0
+      drawFrame(performance.now())
 
-      const video = videoRef.current
-      if (video) {
-        video.currentTime = 0
-        await video.play().catch(() => {})
-      }
-
-      draw(performance.now())
-
-      videoStream = canvas.captureStream(25)
-      destination = ctx.createMediaStreamDestination()
+      canvasStream = canvas.captureStream(25)
+      output = context.createMediaStreamDestination()
 
       stream = new MediaStream([
-        ...videoStream.getVideoTracks(),
-        ...destination.stream.getAudioTracks(),
+        ...canvasStream.getVideoTracks(),
+        ...output.stream.getAudioTracks(),
       ])
 
-      const recorder = new MediaRecorder(stream, {
+      const rec = new MediaRecorder(stream, {
         mimeType: mime,
         videoBitsPerSecond:
-          quality === 1080 ? 5000000 : 3000000,
+          quality === 1080
+            ? 5_000_000
+            : 3_000_000,
       })
 
-      recorded = recorder
-      const chunks: BlobPart[] = []
+      recorder = rec
 
-      const blob: Blob = await new Promise(
+      const blob = await new Promise<Blob>(
         (resolve, reject) => {
-          const start = ctx.currentTime + .1
-          player.ctxStart = start
-          player.playing = true
+          const chunks: BlobPart[] = []
+          let settled = false
 
-          recorder.ondataavailable = e => {
-            if (e.data.size) chunks.push(e.data)
+          const fail = (error: Error) => {
+            if (settled) return
+            settled = true
+            reject(error)
           }
 
-          recorder.onerror = () => {
-            reject(
-              Error('تعذّر إنشاء الفيديو. جرّب جودة 720p.')
+          stopExportRef.current = () => {
+            canceled = true
+            fail(Error('تم إلغاء إنشاء المقطع'))
+
+            if (rec.state !== 'inactive') {
+              rec.stop()
+            }
+          }
+
+          rec.ondataavailable = e => {
+            if (e.data.size) {
+              chunks.push(e.data)
+            }
+          }
+
+          rec.onerror = () =>
+            fail(
+              Error('فشل تسجيل الفيديو. جرّب جودة 720p.')
             )
-          }
 
-          recorder.onstop = () => {
+          rec.onstop = () => {
             if (canceled) {
-              reject(new Error('تم إلغاء التصدير'))
+              fail(Error('تم إلغاء إنشاء المقطع'))
               return
             }
 
-            finished = true
-
-            const resultBlob = new Blob(chunks, {
+            const b = new Blob(chunks, {
               type: mime.split(';')[0],
             })
 
-            if (resultBlob.size < 3000)
-              reject(Error('الفيديو الناتج غير صالح.'))
-            else
-              resolve(resultBlob)
+            if (b.size < 3000) {
+              fail(Error('ملف الفيديو الناتج فارغ'))
+            } else if (!settled) {
+              settled = true
+              resolve(b)
+            }
           }
 
-          recorder.start(400)
+          try {
+            rec.start(400)
+          } catch {
+            fail(
+              Error('تعذر بدء المسجل في المتصفح.')
+            )
+            return
+          }
+
+          const started = context.currentTime + .12
 
           prep.buffers.forEach((buffer, i) => {
-            const node = ctx.createBufferSource()
+            const node =
+              context.createBufferSource()
+
             node.buffer = buffer
-            node.connect(destination!)
-            node.start(start + prep.starts[i])
+            node.connect(output!)
+
+            node.start(
+              started + prep.starts[i]
+            )
             nodes.push(node)
           })
 
-          const loop = () => {
-            if (canceled || finished) return
+          const pulse = () => {
+            if (canceled || settled) return
 
             const t = Math.max(
-              0, ctx.currentTime - start
+              0,
+              context.currentTime - started
             )
+
+            playingRef.current.at =
+              Math.min(t, prep.duration)
 
             setProgress(
               Math.min(
                 100,
-                Math.floor(t / prep.duration * 100)
+                Math.round(
+                  t / prep.duration * 100
+                )
               )
             )
 
-            if (t >= prep.duration + .2) {
-              player.playing = false
-              if (recorder.state !== 'inactive')
-                recorder.stop()
+            if (t >= prep.duration + .12) {
+              if (rec.state !== 'inactive') {
+                rec.stop()
+              }
               return
             }
 
-            ticker = requestAnimationFrame(loop)
+            raf = requestAnimationFrame(pulse)
           }
 
-          ticker = requestAnimationFrame(loop)
+          raf = requestAnimationFrame(pulse)
 
-          timeout = window.setTimeout(() => {
-            if (!finished) {
-              canceled = true
-              reject(
-                Error('انتهت مهلة التصدير. قلّل عدد الآيات أو الجودة.')
-              )
-            }
-          }, (prep.duration + 25) * 1000)
+          timeout = window.setTimeout(
+            () =>
+              fail(
+                Error(
+                  'انتهت مهلة تسجيل الفيديو. جرّب مقطعًا أقصر.'
+                )
+              ),
+            (prep.duration + 20) * 1000
+          )
         }
       )
 
-      if (!canceled && mountedRef.current) {
+      if (!canceled) {
         const url = URL.createObjectURL(blob)
-        resultURLRef.current = url
+        resultURL.current = url
 
         setResult({
           blob,
           url,
-          name:
-            `samee3-${surah}-${from}-${to}.` +
-            (blob.type.includes('mp4') ? 'mp4' : 'webm'),
+          filename:
+            `samee3-${surah}-${start}-${end}.` +
+            (blob.type.includes('mp4')
+              ? 'mp4'
+              : 'webm'),
         })
 
         setProgress(100)
       }
     } catch (e) {
-      if (mountedRef.current) {
-        setError(
-          e instanceof Error
-            ? e.message
-            : 'حدث خطأ أثناء التصدير'
-        )
-      }
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'تعذر إنشاء المقطع'
+      )
     } finally {
-      exporter.current = null
-      cancelAnimationFrame(ticker)
+      stopExportRef.current = null
+      cancelAnimationFrame(raf)
       clearTimeout(timeout)
 
-      playRef.current.playing = false
-      playRef.current.at = 0
-
-      nodes.forEach(node => {
+      if (
+        recorder &&
+        (recorder as MediaRecorder).state !== 'inactive'
+      ) {
         try {
-          node.stop()
-          node.disconnect()
+          (recorder as MediaRecorder).stop()
+        } catch {}
+      }
+
+      nodes.forEach(n => {
+        try {
+          n.stop()
+          n.disconnect()
         } catch {}
       })
 
-      stream?.getTracks().forEach(track => track.stop())
-      videoStream?.getTracks().forEach(track => track.stop())
-      destination?.disconnect()
+      stream?.getTracks().forEach(t => t.stop())
+      canvasStream?.getTracks().forEach(t => t.stop())
+      output?.disconnect()
 
-      if (
-        recorded &&
-        (recorded as MediaRecorder).state !== 'inactive'
-      ) {
-        try {
-          (recorded as MediaRecorder).stop()
-        } catch {}
-      }
+      playingRef.current.at = 0
+      playingRef.current.active = false
 
-      if (mountedRef.current) {
-        setBusy('idle')
-        setStatus('')
-        setPlaying(false)
-        setPosition(0)
-      }
+      setPlaying(false)
+      setPosition(0)
+      setBusy('idle')
+      setStatus('')
     }
   }
 
-  const share = async () => {
+  const shareVideo = async () => {
     if (!result) return
 
     try {
       const media = new File(
         [result.blob],
-        result.name,
+        result.filename,
         { type: result.blob.type }
       )
 
@@ -1156,14 +1203,16 @@ export default function VisualAyahsPage() {
           title: 'آيات مرئية — مصحف سميع',
         })
       } else {
-        setError('نزّل المقطع وشاركه من هاتفك.')
+        setError(
+          'يمكنك تنزيل الفيديو ومشاركته من الجهاز.'
+        )
       }
     } catch (e) {
       if (
         !(e instanceof Error && e.name === 'AbortError')
       ) {
         setError(
-          'المشاركة غير متاحة. نزّل الفيديو أولًا.'
+          'تعذرت المشاركة. استخدم زر التنزيل.'
         )
       }
     }
@@ -1173,55 +1222,55 @@ export default function VisualAyahsPage() {
     <main
       dir="rtl"
       lang="ar"
-      className="min-h-screen bg-[#f8f6f0] pb-32 text-[#263c32]"
+      className="min-h-screen bg-[#f8f5ef] pb-32 text-[#273d33]"
     >
-      <header className="border-b border-[#e6ddc9] bg-[#fffcf6] px-4 py-5">
+      <header className="border-b border-[#e5ddcd] bg-[#fffdf8] px-4 py-5">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <Link
             href="/"
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-[#e3dccb] bg-white"
-            aria-label="الرئيسية"
+            aria-label="العودة للرئيسية"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-[#e6dcc6] bg-white"
           >
-            <ArrowRight size={19} />
+            <ArrowRight size={20} />
           </Link>
 
           <div className="flex-1">
             <h1 className="text-xl font-extrabold">
               آيات مرئية
             </h1>
-            <p className="mt-1 text-xs text-[#81877d]">
-              استوديو سميع · مقاطع قرآن بخلفيات طبيعية متحركة
+            <p className="mt-1 text-xs text-[#7f897f]">
+              خلفيات طبيعية متحركة، وآيات تختارها من نص المصحف
             </p>
           </div>
 
-          <span className="rounded-xl bg-[#eae2cc] px-3 py-2 font-bold text-[#947943]">
-            50
-          </span>
+          <Film className="text-[#b49a65]" size={24} />
         </div>
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-5">
         <nav
-          aria-label="خطوات إنشاء الفيديو"
           className="mb-5 grid grid-cols-3 gap-2"
+          aria-label="خطوات إنشاء الفيديو"
         >
           {[
-            'المشهد المتحرك',
-            'السورة والتلاوة',
+            'الخلفيات الطبيعية',
+            'اختيار الآيات',
             'المعاينة والحفظ',
-          ].map((name, i) => (
+          ].map((label, i) => (
             <button
-              key={name}
-              disabled={locked || (i === 2 && !render)}
+              key={label}
+              disabled={
+                active || (i === 2 && !prepared)
+              }
               onClick={() => setStep(i + 1)}
               className={
-                `rounded-2xl px-2 py-3 text-[11px] font-bold sm:text-sm ` +
+                'rounded-2xl px-2 py-3 text-xs font-bold ' +
                 (step === i + 1
-                  ? 'bg-[#205441] text-white'
-                  : 'bg-[#ece8dd] text-[#788078]')
+                  ? 'bg-[#245343] text-white'
+                  : 'bg-[#ebe7dd] text-[#68766c]')
               }
             >
-              {i + 1}. {name}
+              {ar(i + 1)}. {label}
             </button>
           ))}
         </nav>
@@ -1229,42 +1278,43 @@ export default function VisualAyahsPage() {
         {error && (
           <div
             role="alert"
-            className="mb-4 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+            className="mb-5 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"
           >
-            <p className="flex-1 leading-7">{error}</p>
+            <p className="flex-1">{error}</p>
             <button
+              aria-label="إغلاق التنبيه"
               onClick={() => setError('')}
-              aria-label="إغلاق"
             >
-              <X size={18} />
+              <X size={16} />
             </button>
           </div>
         )}
 
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <section className="order-2 lg:order-1">
+          <section className="order-2 space-y-4 lg:order-1">
             {step === 1 && (
               <>
                 <h2 className="text-xl font-extrabold">
-                  50 مشهدًا من الطبيعة الحقيقية
+                  50 خلفية طبيعية من Mixkit
                 </h2>
 
-                <p className="mt-2 text-sm leading-7 text-[#768075]">
-                  ماء متحرك، ورود، غيوم من الطائرة، أمطار،
-                  شلالات وغابات. يتم تحميل الفيديو عند اختياره.
+                <p className="text-sm leading-7 text-[#778376]">
+                  اختر خلفية طبيعية من المياه أو الزهور أو السحاب أو الغابات.
+                  افتح المقطع الأصلي، نزّل MP4 ثم استورده.
+                  المقاطع المرفوعة إلى الموقع تعمل لكل المستخدمين،
+                  والمحفوظة في المتصفح تعمل على جهازك فقط.
                 </p>
 
-                <div className="my-4 flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2">
                   {GROUPS.map(g => (
                     <button
                       key={g}
                       onClick={() => setGroup(g)}
-                      aria-pressed={group === g}
                       className={
-                        'rounded-full px-4 py-2 text-xs font-semibold ' +
+                        'rounded-full px-4 py-2 text-xs font-bold ' +
                         (group === g
-                          ? 'bg-[#225442] text-white'
-                          : 'border border-[#e2dac9] bg-white')
+                          ? 'bg-[#245343] text-white'
+                          : 'border border-[#e6dcc7] bg-white')
                       }
                     >
                       {g}
@@ -1273,105 +1323,118 @@ export default function VisualAyahsPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-                  {choices.map(s => (
-                    <button
+                  {visibleScenes.map(s => (
+                    <div
                       key={s.id}
-                      onClick={() => selectScene(s)}
-                      disabled={locked}
-                      aria-pressed={scene.id === s.id}
-                      className="text-right"
+                      className={
+                        'overflow-hidden rounded-2xl border-2 bg-white ' +
+                        (scene.id === s.id
+                          ? 'border-[#b89d65]'
+                          : 'border-transparent')
+                      }
                     >
-                      <div
-                        className={
-                          'relative aspect-[4/5] overflow-hidden rounded-[20px] border-[3px] ' +
-                          (scene.id === s.id
-                            ? 'border-[#ba984f]'
-                            : 'border-white')
-                        }
-                        style={{
-                          background:
-                            `linear-gradient(145deg,${s.color},${s.shade})`,
-                        }}
+                      <button
+                        type="button"
+                        disabled={active}
+                        onClick={() => selectScene(s)}
+                        className="block w-full text-right"
                       >
-                        {scene.id === s.id &&
-                        mediaStatus === 'ready' &&
-                        blobURLRef.current ? (
-                          <video
-                            src={blobURLRef.current}
-                            autoPlay
-                            muted
-                            loop
-                            playsInline
-                            className="absolute inset-0 h-full w-full object-cover"
-                            aria-hidden="true"
-                          />
-                        ) : (
-                          <span className="absolute inset-0 flex items-center justify-center text-6xl opacity-70">
-                            {s.emoji}
+                        <div
+                          className="relative flex aspect-[4/5] items-center justify-center text-6xl"
+                          style={{
+                            background:
+                              `linear-gradient(140deg,${s.tint},#102c30)`,
+                          }}
+                        >
+                          <span>{s.emoji}</span>
+
+                          {scene.id === s.id && (
+                            <Check
+                              className="absolute left-2 top-2 rounded-full bg-white p-1 text-[#245343]"
+                              size={24}
+                            />
+                          )}
+
+                          <span className="absolute bottom-2 right-2 rounded-full bg-black/50 px-2 py-1 text-[10px] text-white">
+                            {cached.includes(s.id)
+                              ? 'محفوظ على جهازك'
+                              : 'مشهد طبيعي'}
                           </span>
-                        )}
+                        </div>
 
-                        <span className="absolute bottom-2 right-2 rounded-full bg-black/45 px-2 py-1 text-[10px] text-white">
-                          فيديو طبيعي
-                        </span>
+                        <p className="px-2 pt-2 text-xs font-bold">
+                          {s.name}
+                        </p>
+                      </button>
 
-                        {scene.id === s.id && (
-                          <span className="absolute left-2 top-2 rounded-full bg-[#f1d38c] p-1 text-[#2f4839]">
-                            <Check size={16} />
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="mt-1 text-sm font-bold">
-                        {s.name}
-                      </p>
-                      <p className="text-[11px] text-[#85877e]">
-                        {s.group}
-                      </p>
-                    </button>
+                      <a
+                        href={s.source}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-1 px-2 py-3 text-[11px] text-[#2b6a59] underline"
+                      >
+                        <ExternalLink size={12} />
+                        مشاهدة وتنزيل المقطع
+                      </a>
+                    </div>
                   ))}
                 </div>
 
-                <label className={`${secondaryButton} mt-5 w-full cursor-pointer`}>
-                  <ImagePlus size={18} />
-                  أو استخدم فيديو من جهازك
+                <div className={panel}>
+                  <h3 className="font-bold">
+                    الخلفية المحددة: {scene.name}
+                  </h3>
 
-                  <input
-                    type="file"
-                    accept="video/mp4,video/webm,video/quicktime"
-                    className="sr-only"
-                    onChange={e => {
-                      const f = e.target.files?.[0]
-                      e.currentTarget.value = ''
-
-                      if (f) {
-                        stop(true)
-                        setFile(f)
-                        setError('')
-                      }
-                    }}
-                  />
-                </label>
-
-                {file && (
-                  <p className="mt-2 text-xs text-[#69786d]">
-                    المقطع: {file.name}
-                    <button
-                      className="mr-2 underline"
-                      onClick={() => setFile(null)}
-                    >
-                      إزالة
-                    </button>
+                  <p className="mt-2 text-xs leading-6 text-[#718073]">
+                    {backgroundReady
+                      ? 'الخلفية جاهزة وتتحرك في المعاينة.'
+                      : 'افتح صفحة المقطع ونزّل ملف MP4 ثم أضفه هنا.'}
                   </p>
-                )}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <a
+                      href={scene.source}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={secondary}
+                    >
+                      <ExternalLink size={17} />
+                      فتح موقع الفيديو
+                    </a>
+
+                    <label className={primary + ' cursor-pointer'}>
+                      <Upload size={17} />
+                      استيراد MP4
+
+                      <input
+                        className="sr-only"
+                        type="file"
+                        accept="video/mp4,video/webm,.mp4,.webm"
+                        onChange={e => {
+                          const f = e.target.files?.[0]
+                          e.target.value = ''
+
+                          if (f) {
+                            void importVideo(f)
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  {status && (
+                    <p className="mt-3 text-xs leading-6 text-[#6f7d6f]">
+                      {status}
+                    </p>
+                  )}
+                </div>
 
                 <button
-                  className={`${mainButton} mt-4 w-full`}
+                  className={primary + ' w-full'}
+                  disabled={active}
                   onClick={() => setStep(2)}
-                  disabled={locked}
                 >
-                  التالي: اختر السورة والقارئ
-                  <ChevronLeft size={18} />
+                  اختيار آيات القرآن
                 </button>
               </>
             )}
@@ -1379,323 +1442,312 @@ export default function VisualAyahsPage() {
             {step === 2 && (
               <div className={panel}>
                 <h2 className="text-xl font-extrabold">
-                  اختيار السورة والتلاوة
+                  اختر الآيات من النص نفسه
                 </h2>
 
-                <p className="mt-2 text-sm leading-7 text-[#7d8479]">
-                  قائمة السور مستقلة عن مشغل الفيديو، وتظهر
-                  حتى عند تأخر تحميل الخلفية.
+                <p className="mt-2 text-sm leading-7 text-[#6d7e73]">
+                  تظهر آيات السورة كلها مكتوبة.
+                  اضغط «بداية» للآية الأولى، ثم «نهاية»
+                  للآية الأخيرة. الحد الأقصى عشر آيات.
                 </p>
 
-                <fieldset
-                  disabled={locked || loadingSurahs}
-                  className="mt-5 space-y-4"
-                >
-                  <label className="block text-sm font-bold">
-                    السورة
+                <label className="mt-4 block text-sm font-bold">
+                  السورة
+                  <select
+                    className={input}
+                    value={surah}
+                    disabled={active}
+                    onChange={e =>
+                      changeSurah(Number(e.target.value))
+                    }
+                  >
+                    {surahs.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-                    <select
-                      className={input}
-                      value={surah}
-                      onChange={e => {
-                        const n = Number(e.target.value)
-                        setSurah(n)
-                        setFrom(1)
-                        setTo(1)
-                        invalidate()
-                      }}
-                    >
-                      {surahs.map(s => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <label className="mt-4 block text-sm font-bold">
+                  القارئ
+                  <select
+                    className={input}
+                    value={reader}
+                    disabled={active}
+                    onChange={e => {
+                      setReader(e.target.value)
+                      invalidate()
+                    }}
+                  >
+                    {READERS.map(r => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-                  {surahs.length === 0 && (
+                <p className="my-4 rounded-2xl bg-[#f5efde] p-3 text-sm leading-7">
+                  من الآية <strong>{ar(start)}</strong> إلى الآية{' '}
+                  <strong>{ar(end)}</strong> ·{' '}
+                  {ar(end - start + 1)} آية
+                </p>
+
+                {verseLoading && (
+                  <p role="status" className="my-4 flex gap-2 text-sm">
+                    <Loader2 size={17} className="animate-spin" />
+                    جارٍ تحميل نصوص السورة…
+                  </p>
+                )}
+
+                {verseError && (
+                  <div className="my-3 rounded-xl bg-red-50 p-3 text-xs leading-6 text-red-800">
+                    {verseError}
                     <button
-                      type="button"
-                      className={secondaryButton}
-                      onClick={() => void reloadSurahs()}
+                      className="mr-3 underline"
+                      onClick={() =>
+                        setVerseRetry(v => v + 1)
+                      }
                     >
-                      <RefreshCcw size={16} />
-                      تحديث قائمة السور
+                      إعادة تحميل الآيات
                     </button>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="text-sm font-bold">
-                      من الآية
-
-                      <input
-                        className={input}
-                        type="number"
-                        min={1}
-                        max={surahItem?.count || 286}
-                        value={from}
-                        onChange={e => {
-                          setFrom(Number(e.target.value))
-                          invalidate()
-                        }}
-                      />
-                    </label>
-
-                    <label className="text-sm font-bold">
-                      إلى الآية
-
-                      <input
-                        className={input}
-                        type="number"
-                        min={1}
-                        max={surahItem?.count || 286}
-                        value={to}
-                        onChange={e => {
-                          setTo(Number(e.target.value))
-                          invalidate()
-                        }}
-                      />
-                    </label>
                   </div>
+                )}
 
-                  <label className="block text-sm font-bold">
-                    القارئ
-
-                    <select
-                      className={input}
-                      value={qari}
-                      onChange={e => {
-                        setQari(e.target.value)
-                        invalidate()
-                      }}
+                <div className="max-h-[62vh] space-y-2 overflow-y-auto rounded-2xl border border-[#eee6d7] p-2">
+                  {verses.map(v => (
+                    <article
+                      key={v.number}
+                      className={
+                        'rounded-xl border p-3 ' +
+                        (v.number >= start && v.number <= end
+                          ? 'border-[#cdb57e] bg-[#fcf7e9]'
+                          : 'border-[#eee9df] bg-white')
+                      }
                     >
-                      {QARIS.map(r => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      <p
+                        className="text-center text-xl leading-[2.5]"
+                        style={{
+                          fontFamily:
+                            '"Amiri Quran",Amiri,serif',
+                        }}
+                      >
+                        {v.text}{' '}
+                        <span className="text-[#a18349]">
+                          ﴿{ar(v.number)}﴾
+                        </span>
+                      </p>
 
-                  <label className="block text-sm font-bold">
-                    الترجمة
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          className={
+                            start === v.number
+                              ? primary
+                              : secondary
+                          }
+                          disabled={active}
+                          onClick={() =>
+                            chooseStart(v.number)
+                          }
+                        >
+                          بداية
+                        </button>
 
-                    <select
-                      className={input}
-                      value={translation}
-                      onChange={e => {
-                        setTranslation(e.target.value)
-                        invalidate()
-                      }}
-                    >
-                      <option value="none">بدون ترجمة</option>
-                      <option value="en.sahih">الإنجليزية</option>
-                      <option value="fr.hamidullah">الفرنسية</option>
-                    </select>
-                  </label>
-                </fieldset>
-
-                <p className="mt-4 text-xs text-[#8a8a7e]">
-                  رواية حفص · حتى 10 آيات · أقل من 90 ثانية
-                </p>
+                        <button
+                          className={
+                            end === v.number
+                              ? primary
+                              : secondary
+                          }
+                          disabled={active}
+                          onClick={() =>
+                            chooseEnd(v.number)
+                          }
+                        >
+                          نهاية
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
 
                 <button
-                  className={`${mainButton} mt-5 w-full`}
-                  disabled={locked || surahs.length !== 114}
+                  className={primary + ' mt-5 w-full'}
+                  disabled={
+                    active ||
+                    verseLoading ||
+                    !selected.length
+                  }
                   onClick={() => void prepare()}
                 >
                   {busy === 'prepare' ? (
-                    <Loader2 size={18} className="animate-spin" />
+                    <Loader2
+                      size={17}
+                      className="animate-spin"
+                    />
                   ) : (
-                    <Volume2 size={18} />
+                    <Volume2 size={17} />
                   )}
 
                   {busy === 'prepare'
                     ? status
-                    : 'تجهيز الآيات والتلاوة'}
-                </button>
-
-                <button
-                  className={`${secondaryButton} mt-3 w-full`}
-                  disabled={locked}
-                  onClick={() => setStep(1)}
-                >
-                  رجوع إلى المشاهد
+                    : 'تجهيز التلاوة ومعاينة الآيات'}
                 </button>
               </div>
             )}
 
-            {step === 3 && render && (
-              <div className="space-y-4">
-                <div className={panel}>
-                  <h2 className="text-xl font-extrabold">
-                    تخصيص الفيديو
-                  </h2>
+            {step === 3 && prepared && (
+              <div className={panel + ' space-y-4'}>
+                <h2 className="text-xl font-extrabold">
+                  المعاينة والتصدير
+                </h2>
 
-                  <p className="mt-2 text-sm text-[#738174]">
-                    {surahItem?.name} ·{' '}
-                    {QARIS.find(r => r.id === qari)?.name}
-                    {' · '}{timeString(render.duration)}
-                  </p>
+                <p className="text-sm text-[#7b8478]">
+                  سورة {chapter?.name} · {ar(start)}
+                  {' '}إلى {ar(end)} ·{' '}
+                  {timerLabel(prepared.duration)}
+                </p>
 
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <label className="text-xs font-bold">
-                      مقاس الفيديو
+                <label className="block text-sm font-bold">
+                  مقاس الفيديو
+                  <select
+                    className={input}
+                    disabled={active}
+                    value={ratio}
+                    onChange={e => {
+                      setRatio(
+                        e.target.value as typeof ratio
+                      )
+                      clearResult()
+                    }}
+                  >
+                    <option value="9:16">عمودي 9:16</option>
+                    <option value="1:1">مربع 1:1</option>
+                    <option value="16:9">أفقي 16:9</option>
+                  </select>
+                </label>
 
-                      <select
-                        className={input}
-                        value={ratio}
-                        onChange={e => {
-                          setRatio(e.target.value)
-                          resetResult()
-                        }}
-                      >
-                        <option value="9:16">عمودي 9:16</option>
-                        <option value="1:1">مربع 1:1</option>
-                        <option value="16:9">أفقي 16:9</option>
-                      </select>
-                    </label>
+                <label className="block text-sm font-bold">
+                  الدقة
+                  <select
+                    className={input}
+                    value={quality}
+                    disabled={active}
+                    onChange={e => {
+                      setQuality(
+                        Number(e.target.value)
+                      )
+                      clearResult()
+                    }}
+                  >
+                    <option value={720}>720p</option>
+                    <option value={1080}>1080p</option>
+                  </select>
+                </label>
 
-                    <label className="text-xs font-bold">
-                      جودة الفيديو
+                <label className="block text-sm font-bold">
+                  تعتيم الخلفية: {ar(shade)}٪
+                  <input
+                    className="mt-3 w-full accent-[#ad8b4d]"
+                    type="range"
+                    min={10}
+                    max={80}
+                    value={shade}
+                    disabled={active}
+                    onChange={e => {
+                      setShade(
+                        Number(e.target.value)
+                      )
+                      clearResult()
+                    }}
+                  />
+                </label>
 
-                      <select
-                        className={input}
-                        value={quality}
-                        onChange={e => {
-                          setQuality(Number(e.target.value))
-                          resetResult()
-                        }}
-                      >
-                        <option value={720}>720p</option>
-                        <option value={1080}>1080p</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <label className="mt-4 block text-sm font-bold">
-                    تعتيم الخلفية: {digits(dim)}٪
-
-                    <input
-                      type="range"
-                      min={0}
-                      max={80}
-                      value={dim}
-                      onChange={e => {
-                        setDim(Number(e.target.value))
-                        resetResult()
-                      }}
-                      className="mt-2 w-full accent-[#aa8c51]"
-                    />
-                  </label>
-
-                  <label className="mt-4 block text-sm font-bold">
-                    حجم الخط: {digits(fontSize)}
-
-                    <input
-                      type="range"
-                      min={28}
-                      max={85}
-                      value={fontSize}
-                      onChange={e => {
-                        setFontSize(Number(e.target.value))
-                        resetResult()
-                      }}
-                      className="mt-2 w-full accent-[#aa8c51]"
-                    />
-                  </label>
-
-                  <label className="mt-4 block text-sm font-bold">
-                    لون القرآن
-
-                    <input
-                      type="color"
-                      value={color}
-                      onChange={e => {
-                        setColor(e.target.value)
-                        resetResult()
-                      }}
-                      className="mt-2 block h-11 w-full"
-                    />
-                  </label>
-
-                  <label className="mt-4 block text-sm font-bold">
-                    توقيع الفيديو
-
-                    <input
-                      className={input}
-                      value={signature}
-                      maxLength={45}
-                      onChange={e => {
-                        setSignature(e.target.value)
-                        resetResult()
-                      }}
-                    />
-                  </label>
-                </div>
+                <label className="block text-sm font-bold">
+                  التوقيع
+                  <input
+                    className={input}
+                    value={signature}
+                    maxLength={45}
+                    disabled={active}
+                    onChange={e => {
+                      setSignature(e.target.value)
+                      clearResult()
+                    }}
+                  />
+                </label>
 
                 {busy === 'export' ? (
-                  <div className={panel} role="status">
-                    <div className="flex justify-between text-sm font-bold">
-                      <span>{status}</span>
-                      <span>{digits(progress)}٪</span>
-                    </div>
-
-                    <progress
-                      value={progress}
-                      max={100}
-                      className="mt-4 w-full accent-[#947640]"
-                    />
-
-                    <p className="mt-2 text-xs text-[#85877e]">
-                      اترك الصفحة مفتوحة حتى يكتمل الفيديو.
+                  <div role="status" className="space-y-3">
+                    <p className="text-sm">
+                      جارٍ إنشاء الفيديو: {ar(progress)}٪
                     </p>
 
+                    <progress
+                      className="w-full accent-[#a68c57]"
+                      max={100}
+                      value={progress}
+                    />
+
                     <button
-                      onClick={() => exporter.current?.cancel()}
-                      className={`${secondaryButton} mt-3 w-full`}
+                      className={secondary + ' w-full'}
+                      onClick={() =>
+                        stopExportRef.current?.()
+                      }
                     >
-                      إلغاء الإنشاء
+                      إلغاء التصدير
                     </button>
                   </div>
                 ) : (
                   <button
-                    className={`${mainButton} w-full`}
-                    disabled={mediaStatus !== 'ready'}
-                    onClick={() => void exportVideo()}
+                    className={primary + ' w-full'}
+                    disabled={!backgroundReady}
+                    onClick={() =>
+                      void exportVideo()
+                    }
                   >
-                    <Film size={18} />
-                    إنشاء الفيديو المتحرك
+                    <Film size={17} />
+                    إنشاء فيديو بالمنظر الطبيعي والتلاوة
                   </button>
                 )}
 
+                {!backgroundReady && (
+                  <p className="text-xs leading-6 text-[#936f33]">
+                    الخلفية لم تُضاف بعد. ارجع للقوالب
+                    ونزّل المقطع الأصلي واستورده،
+                    أو ارفع ملف MP4 إلى المستودع.
+                  </p>
+                )}
+
                 {result && (
-                  <div className={panel}>
-                    <h3 className="mb-3 font-bold">
-                      الفيديو جاهز
-                    </h3>
+                  <div className="space-y-3">
+                    <p className="font-bold">
+                      تم إنشاء الفيديو
+                    </p>
 
                     <video
-                      key={result.url}
                       src={result.url}
-                      controls
                       playsInline
+                      controls
                       className="max-h-80 w-full rounded-2xl bg-black"
                     />
 
-                    <div className="mt-3 flex gap-2">
+                    <div className="flex gap-2">
                       <a
                         href={result.url}
-                        download={result.name}
-                        className={`${mainButton} flex-1`}
+                        download={result.filename}
+                        className={primary + ' flex-1'}
                       >
                         <Download size={17} />
                         تنزيل
                       </a>
 
                       <button
-                        className={secondaryButton}
-                        onClick={() => void share()}
+                        className={secondary}
+                        onClick={() =>
+                          void shareVideo()
+                        }
                       >
                         <Share2 size={17} />
                         مشاركة
@@ -1705,73 +1757,61 @@ export default function VisualAyahsPage() {
                 )}
 
                 <button
-                  className={`${secondaryButton} w-full`}
-                  disabled={locked}
+                  className={secondary + ' w-full'}
+                  disabled={active}
                   onClick={() => setStep(2)}
                 >
-                  تغيير السورة أو القارئ
+                  تغيير الآيات
                 </button>
               </div>
             )}
           </section>
 
           <aside className="order-1 lg:order-2 lg:sticky lg:top-4">
-            <div className="mb-2 flex justify-between">
-              <strong className="text-sm">
-                المعاينة المباشرة
-              </strong>
-              <span className="text-xs text-[#7a8578]">
-                {file ? file.name : scene.name}
+            <div className="mb-2 flex items-center justify-between text-sm">
+              <b>معاينة حية</b>
+              <span className="text-xs text-[#778176]">
+                {scene.name}
               </span>
             </div>
 
             <div
-              className="relative mx-auto max-w-[330px] overflow-hidden rounded-[24px] bg-[#163c38] shadow-lg"
-              style={{ aspectRatio: ratioStyle }}
+              className="relative mx-auto max-w-[330px] overflow-hidden rounded-[25px] bg-[#143b34] shadow-lg"
+              style={{ aspectRatio: aspect }}
             >
-              <canvas
-                ref={canvasRef}
-                className="absolute inset-0 h-full w-full"
-                aria-label="معاينة الآيات مع مشهد طبيعي متحرك"
-              />
-
               <video
                 ref={videoRef}
                 muted
-                playsInline
                 loop
-                preload="none"
+                playsInline
+                preload="auto"
+                className="absolute inset-0 h-full w-full object-cover"
                 aria-hidden="true"
-                className="pointer-events-none absolute h-px w-px opacity-0"
               />
 
-              {mediaStatus === 'loading' && (
-                <div className="absolute inset-x-4 bottom-4 flex items-center justify-center gap-2 rounded-xl bg-black/65 p-3 text-center text-xs text-white">
-                  <Loader2
-                    className="animate-spin"
-                    size={15}
-                  />
-                  {mediaMessage}
-                </div>
-              )}
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 h-full w-full"
+                aria-label="معاينة الآية فوق الخلفية المتحركة"
+              />
 
-              {mediaStatus === 'error' && (
-                <div className="absolute inset-x-3 bottom-3 rounded-xl bg-black/75 p-3 text-center text-xs leading-6 text-white">
-                  {mediaMessage}
-
-                  <p className="mt-1 text-amber-100">
-                    اختر مشهدًا آخر أو ارفع مقطعًا من جهازك.
-                  </p>
+              {!backgroundReady && (
+                <div
+                  role="status"
+                  className="absolute inset-x-3 bottom-3 rounded-xl bg-black/75 px-4 py-3 text-center text-xs leading-6 text-white"
+                >
+                  {backgroundStatus ||
+                    'الخلفية غير مثبتة. اختر ملف الفيديو من Mixkit.'}
                 </div>
               )}
             </div>
 
-            {render && (
-              <div className="mx-auto mt-3 flex max-w-[330px] items-center gap-3 rounded-2xl bg-white p-3 shadow-sm">
+            {prepared && (
+              <div className="mx-auto mt-3 flex max-w-[330px] items-center gap-2 rounded-2xl bg-white p-3">
                 <button
-                  className="flex h-11 w-11 items-center justify-center rounded-full bg-[#285644] text-white"
-                  onClick={() => void toggleAudio()}
-                  disabled={locked}
+                  className="rounded-full bg-[#245343] p-3 text-white disabled:opacity-40"
+                  disabled={active}
+                  onClick={() => void playPause()}
                   aria-label={
                     playing
                       ? 'إيقاف التلاوة'
@@ -1779,60 +1819,60 @@ export default function VisualAyahsPage() {
                   }
                 >
                   {playing
-                    ? <Pause size={19} />
-                    : <Play size={19} />}
+                    ? <Pause size={17} />
+                    : <Play size={17} />}
                 </button>
 
                 <div className="flex-1">
                   <progress
+                    className="w-full accent-[#a8884b]"
+                    max={prepared.duration}
                     value={position}
-                    max={render.duration}
-                    className="h-1 w-full accent-[#aa8b51]"
                   />
 
                   <p
-                    className="mt-1 text-center text-xs text-[#818578]"
                     dir="ltr"
+                    className="text-center text-[11px]"
                   >
-                    {timeString(position)}
+                    {timerLabel(position)}
                     {' / '}
-                    {timeString(render.duration)}
+                    {timerLabel(prepared.duration)}
                   </p>
                 </div>
 
                 <button
-                  className="p-2 text-[#68816e]"
-                  aria-label="إعادة"
-                  onClick={() => stop(true)}
+                  className="p-2"
+                  aria-label="إعادة التلاوة"
+                  onClick={() => stopAudio(true)}
                 >
                   <RefreshCcw size={17} />
                 </button>
               </div>
             )}
 
-            {clip && (
-              <p className="mt-3 text-center text-[11px] leading-6 text-[#7c8177]">
-                فيديو مرخّص من {clip.provider}: {clip.license}
-                {' · '}{clip.artist}
-                {' — '}
-                <a
-                  href={clip.source}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  مصدر الفيديو وترخيصه
-                </a>
-              </p>
+            {!backgroundReady && (
+              <a
+                href={scene.source}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={secondary + ' mt-3 w-full'}
+              >
+                <ExternalLink size={17} />
+                تنزيل مشهد «{scene.name}» من Mixkit
+              </a>
             )}
 
-            <p className="mx-auto mt-3 max-w-[330px] text-center text-[11px] leading-6 text-[#7c8376]">
-              {videoActive
-                ? 'الخلفية فيديو طبيعي متحرك فعليًا، وليست صورة ثابتة.'
-                : 'المشهد المعروض مؤقت حتى تحميل الفيديو الطبيعي.'}
+            <p className="mt-3 text-center text-[11px] leading-6 text-[#788577]">
+              الخلفية صامتة. صوت المقطع النهائي هو التلاوة فقط،
+              بلا موسيقى.
             </p>
           </aside>
         </div>
+
+        <footer className="mt-10 text-center text-xs leading-6 text-[#83887e]">
+          الفيديوهات: Mixkit · الآيات: AlQuran.cloud ·
+          الأصوات: EveryAyah
+        </footer>
       </div>
     </main>
   )
