@@ -24,7 +24,7 @@ const extras: SunniLibraryBook[] = [
 const YT = (id: string) => `https://www.youtube.com/playlist?list=${id}`
 // These are real source pages/playlists, never generated search links.
 const resources: Record<string, Partial<LearningCourse>> = {
-  'aq-lumat': { downloadUrl: 'https://d1.islamhouse.com/data/ar/ih_books/single/ar_Lomat_AlAatakad_AlHady_Ela_Sabeel_AlRashad.pdf', videoUrl: YT('PLabBqCjtdZ0GuYbsA97BTc5o4mhMfMoXM'), videoAuthor: 'صالح آل الشيخ', audioSourceUrl: 'https://islamhouse.com/ar/audios/312573/' },
+  'aq-lumat': { downloadUrl: 'https://shamela.org/gen/05e3690ce9c945c6867887ca83f912aa_gen.pdf?download=1', videoUrl: YT('PLabBqCjtdZ0GuYbsA97BTc5o4mhMfMoXM'), videoAuthor: 'صالح آل الشيخ', audioSourceUrl: 'https://islamhouse.com/ar/audios/312573/' },
   'fiqh-mulakhkhas': { downloadUrl: 'https://d1.islamhouse.com/data/ar/ih_books/single_01/ar_Fiqh_Summary.pdf', videoUrl: YT('PL3523jgHxjkY2hy-9-YqgbS3yzGhQkmuq') },
   'seerah-raheeq': { videoUrl: YT('PLQI-l5kqLXsaVs1q5_4pnq7bKB-yYoYeW'), videoAuthor: 'عبد الرحمن العجلان' },
   'usul-tafsir-hisan': { videoUrl: YT('PLpl0y8qVS70S5DK8ag-dEZqjskIITryOG'), audioSourceUrl: 'https://www.al-badr.net/sub/101' },
@@ -49,7 +49,7 @@ const resources: Record<string, Partial<LearningCourse>> = {
   'hadith-riyad': { videoUrl: YT('PLXS0usquloW9kO9XISmGQbdKHoap4EQPX'), audioSourceUrl: 'https://audio.islamweb.net/AUDIO/index.php?page=lecview&sid=162&lg=118' },
 }
 const pdfEditions: Record<string, string> = {
-  "aq-lumat": "https://d1.islamhouse.com/data/ar/ih_books/single/ar_Lomat_AlAatakad_AlHady_Ela_Sabeel_AlRashad.pdf",
+  "aq-lumat": "https://shamela.org/gen/05e3690ce9c945c6867887ca83f912aa_gen.pdf?download=1",
   "fiqh-mulakhkhas": "https://d1.islamhouse.com/data/ar/ih_books/single_01/ar_Fiqh_Summary.pdf",
   "seerah-raheeq": "https://assets.usul.ai/pdfs/iH_Ka_GPe8.pdf",
   "usul-tafsir-hisan": "https://d1.islamhouse.com/data/ar/ih_books/single2/ar_alhasan_rules.pdf",
