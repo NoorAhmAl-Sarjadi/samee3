@@ -3341,7 +3341,7 @@ export default function MushafPage() {
 
       if (
         target.closest(
-          'button, select, input, textarea, a, [data-riwaya-scroll], .samee3-top-controls, .samee3-bottom-shell, .samee3-reader-toggle, .samee3-ayah-overlay, .samee3-image-preview-overlay, .samee3-picker-menu, .samee3-search-results-overlay',
+          'button, select, input, textarea, a, [data-riwaya-pan="true"], .samee3-top-controls, .samee3-bottom-shell, .samee3-reader-toggle, .samee3-ayah-overlay, .samee3-image-preview-overlay, .samee3-picker-menu, .samee3-search-results-overlay',
         )
       ) {
         pointerStartX.current = null
@@ -3371,7 +3371,7 @@ export default function MushafPage() {
 
       // نحافظ على حركة المؤشر حتى لو خرج قليلًا من حدود الصفحة.
       // وعند البدء فوق آية نؤجل الـcapture حتى نتأكد أنها سحبة وليست ضغطة.
-      if (!ayahTarget) {
+      if (!ayahTarget && !target.closest('[data-riwaya-scroll]')) {
         try {
           event.currentTarget.setPointerCapture(event.pointerId)
         } catch {}
@@ -3408,7 +3408,7 @@ export default function MushafPage() {
       event.preventDefault()
 
       // بعد أن تتضح أنها سحبة أفقية، نأخذ pointer capture حتى لا تضيع الحركة فوق الـSVG أو خارج الصفحة.
-      if (pointerStartedOnAyahRef.current) {
+      if (pointerIdRef.current !== null) {
         try {
           event.currentTarget.setPointerCapture(event.pointerId)
         } catch {}
@@ -5788,6 +5788,7 @@ export default function MushafPage() {
                       side="single"
                       meta={baseMeta}
                       activeAyahNumber={playingAyahNumber}
+                      onNavigate={navigateTo}
                       onAyahClick={handleAyahClick}
                       onAyahPointerDown={handleAyahPointerDown}
                       onAyahPointerUp={handleAyahPointerUp}
@@ -6625,9 +6626,10 @@ type MushafPageSheetProps = {
   onAyahClick: (event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => void
   onAyahPointerDown: (event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => void
   onAyahPointerUp: () => void
+  onNavigate?: (page: number, extra: undefined, direction: 'next' | 'prev') => void
 }
 
-function MushafPageSheet({ page, data, html, side, meta, activeAyahNumber, onAyahClick, onAyahPointerDown, onAyahPointerUp }: MushafPageSheetProps) {
+function MushafPageSheet({ page, data, html, side, meta, activeAyahNumber, onAyahClick, onAyahPointerDown, onAyahPointerUp, onNavigate }: MushafPageSheetProps) {
   const isRealRiwayaImagePage = html.includes('data-samee3-real-riwaya="true"')
   const textRiwaya = html.includes('data-samee3-riwaya="sousi"') ? 'sousi' : 'bazzi'
 
@@ -6657,7 +6659,7 @@ function MushafPageSheet({ page, data, html, side, meta, activeAyahNumber, onAya
         <span className="ornament">☙</span>
       </div>
 
-      {isRealRiwayaImagePage ? <RiwayaReadablePage key={`${textRiwaya}:${page}`} data={data} riwaya={textRiwaya} page={page} activeAyahNumber={activeAyahNumber} /> : <div className="samee3-page-art samee3-ayah-interactive" dangerouslySetInnerHTML={{ __html: html }} />}
+      {isRealRiwayaImagePage ? <RiwayaReadablePage key={`${textRiwaya}:${page}`} data={data} riwaya={textRiwaya} page={page} activeAyahNumber={activeAyahNumber} onNavigate={onNavigate} /> : <div className="samee3-page-art samee3-ayah-interactive" dangerouslySetInnerHTML={{ __html: html }} />}
 
     </section>
   )
@@ -6665,7 +6667,7 @@ function MushafPageSheet({ page, data, html, side, meta, activeAyahNumber, onAya
 
 
 
-function RiwayaReadablePage({ data, riwaya, page, activeAyahNumber }: { data: PageData | null; riwaya: 'sousi' | 'bazzi'; page: number; activeAyahNumber?: number | null }) {
+function RiwayaReadablePage({ data, riwaya, page, activeAyahNumber, onNavigate }: { data: PageData | null; riwaya: 'sousi' | 'bazzi'; page: number; activeAyahNumber?: number | null; onNavigate?: MushafPageSheetProps['onNavigate'] }) {
   const [original, setOriginal] = useState(false)
   const [fontSize, setFontSize] = useState(28)
   const [zoom, setZoom] = useState(100)
@@ -6693,21 +6695,30 @@ function RiwayaReadablePage({ data, riwaya, page, activeAyahNumber }: { data: Pa
       <button type="button" aria-pressed={!original} disabled={fontFailed} onClick={() => save(false)}>قراءة واضحة</button><button type="button" aria-pressed={original} onClick={() => save(true)}>الصفحة الأصلية</button>
       <button type="button" aria-label="تصغير نص الرواية" onClick={() => original ? setZoom((n) => Math.max(100,n-20)) : save(false,Math.max(22,fontSize-2))}>−</button><button type="button" aria-label="تكبير نص الرواية" onClick={() => original ? setZoom((n) => Math.min(220,n+20)) : save(false,Math.min(42,fontSize+2))}>+</button>
     </div>
-    <div ref={scroll} data-riwaya-scroll className="samee3-riwaya-scroll" >
+    <div ref={scroll} data-riwaya-scroll data-riwaya-pan={original && zoom > 100 ? 'true' : undefined} className="samee3-riwaya-scroll" style={{ touchAction: original && zoom > 100 ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom' }}>
       {original ? <>{imageFailed ? <p role="alert">تعذر فتح الصورة. <button type="button" onClick={() => save(false)}>افتح القراءة الواضحة</button></p> : <img alt={`الصفحة الأصلية ${page} برواية ${RIWAYA_NAMES[riwaya]}`} src={`/api/mushaf-riwaya-image?riwaya=${riwaya}&page=${page}&v=5`} onError={() => setImageFailed(true)} style={{ width: `${zoom}%`, maxWidth: 'none', height: 'auto' }} draggable={false} />}<p className="samee3-original-hint">لتحديد آية وتشغيلها اختر «قراءة واضحة».</p></> : !fontReady ? <div className="flex items-center justify-center gap-2 py-8 text-sm"><Loader2 className="animate-spin" size={18} />جارٍ تجهيز خط الرواية…</div> : <div className="samee3-riwaya-flow" style={{ fontFamily: `"Samee3-${riwaya}"`, fontSize }}>
         {data?.ayahs.map((ayah, index) => <span key={ayah.key || ayah.number}>
           {(index === 0 || data.ayahs[index-1].surah?.number !== ayah.surah?.number) && ayah.numberInSurah === 1 && <><span className="samee3-flow-surah-title">سورة {getSurahName(ayah.surah?.number)}</span>{ayah.surah?.number !== 9 && !(ayah.surah?.number === 1 && riwaya === 'bazzi') && data.bismillah && <span className="samee3-flow-basmalah">{data.bismillah}</span>}</>}
           <span className={`samee3-text-ayah ${ayah.number === activeAyahNumber ? 'samee3-playing-ayah' : ''}`} data-ayah={`${ayah.surah?.number}:${ayah.numberInSurah}`} data-surah={ayah.surah?.number} data-ayah-number={ayah.numberInSurah} data-global-ayah={ayah.number} role="button" tabIndex={0} aria-label={`خيارات الآية ${ayah.numberInSurah}`} onKeyDown={(event) => { if(event.key==='Enter'||event.key===' '){event.preventDefault();event.currentTarget.click()} }}>{ayah.text} <span className="samee3-flow-ayah-number">﴿{arabicNumber(ayah.numberInSurah)}﴾</span></span>{' '}
         </span>)}
       </div>}
-    </div><style jsx global>{`
-      .samee3-reflow-stage { touch-action:pan-y pinch-zoom !important; }
+    </div>
+    {onNavigate && <nav className="samee3-riwaya-page-nav" aria-label="تقليب صفحات المصحف" onClick={(event) => event.stopPropagation()}>
+      <button type="button" disabled={page <= 1} onClick={() => onNavigate(page - 1, undefined, 'prev')}>السابقة</button>
+      <span>صفحة {arabicNumber(page)} من ٦٠٤</span>
+      <button type="button" disabled={page >= 604} onClick={() => onNavigate(page + 1, undefined, 'next')}>التالية</button>
+    </nav>}
+    <style jsx global>{`
+      .samee3-reflow-stage { touch-action:pan-x pan-y pinch-zoom !important; }
       .samee3-riwaya-readable.samee3-page-art { inset:50px 5px 50px !important; width:auto !important; display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start; border:0 !important; box-shadow:none !important; }
       .samee3-riwaya-readable::after { display:none !important; }
       .samee3-riwaya-view-tools { display:flex; align-items:center; gap:5px; padding:5px 4px 10px; font:700 11px 'Tajawal',sans-serif; }
       .samee3-riwaya-view-tools button { border:1px solid #decaa7; border-radius:9px; padding:7px 9px; background:#fffdf5; color:#856333; min-height:34px; }
       .samee3-riwaya-view-tools button[aria-pressed=true] { background:#ead9b7; }
-      .samee3-riwaya-scroll { flex:1; min-height:0; width:100%; overflow:auto; padding:8px 12px 30px; touch-action:pan-x pan-y pinch-zoom; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+      .samee3-riwaya-scroll { flex:1; min-height:0; width:100%; overflow:auto; padding:8px 12px 30px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+      .samee3-riwaya-page-nav { display:flex; flex-shrink:0; justify-content:space-between; align-items:center; gap:8px; padding:8px 4px 0; font:700 12px 'Tajawal',sans-serif; color:#856333; }
+      .samee3-riwaya-page-nav button { min-height:40px; padding:8px 16px; border:1px solid #decaa7; border-radius:12px; background:#fffdf5; }
+      .samee3-riwaya-page-nav button:disabled { opacity:.35; }
       .samee3-riwaya-flow { text-align:justify; text-align-last:center; line-height:2.15; direction:rtl; color:#192821; overflow-wrap:normal; }
       .samee3-flow-surah-title { display:block; font:700 21px 'Amiri',serif; text-align:center; padding:6px 0 16px; color:#936b35; }
       .samee3-flow-basmalah { display:block; text-align:center; margin:4px 0 14px; }
