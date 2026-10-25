@@ -137,6 +137,7 @@ export default function VisualAyahsPage() {
           className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#35695b] px-3 text-xs font-bold text-white"
         >
           <ExternalLink size={17} />
+
           <span className="hidden sm:inline">
             فتح مستقل
           </span>
@@ -187,6 +188,7 @@ export default function VisualAyahsPage() {
               size={28}
               className="animate-spin"
             />
+
             جارٍ فتح محرر GT-SQR…
           </div>
         )}
