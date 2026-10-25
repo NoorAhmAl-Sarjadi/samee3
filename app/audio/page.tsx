@@ -1,5 +1,6 @@
 'use client'
 
+import { useAudioContinuity } from '@/lib/use-audio-continuity'
 import { KHUTBAH_SCHOLARS, libraryAudioSource } from '@/lib/audio-catalog'
 import {
   useCallback,
@@ -788,6 +789,9 @@ export default function AudioPage() {
     window.setTimeout(() => setToast(''), 2800)
   }, [])
 
+  useAudioContinuity(audioRef, notify)
+  const contextReady = useRef(false)
+
   const loadOfflineIndex = useCallback(async () => {
     const requestId = ++indexRequestRef.current
     const records = await listOffline().catch(() => [] as OfflineRecord[])
@@ -954,30 +958,40 @@ export default function AudioPage() {
   useEffect(() => {
     void loadBaseLibrary()
     void loadOfflineIndex()
-  }, [loadBaseLibrary, loadOfflineIndex])
+    try {
+      const saved = JSON.parse(localStorage.getItem('samee3_audio_view_v2') || '{}')
+      if (['ruqyah', 'khutbah', 'sunnah'].includes(saved.tab)) {
+        const tab = saved.tab as Exclude<TabKey, 'quran'>
+        const scholar = KHUTBAH_SCHOLARS.some((item) => item.id === saved.scholar) ? saved.scholar as string : ''
+        const book = typeof saved.book === 'string' ? saved.book : null
+        setActiveTab(tab); setKhutbahScholarId(scholar); setSelectedSunnahBookId(book)
+        void loadLibraryContent(tab, tab === 'khutbah' ? scholar || undefined : tab === 'sunnah' ? book || undefined : undefined)
+      }
+    } catch {}
+    contextReady.current = true
+  }, [loadBaseLibrary, loadOfflineIndex, loadLibraryContent])
+
+  useEffect(() => {
+    if (!contextReady.current) return
+    try { localStorage.setItem('samee3_audio_view_v2', JSON.stringify({ tab: activeTab, scholar: khutbahScholarId, book: selectedSunnahBookId })) } catch {}
+  }, [activeTab, khutbahScholarId, selectedSunnahBookId])
 
   useEffect(() => {
     const update = () => {
       const offline = navigator.onLine === false
       setIsOffline(offline)
       if (offline) setShowSaved(true)
-      void loadOfflineIndex()
     }
-    const visible = () => { if (document.visibilityState === 'visible') update() }
     update()
     window.addEventListener('online', update)
     window.addEventListener('offline', update)
-    window.addEventListener('focus', update)
-    document.addEventListener('visibilitychange', visible)
     return () => {
       window.removeEventListener('online', update)
       window.removeEventListener('offline', update)
-      window.removeEventListener('focus', update)
-      document.removeEventListener('visibilitychange', visible)
       indexRequestRef.current += 1
       libraryRequestRef.current += 1
     }
-  }, [loadOfflineIndex])
+  }, [])
 
   useEffect(() => {
     if (!selectedRiwaya) return
@@ -1201,7 +1215,8 @@ export default function AudioPage() {
          * تحريك شريط الصوت. هذه الـeffect تعمل فقط عند تغيير الملف نفسه.
          */
         currentAudio.pause()
-        currentAudio.src = savedBlob ? source : libraryAudioSource(source)
+        const playbackSource = libraryAudioSource(source)
+        currentAudio.src = savedBlob ? source : playbackSource.startsWith('/api/audio-proxy?') ? `${playbackSource}&stream=1` : playbackSource
         currentAudio.load()
 
         const playNow = async () => {
@@ -1254,7 +1269,7 @@ export default function AudioPage() {
     const audio = audioRef.current
     if (!audio) return
 
-    const handleTimeUpdate = () => setProgress(audio.currentTime || 0)
+    const handleTimeUpdate = () => setProgress((old) => Math.floor(old) === Math.floor(audio.currentTime || 0) ? old : audio.currentTime || 0)
     const handleLoadedMetadata = () =>
       setDuration(Number.isFinite(audio.duration) ? audio.duration : 0)
     const handlePlay = () => setIsPlaying(true)
@@ -1287,10 +1302,7 @@ export default function AudioPage() {
       setProgress(0)
     }
 
-    const handleError = () => {
-      setIsPlaying(false)
-      notify('تعذر تشغيل هذا الملف. جرّب مصدرًا آخر.')
-    }
+    const handleError = () => setIsPlaying(false)
 
     audio.addEventListener('timeupdate', handleTimeUpdate)
     audio.addEventListener('loadedmetadata', handleLoadedMetadata)
@@ -1420,6 +1432,8 @@ export default function AudioPage() {
   const togglePlayer = async () => {
     const audio = audioRef.current
     if (!audio || !player) return
+
+    if (audio.error) { audio.dispatchEvent(new Event('samee3-audio-retry')); return }
 
     if (audio.paused) {
       await audio.play().catch(() => {})
