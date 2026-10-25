@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   Bell,
   Headphones,
+  Clapperboard,
   LibraryBig,
   MessageCircle,
   type LucideIcon,
@@ -32,43 +33,81 @@ interface ReadingProgress {
   lastReadMoshafId?: number
 }
 
-// نفس المفاتيح التي تكتبها صفحة المصحف الحالية؛ لا نغيّر تنزيلات المستخدم.
 const READING_KEY = 'samee3_persistent_reading_v2'
 const AUDIO_KEY = 'samee3_persistent_audio_v2'
 const ACCOUNT_PROGRESS_PREFIX = 'samee3_home_account_progress_v1:'
-const RIWAYAT = ['hafs', 'warsh', 'qalun', 'douri', 'shubah', 'sousi', 'bazzi']
+
+const RIWAYAT = [
+  'hafs',
+  'warsh',
+  'qalun',
+  'douri',
+  'shubah',
+  'sousi',
+  'bazzi',
+]
 
 type StoredObject = Record<string, unknown>
 
 function asObject(value: unknown): StoredObject | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+  return value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
     ? (value as StoredObject)
     : null
 }
 
-function positiveInteger(value: unknown, max = Number.MAX_SAFE_INTEGER): number | undefined {
-  if (typeof value !== 'number' && typeof value !== 'string') return undefined
-  if (typeof value === 'string' && !value.trim()) return undefined
+function positiveInteger(
+  value: unknown,
+  max = Number.MAX_SAFE_INTEGER,
+): number | undefined {
+  if (
+    typeof value !== 'number' &&
+    typeof value !== 'string'
+  ) {
+    return undefined
+  }
+
+  if (typeof value === 'string' && !value.trim()) {
+    return undefined
+  }
+
   const number = Number(value)
-  return Number.isSafeInteger(number) && number >= 1 && number <= max
+
+  return Number.isSafeInteger(number) &&
+    number >= 1 &&
+    number <= max
     ? number
     : undefined
 }
 
 function textValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+  return typeof value === 'string' && value.trim()
+    ? value.trim()
+    : undefined
 }
 
 function riwayaValue(value: unknown): string | undefined {
-  return typeof value === 'string' && RIWAYAT.includes(value) ? value : undefined
+  return typeof value === 'string' && RIWAYAT.includes(value)
+    ? value
+    : undefined
 }
 
 function ayahKeyValue(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !/^\d{1,3}:\d{1,3}$/.test(value)) return undefined
+  if (
+    typeof value !== 'string' ||
+    !/^\d{1,3}:\d{1,3}$/.test(value)
+  ) {
+    return undefined
+  }
+
   const [surah, ayah] = value.split(':')
   const surahNumber = positiveInteger(surah, 114)
   const ayahNumber = positiveInteger(ayah, 286)
-  return surahNumber && ayahNumber ? `${surahNumber}:${ayahNumber}` : undefined
+
+  return surahNumber && ayahNumber
+    ? `${surahNumber}:${ayahNumber}`
+    : undefined
 }
 
 function readStoredObject(key: string): StoredObject | null {
@@ -76,86 +115,146 @@ function readStoredObject(key: string): StoredObject | null {
     const value = window.localStorage.getItem(key)
     return value ? asObject(JSON.parse(value)) : null
   } catch {
-    // منع التخزين أو تلف قيمة قديمة لا يعطّل الصفحة.
     return null
   }
 }
 
-function normalizeAccountProgress(value: unknown): ReadingProgress | null {
+function normalizeAccountProgress(
+  value: unknown,
+): ReadingProgress | null {
   const data = asObject(value)
   if (!data) return null
+
   const page = positiveInteger(data.lastReadPage, 604)
   if (!page) return null
+
   const reciterId = positiveInteger(data.lastReadReciterId)
+
   return {
     lastReadPage: page,
     lastReadRiwayaId: riwayaValue(data.lastReadRiwayaId),
-    lastReadSurahNumber: positiveInteger(data.lastReadSurahNumber, 114),
+    lastReadSurahNumber: positiveInteger(
+      data.lastReadSurahNumber,
+      114,
+    ),
     lastReadSurahName: textValue(data.lastReadSurahName),
     lastReadJuz: positiveInteger(data.lastReadJuz, 30),
     lastReadAyahKey: ayahKeyValue(data.lastReadAyahKey),
-    lastReadReciterId: reciterId ? String(reciterId) : undefined,
+    lastReadReciterId: reciterId
+      ? String(reciterId)
+      : undefined,
     lastReadReciterName: textValue(data.lastReadReciterName),
     lastReadMoshafId: positiveInteger(data.lastReadMoshafId),
   }
 }
 
 function readDeviceProgress(): ReadingProgress | null {
-  // موضع القراءة هو المرجع الأول. حالة الصوت بديل فقط إذا غاب موضع القراءة.
-  // هذه بيانات الجهاز المشتركة بالفعل في صفحة المصحف، وليست بيانات حساب آخر.
   for (const key of [READING_KEY, AUDIO_KEY]) {
     const data = readStoredObject(key)
     if (!data) continue
+
     const page = positiveInteger(data.page, 604)
     if (!page) continue
+
     const surah = positiveInteger(data.surah, 114)
     const ayah = positiveInteger(data.ayah, 286)
     const reciterId = positiveInteger(data.reciterId)
+
     return {
       lastReadPage: page,
       lastReadRiwayaId: riwayaValue(data.riwaya),
       lastReadSurahNumber: surah,
-      lastReadAyahKey: surah && ayah ? `${surah}:${ayah}` : undefined,
-      lastReadReciterId: reciterId ? String(reciterId) : undefined,
+      lastReadAyahKey: surah && ayah
+        ? `${surah}:${ayah}`
+        : undefined,
+      lastReadReciterId: reciterId
+        ? String(reciterId)
+        : undefined,
       lastReadReciterName: textValue(data.reciterName),
       lastReadMoshafId: positiveInteger(data.moshafId),
     }
   }
+
   return null
 }
 
-function readAccountProgress(uid: string | undefined): ReadingProgress | null {
-  return uid ? normalizeAccountProgress(readStoredObject(`${ACCOUNT_PROGRESS_PREFIX}${uid}`)) : null
+function readAccountProgress(
+  uid: string | undefined,
+): ReadingProgress | null {
+  return uid
+    ? normalizeAccountProgress(
+      readStoredObject(`${ACCOUNT_PROGRESS_PREFIX}${uid}`),
+    )
+    : null
 }
 
-function saveAccountProgress(uid: string, progress: ReadingProgress | null) {
+function saveAccountProgress(
+  uid: string,
+  progress: ReadingProgress | null,
+) {
   try {
     const key = `${ACCOUNT_PROGRESS_PREFIX}${uid}`
-    // نحفظ موضع القراءة فقط، دون نسخ مستند المستخدم أو معلوماته الشخصية.
-    if (progress) window.localStorage.setItem(key, JSON.stringify(progress))
-    else window.localStorage.removeItem(key)
-  } catch {
-    // قد تكون مساحة التخزين ممتلئة؛ تظل البيانات متاحة في الذاكرة.
-  }
+
+    if (progress) {
+      window.localStorage.setItem(
+        key,
+        JSON.stringify(progress),
+      )
+    } else {
+      window.localStorage.removeItem(key)
+    }
+  } catch {}
 }
 
-function buildContinueHref(progress: ReadingProgress | null): string {
-  // غياب موضع مؤكد يترك لصفحة المصحف فرصة استعادة جلستها بنفسها.
+function buildContinueHref(
+  progress: ReadingProgress | null,
+): string {
   if (!progress) return '/mushaf'
-  const params = new URLSearchParams({ page: String(progress.lastReadPage) })
-  if (progress.lastReadRiwayaId) params.set('riwaya', progress.lastReadRiwayaId)
-  if (progress.lastReadReciterId) params.set('reciterId', progress.lastReadReciterId)
-  if (progress.lastReadReciterName) params.set('reciterName', progress.lastReadReciterName)
-  if (progress.lastReadMoshafId) params.set('moshafId', String(progress.lastReadMoshafId))
-  if (progress.lastReadSurahNumber) params.set('surah', String(progress.lastReadSurahNumber))
-  if (progress.lastReadAyahKey) params.set('ayah', progress.lastReadAyahKey)
+
+  const params = new URLSearchParams({
+    page: String(progress.lastReadPage),
+  })
+
+  if (progress.lastReadRiwayaId) {
+    params.set('riwaya', progress.lastReadRiwayaId)
+  }
+
+  if (progress.lastReadReciterId) {
+    params.set('reciterId', progress.lastReadReciterId)
+  }
+
+  if (progress.lastReadReciterName) {
+    params.set('reciterName', progress.lastReadReciterName)
+  }
+
+  if (progress.lastReadMoshafId) {
+    params.set(
+      'moshafId',
+      String(progress.lastReadMoshafId),
+    )
+  }
+
+  if (progress.lastReadSurahNumber) {
+    params.set(
+      'surah',
+      String(progress.lastReadSurahNumber),
+    )
+  }
+
+  if (progress.lastReadAyahKey) {
+    params.set('ayah', progress.lastReadAyahKey)
+  }
+
   return `/mushaf?${params.toString()}`
 }
 
 export default function HomePage() {
   const { user, profile } = useAuth()
   const uid = user?.uid
-  const [progress, setProgress] = useState<ReadingProgress | null>(null)
+
+  const [progress, setProgress] =
+    useState<ReadingProgress | null>(null)
+
   const [isOffline, setIsOffline] = useState(false)
 
   useEffect(() => {
@@ -165,22 +264,27 @@ export default function HomePage() {
 
     const refreshLocalProgress = () => {
       if (cancelled) return
-      // لا تستبدل استجابة سحابية متأخرة موضع القراءة المحفوظ على هذا الجهاز.
       setProgress(readDeviceProgress() ?? accountProgress)
     }
 
     const refreshAccountProgress = async () => {
       if (!uid || inFlight || cancelled) return
       inFlight = true
+
       try {
         const reference = doc(db, 'users', uid)
+
         const snapshot = navigator.onLine === false
           ? await getDocFromCache(reference)
           : await getDoc(reference)
+
         if (cancelled) return
-        // نتيجة كاش ناقصة لا تمحو آخر موضع صالح للحساب.
+
         if (snapshot.exists()) {
-          const next = normalizeAccountProgress(snapshot.data())
+          const next = normalizeAccountProgress(
+            snapshot.data(),
+          )
+
           if (next || !snapshot.metadata.fromCache) {
             accountProgress = next
             saveAccountProgress(uid, next)
@@ -189,9 +293,9 @@ export default function HomePage() {
           accountProgress = null
           saveAccountProgress(uid, null)
         }
+
         refreshLocalProgress()
       } catch {
-        // فشل الشبكة أو غياب كاش Firebase لا يوقف متابعة القراءة المحلية.
         refreshLocalProgress()
       } finally {
         inFlight = false
@@ -201,22 +305,37 @@ export default function HomePage() {
     const onConnectionChange = () => {
       setIsOffline(navigator.onLine === false)
       refreshLocalProgress()
-      if (navigator.onLine !== false) void refreshAccountProgress()
+
+      if (navigator.onLine !== false) {
+        void refreshAccountProgress()
+      }
     }
+
     const onStorage = (event: StorageEvent) => {
-      if (event.key === null || event.key === READING_KEY || event.key === AUDIO_KEY ||
-          (uid && event.key === `${ACCOUNT_PROGRESS_PREFIX}${uid}`)) {
+      if (
+        event.key === null ||
+        event.key === READING_KEY ||
+        event.key === AUDIO_KEY ||
+        (
+          uid &&
+          event.key === `${ACCOUNT_PROGRESS_PREFIX}${uid}`
+        )
+      ) {
         accountProgress = readAccountProgress(uid)
         refreshLocalProgress()
       }
     }
+
     const onVisible = () => {
-      if (document.visibilityState === 'visible') onConnectionChange()
+      if (document.visibilityState === 'visible') {
+        onConnectionChange()
+      }
     }
 
     setIsOffline(navigator.onLine === false)
     refreshLocalProgress()
     void refreshAccountProgress()
+
     window.addEventListener('online', onConnectionChange)
     window.addEventListener('offline', onConnectionChange)
     window.addEventListener('focus', onConnectionChange)
@@ -231,11 +350,18 @@ export default function HomePage() {
       window.removeEventListener('focus', onConnectionChange)
       window.removeEventListener('pageshow', onConnectionChange)
       window.removeEventListener('storage', onStorage)
-      document.removeEventListener('visibilitychange', onVisible)
+      document.removeEventListener(
+        'visibilitychange',
+        onVisible,
+      )
     }
   }, [uid])
 
-  const displayName = profile?.name?.trim() || user?.displayName?.trim() || 'يا باغي الخير'
+  const displayName =
+    profile?.name?.trim() ||
+    user?.displayName?.trim() ||
+    'يا باغي الخير'
+
   const lastPage = progress?.lastReadPage ?? 1
   const hasReadingProgress = progress !== null
   const continueHref = buildContinueHref(progress)
@@ -245,7 +371,15 @@ export default function HomePage() {
       <div className="mx-auto w-full max-w-5xl">
         <header className="mb-7 flex items-center justify-between gap-4 pt-1">
           <div className="flex min-w-0 items-center gap-3">
-            <Image src="/icon-192.png" alt="شعار مصحف سميع" width={58} height={58} priority className="h-14 w-14 shrink-0 rounded-2xl border border-[#d8bd88] shadow-sm" />
+            <Image
+              src="/icon-192.png"
+              alt="شعار مصحف سميع"
+              width={58}
+              height={58}
+              priority
+              className="h-14 w-14 shrink-0 rounded-2xl border border-[#d8bd88] shadow-sm"
+            />
+
             <div className="min-w-0">
               <p className="mb-1 text-sm font-medium text-slate-500">
                 السلام عليكم،
@@ -275,8 +409,12 @@ export default function HomePage() {
         </header>
 
         {isOffline && (
-          <div role="status" className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-7 text-amber-900">
-            أنت دون اتصال بالإنترنت. يمكنك قراءة الصفحات وتشغيل الصوتيات التي سبق حفظها على هذا الجهاز.
+          <div
+            role="status"
+            className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-7 text-amber-900"
+          >
+            أنت دون اتصال بالإنترنت. يمكنك قراءة الصفحات
+            وتشغيل الصوتيات التي سبق حفظها على هذا الجهاز.
           </div>
         )}
 
@@ -305,7 +443,9 @@ export default function HomePage() {
 
               <div className="mb-5">
                 <h2 className="mb-2 font-uthmani text-3xl leading-relaxed sm:text-4xl">
-                  {hasReadingProgress ? 'استكمال الورد' : 'ابدأ تلاوتك'}
+                  {hasReadingProgress
+                    ? 'استكمال الورد'
+                    : 'ابدأ تلاوتك'}
                 </h2>
 
                 {hasReadingProgress ? (
@@ -334,7 +474,8 @@ export default function HomePage() {
                   </div>
                 ) : (
                   <p className="text-sm font-medium leading-7 text-white/85">
-                    ابدأ رحلتك مع القرآن الكريم واختر السورة والرواية والقارئ المناسب لك.
+                    ابدأ رحلتك مع القرآن الكريم واختر السورة
+                    والرواية والقارئ المناسب لك.
                   </p>
                 )}
               </div>
@@ -343,9 +484,14 @@ export default function HomePage() {
                 href={continueHref}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-3.5 font-bold text-[var(--royal-blue)] shadow-lg transition-all duration-200 hover:-translate-y-0.5 hover:bg-slate-50 active:scale-[0.99]"
               >
-                {hasReadingProgress ? 'أكمل التلاوة' : 'فتح المصحف'}
+                {hasReadingProgress
+                  ? 'أكمل التلاوة'
+                  : 'فتح المصحف'}
 
-                <ChevronLeft size={20} strokeWidth={2.5} />
+                <ChevronLeft
+                  size={20}
+                  strokeWidth={2.5}
+                />
               </Link>
             </div>
           </div>
@@ -377,6 +523,13 @@ export default function HomePage() {
               icon={List}
               title="فهرس السور"
               description="السور والقراءات"
+            />
+
+            <QuickServiceCard
+              href="/visual-ayahs"
+              icon={Clapperboard}
+              title="آيات مرئية"
+              description="صمّم فيديو للآيات"
             />
 
             <QuickServiceCard
