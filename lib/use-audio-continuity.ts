@@ -110,6 +110,7 @@ export function useAudioContinuity(
       const time = audio.currentTime
 
       save()
+
       attempts += 1
       restoring = true
       failed = false
