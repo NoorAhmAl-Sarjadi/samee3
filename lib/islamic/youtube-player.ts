@@ -19,17 +19,33 @@ export function youtubeSource(value: unknown): { list?: string; video?: string }
     return video && /^[\w-]{11}$/.test(video) ? { video } : null
   } catch { return null }
 }
+export function youtubeError(code: number) {
+  if (code === 100) return 'الدرس محذوف أو خاص لدى الناشر. اختر درسًا آخر.'
+  if (code === 101 || code === 150) return 'الناشر يمنع تشغيل هذا الدرس داخل التطبيقات. افتحه من زر YouTube.'
+  if (code === 153) return 'YouTube لم يستقبل تعريف الموقع. افتح التطبيق في Safari أو Chrome ثم أعد المحاولة، أو افتح الدرس من زر YouTube.'
+  if (code === 2) return 'رابط الدرس غير صالح لدى YouTube.'
+  if (code === 5) return 'المتصفح لم يستطع تشغيل الفيديو. أعد المحاولة أو افتحه في YouTube.'
+  return 'تعذر الاتصال بـ YouTube. تحقق من الاتصال ثم أعد المحاولة.'
+}
 export function loadYoutubePlayer(): Promise<YoutubeAPI> {
   const win = window as Window & { YT?: YoutubeAPI; onYouTubeIframeAPIReady?: () => void }
   if (win.YT?.Player) return Promise.resolve(win.YT)
   if (loading) return loading
   loading = new Promise<YoutubeAPI>((resolve, reject) => {
+    document.getElementById('samee3-youtube-api')?.remove()
     const previous = win.onYouTubeIframeAPIReady
-    const timer = window.setTimeout(() => { loading = null; reject(new Error('تعذر الاتصال بمشغل YouTube. أعد المحاولة.')) }, 20000)
-    win.onYouTubeIframeAPIReady = () => { try { previous?.() } finally { window.clearTimeout(timer); if (win.YT?.Player) resolve(win.YT); else { loading = null; reject(new Error('تعذر تهيئة المشغل.')) } } }
-    let script = document.querySelector<HTMLScriptElement>('#samee3-youtube-api')
-    if (!script) { script = document.createElement('script'); script.id = 'samee3-youtube-api'; script.src = 'https://www.youtube.com/iframe_api'; script.async = true; document.head.append(script) }
-    script.onerror = () => { window.clearTimeout(timer); script?.remove(); loading = null; reject(new Error('تعذر تحميل مشغل YouTube.')) }
+    const script = document.createElement('script')
+    script.id = 'samee3-youtube-api'; script.src = 'https://www.youtube.com/iframe_api'; script.async = true
+    let done = false
+    const cleanup = () => { clearTimeout(timer); clearInterval(poll); script.onerror = null; if (win.onYouTubeIframeAPIReady === ready) win.onYouTubeIframeAPIReady = previous || (() => {}) }
+    const ready = () => {
+      if (done || !win.YT?.Player) return
+      done = true; cleanup(); resolve(win.YT)
+      try { previous?.() } catch {}
+    }
+    const fail = () => { if (done) return; done = true; cleanup(); script.remove(); loading = null; reject(new Error('تعذر تحميل مشغل YouTube. تحقق من الاتصال وأعد المحاولة.')) }
+    const timer = setTimeout(fail, 20000), poll = setInterval(ready, 200)
+    win.onYouTubeIframeAPIReady = ready; script.onerror = fail; document.head.append(script)
   })
   return loading
 }
