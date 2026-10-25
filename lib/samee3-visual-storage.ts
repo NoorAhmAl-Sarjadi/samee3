@@ -1,3 +1,4 @@
+
 const DB = 'samee3-visual-clips-v1'
 const STORE = 'videos'
 
