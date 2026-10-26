@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import {
   DEFAULT_VIDEO_DESIGN,
+  fontById,
   FALLBACK_SURAHS,
   FONT_OPTIONS,
   MAX_AYAH_COUNT,
@@ -99,15 +100,46 @@ function SceneCard({
   onPick: () => void
 }) {
   const [preview, setPreview] = useState(item.videoURL || '')
+  const [visible, setVisible] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  const playerRef = useRef<HTMLVideoElement | null>(null)
+
+  useEffect(() => {
+    const container = cardRef.current
+    if (!container) return
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      setVisible(entry.isIntersecting)
+    }, { rootMargin: '100px 0px', threshold: 0.01 })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const player = playerRef.current
+    if (!player) return
+    if (!visible) {
+      player.pause()
+      return
+    }
+    void player.play().catch(() => {
+      // Safari may postpone autoplay until the user interacts.
+    })
+  }, [visible, preview])
 
   useEffect(() => {
     let active = true
     let objectURL: string | null = null
+    setFailed(false)
     if (item.videoURL) {
       setPreview(item.videoURL)
       return
     }
-    if (!item.id.startsWith('local:')) return
+    if (!item.id.startsWith('local:') || !visible) return
     readClip(item.id).then(file => {
       if (!active || !file) return
       objectURL = URL.createObjectURL(file)
@@ -117,23 +149,28 @@ function SceneCard({
       active = false
       if (objectURL) URL.revokeObjectURL(objectURL)
     }
-  }, [item.id, item.videoURL])
+  }, [item.id, item.videoURL, visible])
 
   return (
     <button
       type="button"
       disabled={disabled}
       aria-pressed={selected}
-      onClick={onPick}
+      onClick={() => {
+        void playerRef.current?.play().catch(() => {})
+        onPick()
+      }}
       className={
         'overflow-hidden rounded-2xl border-2 bg-white text-right shadow-sm ' +
         (selected ? 'border-[#b79859]' : 'border-white')
       }
     >
-      <div className="relative aspect-[4/5] overflow-hidden rounded-b-none rounded-t-2xl bg-[#123]">
-        {preview ? (
+      <div ref={cardRef} className="relative aspect-[4/5] overflow-hidden rounded-b-none rounded-t-2xl bg-[#123]">
+        {preview && visible && !failed ? (
           <video
+            ref={playerRef}
             src={preview}
+            onError={() => setFailed(true)}
             muted
             loop
             autoPlay
@@ -175,6 +212,7 @@ export default function VisualAyahsPage() {
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryWarning, setGalleryWarning] = useState('')
   const [backgroundReady, setBackgroundReady] = useState(false)
+  const [backgroundPlaying, setBackgroundPlaying] = useState(false)
   const [backgroundStatus, setBackgroundStatus] = useState('')
 
   const [surahs, setSurahs] = useState<SurahInfo[]>(FALLBACK_SURAHS)
@@ -220,7 +258,7 @@ export default function VisualAyahsPage() {
 
   const chosenVerses = useMemo(() => verses.filter(v => v.number >= from && v.number <= to), [verses, from, to])
   const allScenes = useMemo(() => [...repository, ...local, ...SCENES], [repository, local])
-  const groups = useMemo(() => ['الكل', ...new Set(allScenes.map(s => s.group))], [allScenes])
+  const groups = useMemo(() => ['الكل', ...Array.from(new Set(allScenes.map(s => s.group)))], [allScenes])
   const shownScenes = useMemo(() => category === 'الكل' ? allScenes : allScenes.filter(s => s.group === category), [category, allScenes])
   const chapter = surahs.find(s => s.id === surah)
   const working = busy !== 'idle'
@@ -267,9 +305,12 @@ export default function VisualAyahsPage() {
   }, [clearResult])
 
   const applyTemplate = useCallback((preset: TemplatePreset | StoredTemplate) => {
-    const data = 'design' in preset ? preset.design : preset.design
     clearResult()
-    setDesign(old => ({ ...old, ...data, signature: old.signature || DEFAULT_VIDEO_DESIGN.signature }))
+    setDesign(previous => ({
+      ...previous,
+      ...preset.design,
+      signature: previous.signature || DEFAULT_VIDEO_DESIGN.signature,
+    }))
   }, [clearResult])
 
   const persistTemplates = useCallback((items: StoredTemplate[]) => {
@@ -357,6 +398,7 @@ export default function VisualAyahsPage() {
     video.removeAttribute('src')
     video.load()
     setBackgroundReady(false)
+    setBackgroundPlaying(false)
     setBackgroundStatus('جارٍ تحميل الخلفية…')
 
     async function openScene() {
@@ -551,7 +593,8 @@ export default function VisualAyahsPage() {
       const starts: number[] = []
       let duration = 0
 
-      for (const [index, verse] of chosenVerses.entries()) {
+      for (let index = 0; index < chosenVerses.length; index++) {
+        const verse = chosenVerses[index]
         if (id !== requestId.current) return
         setStatus(`تحميل الآية ${digits(index + 1)} من ${digits(chosenVerses.length)}`)
         const params = new URLSearchParams({ kind: 'audio', surah: String(surah), ayah: String(verse.number), reciter: reader })
@@ -645,7 +688,11 @@ export default function VisualAyahsPage() {
       'video/mp4',
       'video/webm;codecs=vp8,opus',
       'video/webm',
-    ].find(item => MediaRecorder.isTypeSupported(item)) || 'video/webm'
+    ].find(item => MediaRecorder.isTypeSupported(item))
+    if (!mime) {
+      setError('متصفحك لا يدعم التصدير بصيغة MP4 أو WebM.')
+      return
+    }
 
     setBusy('export')
     setStatus('جارٍ إنشاء الفيديو…')
@@ -653,7 +700,6 @@ export default function VisualAyahsPage() {
     clearResult()
     stopPlayback(true)
     stopGlobalAudio()
-    await context.resume()
     let tick = 0
     let timeout = 0
     let recorder: MediaRecorder | null = null
@@ -662,6 +708,12 @@ export default function VisualAyahsPage() {
     let recordedStream: MediaStream | null = null
     const nodes: AudioBufferSourceNode[] = []
     try {
+      await context.resume()
+      await Promise.all([
+        document.fonts.load(`24px ${fontById(design.quranFontId).family}`),
+        document.fonts.load(`24px ${fontById(design.uiFontId).family}`),
+      ]).catch(() => [])
+      await document.fonts.ready
       canvasStream = canvas.captureStream(30)
       destination = context.createMediaStreamDestination()
       recordedStream = new MediaStream([
@@ -798,6 +850,9 @@ export default function VisualAyahsPage() {
 
   return (
     <main dir="rtl" lang="ar" className="min-h-screen bg-[#f8f5ec] pb-32 text-[#2b4035]">
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;700&family=Almarai:wght@400;700&family=Amiri:wght@400;700&family=Amiri+Quran&family=Aref+Ruqaa:wght@400;700&family=Cairo:wght@400;700&family=El+Messiri:wght@400;700&family=IBM+Plex+Sans+Arabic:wght@400;700&family=Lateef&family=Markazi+Text:wght@400;700&family=Noto+Kufi+Arabic:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&family=Reem+Kufi:wght@400;700&family=Scheherazade+New&family=Tajawal:wght@400;700&display=swap" />
       <header className="border-b border-[#e7decf] bg-[#fffdf7] px-4 py-5">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <Link href="/" aria-label="العودة للرئيسية" className={secondary}>
@@ -922,13 +977,19 @@ export default function VisualAyahsPage() {
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <label className="text-sm font-bold">
                     من رقم الآية
-                    <select className={field} value={from} disabled={working || versesLoading} onChange={(event: ChangeEvent<HTMLSelectElement>) => setRange(Number(event.target.value), Math.max(Number(event.target.value), to))}>
+                    <select className={field} value={from} disabled={working || versesLoading} onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                      const first = Number(event.target.value)
+                      setRange(first, Math.min(Math.max(first, to), first + MAX_AYAH_COUNT - 1))
+                    }}>
                       {verseNumbers.map(number => <option key={`from-${number}`} value={number}>{digits(number)}</option>)}
                     </select>
                   </label>
                   <label className="text-sm font-bold">
                     إلى رقم الآية
-                    <select className={field} value={to} disabled={working || versesLoading} onChange={(event: ChangeEvent<HTMLSelectElement>) => setRange(from, Number(event.target.value))}>
+                    <select className={field} value={to} disabled={working || versesLoading} onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                      const last = Number(event.target.value)
+                      setRange(Math.max(1, Math.min(from, last)), last)
+                    }}>
                       {verseNumbers.map(number => <option key={`to-${number}`} value={number}>{digits(number)}</option>)}
                     </select>
                   </label>
@@ -1017,6 +1078,9 @@ export default function VisualAyahsPage() {
                   )}
                 </div>
 
+                <details className="rounded-2xl border border-[#e8e0d1] bg-[#fbfaf6] p-4">
+                  <summary className="cursor-pointer text-sm font-bold text-[#245343]">تخصيص الخطوط والألوان والإطارات وكل تفاصيل الفيديو</summary>
+                  <div className="mt-5 space-y-5">
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-sm font-bold">مقاس الفيديو
                     <select className={field} disabled={working} value={design.ratio} onChange={(event: ChangeEvent<HTMLSelectElement>) => changeDesign({ ratio: event.target.value as VideoRatio })}>
@@ -1116,6 +1180,9 @@ export default function VisualAyahsPage() {
                   <input className={field} maxLength={45} value={design.signature} onChange={(event: ChangeEvent<HTMLInputElement>) => changeDesign({ signature: event.target.value })} />
                 </label>
 
+                  </div>
+                </details>
+
                 {busy === 'export' ? (
                   <div role="status" className="space-y-3">
                     <p className="text-sm">{status} {digits(progress)}٪</p>
@@ -1148,8 +1215,13 @@ export default function VisualAyahsPage() {
               <span className="truncate text-xs text-[#758473]">{scene.name}</span>
             </div>
             <div className="relative mx-auto max-w-[340px] overflow-hidden rounded-[24px] bg-[#133a33] shadow-lg" style={{ aspectRatio: design.ratio.replace(':', ' / ') }}>
-              <video ref={videoRef} muted loop playsInline preload="auto" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
+              <video ref={videoRef} muted loop playsInline preload="auto" aria-hidden="true" onPlay={() => setBackgroundPlaying(true)} onPause={() => setBackgroundPlaying(false)} className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
               <canvas ref={canvasRef} aria-label="المعاينة القرآنية المتحركة" className="absolute inset-0 h-full w-full" />
+              {backgroundReady && !backgroundPlaying && (
+                <button type="button" className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/75 px-4 py-2 text-xs font-bold text-white" onClick={() => void videoRef.current?.play().catch(() => setError('تعذّر تشغيل الفيديو في وضع توفير الطاقة. جرّب تشغيله يدويًا بعد إغلاق وضع توفير الطاقة.'))}>
+                  <Play size={14} className="ml-1 inline" /> تشغيل الخلفية
+                </button>
+              )}
               {!backgroundReady && (
                 <p role="status" className="absolute inset-x-3 bottom-3 rounded-xl bg-black/75 px-3 py-3 text-center text-xs leading-6 text-white">
                   {backgroundStatus}
