@@ -63,7 +63,7 @@ export async function GET() {
   }
   const map = new Map<string, VideoFile>()
   for (const file of [...remote, ...local]) map.set(file.filename, file)
-  const files = [...map.values()].sort((a, b) => a.filename.localeCompare(b.filename, 'ar'))
+  const files = Array.from(map.values()).sort((a, b) => a.filename.localeCompare(b.filename, 'ar'))
   return NextResponse.json({ files, warning }, {
     headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=180' },
   })
