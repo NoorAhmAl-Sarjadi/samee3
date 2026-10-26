@@ -10,6 +10,7 @@ export type FontOption = {
 }
 
 export type FrameStyle =
+  | 'none'
   | 'classic'
   | 'double'
   | 'rounded'
@@ -42,6 +43,13 @@ export type VideoDesign = {
   readerColor: string
   signatureColor: string
   cornerRadius: number
+  titleScale: number
+  readerScale: number
+  signatureScale: number
+  verseVertical: number
+  textWidth: number
+  lineSpacing: number
+  loopFade: number
 }
 
 export type TemplatePreset = {
@@ -118,6 +126,13 @@ export const DEFAULT_VIDEO_DESIGN: VideoDesign = {
   readerColor: '#f1dfb9',
   signatureColor: '#d9bc81',
   cornerRadius: 26,
+  titleScale: 1,
+  readerScale: 1,
+  signatureScale: 1,
+  verseVertical: 49,
+  textWidth: 80,
+  lineSpacing: 1.72,
+  loopFade: 0.9,
 }
 
 export const TEMPLATE_PRESETS: TemplatePreset[] = [
@@ -139,7 +154,7 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
   { id: 't16', name: 'ثلجي', category: 'شتاء', description: 'ألوان باردة هادئة', design: { frameColor: '#b9dff3', titleColor: '#eef9ff', readerColor: '#eef9ff', signatureColor: '#b9dff3', panelColor: '#091116', panelOpacity: 33, quranFontId: 'noto-naskh', uiFontId: 'ibm-plex-arabic' } },
   { id: 't17', name: 'مخملي', category: 'ورود', description: 'ألوان دافئة ناعمة', design: { frameColor: '#e8b7aa', titleColor: '#ffe7df', readerColor: '#ffe7df', signatureColor: '#e8b7aa', panelColor: '#190d0d', panelOpacity: 39, quranFontId: 'lateef', uiFontId: 'aref-ruqaa' } },
   { id: 't18', name: 'مسجدي', category: 'رسمي', description: 'تقليدي مريح للقراءة', design: { frameStyle: 'double', frameColor: '#ddc07d', panelStyle: 'solid', panelColor: '#101814', panelOpacity: 48, quranFontId: 'scheherazade', uiFontId: 'almarai' } },
-  { id: 't19', name: 'هادئ بلا إطار', category: 'بسيط', description: 'تركيز كامل على النص', design: { frameStyle: 'top-bottom', frameWidth: 1, frameColor: '#e7cf98', panelStyle: 'none', quranFontId: 'amiri-quran', uiFontId: 'system-sans' } },
+  { id: 't19', name: 'هادئ بلا إطار', category: 'بسيط', description: 'تركيز كامل على النص', design: { frameStyle: 'none', frameWidth: 1, frameColor: '#e7cf98', panelStyle: 'none', quranFontId: 'amiri-quran', uiFontId: 'system-sans' } },
   { id: 't20', name: 'تخصيص كامل', category: 'مخصص', description: 'ابدأ منه ثم عدّل كل شيء', design: { frameStyle: 'rounded', frameColor: '#e3bf74', panelStyle: 'glass', panelColor: '#071311', panelOpacity: 30, overlayColor: '#000000', overlayOpacity: 0, quranFontId: 'amiri-quran', uiFontId: 'tajawal' } },
 ]
 
