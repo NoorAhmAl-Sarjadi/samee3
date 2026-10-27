@@ -2,302 +2,394 @@
 
 import { useEffect, type RefObject } from 'react'
 
+const POSITION_KEY = 'samee3_audio_position_v2'
+const MAX_RETRIES = 3
+
+export function attachAudioContinuity(
+  audio: HTMLAudioElement,
+  notify: (message: string) => void
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let disposed = false
+  let attempts = 0
+  let wanted = !audio.paused && !audio.ended
+  let restoring = false
+  let recovering = false
+  let previous = ''
+  let resume = 0
+  let lastSave = 0
+  let recoveryTime = 0
+  let lastPosition = 0
+  let serial = 0
+
+  const source = () => {
+    const value = audio.getAttribute('src')
+    if (!value) return ''
+
+    try {
+      const url = new URL(value, location.href)
+      url.searchParams.delete('_retry')
+      return url.href
+    } catch {
+      return ''
+    }
+  }
+
+  const stopTimer = () => {
+    clearTimeout(timer)
+    timer = undefined
+  }
+
+  const save = () => {
+    const url = source()
+    const time = restoring ? resume : audio.currentTime
+
+    if (
+      !url ||
+      url.startsWith('blob:') ||
+      !Number.isFinite(time) ||
+      time < 1
+    ) {
+      return
+    }
+
+    try {
+      localStorage.setItem(
+        POSITION_KEY,
+        JSON.stringify({ url, time, at: Date.now() })
+      )
+    } catch {}
+  }
+
+  const savedPosition = (url: string) => {
+    try {
+      const saved: unknown = JSON.parse(
+        localStorage.getItem(POSITION_KEY) || 'null'
+      )
+
+      if (!saved || typeof saved !== 'object') return 0
+
+      const row = saved as {
+        url?: unknown
+        time?: unknown
+        at?: unknown
+      }
+
+      if (
+        row.url === url &&
+        typeof row.time === 'number' &&
+        Number.isFinite(row.time) &&
+        typeof row.at === 'number' &&
+        Date.now() - row.at >= 0 &&
+        Date.now() - row.at < 86400000
+      ) {
+        return Math.max(0, row.time)
+      }
+    } catch {}
+
+    return 0
+  }
+
+  const schedule = (delay: number) => {
+    if (
+      !disposed &&
+      wanted &&
+      !timer &&
+      navigator.onLine !== false
+    ) {
+      timer = setTimeout(recover, delay)
+    }
+  }
+
+  const fail = (message: string) => {
+    wanted = false
+    restoring = false
+    recovering = false
+    stopTimer()
+    notify(message)
+  }
+
+  function recover() {
+    timer = undefined
+    const url = source()
+
+    if (
+      disposed ||
+      !wanted ||
+      audio.ended ||
+      !url ||
+      navigator.onLine === false
+    ) {
+      return
+    }
+
+    if (url.startsWith('blob:')) {
+      fail(
+        'تعذر قراءة النسخة المحفوظة. أعد حفظ هذا التسجيل أثناء الاتصال.'
+      )
+      return
+    }
+
+    if (attempts >= MAX_RETRIES) {
+      fail(
+        'المصدر لا يستجيب. اضغط تشغيل لإعادة المحاولة من نفس الموضع.'
+      )
+      return
+    }
+
+    if (
+      !restoring &&
+      Number.isFinite(audio.currentTime) &&
+      audio.currentTime > 0
+    ) {
+      resume = audio.currentTime
+    }
+
+    save()
+    attempts += 1
+    restoring = true
+    recovering = true
+    recoveryTime = Date.now()
+    serial += 1
+
+    const rate = audio.playbackRate
+
+    try {
+      const next = new URL(url)
+
+      if (
+        next.origin === location.origin &&
+        next.pathname === '/api/audio-proxy'
+      ) {
+        next.searchParams.set('_retry', String(Date.now()))
+      }
+
+      audio.src = next.href
+      audio.load()
+      audio.playbackRate = rate
+      schedule(15000)
+    } catch {
+      fail(
+        'تعذر استكمال التسجيل. اضغط تشغيل للمحاولة مجددًا.'
+      )
+    }
+  }
+
+  const restore = () => {
+    if (disposed) return
+
+    if (
+      resume > 0 &&
+      audio.readyState >= 1 &&
+      Number.isFinite(audio.duration)
+    ) {
+      if (resume < audio.duration - 2) {
+        try {
+          audio.currentTime = resume
+        } catch {
+          return
+        }
+      }
+
+      resume = 0
+    }
+
+    if (!restoring || !wanted) return
+
+    const request = serial
+    const url = source()
+
+    void audio.play().catch((error: unknown) => {
+      if (
+        disposed ||
+        request !== serial ||
+        source() !== url ||
+        !wanted
+      ) {
+        return
+      }
+
+      if (
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+      ) {
+        return
+      }
+
+      fail('اضغط تشغيل لاستكمال الصوت من نفس الموضع.')
+    })
+  }
+
+  const load = () => {
+    const current = source()
+    if (current === previous) return
+
+    serial += 1
+    previous = current
+    attempts = 0
+    restoring = false
+    recovering = false
+    resume = current ? savedPosition(current) : 0
+    lastPosition = 0
+    stopTimer()
+
+    if (!current) wanted = false
+  }
+
+  const play = () => {
+    wanted = true
+
+    // التشغيل الناتج عن الاستعادة لا يبدأ عداد المحاولات من الصفر.
+    if (!recovering) attempts = 0
+  }
+
+  const playing = () => {
+    wanted = true
+    restoring = false
+    lastPosition = audio.currentTime
+    stopTimer()
+  }
+
+  const pause = () => {
+    if (restoring || audio.error) return
+
+    wanted = false
+    serial += 1
+    stopTimer()
+    save()
+  }
+
+  const waiting = () => schedule(15000)
+
+  const progress = () => {
+    if (
+      !audio.paused &&
+      audio.currentTime > lastPosition + 0.05
+    ) {
+      lastPosition = audio.currentTime
+      stopTimer()
+
+      if (
+        recovering &&
+        Date.now() - recoveryTime >= 30000
+      ) {
+        recovering = false
+        attempts = 0
+      }
+    }
+
+    if (Date.now() - lastSave > 5000) {
+      lastSave = Date.now()
+      save()
+    }
+  }
+
+  const error = () => {
+    if (!source()) return
+
+    if (audio.error?.code === 2) {
+      stopTimer()
+
+      if (wanted) {
+        schedule(1000 * (attempts + 1))
+      }
+    } else {
+      fail(
+        'تعذر تشغيل صيغة هذا الملف أو لم يعد متاحًا لدى المصدر.'
+      )
+    }
+  }
+
+  const manualRetry = () => {
+    if (!source()) return
+
+    stopTimer()
+    attempts = 0
+    wanted = true
+
+    if (navigator.onLine === false) {
+      notify(
+        'اتصل بالإنترنت لاستكمال التسجيل غير المحفوظ.'
+      )
+      return
+    }
+
+    recover()
+  }
+
+  const online = () => schedule(500)
+
+  const offline = () => {
+    save()
+    stopTimer()
+  }
+
+  const ended = () => {
+    wanted = false
+    restoring = false
+    recovering = false
+    stopTimer()
+
+    try {
+      localStorage.removeItem(POSITION_KEY)
+    } catch {}
+  }
+
+  const events: Record<string, EventListener> = {
+    loadstart: load,
+    emptied: () => {
+      if (!source()) load()
+    },
+    loadedmetadata: restore,
+    canplay: () => {
+      if (restoring) restore()
+    },
+    play,
+    playing,
+    pause,
+    waiting,
+    stalled: waiting,
+    timeupdate: progress,
+    error,
+    ended,
+    'samee3-audio-retry': manualRetry,
+  }
+
+  load()
+
+  for (const [name, listener] of Object.entries(events)) {
+    audio.addEventListener(name, listener)
+  }
+
+  window.addEventListener('online', online)
+  window.addEventListener('offline', offline)
+  window.addEventListener('pagehide', save)
+
+  return () => {
+    save()
+    disposed = true
+    serial += 1
+    stopTimer()
+
+    for (const [name, listener] of Object.entries(events)) {
+      audio.removeEventListener(name, listener)
+    }
+
+    window.removeEventListener('online', online)
+    window.removeEventListener('offline', offline)
+    window.removeEventListener('pagehide', save)
+  }
+}
+
 export function useAudioContinuity(
   ref: RefObject<HTMLAudioElement | null>,
   notify: (message: string) => void
 ) {
   useEffect(() => {
     const audio = ref.current
-    if (!audio) return
 
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    let attempts = 0
-    let wanted = false
-    let restoring = false
-    let failed = false
-    let lastSave = 0
-    let recoveredAt = 0
-    let previous = ''
-    let resume = 0
-
-    const key = () => {
-      const url = new URL(
-        audio.currentSrc || audio.src,
-        location.href
-      )
-
-      url.searchParams.delete('_retry')
-      return url.href
-    }
-
-    const stopTimer = () => {
-      clearTimeout(timer)
-      timer = undefined
-    }
-
-    const save = () => {
-      if (
-        !audio.src ||
-        audio.src.startsWith('blob:') ||
-        !Number.isFinite(audio.currentTime) ||
-        audio.currentTime < 1
-      ) {
-        return
-      }
-
-      try {
-        localStorage.setItem(
-          'samee3_audio_position_v2',
-          JSON.stringify({
-            url: key(),
-            time: audio.currentTime,
-            at: Date.now(),
-          })
-        )
-      } catch {}
-    }
-
-    const restore = () => {
-      const position = resume
-      resume = 0
-
-      if (
-        position > 0 &&
-        Number.isFinite(audio.duration) &&
-        position < audio.duration - 2
-      ) {
-        try {
-          audio.currentTime = position
-        } catch {}
-      }
-
-      if (restoring && wanted) {
-        restoring = false
-
-        void audio.play().catch(() => {
-          wanted = false
-          notify('اضغط تشغيل لاستكمال الصوت من نفس الموضع.')
-        })
-      } else {
-        restoring = false
-      }
-    }
-
-    const recover = () => {
-      timer = undefined
-
-      if (
-        !wanted ||
-        audio.ended ||
-        !audio.src ||
-        audio.src.startsWith('blob:') ||
-        navigator.onLine === false
-      ) {
-        return
-      }
-
-      if (attempts >= 3) {
-        wanted = false
-
-        notify(
-          'المصدر لا يستجيب. اضغط تشغيل للمحاولة من نفس الموضع أو حمّل التسجيل.'
-        )
-
-        return
-      }
-
-      const time = audio.currentTime
-
-      save()
-
-      attempts += 1
-      restoring = true
-      failed = false
-      recoveredAt = Date.now()
-      resume = time
-
-      const src = new URL(audio.src, location.href)
-
-      if (src.pathname === '/api/audio-proxy') {
-        src.searchParams.set('_retry', String(Date.now()))
-      }
-
-      audio.src = src.href
-      audio.load()
-    }
-
-    const waiting = () => {
-      if (wanted && !timer) {
-        timer = setTimeout(recover, 15000)
-      }
-    }
-
-    const playing = () => {
-      wanted = true
-      restoring = false
-      stopTimer()
-    }
-
-    const pause = () => {
-      if (!restoring) {
-        wanted = false
-        stopTimer()
-        save()
-      }
-    }
-
-    const play = () => {
-      wanted = true
-
-      if (!restoring) {
-        attempts = 0
-      }
-    }
-
-    const progress = () => {
-      if (
-        !failed &&
-        !audio.paused &&
-        audio.readyState >= 3
-      ) {
-        stopTimer()
-      }
-
-      if (
-        recoveredAt &&
-        Date.now() - recoveredAt > 30000
-      ) {
-        attempts = 0
-      }
-
-      if (Date.now() - lastSave > 5000) {
-        lastSave = Date.now()
-        save()
-      }
-    }
-
-    const load = () => {
-      const current = key()
-
-      if (current === previous) {
-        return
-      }
-
-      previous = current
-      attempts = 0
-
-      if (!restoring) {
-        resume = 0
-
-        try {
-          const saved = JSON.parse(
-            localStorage.getItem(
-              'samee3_audio_position_v2'
-            ) || '{}'
-          )
-
-          if (
-            saved.url === current &&
-            Date.now() - saved.at < 86400000 &&
-            Number.isFinite(saved.time)
-          ) {
-            resume = Math.max(0, saved.time)
-          }
-        } catch {}
-      }
-    }
-
-    const error = () => {
-      if (audio.error?.code === 2) {
-        wanted = true
-        failed = true
-        stopTimer()
-
-        if (navigator.onLine !== false) {
-          timer = setTimeout(
-            recover,
-            1000 * (attempts + 1)
-          )
-        }
-      } else {
-        wanted = false
-        restoring = false
-        stopTimer()
-
-        notify(
-          'تعذر تشغيل صيغة هذا الملف أو لم يعد متاحًا لدى المصدر.'
-        )
-      }
-    }
-
-    const manualRetry = () => {
-      stopTimer()
-      attempts = 0
-      wanted = true
-
-      if (navigator.onLine === false) {
-        notify(
-          'اتصل بالإنترنت لاستكمال التسجيل غير المحفوظ.'
-        )
-        return
-      }
-
-      recover()
-    }
-
-    const online = () => {
-      if (wanted) {
-        waiting()
-      }
-    }
-
-    const ended = () => {
-      wanted = false
-      stopTimer()
-
-      try {
-        localStorage.removeItem(
-          'samee3_audio_position_v2'
-        )
-      } catch {}
-    }
-
-    const events = {
-      loadstart: load,
-      loadedmetadata: restore,
-      play,
-      playing,
-      pause,
-      waiting,
-      stalled: waiting,
-      timeupdate: progress,
-      error,
-      ended,
-      'samee3-audio-retry': manualRetry,
-    }
-
-    for (
-      const [name, listener] of Object.entries(events)
-    ) {
-      audio.addEventListener(name, listener)
-    }
-
-    window.addEventListener('online', online)
-    window.addEventListener('pagehide', save)
-
-    return () => {
-      save()
-      stopTimer()
-
-      for (
-        const [name, listener] of Object.entries(events)
-      ) {
-        audio.removeEventListener(name, listener)
-      }
-
-      window.removeEventListener('online', online)
-      window.removeEventListener('pagehide', save)
+    if (audio) {
+      return attachAudioContinuity(audio, notify)
     }
   }, [ref, notify])
 }
