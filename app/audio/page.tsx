@@ -1,6 +1,7 @@
 'use client'
 
 import { KHUTBAH_SCHOLARS, libraryAudioSource } from '@/lib/audio-catalog'
+import { bindQuranMediaSession } from '@/lib/quran/media-session'
 import {
   useCallback,
   useEffect,
@@ -116,6 +117,7 @@ type PlayerItem = {
   surahId?: number
   reciterId?: number
   riwayaId?: number
+  moshafId?: number
   libraryId?: string
   sourceName?: string
   isStream?: boolean
@@ -1218,6 +1220,7 @@ export default function AudioPage() {
       surahId: surah.id,
       reciterId: selectedReciter.id,
       riwayaId: selectedRiwaya.id,
+      moshafId: selectedMoshaf.id,
       isStream: false,
     }))
   }, [
@@ -1301,6 +1304,7 @@ export default function AudioPage() {
         currentAudio.pause()
         const playbackSource = libraryAudioSource(source)
         currentAudio.src = savedBlob ? source : playbackSource.startsWith('/api/audio-proxy?') ? `${playbackSource}&stream=1` : playbackSource
+        bindQuranMediaSession(currentAudio, currentPlayer)
         currentAudio.load()
 
         const playNow = async () => {
