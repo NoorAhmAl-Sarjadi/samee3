@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { RefreshCw, X } from 'lucide-react'
+import { APP_BUILD_ID } from '@/lib/app-version'
 
 /**
  * SAMEE3 — Service Worker registration.
@@ -18,7 +19,7 @@ import { RefreshCw, X } from 'lucide-react'
 const SW_URL = '/sw.js'
 
 const CHECK_INTERVAL_MS =
-  30 * 60 * 1000
+  60 * 1000
 
 const ACTIVATION_WAIT_MS =
   12 * 1000
@@ -290,6 +291,7 @@ export default function ServiceWorkerRegistration() {
       'online',
       onOnline,
     )
+    window.addEventListener('samee3:check-update', onOnline)
 
     window.addEventListener(
       'focus',
@@ -407,6 +409,7 @@ export default function ServiceWorkerRegistration() {
         'online',
         onOnline,
       )
+      window.removeEventListener('samee3:check-update', onOnline)
 
       window.removeEventListener(
         'focus',
@@ -421,6 +424,53 @@ export default function ServiceWorkerRegistration() {
       reloadOnActivationRef.current =
         false
     }
+  }, [])
+
+  // A website deployment can change while sw.js itself stays byte-for-byte identical.
+  // Compare the actual build ID as well; never delete Quran/audio downloads.
+  useEffect(() => {
+    if (APP_BUILD_ID === 'development') return
+    let disposed = false, checking = false, lastCheck = 0
+    const report = (message: string) => window.dispatchEvent(new CustomEvent('samee3:update-status', { detail: message }))
+    const check = async (manual = false) => {
+      if (disposed || checking || navigator.onLine === false) { if (manual) report('اتصل بالإنترنت لفحص التحديثات.'); return }
+      if (!manual && Date.now() - lastCheck < 20_000) return
+      checking = true; lastCheck = Date.now()
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), 12000)
+      try {
+        const response = await fetch('/api/app-version', { cache: 'no-store', signal: controller.signal })
+        if (!response.ok) throw new Error('Version unavailable')
+        const payload: unknown = await response.json()
+        if (disposed || !payload || typeof payload !== 'object' || !('buildId' in payload) || typeof payload.buildId !== 'string') return
+        if (payload.buildId === APP_BUILD_ID) { if (manual) report('أنت على أحدث محتوى منشور لسميع.'); return }
+        setUpdateAvailable(true)
+        if (manual) report('يوجد تحديث جديد. اضغط «تحديث التطبيق الآن» لتطبيقه.')
+        // Refresh an idle HOME immediately. An open reader/editor keeps its position until the user applies the update.
+        const playing = Array.from(document.querySelectorAll<HTMLMediaElement>('audio,video')).some((media) => !media.paused && !media.ended)
+        const focused = document.activeElement
+        const editing = focused instanceof HTMLElement && (focused.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(focused.tagName))
+        if (!manual && document.visibilityState === 'visible' && window.location.pathname === '/' && !playing && !editing) {
+          let attempted = false
+          try { attempted = sessionStorage.getItem('samee3_last_build_reload') === payload.buildId; sessionStorage.setItem('samee3_last_build_reload', payload.buildId) } catch { attempted = true }
+          if (!attempted) {
+            const worker = registrationRef.current?.waiting
+            if (worker) { reloadOnActivationRef.current = true; worker.postMessage({ type: 'SKIP_WAITING' }) }
+            else window.location.reload()
+          }
+        }
+      } catch { if (manual && !disposed) report('تعذر فحص التحديثات الآن. أعد المحاولة عند استقرار الاتصال.') }
+      finally { clearTimeout(timeout); checking = false }
+    }
+    const manual = () => { void check(true) }
+    const visible = () => { if (document.visibilityState === 'visible') void check() }
+    const initial = window.setTimeout(() => void check(), 1500)
+    const interval = window.setInterval(visible, 60_000)
+    window.addEventListener('samee3:check-update', manual)
+    window.addEventListener('online', visible)
+    window.addEventListener('focus', visible)
+    document.addEventListener('visibilitychange', visible)
+    return () => { disposed = true; clearTimeout(initial); clearInterval(interval); window.removeEventListener('samee3:check-update', manual); window.removeEventListener('online', visible); window.removeEventListener('focus', visible); document.removeEventListener('visibilitychange', visible) }
   }, [])
 
   // =====================================
@@ -495,11 +545,11 @@ export default function ServiceWorkerRegistration() {
           </p>
 
           <p className="mt-1 text-xs leading-6 text-slate-600">
-            التحديث جاهز. لن نعيد تحميل
-            الصفحة تلقائيًا حتى لا تنقطع
-            التلاوة أو التنزيلات الجارية.
-            احفظ عملك ثم حدّث التطبيق
-            في الوقت المناسب.
+            محتوى جديد جاهز. اضغط للتحديث
+            بعد حفظ عملك؛ لن نقطع جلسة
+            المصحف أو التلاوة تلقائيًا.
+            تغييرات أيقونة تطبيق أندرويد
+            المثبّت تحتاج إصدار APK جديدًا.
           </p>
 
         </div>
