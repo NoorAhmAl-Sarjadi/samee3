@@ -2,6 +2,7 @@ export const SAMEE3_AUDIO_CACHES = [
   'samee3-audio-v2',
   'samee3-v2-audio',
   'samee-audio-v2',
+  'samee3-quran-audio-v1',
 ] as const
 
 const LIBRARY_DB = 'samee-audio-library'
@@ -131,7 +132,7 @@ function catalogKeyForUrl(url: string): string | null {
   return null
 }
 
-async function readIndexedAudio(key: string): Promise<Blob | null> {
+async function readIndexedAudio(key: string, expectedUrl: string | null): Promise<Blob | null> {
   if (!key) return null
   const database = await openExistingLibrary()
   if (!database) return null
@@ -143,7 +144,8 @@ async function readIndexedAudio(key: string): Promise<Blob | null> {
       let blob: Blob | null = null
 
       request.onsuccess = () => {
-        const value = request.result as { blob?: unknown } | undefined
+        const value = request.result as { blob?: unknown; item?: { audioUrl?: string } } | undefined
+        if (value?.item?.audioUrl && expectedUrl && safeUrl(value.item.audioUrl) !== expectedUrl) return
         blob = value?.blob instanceof Blob && value.blob.size > 0
           ? value.blob : null
       }
@@ -223,7 +225,7 @@ export async function resolveOfflineAudio(
   const indexedKey = identity.key || (url ? catalogKeyForUrl(url) : null)
   if (indexedKey) {
     try {
-      const blob = await readIndexedAudio(indexedKey)
+      const blob = await readIndexedAudio(indexedKey, url)
       if (blob && blob.size <= MAX_AUDIO_BYTES) {
         const objectUrl = URL.createObjectURL(blob)
         return { src: objectUrl, objectUrl, origin: 'indexeddb', verified: true }
