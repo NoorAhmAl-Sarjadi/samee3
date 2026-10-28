@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useAndroidApp } from '@/lib/android-native'
 import { apiPrayerDate, fetchPrayerDay, locationDate, nextPrayerFromDays, parsePrayerDay, qiblaBearing, shiftPrayerDate, type PrayerDay } from '@/lib/prayer-times'
 import {
   ChevronRight,
@@ -111,6 +112,8 @@ function formatCountdown(totalSeconds: number) {
 }
 
 export default function PrayerPage() {
+  const { status: android } = useAndroidApp()
+  const calculation = useRef({ method: CALCULATION_METHOD, school: 0, timezone: '' })
   const [days, setDays] = useState<PrayerDay[]>([])
   const [now, setNow] = useState(() => new Date())
   const [loading, setLoading] = useState(true)
@@ -148,8 +151,10 @@ export default function PrayerPage() {
     const controller = new AbortController()
     controllerRef.current = controller
     setRefreshing(true); setError('')
+    const query = new URLSearchParams({ latitude: String(lat), longitude: String(lng), method: String(calculation.current.method), school: String(calculation.current.school), iso8601: 'true' })
+    if (calculation.current.timezone) query.set('timezonestring', calculation.current.timezone)
     const fetchDay = (date?: string) => fetchPrayerDay(
-      `https://api.aladhan.com/v1/timings${date ? '/' + apiPrayerDate(date) : ''}?latitude=${lat}&longitude=${lng}&method=${CALCULATION_METHOD}`,
+      `https://api.aladhan.com/v1/timings${date ? '/' + apiPrayerDate(date) : ''}?${query}`,
       controller.signal,
     )
     try {
@@ -162,7 +167,7 @@ export default function PrayerPage() {
       const next = [today, ...(tomorrow ? [tomorrow] : [])]
       setDays(next); setCoordinates({ latitude: lat, longitude: lng }); setLocationName(city)
       lastRefresh.current = actualDate
-      try { localStorage.setItem('samee3_prayer_days_v1', JSON.stringify({ days: next, latitude: lat, longitude: lng, city })) } catch {}
+      try { localStorage.setItem('samee3_prayer_days_v1', JSON.stringify({ days: next, latitude: lat, longitude: lng, city, method: calculation.current.method, school: calculation.current.school, timezone: calculation.current.timezone })) } catch {}
       if (!tomorrow) setError('مواقيت اليوم جاهزة؛ تعذر تحديث فجر الغد. أعد التحديث عند توفر الاتصال.')
     } catch (cause) {
       if (id === request.current) setError(cause instanceof Error && cause.name !== 'AbortError' ? cause.message : 'انتهت مهلة تحديث المواقيت. أعد المحاولة.')
@@ -189,7 +194,7 @@ export default function PrayerPage() {
     try {
       const saved = JSON.parse(localStorage.getItem('samee3_prayer_days_v1') || 'null')
       if (saved && Array.isArray(saved.days) && Number.isFinite(saved.latitude) && Number.isFinite(saved.longitude)) {
-        const validated = saved.days.map((day: PrayerDay) => parsePrayerDay({ code: 200, data: { timings: day.timings, meta: { timezone: day.timezone }, date: { gregorian: { date: apiPrayerDate(day.date) }, hijri: { date: day.hijri } } } }))
+        const validated = saved.days.map((day: PrayerDay) => parsePrayerDay({ code: 200, data: { timings: day.isoTimings || day.timings, meta: { timezone: day.timezone }, date: { gregorian: { date: apiPrayerDate(day.date) }, hijri: { date: day.hijri } } } }))
         if (validated.some((day: PrayerDay) => day.date === locationDate(new Date(), day.timezone))) {
           lastRefresh.current = locationDate(new Date(), validated[0].timezone)
           setDays(validated); setCoordinates({ latitude: saved.latitude, longitude: saved.longitude }); setLocationName(String(saved.city || 'الموقع المحفوظ'))
@@ -209,6 +214,22 @@ export default function PrayerPage() {
     window.addEventListener('online', network); window.addEventListener('offline', network); window.addEventListener('focus', tick)
     return () => { request.current += 1; locationRequest.current += 1; controllerRef.current?.abort(); clearInterval(interval); window.removeEventListener('online', network); window.removeEventListener('offline', network); window.removeEventListener('focus', tick) }
   }, [fetchTimings, loadCurrentLocation])
+
+  // Use the same explicitly saved native prayer location/method as the notification scheduler.
+  useEffect(() => {
+    const saved = android?.settings
+    if (!saved || !Number.isFinite(saved.latitude) || !Number.isFinite(saved.longitude)) return
+    calculation.current = { method: saved.method, school: saved.school, timezone: saved.timezone }
+    locationRequest.current += 1
+    const lat = saved.latitude!, lng = saved.longitude!
+    let matchingCache = false
+    try {
+      const cache = JSON.parse(localStorage.getItem('samee3_prayer_days_v1') || 'null')
+      matchingCache = cache?.latitude === lat && cache?.longitude === lng && cache?.method === saved.method && cache?.school === saved.school && cache?.timezone === saved.timezone
+    } catch {}
+    if (!matchingCache) setDays([])
+    void fetchTimings(lat, lng, saved.city)
+  }, [android?.settings.latitude, android?.settings.longitude, android?.settings.method, android?.settings.school, android?.settings.timezone, android?.settings.city, fetchTimings])
 
   useEffect(() => {
     if (!days.length) return
@@ -310,6 +331,8 @@ export default function PrayerPage() {
               {error}
             </div>
           )}
+
+          <Link href="/notifications" className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-mushaf-border/50 bg-white p-4 text-sm font-bold text-mushaf-teal"><Bell size={19} />ضبط تنبيهات الصلاة والإشعارات</Link>
 
           {/* بطاقة الصلاة القادمة */}
           <div className="bg-gradient-to-br from-[#175E67] to-[#0D383E] rounded-3xl p-6 shadow-xl text-white relative overflow-hidden border border-mushaf-gold/20">
