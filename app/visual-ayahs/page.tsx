@@ -1,6 +1,8 @@
 
 'use client'
 
+import { claimAudioFocus } from '@/lib/audio-focus'
+
 import {
   useCallback,
   useEffect,
@@ -154,6 +156,7 @@ async function requestJSON<T>(
 }
 
 function stopGlobalAudio() {
+  claimAudioFocus(null)
   document
     .querySelectorAll<HTMLAudioElement>('audio')
     .forEach(media => media.pause())
