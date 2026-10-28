@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { apiPrayerDate, fetchPrayerDay, locationDate, nextPrayerFromDays, parsePrayerDay, qiblaBearing, shiftPrayerDate, type PrayerDay } from '@/lib/prayer-times'
 import {
   ChevronRight,
   MapPin,
@@ -98,38 +99,6 @@ function directionName(degrees: number) {
   return directions[index]
 }
 
-function getLocationClock(timeZone?: string | null) {
-  try {
-    const formatter = new Intl.DateTimeFormat('en-GB', {
-      timeZone: timeZone || undefined,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    })
-
-    const parts = formatter.formatToParts(new Date())
-    const hour = Number(parts.find((part) => part.type === 'hour')?.value || 0)
-    const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0)
-    const second = Number(parts.find((part) => part.type === 'second')?.value || 0)
-
-    return {
-      hour,
-      minute,
-      second,
-      totalSeconds: hour * 3600 + minute * 60 + second,
-    }
-  } catch {
-    const now = new Date()
-    return {
-      hour: now.getHours(),
-      minute: now.getMinutes(),
-      second: now.getSeconds(),
-      totalSeconds: now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds(),
-    }
-  }
-}
-
 function formatCountdown(totalSeconds: number) {
   const safe = Math.max(0, totalSeconds)
   const hours = Math.floor(safe / 3600)
@@ -142,231 +111,129 @@ function formatCountdown(totalSeconds: number) {
 }
 
 export default function PrayerPage() {
-  const [timings, setTimings] = useState<Timings | null>(null)
+  const [days, setDays] = useState<PrayerDay[]>([])
+  const [now, setNow] = useState(() => new Date())
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
-  const [locationName, setLocationName] = useState('جاري تحديد الموقع...')
-  const [coordinates, setCoordinates] = useState({
-    latitude: FALLBACK_LOCATION.latitude,
-    longitude: FALLBACK_LOCATION.longitude,
-  })
-  const [timeZone, setTimeZone] = useState<string | null>(null)
-  const [hijriDate, setHijriDate] = useState('')
-  const [gregorianDate, setGregorianDate] = useState('')
-  const [nextPrayer, setNextPrayer] = useState<NextPrayer>({
-    id: 'Fajr',
-    name: 'الفجر',
-    time: '',
-    isTomorrow: false,
-  })
-  const [countdown, setCountdown] = useState(0)
-
-  const [qibla, setQibla] = useState<QiblaData | null>(null)
-  const [qiblaLoading, setQiblaLoading] = useState(false)
-  const [qiblaError, setQiblaError] = useState('')
+  const [offline, setOffline] = useState(false)
+  const [locationName, setLocationName] = useState(FALLBACK_LOCATION.city)
+  const [coordinates, setCoordinates] = useState({ latitude: FALLBACK_LOCATION.latitude, longitude: FALLBACK_LOCATION.longitude })
   const [deviceHeading, setDeviceHeading] = useState<number | null>(null)
   const [compassEnabled, setCompassEnabled] = useState(false)
   const [compassPermissionState, setCompassPermissionState] = useState('')
+  const request = useRef(0)
+  const locationRequest = useRef(0)
+  const controllerRef = useRef<AbortController | null>(null)
+  const lastRefresh = useRef('')
+  const current = useRef({ coordinates, locationName, days })
+  current.current = { coordinates, locationName, days }
+  const activeDay = days.find((day) => day.date === locationDate(now, day.timezone))
+  const timings = activeDay?.timings || null
+  const hijriDate = activeDay?.hijri || ''
+  const gregorianDate = activeDay?.gregorian || ''
+  const upcoming = useMemo(() => nextPrayerFromDays(days, now), [days, now])
+  const nextPrayer: NextPrayer = upcoming || { id: '', name: 'المواقيت غير متاحة', time: '' }
+  const countdown = upcoming ? Math.max(0, Math.ceil((upcoming.at - now.getTime()) / 1000)) : 0
+  const currentPrayerItems = timings ? prayerList.map((p) => ({ ...p, time: timings[p.id] })) : []
+  const qibla = useMemo(() => {
+    const direction = qiblaBearing(coordinates.latitude, coordinates.longitude)
+    return { direction, directionRounded: Math.round(direction * 10) / 10, compassPoint: directionName(direction) }
+  }, [coordinates])
+  const qiblaLoading = false, qiblaError = ''
 
-  const currentPrayerItems = useMemo<PrayerItem[]>(() => {
-    if (!timings) return []
-
-    return prayerList.map((prayer) => ({
-      ...prayer,
-      time: timings[prayer.id],
-    }))
-  }, [timings])
-
-  const calculateNextPrayer = useCallback(
-    (times: Timings) => {
-      const now = getLocationClock(timeZone)
-      const currentSeconds = now.totalSeconds
-
-      for (const prayer of prayerList) {
-        const time = times[prayer.id]
-        const prayerSeconds = parseTime(time) * 60
-
-        if (prayerSeconds > currentSeconds) {
-          setNextPrayer({ ...prayer, time, isTomorrow: false })
-          setCountdown(prayerSeconds - currentSeconds)
-          return
-        }
-      }
-
-      const fajr = times.Fajr
-      const fajrSeconds = parseTime(fajr) * 60
-
-      setNextPrayer({
-        ...prayerList[0],
-        time: fajr,
-        isTomorrow: true,
-      })
-      setCountdown(fajrSeconds + 24 * 60 * 60 - currentSeconds)
-    },
-    [timeZone]
-  )
-
-  const fetchQibla = useCallback(async (lat: number, lng: number) => {
-    setQiblaLoading(true)
-    setQiblaError('')
-
+  const fetchTimings = useCallback(async (lat: number, lng: number, city = 'موقعك الحالي') => {
+    const id = ++request.current
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setRefreshing(true); setError('')
+    const fetchDay = (date?: string) => fetchPrayerDay(
+      `https://api.aladhan.com/v1/timings${date ? '/' + apiPrayerDate(date) : ''}?latitude=${lat}&longitude=${lng}&method=${CALCULATION_METHOD}`,
+      controller.signal,
+    )
     try {
-      const response = await fetch(
-        `https://api.aladhan.com/v1/qibla/${encodeURIComponent(lat)}/${encodeURIComponent(lng)}`,
-        { cache: 'no-store' }
-      )
-
-      if (!response.ok) throw new Error('Qibla request failed')
-
-      const result = await response.json()
-      if (result.code !== 200 || !result.data) throw new Error('Qibla data unavailable')
-
-      const direction = Number(result.data.direction)
-      setQibla({
-        direction,
-        directionRounded: Number(result.data.direction_rounded ?? direction.toFixed(1)),
-        compassPoint: result.data.compass_point || directionName(direction),
-      })
-    } catch (err) {
-      console.error('Qibla error:', err)
-      setQibla(null)
-      setQiblaError('تعذر حساب اتجاه القبلة حاليًا')
+      if (navigator.onLine === false) throw new Error('أنت دون إنترنت. يُعرض جدول الموقع المحفوظ إذا كان صالحًا لهذا اليوم.')
+      let today = await fetchDay()
+      const actualDate = locationDate(new Date(), today.timezone)
+      if (today.date !== actualDate) today = await fetchDay(actualDate)
+      const tomorrow = await fetchDay(shiftPrayerDate(today.date, 1)).catch(() => null)
+      if (id !== request.current || controller.signal.aborted) return
+      const next = [today, ...(tomorrow ? [tomorrow] : [])]
+      setDays(next); setCoordinates({ latitude: lat, longitude: lng }); setLocationName(city)
+      lastRefresh.current = actualDate
+      try { localStorage.setItem('samee3_prayer_days_v1', JSON.stringify({ days: next, latitude: lat, longitude: lng, city })) } catch {}
+      if (!tomorrow) setError('مواقيت اليوم جاهزة؛ تعذر تحديث فجر الغد. أعد التحديث عند توفر الاتصال.')
+    } catch (cause) {
+      if (id === request.current) setError(cause instanceof Error && cause.name !== 'AbortError' ? cause.message : 'انتهت مهلة تحديث المواقيت. أعد المحاولة.')
     } finally {
-      setQiblaLoading(false)
+      if (id === request.current) { setLoading(false); setRefreshing(false) }
     }
   }, [])
 
-  const fetchTimings = useCallback(
-    async (lat: number, lng: number, city = 'موقعك الحالي') => {
-      setRefreshing(true)
-      setError('')
-
-      try {
-        const response = await fetch(
-          `https://api.aladhan.com/v1/timings?latitude=${encodeURIComponent(
-            lat
-          )}&longitude=${encodeURIComponent(lng)}&method=${CALCULATION_METHOD}`,
-          { cache: 'no-store' }
-        )
-
-        if (!response.ok) throw new Error('Prayer timings request failed')
-
-        const result = await response.json()
-        if (result.code !== 200 || !result.data?.timings) {
-          throw new Error('Prayer timings unavailable')
-        }
-
-        const data = result.data
-        const nextTimings = data.timings as Timings
-
-        setTimings(nextTimings)
-        setCoordinates({ latitude: lat, longitude: lng })
-        setLocationName(city)
-        setTimeZone(data.meta?.timezone || null)
-        setHijriDate(
-          data.date?.hijri?.date
-            ? `${data.date.hijri.date} ${data.date.hijri.month?.ar || ''}`
-            : ''
-        )
-        setGregorianDate(
-          data.date?.gregorian?.date
-            ? `${data.date.gregorian.date} ${data.date.gregorian.month?.ar || ''}`
-            : ''
-        )
-
-        // حساب الصلاة القادمة بعد استلام المواقيت.
-        // سيتم إعادة الحساب ثانية عند تغير المنطقة الزمنية من استجابة API.
-        calculateNextPrayer(nextTimings)
-        await fetchQibla(lat, lng)
-      } catch (err) {
-        console.error('Prayer timings error:', err)
-        setError('تعذر جلب مواقيت الصلاة، سنحاول مرة أخرى')
-      } finally {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    },
-    [calculateNextPrayer, fetchQibla]
-  )
-
   const loadCurrentLocation = useCallback(() => {
-    setLoading(true)
+    const id = ++locationRequest.current
     setError('')
-
-    if (!navigator.geolocation) {
-      fetchTimings(
-        FALLBACK_LOCATION.latitude,
-        FALLBACK_LOCATION.longitude,
-        FALLBACK_LOCATION.city
-      )
-      return
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        fetchTimings(
-          position.coords.latitude,
-          position.coords.longitude,
-          'موقعك الحالي'
-        )
-      },
-      () => {
-        fetchTimings(
-          FALLBACK_LOCATION.latitude,
-          FALLBACK_LOCATION.longitude,
-          FALLBACK_LOCATION.city
-        )
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 5 * 60 * 1000,
-      }
-    )
+    if (navigator.onLine === false && current.current.days.length) { setLoading(false); return }
+    setLoading(true)
+    if (!navigator.geolocation) { void fetchTimings(FALLBACK_LOCATION.latitude, FALLBACK_LOCATION.longitude, FALLBACK_LOCATION.city); return }
+    navigator.geolocation.getCurrentPosition((position) => {
+      if (id !== locationRequest.current) return
+      void fetchTimings(position.coords.latitude, position.coords.longitude)
+    }, () => {
+      if (id === locationRequest.current) void fetchTimings(FALLBACK_LOCATION.latitude, FALLBACK_LOCATION.longitude, FALLBACK_LOCATION.city)
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 })
   }, [fetchTimings])
 
   useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('samee3_prayer_days_v1') || 'null')
+      if (saved && Array.isArray(saved.days) && Number.isFinite(saved.latitude) && Number.isFinite(saved.longitude)) {
+        const validated = saved.days.map((day: PrayerDay) => parsePrayerDay({ code: 200, data: { timings: day.timings, meta: { timezone: day.timezone }, date: { gregorian: { date: apiPrayerDate(day.date) }, hijri: { date: day.hijri } } } }))
+        if (validated.some((day: PrayerDay) => day.date === locationDate(new Date(), day.timezone))) {
+          lastRefresh.current = locationDate(new Date(), validated[0].timezone)
+          setDays(validated); setCoordinates({ latitude: saved.latitude, longitude: saved.longitude }); setLocationName(String(saved.city || 'الموقع المحفوظ'))
+          current.current = { coordinates: { latitude: saved.latitude, longitude: saved.longitude }, locationName: String(saved.city || 'الموقع المحفوظ'), days: validated }
+          if (navigator.onLine === false) setLoading(false)
+        }
+      }
+    } catch {}
     loadCurrentLocation()
-  }, [loadCurrentLocation])
-
-  useEffect(() => {
-    if (!timings) return
-
-    const timer = window.setInterval(() => {
-      calculateNextPrayer(timings)
-    }, 1000)
-
-    return () => window.clearInterval(timer)
-  }, [timings, calculateNextPrayer])
-
-  useEffect(() => {
-    if (!('DeviceOrientationEvent' in window) || !compassEnabled) return
-
-    const handleOrientation = (event: DeviceOrientationEvent) => {
-      const webkitEvent = event as DeviceOrientationEvent & {
-        webkitCompassHeading?: number
-      }
-
-      let heading: number | null = null
-
-      if (typeof webkitEvent.webkitCompassHeading === 'number') {
-        heading = webkitEvent.webkitCompassHeading
-      } else if (typeof event.alpha === 'number') {
-        heading = normalizeAngle(360 - event.alpha)
-      }
-
-      if (heading !== null && Number.isFinite(heading)) {
-        setDeviceHeading(heading)
-      }
+    const tick = () => setNow(new Date())
+    const network = () => {
+      setOffline(navigator.onLine === false)
+      if (navigator.onLine !== false) { const { coordinates: c, locationName: label } = current.current; void fetchTimings(c.latitude, c.longitude, label) }
     }
+    setOffline(navigator.onLine === false)
+    const interval = window.setInterval(tick, 1000)
+    window.addEventListener('online', network); window.addEventListener('offline', network); window.addEventListener('focus', tick)
+    return () => { request.current += 1; locationRequest.current += 1; controllerRef.current?.abort(); clearInterval(interval); window.removeEventListener('online', network); window.removeEventListener('offline', network); window.removeEventListener('focus', tick) }
+  }, [fetchTimings, loadCurrentLocation])
 
+  useEffect(() => {
+    if (!days.length) return
+    const date = locationDate(now, days[0].timezone)
+    if (lastRefresh.current === date) return
+    lastRefresh.current = date
+    if (navigator.onLine !== false) void fetchTimings(coordinates.latitude, coordinates.longitude, locationName)
+  }, [days, now, coordinates, locationName, fetchTimings])
+
+  useEffect(() => {
+    if (!compassEnabled) return
+    const handleOrientation = (event: DeviceOrientationEvent) => {
+      const value = event as DeviceOrientationEvent & { webkitCompassHeading?: number }
+      const heading = typeof value.webkitCompassHeading === 'number' ? value.webkitCompassHeading
+        : event.absolute && typeof event.alpha === 'number' ? normalizeAngle(360 - event.alpha) : null
+      if (heading !== null && Number.isFinite(heading)) setDeviceHeading(heading)
+    }
     window.addEventListener('deviceorientation', handleOrientation, true)
-    return () => window.removeEventListener('deviceorientation', handleOrientation, true)
+    window.addEventListener('deviceorientationabsolute', handleOrientation as EventListener, true)
+    return () => { window.removeEventListener('deviceorientation', handleOrientation, true); window.removeEventListener('deviceorientationabsolute', handleOrientation as EventListener, true) }
   }, [compassEnabled])
 
   const enableCompass = async () => {
     try {
+      if (!('DeviceOrientationEvent' in window)) { setCompassPermissionState('unsupported'); return }
       const orientationEvent = DeviceOrientationEvent as typeof DeviceOrientationEvent & {
         requestPermission?: () => Promise<'granted' | 'denied'>
       }
@@ -392,7 +259,8 @@ export default function PrayerPage() {
     : 0
 
   const useFallbackLocation = () => {
-    fetchTimings(
+    locationRequest.current += 1
+    void fetchTimings(
       FALLBACK_LOCATION.latitude,
       FALLBACK_LOCATION.longitude,
       FALLBACK_LOCATION.city
@@ -436,6 +304,7 @@ export default function PrayerPage() {
         </div>
       ) : (
         <div className="px-5 flex flex-col gap-6 relative z-10">
+          {offline && <p role="status" className="rounded-2xl bg-amber-50 p-3 text-sm leading-7 text-amber-900">{activeDay ? 'مواقيت محفوظة للموقع الموضح أدناه.' : 'لا يوجد جدول محفوظ صالح لهذا اليوم. اتصل بالإنترنت لتحديثه.'}</p>}
           {error && (
             <div className="bg-red-50 border border-red-100 text-red-700 rounded-2xl p-4 text-sm font-bold text-center">
               {error}
@@ -606,8 +475,8 @@ export default function PrayerPage() {
               </div>
             )}
 
-            {compassPermissionState === 'denied' && (
-              <p className="text-xs text-red-500 text-center mt-4">تم رفض صلاحية اتجاه الهاتف. يمكنك استخدام زاوية القبلة المعروضة يدويًا.</p>
+            {(compassPermissionState === 'denied' || compassPermissionState === 'unsupported') && (
+              <p className="text-xs text-red-500 text-center mt-4">حساس البوصلة غير متاح أو لم تُمنح صلاحيته. استخدم زاوية القبلة المعروضة بالنسبة إلى الشمال.</p>
             )}
 
             <div className="mt-6 bg-mushaf-paper rounded-2xl p-4 flex items-start gap-3">
