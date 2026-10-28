@@ -13,6 +13,7 @@ import { signOut } from 'firebase/auth'
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { useAuth } from '@/context/AuthContext'
 import { auth, db } from '@/lib/firebase'
+import { bookmarkIdentity } from '@/lib/quran/ayah-identity'
 
 // SAMEE3 — Profile. Compatible with existing mushaf storage keys.
 const TOTAL_PAGES = 604
@@ -133,17 +134,18 @@ function readBookmarks(): BookmarkItem[] {
 
     if (!Array.isArray(parsed)) return []
 
-    const seen = new Set<number>()
+    const seen = new Set<string>()
     const result: BookmarkItem[] = []
 
     parsed.forEach((entry: unknown) => {
       const data = asRecord(entry)
       if (!data) return
 
-      const number = integer(data.number, 1, 10000)
-      if (!number || seen.has(number)) return
+      const number = integer(data.number, 1, 1000000)
+      const identity = bookmarkIdentity(data)
+      if (!number || seen.has(identity)) return
 
-      seen.add(number)
+      seen.add(identity)
 
       result.push({
         number,
@@ -429,7 +431,7 @@ export default function ProfilePage() {
     }
   }
 
-  const removeBookmark = (number: number) => {
+  const removeBookmark = (identity: string) => {
     setBookmarkNotice('')
 
     try {
@@ -442,7 +444,7 @@ export default function ProfilePage() {
       }
 
       const next = parsed.filter(
-        (entry: unknown) => asRecord(entry)?.number !== number,
+        (entry: unknown) => { const value = asRecord(entry); return !value || bookmarkIdentity(value) !== identity },
       )
 
       localStorage.setItem(BOOKMARK_KEY, JSON.stringify(next))
@@ -927,7 +929,7 @@ export default function ProfilePage() {
             <div className="mt-4 space-y-3">
               {bookmarks.map((item) => (
                 <article
-                  key={item.number}
+                  key={bookmarkIdentity(item)}
                   className="rounded-2xl border border-slate-100 bg-[#fbfcfd] p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -946,7 +948,7 @@ export default function ProfilePage() {
 
                     <button
                       type="button"
-                      onClick={() => removeBookmark(item.number)}
+                      onClick={() => removeBookmark(bookmarkIdentity(item))}
                       aria-label={`إزالة الآية ${numberAr(item.numberInSurah)} من المحفوظات`}
                       className="rounded-xl bg-rose-50 p-2.5 text-rose-600 hover:bg-rose-100"
                     >
