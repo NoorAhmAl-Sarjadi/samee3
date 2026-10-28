@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { NextRequest, NextResponse } from 'next/server'
+import { juzForAyah, type VerseLocation } from '@/lib/quran/reading-map'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -261,7 +262,9 @@ async function fetchMushafFromSource(
       `${BASE_URL}/mushafs/${mushafId}`,
       {
         method: 'GET',
-        cache: 'force-cache',
+        // The complete corpus exceeds Next.js's 2 MiB data-cache entry limit.
+        // loadMushaf already deduplicates requests and keeps a bounded TTL copy.
+        cache: 'no-store',
         signal: controller.signal,
         headers: {
           Accept: 'application/json',
@@ -569,7 +572,7 @@ function serializePage(
 
         numberInSurah: ayahNumber,
 
-        juz: toPositiveInteger(ayah.juz),
+        juz: juzForAyah(surahNumber, ayahNumber, hafsNumbers),
 
         page: pageNumber,
 
@@ -596,14 +599,7 @@ function serializePage(
    */
   return result.sort(
     (a, b) => {
-      if (a.number !== b.number) {
-        return a.number - b.number
-      }
-
-      return (
-        a.numberInSurah -
-        b.numberInSurah
-      )
+      return a.surah.number - b.surah.number || a.numberInSurah - b.numberInSurah
     },
   )
 }
@@ -641,6 +637,7 @@ export async function GET(
     searchParams.get('page') || '1'
 
   const page = Number(rawPage)
+  const indexRequested = searchParams.get('mode') === 'index'
 
   /*
    * -----------------------------
@@ -667,7 +664,7 @@ export async function GET(
    * التحقق من الصفحة
    * -----------------------------
    */
-  if (!isValidPage(page)) {
+  if (!indexRequested && !isValidPage(page)) {
     return NextResponse.json(
       {
         success: false,
@@ -690,6 +687,27 @@ export async function GET(
       await loadMushaf(
         riwayaParam,
       )
+
+    if (indexRequested) {
+      const locations: VerseLocation[] = []
+      for (const surah of mushaf.surahs || []) {
+        const surahNumber = toPositiveInteger(surah.id)
+        if (surahNumber < 1 || surahNumber > 114) continue
+        for (const ayah of surah.ayahs || []) {
+          const number = toPositiveInteger(ayah.number)
+          const ayahPage = toPositiveInteger(ayah.page_number)
+          if (!number || !isValidPage(ayahPage)) continue
+          const references = Array.isArray(ayah.number_in_hafs)
+            ? ayah.number_in_hafs.map(toPositiveInteger).filter((n) => n > 0) : []
+          locations.push({ surah: surahNumber, ayah: number, page: ayahPage,
+            hafsNumbers: references.length ? references : riwayaParam === 'hafs' ? [number] : [] })
+        }
+      }
+      locations.sort((a, b) => a.surah - b.surah || a.ayah - b.ayah)
+      return NextResponse.json({ success: true, riwaya: riwayaParam, locations }, {
+        headers: createJsonHeaders(86400),
+      })
+    }
 
     const ayahs =
       serializePage(
