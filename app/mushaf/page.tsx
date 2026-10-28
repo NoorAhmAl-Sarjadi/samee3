@@ -1,5 +1,6 @@
 'use client'
 
+import { inspectMushafDownloads as inspectAllMushafCaches, announceMushafDownloadsChanged } from '@/lib/quran/mushaf-downloads'
 import { tafsirReferences } from '@/lib/quran/tafsir-reference'
 import timingReads from '@/data/timing-reads.json'
 
@@ -43,9 +44,13 @@ import { activeAyahAt as getActiveAyahFromTimings, seekAudioBeforePlay } from '@
 import type { CardContent } from '@/lib/share-card'
 import { getOfflineTafsir } from '@/lib/tafsir-offline'
 import { resolveOfflineAudio } from '@/lib/samee3-audio-offline'
+import { ayahForElement, matchesBookmark } from '@/lib/quran/ayah-identity'
+import { juzForAyah, parseReadingMap, readingReference, type VerseLocation } from '@/lib/quran/reading-map'
+import { HAFS_JUZ_RANGES } from '@/lib/quran/juz-boundaries'
+import { pageDataUrl, pageSvgUrl, pageImageUrl, readingMapUrl, rememberPage, fetchMushafJson } from '@/lib/quran/mushaf-cache'
 
 // MP3Quran: مشاري راشد العفاسي — القارئ الافتراضي للمصحف.
-// المعرّف الحالي لمشاري راشد العفاسي في كتالوج MP3Quran هو 123، وصوت حفص الكامل مصدره مسار afs.
+// معرّف القارئ 123؛ رابط التسجيل يؤخذ من الكتالوج الفعلي ولا يُثبت على خادم قديم.
 const DEFAULT_RECITER_API_ID = 123
 const DEFAULT_RECITER_NAME = 'مشاري راشد العفاسي'
 
@@ -166,6 +171,7 @@ type AudioRuntime = {
     targetAyahNumber?: number,
     reciterOverride?: LocalReciter | null,
     fallbackStartSeconds?: number,
+    targetRiwaya?: Riwaya,
   ) => Promise<void>
   updatePlayingAyahFromTime: (
     currentTime: number,
@@ -198,7 +204,8 @@ type AudioRuntime = {
     nextRiwaya: Riwaya,
     nextReciter?: LocalReciter | null,
     nextSurah?: number,
-  ) => void
+  ) => Promise<boolean>
+  repeatOnEnded: () => boolean
 }
 
 const PRINTED_RIWAYAT = new Set<Riwaya>([
@@ -838,38 +845,7 @@ type JuzEntry = {
 
 // حدود الأجزاء القرآنية. الصفحة الفعلية لا تُحفظ هنا؛ يتم حلها من مصدر
 // الرواية المختارة حتى يفتح الجزء في الصفحة الصحيحة لكل رواية.
-const JUZ_LIST: JuzEntry[] = [
-  { number: 1, start: { surah: 1, ayah: 1 }, end: { surah: 2, ayah: 141 } },
-  { number: 2, start: { surah: 2, ayah: 142 }, end: { surah: 2, ayah: 252 } },
-  { number: 3, start: { surah: 2, ayah: 253 }, end: { surah: 3, ayah: 92 } },
-  { number: 4, start: { surah: 3, ayah: 93 }, end: { surah: 4, ayah: 23 } },
-  { number: 5, start: { surah: 4, ayah: 24 }, end: { surah: 4, ayah: 147 } },
-  { number: 6, start: { surah: 4, ayah: 148 }, end: { surah: 5, ayah: 81 } },
-  { number: 7, start: { surah: 5, ayah: 82 }, end: { surah: 6, ayah: 110 } },
-  { number: 8, start: { surah: 6, ayah: 111 }, end: { surah: 7, ayah: 87 } },
-  { number: 9, start: { surah: 7, ayah: 88 }, end: { surah: 8, ayah: 40 } },
-  { number: 10, start: { surah: 8, ayah: 41 }, end: { surah: 9, ayah: 93 } },
-  { number: 11, start: { surah: 9, ayah: 94 }, end: { surah: 11, ayah: 5 } },
-  { number: 12, start: { surah: 11, ayah: 6 }, end: { surah: 12, ayah: 52 } },
-  { number: 13, start: { surah: 12, ayah: 53 }, end: { surah: 14, ayah: 52 } },
-  { number: 14, start: { surah: 15, ayah: 1 }, end: { surah: 16, ayah: 128 } },
-  { number: 15, start: { surah: 17, ayah: 1 }, end: { surah: 18, ayah: 74 } },
-  { number: 16, start: { surah: 18, ayah: 75 }, end: { surah: 20, ayah: 135 } },
-  { number: 17, start: { surah: 21, ayah: 1 }, end: { surah: 22, ayah: 78 } },
-  { number: 18, start: { surah: 23, ayah: 1 }, end: { surah: 25, ayah: 20 } },
-  { number: 19, start: { surah: 25, ayah: 21 }, end: { surah: 27, ayah: 55 } },
-  { number: 20, start: { surah: 27, ayah: 56 }, end: { surah: 29, ayah: 45 } },
-  { number: 21, start: { surah: 29, ayah: 46 }, end: { surah: 33, ayah: 30 } },
-  { number: 22, start: { surah: 33, ayah: 31 }, end: { surah: 36, ayah: 27 } },
-  { number: 23, start: { surah: 36, ayah: 28 }, end: { surah: 39, ayah: 31 } },
-  { number: 24, start: { surah: 39, ayah: 32 }, end: { surah: 41, ayah: 46 } },
-  { number: 25, start: { surah: 41, ayah: 47 }, end: { surah: 45, ayah: 37 } },
-  { number: 26, start: { surah: 46, ayah: 1 }, end: { surah: 51, ayah: 30 } },
-  { number: 27, start: { surah: 51, ayah: 31 }, end: { surah: 57, ayah: 29 } },
-  { number: 28, start: { surah: 58, ayah: 1 }, end: { surah: 66, ayah: 12 } },
-  { number: 29, start: { surah: 67, ayah: 1 }, end: { surah: 77, ayah: 50 } },
-  { number: 30, start: { surah: 78, ayah: 1 }, end: { surah: 114, ayah: 6 } },
-]
+const JUZ_LIST: JuzEntry[] = HAFS_JUZ_RANGES
 
 function isRiwaya(value: string | null): value is Riwaya {
   return (
@@ -934,6 +910,7 @@ type Samee3AudioElement = HTMLAudioElement & {
   /** Prevent transient pause events during a reciter/surah switch from canceling intent. */
   __samee3Switching?: boolean
   __samee3ObjectUrl?: string
+  __samee3Juz?: { number: number; end: QuranReference } | null
 }
 
 const SAMEE3_AUDIO_STORAGE_KEY = 'samee3_persistent_audio_v2'
@@ -1144,7 +1121,7 @@ async function cacheAudioForOffline(networkUrl: string): Promise<boolean> {
 
 async function cacheAudioForOfflineOnce(networkUrl: string): Promise<boolean> {
   try {
-    const knownCaches = [SAMEE3_AUDIO_CACHE_NAME, 'samee3-v2-audio', 'samee-audio-v2']
+    const knownCaches = [SAMEE3_AUDIO_CACHE_NAME, 'samee3-v2-audio', 'samee-audio-v2', 'samee3-quran-audio-v1']
     const availableCaches = await caches.keys()
     for (const cacheName of knownCaches) {
       if (!availableCaches.includes(cacheName)) continue
@@ -1391,7 +1368,8 @@ function getSurahName(surahNumber?: number, data?: PageData | null) {
 }
 
 function getJuz(data?: PageData | null) {
-  return data?.ayahs?.find((ayah) => Number.isFinite(ayah.juz))?.juz || 1
+  const ayah = data?.ayahs?.[0]
+  return ayah?.surah ? juzForAyah(ayah.surah.number, ayah.numberInSurah, ayah.hafsNumbers) : 1
 }
 
 type QuranReference = {
@@ -1466,94 +1444,7 @@ function getMoshafForRiwaya(
 type MushafDownloadChoice = 'checking' | 'choose' | 'downloading' | 'ready'
 type MushafDownloadMode = 'hafs' | 'single' | 'all'
 
-type MushafCacheSummary = {
-  completed: Record<Riwaya, Set<number>>
-  supported: boolean
-}
-
 const MUSHAF_TOTAL_PAGES = 604
-// This decision applies to the DEVICE, not to a single riwaya or browser session.
-// Never show the first-visit dialog again unless the user explicitly taps Download.
-const MUSHAF_FIRST_VISIT_KEY = 'samee3_mushaf_first_visit_decision_v3'
-const MUSHAF_FIRST_VISIT_FALLBACK = 'samee3_mushaf_first_visit_session_v3'
-
-function hasSeenMushafWelcome(): boolean {
-  try {
-    if (localStorage.getItem(MUSHAF_FIRST_VISIT_KEY) === '1') return true
-    // A previously used mushaf predating this release is not a first visit.
-    if (localStorage.getItem('samee3_persistent_reading_v2')) {
-      markMushafWelcomeSeen()
-      return true
-    }
-  } catch { /* Storage can be blocked in private browsing. */ }
-  try { return sessionStorage.getItem(MUSHAF_FIRST_VISIT_FALLBACK) === '1' } catch { return false }
-}
-
-function markMushafWelcomeSeen(): void {
-  try { localStorage.setItem(MUSHAF_FIRST_VISIT_KEY, '1') } catch { /* ignored */ }
-  try { sessionStorage.setItem(MUSHAF_FIRST_VISIT_FALLBACK, '1') } catch { /* ignored */ }
-}
-
-
-function emptyMushafCache(): Record<Riwaya, Set<number>> {
-  return {
-    hafs: new Set<number>(), warsh: new Set<number>(), qalun: new Set<number>(),
-    douri: new Set<number>(), shubah: new Set<number>(),
-    sousi: new Set<number>(), bazzi: new Set<number>(),
-  }
-}
-
-// Read every relevant Cache Storage index once; 7 separate scans get expensive
-// after thousands of pages have been downloaded.
-async function inspectAllMushafCaches(): Promise<MushafCacheSummary> {
-  const completed = emptyMushafCache()
-  if (typeof window === 'undefined' || !('caches' in window)) {
-    return { completed, supported: false }
-  }
-
-  const flags: Record<Riwaya, Uint8Array> = {
-    hafs: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
-    warsh: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
-    qalun: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
-    douri: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
-    shubah: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
-    sousi: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
-    bazzi: new Uint8Array(MUSHAF_TOTAL_PAGES + 1),
-  }
-
-  const names = await caches.keys()
-  const matching = [SAMEE3_MUSHAF_PAGE_CACHE_NAME, 'samee3-v3-riwaya-images']
-    .filter((name) => names.includes(name))
-
-  await Promise.all(matching.map(async (name) => {
-    const cache = await caches.open(name)
-    const keys = await cache.keys()
-    keys.forEach((request) => {
-      try {
-        const url = new URL(request.url)
-        if (url.origin !== location.origin) return
-        const id = url.searchParams.get('riwaya')
-        if (!isRiwaya(id)) return
-        const page = Number(url.searchParams.get('page'))
-        if (!Number.isInteger(page) || page < 1 || page > MUSHAF_TOTAL_PAGES) return
-        if (url.pathname === '/api/quran') flags[id][page] |= 1
-        else if (url.pathname === '/api/mushaf-svg') flags[id][page] |= 2
-        else if (url.pathname === '/api/mushaf-riwaya-image') flags[id][page] |= 4
-      } catch {
-        // Ignore legacy cache entries with unexpected request keys.
-      }
-    })
-  }))
-
-  ALL_MUSHAF_RIWAYAT.forEach((id) => {
-    const needed = id === 'sousi' || id === 'bazzi' ? 7 : 3
-    for (let page = 1; page <= MUSHAF_TOTAL_PAGES; page += 1) {
-      if ((flags[id][page] & needed) === needed) completed[id].add(page)
-    }
-  })
-
-  return { completed, supported: true }
-}
 
 function MushafDownloadStartup({
   riwaya,
@@ -1564,7 +1455,7 @@ function MushafDownloadStartup({
   prefetchPage: (riwaya: Riwaya, page: number, signal?: AbortSignal) => Promise<boolean>
   reopenCount: number
 }) {
-  const [choice, setChoice] = useState<MushafDownloadChoice>('checking')
+  const [choice, setChoice] = useState<MushafDownloadChoice>('ready')
   const [mode, setMode] = useState<MushafDownloadMode>('hafs')
   const [pickedRiwaya, setPickedRiwaya] = useState<Riwaya>(riwaya)
   const [counts, setCounts] = useState<Record<Riwaya, number>>({
@@ -1593,22 +1484,16 @@ function MushafDownloadStartup({
     runningRef.current = false
     downloadControllerRef.current?.abort()
     downloadControllerRef.current = null
-    setMode('hafs')
+    setMode(riwaya === 'hafs' ? 'hafs' : 'single')
     setPickedRiwaya(riwaya)
     setMessage('')
     setFailedCount(0)
 
-    const manualRequest = reopenCount > 0
-    const alreadySeen = hasSeenMushafWelcome()
-    openedAutomaticallyRef.current = !manualRequest && !alreadySeen
-
-    // No loading overlay, no toast and no cache scan on subsequent visits.
-    // Opening the download manager manually is still always possible.
-    if (!manualRequest && alreadySeen) {
+    if (reopenCount === 0) {
       setChoice('ready')
       return () => { generationRef.current += 1 }
     }
-
+    openedAutomaticallyRef.current = false
     setChoice('checking')
     void (async () => {
       try {
@@ -1619,27 +1504,11 @@ function MushafDownloadStartup({
         ALL_MUSHAF_RIWAYAT.forEach((id) => { next[id] = summary.completed[id].size })
         setCounts(next)
 
-        if (manualRequest) {
-          setChoice('choose')
-          return
-        }
-        // Returning users with a previously downloaded riwaya don't need
-        // a new first-time dialog just because the storage key is newer.
-        if (ALL_MUSHAF_RIWAYAT.some((id) => next[id] === MUSHAF_TOTAL_PAGES)) {
-          markMushafWelcomeSeen()
-          setChoice('ready')
-          return
-        }
-        // Save when SHOWN, not only after a choice: the offer is truly once.
-        markMushafWelcomeSeen()
         setChoice('choose')
       } catch {
         if (generation !== generationRef.current || !mountedRef.current) return
-        if (manualRequest) {
-          setMessage('تعذر فحص الصفحات المحفوظة. يمكنك القراءة عبر الإنترنت.')
-        }
-        // The first-visit decision is still considered shown once.
-        if (!manualRequest) markMushafWelcomeSeen()
+        setStorageSupported(false)
+        setMessage('حفظ الصفحات غير متاح في هذا المتصفح حاليًا. يمكنك القراءة أثناء الاتصال.')
         setChoice('choose')
       }
     })()
@@ -1659,10 +1528,12 @@ function MushafDownloadStartup({
   const everythingSaved = ALL_MUSHAF_RIWAYAT.every((id) => counts[id] === MUSHAF_TOTAL_PAGES)
 
   const finishSelection = () => {
+    downloadControllerRef.current?.abort()
+    downloadControllerRef.current = null
+    announceMushafDownloadsChanged()
     generationRef.current += 1
     runningRef.current = false
     setCurrentRiwaya(null)
-    markMushafWelcomeSeen()
     setChoice('ready')
   }
 
@@ -1777,6 +1648,7 @@ function MushafDownloadStartup({
       const final = {} as Record<Riwaya, number>
       ALL_MUSHAF_RIWAYAT.forEach((id) => { final[id] = verified.completed[id].size })
       setCounts(final)
+      announceMushafDownloadsChanged()
       const complete = targets.every((id) => final[id] === MUSHAF_TOTAL_PAGES)
       setCurrentRiwaya(null)
       if (complete && openedAutomaticallyRef.current) {
@@ -1810,6 +1682,7 @@ function MushafDownloadStartup({
     runningRef.current = false
     setChoice('choose')
     setCurrentRiwaya(null)
+    announceMushafDownloadsChanged()
     setMessage('تم إيقاف التحميل. الصفحات المكتملة باقية، ويمكن استكمال الناقص من زر التنزيل وقتما تشاء.')
     void inspectAllMushafCaches().then((summary) => {
       const next = {} as Record<Riwaya, number>
@@ -1937,6 +1810,7 @@ export default function MushafPage() {
   const requestedSurah = Number(searchParams.get('surah') || '0')
   const reciterApiId = Number(searchParams.get('reciterId') || '0') || DEFAULT_RECITER_API_ID
   const requestedMoshafId = Number(searchParams.get('moshafId') || '0')
+  const hasRequestedReciter = searchParams.has('reciterId')
   const reciterName = searchParams.get('reciterName') || DEFAULT_RECITER_NAME
   const autoplayRequested = searchParams.get('autoplay') === '1'
   const activeJuzNumber = Number(searchParams.get('juz') || '0')
@@ -1957,9 +1831,11 @@ export default function MushafPage() {
       start: activeJuzStart,
       end: activeJuzEnd,
     }
-  }, [activeJuzEnd, activeJuzNumber, activeJuzStart])
+  }, [activeJuzEnd?.surah, activeJuzEnd?.ayah, activeJuzNumber, activeJuzStart?.surah, activeJuzStart?.ayah])
 
   const initialRouteRef = useRef(searchParams.toString())
+  const [routeReady, setRouteReady] = useState(false)
+  useEffect(() => { setRouteReady(true) }, [])
   const [isDesktop, setIsDesktop] = useState(false)
   const [showChrome, setShowChrome] = useState(false)
   const [searchInput, setSearchInput] = useState('')
@@ -1968,11 +1844,16 @@ export default function MushafPage() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [showSearchResults, setShowSearchResults] = useState(false)
 
-  const [pageData, setPageData] = useState<PageData | null>(null)
-  const [rightPageData, setRightPageData] = useState<PageData | null>(null)
-  const [leftPageData, setLeftPageData] = useState<PageData | null>(null)
-  const [svg, setSvg] = useState('')
-  const [leftSvg, setLeftSvg] = useState('')
+  // Text and artwork belong to one immutable reading/page identity. A route
+  // change cannot expose the previous page as if it were the new one.
+  const [loadedPage, setLoadedPage] = useState<{ key: string; data: PageData; html: string } | null>(null)
+  const pageReady = loadedPage?.key === `${riwaya}:${pageNumber}`
+  const pageData = pageReady ? loadedPage.data : null
+  const rightPageData = pageData
+  const [leftPageData] = useState<PageData | null>(null)
+  const svg = pageReady ? loadedPage.html : ''
+  const leftSvg = ''
+  const [pageRetry, setPageRetry] = useState(0)
   const [error, setError] = useState('')
 
   const [selectedAyah, setSelectedAyah] = useState<Ayah | null>(null)
@@ -2002,7 +1883,8 @@ export default function MushafPage() {
     blob: Blob
   } | null>(null)
 
-  const [reciters, setReciters] = useState<LocalReciter[]>([])
+  const [reciterCatalog, setReciterCatalog] = useState<{ riwaya: Riwaya; entries: LocalReciter[] } | null>(null)
+  const reciters = useMemo(() => reciterCatalog?.riwaya === riwaya ? reciterCatalog.entries : [], [reciterCatalog, riwaya])
   const [recitersLoading, setRecitersLoading] = useState(false)
   const [selectedReciterId, setSelectedReciterId] = useState(reciterApiId)
 
@@ -2061,9 +1943,17 @@ export default function MushafPage() {
   const pageTurnNavigationTokenRef = useRef(0)
   const [openPicker, setOpenPicker] = useState<'riwaya' | 'reciter' | 'surah' | 'juz' | null>(null)
   const [mushafDownloadOpenCount, setMushafDownloadOpenCount] = useState(0)
+  useEffect(() => {
+    if (searchParams.get('download') !== '1') return
+    setMushafDownloadOpenCount((value) => value + 1)
+    const params = new URLSearchParams(window.location.search)
+    params.delete('download')
+    window.history.replaceState(null, '', `/mushaf?${params.toString()}`)
+  }, [searchParams])
   const audioRestoreAttemptedRef = useRef(false)
   const readingRestoreAttemptedRef = useRef(false)
   const audioOperationRef = useRef(0)
+  const routeSelectionRef = useRef(0)
   const audioToggleBusyRef = useRef(false)
   // An explicit user stop must never be undone by query-param autoplay.
   const audioUserStoppedRef = useRef(false)
@@ -2186,6 +2076,8 @@ export default function MushafPage() {
 
   const pageMemoryCacheRef = useRef(new Map<string, PageData>())
   const svgMemoryCacheRef = useRef(new Map<string, string>())
+  const readingMapsRef = useRef(new Map<Riwaya, VerseLocation[]>())
+  const readingMapRequestsRef = useRef(new Map<Riwaya, Promise<VerseLocation[]>>())
   const ayahPageCacheRef = useRef(new Map<string, number>())
   const pageSyncInFlightRef = useRef(false)
   const lastPageSyncAyahRef = useRef('')
@@ -2232,6 +2124,7 @@ export default function MushafPage() {
   }, [])
 
   const persistReadingPosition = useCallback((pageOverride?: number) => {
+    if (!pageData?.ayahs.length) return
     const audio = audioRef.current as Samee3AudioElement | null
     const savedAudio = readPersistentAudioState()
     const page = clampPage(Number(pageOverride || pageNumber))
@@ -2279,7 +2172,7 @@ export default function MushafPage() {
     const memoryHit = pageMemoryCacheRef.current.get(key)
     if (memoryHit) return memoryHit
 
-    const url = `/api/quran?riwaya=${encodeURIComponent(riwaya)}&page=${safePage}&v=6`
+    const url = pageDataUrl(riwaya, safePage)
 
     try {
       if ('caches' in window) {
@@ -2296,7 +2189,7 @@ export default function MushafPage() {
                 : [],
           } as PageData
           if (result.ayahs.length > 0) {
-            pageMemoryCacheRef.current.set(key, result)
+            rememberPage(pageMemoryCacheRef.current, key, result)
             return result
           }
         }
@@ -2305,12 +2198,7 @@ export default function MushafPage() {
       // ننتقل إلى الشبكة.
     }
 
-    const response = await fetch(url, {
-      cache: 'force-cache',
-      headers: { Accept: 'application/json' },
-    })
-    if (!response.ok) throw new Error(`تعذر تحميل بيانات الصفحة ${safePage}`)
-    const data = await response.json()
+    const data = await fetchMushafJson(url) as { bismillah?: string; ayahs?: Ayah[]; data?: { ayahs?: Ayah[] } }
     const result = {
       bismillah: typeof data?.bismillah === 'string' ? data.bismillah : undefined,
       ayahs: Array.isArray(data?.ayahs)
@@ -2320,7 +2208,8 @@ export default function MushafPage() {
           : [],
     } as PageData
 
-    pageMemoryCacheRef.current.set(key, result)
+    if (!result.ayahs.length) throw new Error(`لم يتم العثور على آيات الصفحة ${safePage}.`)
+    rememberPage(pageMemoryCacheRef.current, key, result)
 
     try {
       if ('caches' in window) {
@@ -2345,89 +2234,56 @@ export default function MushafPage() {
     )
   }, [pageData])
 
-  const resolveAyahPage = useCallback(async (targetRiwaya: Riwaya, surahNumber: number, ayahNumber: number) => {
-    if (!targetRiwaya || !surahNumber || !ayahNumber) return null
-
-    const cacheKey = `${targetRiwaya}:${surahNumber}:${ayahNumber}`
-    const cached = ayahPageCacheRef.current.get(cacheKey)
-    if (cached) return cached
-
-    if (targetRiwaya === riwaya) {
-      const nearbyPages = Array.from(
-        new Set([
-          pageNumber,
-          clampPage(pageNumber + 1),
-          clampPage(pageNumber - 1),
-          clampPage(pageNumber + 2),
-          clampPage(pageNumber - 2),
-        ]),
-      )
-
-      for (const candidatePage of nearbyPages) {
-        try {
-          const candidateData = await fetchPageData(candidatePage)
-          const found = candidateData.ayahs.some(
-            (item) =>
-              Number(item.surah?.number) === Number(surahNumber) &&
-              Number(item.numberInSurah) === Number(ayahNumber),
-          )
-          if (found) {
-            ayahPageCacheRef.current.set(cacheKey, candidatePage)
-            return candidatePage
+  const loadReadingMap = useCallback(async (targetRiwaya: Riwaya): Promise<VerseLocation[]> => {
+    const saved = readingMapsRef.current.get(targetRiwaya)
+    if (saved?.length) return saved
+    const pending = readingMapRequestsRef.current.get(targetRiwaya)
+    if (pending) return pending
+    const request = (async () => {
+      const url = readingMapUrl(targetRiwaya)
+      let cache: Cache | null = null
+      try {
+        cache = await caches.open(SAMEE3_MUSHAF_PAGE_CACHE_NAME)
+        const response = await cache.match(url)
+        if (response?.ok) {
+          const payload = await response.json()
+          const rows = parseReadingMap(payload.locations)
+          if (payload.riwaya === targetRiwaya && rows.length) {
+            readingMapsRef.current.set(targetRiwaya, rows)
+            return rows
           }
-        } catch {
-          // ننتقل للمصدر الدقيق.
         }
-      }
-    }
+      } catch { /* Cache Storage is optional. */ }
+      if (isBrowserOffline()) return []
+      try {
+        const payload = await fetchMushafJson(url) as { success?: boolean; riwaya?: string; locations?: unknown }
+        const rows = parseReadingMap(payload.locations)
+        if (!payload.success || payload.riwaya !== targetRiwaya || !rows.length) return []
+        readingMapsRef.current.set(targetRiwaya, rows)
+        if (cache) await cache.put(url, new Response(JSON.stringify(payload), {
+          headers: { 'Content-Type': 'application/json' },
+        })).catch(() => undefined)
+        return rows
+      } catch { return [] }
+    })().finally(() => readingMapRequestsRef.current.delete(targetRiwaya))
+    readingMapRequestsRef.current.set(targetRiwaya, request)
+    return request
+  }, [])
 
-    try {
-      const mushafId = RIWAYA_MUSHAF_IDS[targetRiwaya]
-      const response = await fetch(
-        `https://api.quranpedia.net/v1/mushafs/${mushafId}/${surahNumber}`,
-        { cache: 'force-cache', headers: { Accept: 'application/json' } },
-      )
+  useEffect(() => { if (routeReady) void loadReadingMap(riwaya) }, [loadReadingMap, riwaya, routeReady])
 
-      if (response.ok) {
-        const payload = await response.json()
-        const ayahs = Array.isArray(payload)
-          ? payload
-          : Array.isArray(payload?.ayahs)
-            ? payload.ayahs
-            : Array.isArray(payload?.data)
-              ? payload.data
-              : []
-
-        const found =
-          ayahs.find((item: any) =>
-            Number(
-              item?.numberInSurah ??
-                item?.number_in_surah ??
-                item?.ayah_number ??
-                item?.ayah,
-            ) === Number(ayahNumber),
-          ) ||
-          ayahs.find((item: any) => Number(item?.number) === Number(ayahNumber))
-
-        const exactPage = Number(
-          found?.page_number ??
-            found?.page ??
-            found?.pageNumber ??
-            0,
-        )
-
-        if (exactPage > 0) {
-          const safePage = clampPage(exactPage)
-          ayahPageCacheRef.current.set(cacheKey, safePage)
-          return safePage
-        }
-      }
-    } catch {
-      // عدم توفر المصدر الدقيق لا يجب أن يوقف الصوت.
-    }
-
-    return null
-  }, [fetchPageData, pageData, pageNumber, riwaya])
+  const resolveAyahPage = useCallback(async (targetRiwaya: Riwaya, surah: number, ayah: number) => {
+    const key = `${targetRiwaya}:${surah}:${ayah}`
+    const cached = ayahPageCacheRef.current.get(key)
+    if (cached) return cached
+    const visible = targetRiwaya === riwaya && pageData?.ayahs.some((row) =>
+      row.surah?.number === surah && row.numberInSurah === ayah)
+    if (visible) return pageNumber
+    const row = readingReference(await loadReadingMap(targetRiwaya), surah, ayah)
+    if (!row) return null
+    rememberPage(ayahPageCacheRef.current, key, row.page, 2048)
+    return row.page
+  }, [loadReadingMap, pageData, pageNumber, riwaya])
 
   useEffect(() => {
     if (autoPageTargetRef.current === pageNumber) {
@@ -2445,7 +2301,7 @@ export default function MushafPage() {
     const memoryHit = svgMemoryCacheRef.current.get(key)
     if (memoryHit) return memoryHit
 
-    const url = `/api/mushaf-svg?riwaya=${encodeURIComponent(riwaya)}&page=${safePage}&v=5`
+    const url = pageSvgUrl(riwaya, safePage)
 
     try {
       if ('caches' in window) {
@@ -2455,7 +2311,7 @@ export default function MushafPage() {
           const data = await cachedResponse.json()
           if (data?.success && data?.svg) {
             const value = String(data.svg)
-            svgMemoryCacheRef.current.set(key, value)
+            rememberPage(svgMemoryCacheRef.current, key, value)
             return value
           }
         }
@@ -2464,14 +2320,10 @@ export default function MushafPage() {
       // ننتقل إلى الشبكة.
     }
 
-    const response = await fetch(url, {
-      cache: 'force-cache',
-    })
-    if (!response.ok) throw new Error(`تعذر تحميل صفحة المصحف ${safePage}`)
-    const data = await response.json()
+    const data = await fetchMushafJson(url) as { success?: boolean; svg?: string }
     if (!data?.success || !data?.svg) throw new Error(`لم يتم العثور على صفحة المصحف ${safePage}`)
     const value = String(data.svg)
-    svgMemoryCacheRef.current.set(key, value)
+    rememberPage(svgMemoryCacheRef.current, key, value)
 
     try {
       if ('caches' in window) {
@@ -2527,8 +2379,19 @@ export default function MushafPage() {
 
     if (!cache) return false
 
+    try {
+      const indexUrl = readingMapUrl(targetRiwaya)
+      if (!await cache.match(indexUrl)) {
+        const locations = await loadReadingMap(targetRiwaya)
+        if (!locations.length || signal?.aborted) return false
+        await cache.put(indexUrl, new Response(JSON.stringify({ success: true, riwaya: targetRiwaya, locations }), {
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+    } catch { return false }
+
     let pageOk = false
-    const pageUrl = `/api/quran?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}&v=6`
+    const pageUrl = pageDataUrl(targetRiwaya, safePage)
 
     try {
       if (cache) {
@@ -2580,7 +2443,7 @@ export default function MushafPage() {
     }
 
     let svgOk = false
-    const svgUrl = `/api/mushaf-svg?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}&v=5`
+    const svgUrl = pageSvgUrl(targetRiwaya, safePage)
 
     try {
       if (cache) {
@@ -2621,7 +2484,7 @@ export default function MushafPage() {
     let imageOk = true
     if (targetRiwaya === 'sousi' || targetRiwaya === 'bazzi') {
       imageOk = false
-      const imageUrl = `/api/mushaf-riwaya-image?riwaya=${encodeURIComponent(targetRiwaya)}&page=${safePage}&v=5`
+      const imageUrl = pageImageUrl(targetRiwaya, safePage)
 
       try {
         if (cache) {
@@ -2647,7 +2510,7 @@ export default function MushafPage() {
     }
 
     return pageOk && svgOk && imageOk
-  }, [downloadFetch])
+  }, [downloadFetch, loadReadingMap])
 
   // تنزيل المصحف الكامل يتم فقط بطلب صريح من المستخدم عبر شاشة البدء.
   // لا نقوم بتسخين الروايات السبع تلقائيًا في الخلفية.
@@ -2683,7 +2546,9 @@ export default function MushafPage() {
   }, [pageData, pageNumber, riwaya, svg])
 
   useEffect(() => {
+    if (!routeReady) return
     let cancelled = false
+    setError('')
 
     // Fetch the ayah text and printed page together. Downloaded pages are
     // read from the existing local cache and never show a loading dialog.
@@ -2695,11 +2560,7 @@ export default function MushafPage() {
         ])
         if (cancelled) return
 
-        setPageData(mainData)
-        setRightPageData(mainData)
-        setLeftPageData(null)
-        setSvg(mainSvg || '')
-        setLeftSvg('')
+        setLoadedPage({ key: `${riwaya}:${pageNumber}`, data: mainData, html: mainSvg })
         setError('')
       } catch (loadError) {
         if (!cancelled) {
@@ -2710,9 +2571,10 @@ export default function MushafPage() {
     })()
 
     return () => { cancelled = true }
-  }, [fetchPageData, fetchSvg, pageNumber, riwaya])
+  }, [fetchPageData, fetchSvg, pageNumber, riwaya, pageRetry, routeReady])
 
   useEffect(() => {
+    if (!routeReady) return
     let cancelled = false
     const nearby = Array.from(
       new Set([clampPage(pageNumber + 1), clampPage(pageNumber - 1)]),
@@ -2735,7 +2597,7 @@ export default function MushafPage() {
     return () => {
       cancelled = true
     }
-  }, [fetchPageData, fetchSvg, pageNumber, riwaya])
+  }, [fetchPageData, fetchSvg, pageNumber, riwaya, routeReady])
 
   useEffect(() => {
     if (!ayahFromUrl) {
@@ -2940,47 +2802,7 @@ export default function MushafPage() {
 
 
   const resolveSelectedAyahFromElement = useCallback((element: Element, sourceData: PageData | null) => {
-    const sourceAyahs = sourceData?.ayahs || []
-    const svgSurah = Number(element.getAttribute('surah') || element.getAttribute('data-surah') || 0)
-    const svgAyah = Number(element.getAttribute('ayah') || element.getAttribute('data-ayah') || element.getAttribute('data-ayah-number') || 0)
-
-    // الـSVG المطبوع يضع السورة والآية على نفس عنصر ayahPolygon.
-    if (svgSurah > 0 && svgAyah > 0) {
-      const exact = sourceAyahs.find(
-        (item) =>
-          Number(item.surah?.number) === svgSurah &&
-          (Number(item.numberInSurah) === svgAyah || Number(item.number) === svgAyah),
-      )
-      if (exact) return exact
-    }
-
-    // للروايات النصية نستخدم رقم الآية العامة/المحلية مع سورة الصفحة.
-    const fallbackValues = [
-      element.getAttribute('data-ayah'),
-      element.getAttribute('data-ayah-number'),
-      element.getAttribute('id'),
-    ].filter(Boolean) as string[]
-
-    const parentSheet = element.closest('.samee3-page-sheet') as HTMLElement | null
-    const sheetSurah = Number(parentSheet?.dataset.surahNumber || 0)
-
-    for (const value of fallbackValues) {
-      const match = value.match(/\d+/)
-      if (!match) continue
-      const numeric = Number(match[0])
-
-      const exactGlobal = sourceAyahs.find((ayah) => ayah.number === numeric)
-      if (exactGlobal) return exactGlobal
-
-      const exactLocal = sourceAyahs.find(
-        (ayah) =>
-          Number(ayah.numberInSurah) === numeric &&
-          (!sheetSurah || Number(ayah.surah?.number) === sheetSurah),
-      )
-      if (exactLocal) return exactLocal
-    }
-
-    return null
+    return ayahForElement(element, sourceData?.ayahs || [])
   }, [])
 
   const handleAyahClick = useCallback((event: React.MouseEvent<HTMLElement>, sourceData: PageData | null) => {
@@ -3048,15 +2870,12 @@ export default function MushafPage() {
       const saved = JSON.parse(localStorage.getItem('samee3_bookmarks') || '[]')
       setIsSaved(
         Array.isArray(saved) &&
-          saved.some(
-            (item: { number?: number }) =>
-              item?.number === found.number,
-          ),
+          saved.some((item) => item && matchesBookmark(item, found, riwaya)),
       )
     } catch {
       setIsSaved(false)
     }
-  }, [resolveSelectedAyahFromElement])
+  }, [resolveSelectedAyahFromElement, riwaya])
 
   const handleAyahPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, sourceData: PageData | null) => {
     const target = event.target as Element | null
@@ -3122,7 +2941,7 @@ export default function MushafPage() {
     if (!html) return null
 
     const preview = { page: safePage, data, html }
-    turnPreviewCacheRef.current.set(key, preview)
+    rememberPage(turnPreviewCacheRef.current, key, preview, 8)
     return preview
   }, [riwaya])
 
@@ -3154,7 +2973,7 @@ export default function MushafPage() {
         html,
       }
 
-      turnPreviewCacheRef.current.set(`${riwaya}:${safePage}`, preview)
+      rememberPage(turnPreviewCacheRef.current, `${riwaya}:${safePage}`, preview, 8)
       setTurnPreview(preview)
       return preview
     } catch {
@@ -3164,6 +2983,7 @@ export default function MushafPage() {
 
   const resetPageTurnState = useCallback(() => {
     pageTurnNavigationTokenRef.current += 1
+    turnPreviewRequestRef.current += 1
     setPageSettleX(0)
     setPageDragX(0)
     setPageDragY(0)
@@ -3178,6 +2998,10 @@ export default function MushafPage() {
     pendingNavigationPageRef.current = null
     navigatingRef.current = false
   }, [])
+
+  useEffect(() => {
+    resetPageTurnState()
+  }, [riwaya, resetPageTurnState])
 
   const navigateTo = useCallback((
     page: number,
@@ -3209,6 +3033,7 @@ export default function MushafPage() {
       if (!preview || preview.page !== nextPage) {
         if (token === pageTurnNavigationTokenRef.current) {
           resetPageTurnState()
+          triggerToast('تعذر فتح الصفحة المطلوبة. اتصل بالإنترنت أو حمّلها أولًا.')
         }
         return
       }
@@ -3284,6 +3109,7 @@ export default function MushafPage() {
       window.setTimeout(() => {
         if (token !== pageTurnNavigationTokenRef.current) return
         if (pendingNavigationPageRef.current !== nextPage) return
+        if (preview.data) setLoadedPage({ key: `${riwaya}:${nextPage}`, data: preview.data, html: preview.html })
         window.history.replaceState(null, '', `/mushaf?${params.toString()}`)
       }, remaining + 18)
 
@@ -3325,6 +3151,8 @@ export default function MushafPage() {
     router,
     searchParams,
     turnPreview,
+    riwaya,
+    triggerToast,
   ])
 
   /*
@@ -3336,6 +3164,7 @@ export default function MushafPage() {
    */
   const beginPagePointer = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
+      if (navigatingRef.current || !event.isPrimary || event.button !== 0) return
       const target = event.target as Element | null
       if (!target) return
 
@@ -3544,12 +3373,17 @@ export default function MushafPage() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey ||
+        target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]') ||
+        showAyahActions || showSearchResults || openPicker) return
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') event.preventDefault()
       if (event.key === 'ArrowRight') navigateTo(pageNumber - 1, undefined, 'prev')
       if (event.key === 'ArrowLeft') navigateTo(pageNumber + 1, undefined, 'next')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isDesktop, navigateTo, pageNumber])
+  }, [navigateTo, pageNumber, showAyahActions, showSearchResults, openPicker])
 
   const recitersRequestRef = useRef(0)
 
@@ -3560,7 +3394,7 @@ export default function MushafPage() {
     const savedReciters = readSavedReciterSources(riwayaId)
     if (isBrowserOffline()) {
       if (requestId === recitersRequestRef.current) {
-        setReciters(savedReciters)
+        setReciterCatalog({ riwaya: riwayaId, entries: savedReciters })
         setRecitersLoading(false)
       }
       return savedReciters
@@ -3575,27 +3409,12 @@ export default function MushafPage() {
        * rewaya مع أن بعض القراء لديهم سور محدودة. ثم ندمج معها استجابة
        * الرواية نفسها للاستفادة من الموشف الذي تؤكده الـ API للرواية المختارة.
        */
-      const [allResponse, riwayaResponse] = await Promise.all([
-        fetch(
-          'https://mp3quran.net/api/v3/reciters?language=ar',
-          { cache: 'no-store' },
-        ),
-        fetch(
-          `https://mp3quran.net/api/v3/reciters?language=ar&rewaya=${remoteRiwayaId}`,
-          { cache: 'no-store' },
-        ),
+      const results = await Promise.allSettled([
+        fetchMushafJson('https://mp3quran.net/api/v3/reciters?language=ar', { cache: 'no-store' }),
+        fetchMushafJson(`https://mp3quran.net/api/v3/reciters?language=ar&rewaya=${remoteRiwayaId}`, { cache: 'no-store' }),
       ])
-
-      if (!allResponse.ok && !riwayaResponse.ok) {
-        throw new Error('تعذر تحميل القراء')
-      }
-
-      const allPayload = allResponse.ok
-        ? await allResponse.json()
-        : null
-      const riwayaPayload = riwayaResponse.ok
-        ? await riwayaResponse.json()
-        : null
+      const allPayload = results[0].status === 'fulfilled' ? results[0].value as { reciters?: ApiReciter[] } : null
+      const riwayaPayload = results[1].status === 'fulfilled' ? results[1].value as { reciters?: ApiReciter[] } : null
 
       const allReciters = Array.isArray(allPayload?.reciters)
         ? (allPayload.reciters as ApiReciter[])
@@ -3676,13 +3495,13 @@ export default function MushafPage() {
       const timed = new Set(timingReads.map((read) => read.id))
       unique.sort((a,b) => Number(timed.has(b.moshafId || 0)) - Number(timed.has(a.moshafId || 0)))
       if (unique.length) saveReciterSources(riwayaId, unique)
-      setReciters(unique.length ? unique : savedReciters)
+      setReciterCatalog({ riwaya: riwayaId, entries: unique.length ? unique : savedReciters })
       return unique.length ? unique : savedReciters
     } catch (error) {
       console.warn('SAMEE3: using locally saved reciter sources.', error)
 
       if (requestId === recitersRequestRef.current) {
-        setReciters(savedReciters)
+        setReciterCatalog({ riwaya: riwayaId, entries: savedReciters })
       }
 
       return savedReciters
@@ -3700,172 +3519,126 @@ export default function MushafPage() {
   }, [fetchReciters, riwaya, showChrome])
 
   const selectedReciter = useMemo(() => {
-    const current = reciters.find((item) => item.apiId === selectedReciterId && (requestedMoshafId <= 0 || item.moshafId === requestedMoshafId))
-    const explicit = reciters.find((item) => item.apiId === selectedReciterId)
+    const desiredId = hasRequestedReciter ? reciterApiId : selectedReciterId
+    const current = reciters.find((item) => item.apiId === desiredId && (requestedMoshafId <= 0 || item.moshafId === requestedMoshafId))
+    const explicit = reciters.find((item) => item.apiId === desiredId)
     const defaultReciter = reciters.find((item) => item.apiId === DEFAULT_RECITER_API_ID)
+    if (requestedMoshafId > 0) return current || null
+    if (hasRequestedReciter) return current || explicit || null
     return current || explicit || defaultReciter || reciters[0] || null
-  }, [reciters, requestedMoshafId, selectedReciterId])
+  }, [reciters, requestedMoshafId, selectedReciterId, hasRequestedReciter, reciterApiId])
 
-  const updateRouteAudioSelection = useCallback((nextRiwaya: Riwaya, nextReciter?: LocalReciter | null, nextSurah?: number) => {
-    const audio = audioRef.current as Samee3AudioElement | null
-    if (audio?.__samee3NetworkUrl && audio.__samee3Surah) {
-      const previous = readPersistentAudioState()
-      writePersistentAudioState({
-        networkUrl: audio.__samee3NetworkUrl,
-        surah: Number(audio.__samee3Surah),
-        ayah: previous?.ayah ?? null,
-        currentTime: Number.isFinite(audio.currentTime) ? Math.max(0, audio.currentTime) : previous?.currentTime ?? 0,
-        playing: !audio.paused,
-        riwaya: nextRiwaya || audio.__samee3Riwaya || previous?.riwaya || 'hafs',
-        reciterId: Number(nextReciter?.apiId || audio.__samee3ReciterId || previous?.reciterId || 0),
-        reciterName: nextReciter?.label || audio.__samee3ReciterName || previous?.reciterName || '',
-        moshafId: nextReciter?.moshafId ?? audio.__samee3MoshafId ?? previous?.moshafId ?? null,
-        page: clampPage(Number(audio.__samee3Page || pageNumber)),
-        updatedAt: Date.now(),
-      })
+  useEffect(() => { setSelectedReciterId(reciterApiId) }, [reciterApiId])
+
+  const updateRouteAudioSelection = useCallback(async (nextRiwaya: Riwaya, nextReciter?: LocalReciter | null, nextSurah?: number) => {
+    const selection = ++routeSelectionRef.current
+    let target: VerseLocation | null = null
+    if (nextSurah) {
+      target = readingReference(await loadReadingMap(nextRiwaya), nextSurah, 1)
+      if (!target) {
+        triggerToast('تعذر تحديد بداية السورة في هذه الرواية. أعد المحاولة عند توفر الاتصال.')
+        return false
+      }
     }
-
-    const params = new URLSearchParams(searchParams.toString())
+    if (selection !== routeSelectionRef.current) return false
+    const params = new URLSearchParams(window.location.search)
     params.set('riwaya', nextRiwaya)
     params.set('autoplay', '0')
     if (nextReciter) {
       params.set('reciterId', String(nextReciter.apiId))
       params.set('reciterName', nextReciter.label)
       if (nextReciter.moshafId != null) params.set('moshafId', String(nextReciter.moshafId))
-    }
-    if (nextSurah) {
-      const info = SURAH_LIST.find((item) => item.id === nextSurah)
-      params.set('surah', String(nextSurah))
-      params.set('page', String(info?.page || pageNumber))
+      else params.delete('moshafId')
+    } else params.delete('moshafId')
+    if (target) {
+      params.set('surah', String(target.surah))
+      params.set('page', String(target.page))
       params.delete('juz')
       params.delete('juzStart')
       params.delete('juzEnd')
       params.delete('ayah')
     }
     window.history.pushState(null, '', `/mushaf?${params.toString()}`)
-  }, [pageNumber, router, searchParams])
+    return true
+  }, [loadReadingMap, triggerToast])
 
   const handleRiwayaSelect = async (value: Riwaya) => {
     if (value === riwaya) return
-
-    const audio = audioRef.current
-    const wasPlaying = !!audio && !audio.paused && !!audio.src
-    const preservedTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0
-    const visibleAyahs = [pageData, rightPageData, leftPageData]
-      .filter(Boolean)
-      .flatMap((source) => (source as PageData).ayahs)
-    const currentSurah =
-      audioSurahRef.current ||
-      visibleAyahs.find((ayah) => ayah.number === playingAyahNumber)?.surah?.number ||
-      selectedAyah?.surah?.number ||
-      requestedSurah ||
-      currentSurahNumber ||
-      0
-    const currentLocalAyah =
-      visibleAyahs.find((ayah) => ayah.number === playingAyahNumber)?.numberInSurah ||
-      selectedAyah?.numberInSurah ||
-      undefined
-
-    audio?.pause()
+    const selection = ++routeSelectionRef.current
+    const audio = audioRef.current as Samee3AudioElement | null
+    const wasPlaying = Boolean(audio && !audio.paused && audio.src)
+    const currentAyah = pageData?.ayahs.find((row) => row.surah?.number === audio?.__samee3Surah && row.numberInSurah === audio?.__samee3CurrentAyah)
+      || selectedAyah || pageData?.ayahs[0]
+    audioOperationRef.current += 1
+    if (audio) {
+      audio.__samee3Continue = false
+      audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
+      audio.pause()
+    }
+    setAudioLoading(false)
     setIsPlaying(false)
     setPlayingAyahNumber(null)
     setRepeatAyahNumber(null)
+    repeatRemainingRef.current = null
     setAudioError('')
-    setShowChrome(true)
-
-    const loaded = await fetchReciters(value)
-    if (!loaded.length) {
-      setSelectedReciterId(0)
-      triggerToast(`لا يوجد قراء متاحون للرواية ${RIWAYA_NAMES[value]} حاليًا.`)
-      return
-    }
-
-    const preferred =
-      loaded.find((item) => item.apiId === DEFAULT_RECITER_API_ID) ||
-      loaded.find((item) => item.apiId === selectedReciterId) ||
-      loaded[0] ||
-      null
-    setReciters(loaded)
+    const [loaded, locations] = await Promise.all([fetchReciters(value), loadReadingMap(value)])
+    if (selection !== routeSelectionRef.current) return
+    const preferred = loaded.find((item) => item.apiId === selectedReciterId)
+      || loaded.find((item) => item.apiId === DEFAULT_RECITER_API_ID) || loaded[0] || null
+    const reference = currentAyah?.surah ? readingReference(locations, currentAyah.surah.number,
+      currentAyah.hafsNumbers?.[0] || currentAyah.numberInSurah, 'hafs') : null
+    setReciterCatalog({ riwaya: value, entries: loaded })
     setSelectedReciterId(preferred?.apiId || 0)
-    updateRouteAudioSelection(value, preferred)
-
-    if (currentSurah && preferred?.surahIds.includes(Number(currentSurah)) && (wasPlaying || preservedTime > 0 || !!currentLocalAyah)) {
-      await loadAudioForSurah(
-        Number(currentSurah),
-        wasPlaying,
-        currentLocalAyah,
-        preferred,
-        preservedTime,
-      )
+    const params = new URLSearchParams(window.location.search)
+    params.set('riwaya', value)
+    params.set('autoplay', '0')
+    params.delete('juz'); params.delete('juzStart'); params.delete('juzEnd')
+    if (preferred) {
+      params.set('reciterId', String(preferred.apiId))
+      params.set('reciterName', preferred.label)
+      if (preferred.moshafId) params.set('moshafId', String(preferred.moshafId))
+      else params.delete('moshafId')
+    } else {
+      params.delete('reciterId'); params.delete('reciterName'); params.delete('moshafId')
     }
-
-    triggerToast(
-      wasPlaying
-        ? `تم تبديل الرواية إلى ${RIWAYA_NAMES[value]} والاستمرار من نفس الموضع.`
-        : `تم اختيار ${RIWAYA_NAMES[value]}`,
-    )
+    if (reference) {
+      params.set('page', String(reference.page))
+      params.set('surah', String(reference.surah))
+      params.set('ayah', `${reference.surah}:${reference.ayah}`)
+    } else params.delete('ayah')
+    window.history.pushState(null, '', `/mushaf?${params.toString()}`)
+    setShowChrome(true)
+    if (wasPlaying && preferred && reference && preferred.surahIds.includes(reference.surah)) {
+      await loadAudioForSurah(reference.surah, true, reference.ayah, preferred, undefined, value)
+    }
+    triggerToast(preferred ? `تم اختيار ${RIWAYA_NAMES[value]}` : `تم فتح ${RIWAYA_NAMES[value]}. تعذر تحميل قائمة قرائها الآن.`)
   }
 
-
   const handleReciterSelect = async (id: number) => {
-    const item = reciters.find((candidate) => candidate.apiId === id) || null
+    const item = reciters.find((candidate) => candidate.apiId === id)
     if (!item) return
-
-    const currentTargetSurah =
-      selectedAyah?.surah?.number ||
-      requestedSurah ||
-      currentSurahNumber ||
-      0
-    const currentSurahIsAvailable =
-      currentTargetSurah > 0 && item.surahIds.includes(currentTargetSurah)
-
-    if (item.surahIds.length < 114) {
-      triggerToast(
-        `تم اختيار ${item.label}. هذا القارئ متاح لـ ${arabicNumber(item.surahIds.length)} سورة فقط، اختر السورة من القائمة.`,
-      )
+    const audio = audioRef.current as Samee3AudioElement | null
+    const wasPlaying = Boolean(audio?.src && !audio.paused)
+    const wasLoaded = Boolean(audio?.src)
+    const surah = audio?.__samee3Surah || selectedAyah?.surah?.number || requestedSurah || currentSurahNumber
+    const ayah = audio?.__samee3CurrentAyah || selectedAyah?.numberInSurah || 1
+    audioOperationRef.current += 1
+    if (audio) {
+      audio.__samee3Continue = false
+      audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
+      audio.pause()
     }
-
-    const audio = audioRef.current
-    const wasPlaying = !!audio && !audio.paused && !!audio.src
-    const wasLoaded = !!audio && !!audio.src
-    const preservedTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0
-
-    const visibleAyahs = [pageData, rightPageData, leftPageData]
-      .filter(Boolean)
-      .flatMap((source) => (source as PageData).ayahs)
-
-    const playingAyah = playingAyahNumber !== null
-      ? visibleAyahs.find((ayah) => ayah.number === playingAyahNumber)
-      : null
-
-    const activeLocalAyah = playingAyah?.numberInSurah || selectedAyah?.numberInSurah || undefined
-    const currentSurah =
-      audioSurahRef.current ||
-      playingAyah?.surah?.number ||
-      selectedAyah?.surah?.number ||
-      requestedSurah ||
-      currentSurahNumber
-
+    setAudioLoading(false)
+    setPlayingAyahNumber(null)
+    setRepeatAyahNumber(null)
+    repeatRemainingRef.current = null
     setSelectedReciterId(id)
-    updateRouteAudioSelection(riwaya, item)
-
-    if (currentSurah && currentSurahIsAvailable && (wasPlaying || wasLoaded)) {
-      await loadAudioForSurah(
-        Number(currentSurah),
-        wasPlaying,
-        activeLocalAyah,
-        item,
-        preservedTime,
-      )
+    await updateRouteAudioSelection(riwaya, item)
+    if (surah && item.surahIds.includes(surah) && wasLoaded) {
+      await loadAudioForSurah(surah, wasPlaying, ayah, item)
     }
-
-    triggerToast(
-      currentSurah && !currentSurahIsAvailable
-        ? `تم اختيار ${item.label}. اختر السورة المتاحة من قائمة السور.`
-        : wasPlaying
-          ? `تم تبديل القارئ إلى ${item.label}`
-          : `تم اختيار ${item.label}`,
-    )
+    triggerToast(surah && !item.surahIds.includes(surah)
+      ? `تم اختيار ${item.label}. اختر سورة متاحة من القائمة.` : `تم اختيار ${item.label}`)
   }
 
   const availableSurahs = useMemo(() => {
@@ -3875,10 +3648,24 @@ export default function MushafPage() {
     return SURAH_LIST.filter((item) => allowed.has(item.id))
   }, [selectedReciter])
 
-  const handleSurahSelect = (id: number) => {
+  const handleSurahSelect = async (id: number) => {
     const info = availableSurahs.find((item) => item.id === id)
     if (!info) return
-    updateRouteAudioSelection(riwaya, selectedReciter, id)
+    const audio = audioRef.current as Samee3AudioElement | null
+    const wasPlaying = Boolean(audio && !audio.paused)
+    audioOperationRef.current += 1
+    if (audio) {
+      audio.__samee3Continue = false
+      audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
+      audio.pause()
+    }
+    setAudioLoading(false)
+    setRepeatAyahNumber(null)
+    repeatRemainingRef.current = null
+    if (!await updateRouteAudioSelection(riwaya, selectedReciter, id)) return
+    if (wasPlaying && Number(new URLSearchParams(window.location.search).get('surah')) === id) {
+      await loadAudioForSurah(id, true, 1, selectedReciter)
+    }
   }
 
   const handleJuzSelect = async (juzNumber: number) => {
@@ -3900,7 +3687,7 @@ export default function MushafPage() {
         null
 
       if (activeReciter) {
-        setReciters(loaded)
+        setReciterCatalog({ riwaya, entries: loaded })
         setSelectedReciterId(activeReciter.apiId)
       }
     }
@@ -3919,23 +3706,22 @@ export default function MushafPage() {
 
     triggerToast(`جاري فتح الجزء ${arabicNumber(juz.number)}...`)
 
-    const exactPage = await resolveAyahPage(
-      riwaya,
-      juz.start.surah,
-      juz.start.ayah,
-    )
-
-    const fallbackPage =
-      SURAH_LIST.find((item) => item.id === juz.start.surah)?.page || 1
-    const targetPage = exactPage || fallbackPage
+    const locations = await loadReadingMap(riwaya)
+    const start = readingReference(locations, juz.start.surah, juz.start.ayah, 'hafs')
+    const end = readingReference(locations, juz.end.surah, juz.end.ayah, 'hafs')
+    if (!start || !end) {
+      triggerToast('تعذر تحديد حدود الجزء في الرواية المختارة. أعد المحاولة عند توفر الاتصال.')
+      return
+    }
+    const targetPage = start.page
 
     const params = new URLSearchParams(searchParams.toString())
     params.set('page', String(targetPage))
     params.set('surah', String(juz.start.surah))
-    params.set('ayah', `${juz.start.surah}:${juz.start.ayah}`)
+    params.set('ayah', `${start.surah}:${start.ayah}`)
     params.set('juz', String(juz.number))
-    params.set('juzStart', `${juz.start.surah}:${juz.start.ayah}`)
-    params.set('juzEnd', `${juz.end.surah}:${juz.end.ayah}`)
+    params.set('juzStart', `${start.surah}:${start.ayah}`)
+    params.set('juzEnd', `${end.surah}:${end.ayah}`)
     params.set('riwaya', riwaya)
     params.set('reciterId', String(activeReciter.apiId))
     params.set('reciterName', activeReciter.label)
@@ -3948,12 +3734,7 @@ export default function MushafPage() {
 
     window.history.pushState(null, '', `/mushaf?${params.toString()}`)
 
-    await loadAudioForSurah(
-      juz.start.surah,
-      true,
-      juz.start.ayah,
-      activeReciter,
-    )
+    // The route autoplay effect starts the selected recording once the page is ready.
   }
 
 
@@ -4009,34 +3790,17 @@ export default function MushafPage() {
   const openSearchResult = useCallback(async (result: SearchResult) => {
     setSearchLoading(true)
     try {
-      let exactPage = result.page
-
-      // صفحة الآية تختلف أحيانًا بين الروايات؛ نعيد حلّها داخل المصحف
-      // المختار قبل فتح النتيجة حتى لا نصل إلى صفحة حفص مثلًا أثناء قراءة ورش.
-      try {
-        const mushafId = RIWAYA_MUSHAF_IDS[riwaya]
-        const response = await fetch(
-          `https://api.quranpedia.net/v1/mushafs/${mushafId}/${result.surah}`,
-          { cache: 'force-cache' },
-        )
-        if (response.ok) {
-          const payload = await response.json()
-          const ayahs = Array.isArray(payload)
-            ? payload
-            : Array.isArray(payload?.ayahs)
-              ? payload.ayahs
-              : []
-          const found = ayahs.find((item: any) => Number(item?.number) === result.ayah)
-          if (Number(found?.page_number) > 0) exactPage = clampPage(Number(found.page_number))
-        }
-      } catch {
-        // نستخدم صفحة نتيجة البحث كخطة احتياطية.
+      const reference = readingReference(await loadReadingMap(riwaya), result.surah, result.ayah, 'hafs')
+      if (!reference) {
+        triggerToast('تعذر تحديد هذه الآية في الرواية المختارة. أعد المحاولة عند توفر الاتصال.')
+        return
       }
+      const exactPage = reference.page
 
       const params = new URLSearchParams(searchParams.toString())
       params.set('page', String(exactPage))
       params.set('surah', String(result.surah))
-      params.set('ayah', `${result.surah}:${result.ayah}`)
+      params.set('ayah', `${reference.surah}:${reference.ayah}`)
       params.set('autoplay', '1')
       params.delete('juz')
       params.delete('juzStart')
@@ -4056,7 +3820,7 @@ export default function MushafPage() {
     } finally {
       setSearchLoading(false)
     }
-  }, [riwaya, router, searchParams, selectedReciter])
+  }, [riwaya, searchParams, selectedReciter, loadReadingMap, triggerToast])
 
   const loadAyahTimings = useCallback(async (surahNumber: number, readId: number) => {
     if (!surahNumber || !readId) {
@@ -4071,16 +3835,9 @@ export default function MushafPage() {
     }
 
     try {
-      const timingResponse = await fetch(
+      const payload = await fetchMushafJson(
         `https://mp3quran.net/api/v3/ayat_timing?surah=${surahNumber}&read=${encodeURIComponent(String(readId))}`,
-        { cache: 'force-cache', signal: AbortSignal.timeout(15000) },
-      )
-
-      if (!timingResponse.ok) {
-        return cachedTimings
-      }
-
-      const payload = await timingResponse.json()
+      ) as { ayat_timing?: unknown[]; data?: unknown[] } | unknown[]
       const raw = Array.isArray(payload)
         ? payload
         : Array.isArray(payload?.ayat_timing)
@@ -4210,13 +3967,16 @@ export default function MushafPage() {
     const active = timings.find((item) => Number(item.ayah) === activeNumber) || null
 
     if (!active || !Number.isFinite(Number(active.ayah))) {
+      setPlayingAyahNumber(null)
       return
     }
 
     const audio = audioRef.current as Samee3AudioElement | null
-    if (audio) {
-      audio.__samee3CurrentAyah = Number(active.ayah)
+    if (audio?.__samee3Riwaya !== riwaya) {
+      setPlayingAyahNumber(null)
+      return
     }
+    if (audio) audio.__samee3CurrentAyah = Number(active.ayah)
 
     const currentSurah = Number(
       audioSurahRef.current ||
@@ -4234,11 +3994,7 @@ export default function MushafPage() {
           Number(item.numberInSurah) === Number(active?.ayah),
       )
 
-    if (visibleAyah) {
-      setPlayingAyahNumber((previous) =>
-        previous === visibleAyah.number ? previous : visibleAyah.number,
-      )
-    }
+    setPlayingAyahNumber((previous) => previous === (visibleAyah?.number ?? null) ? previous : visibleAyah?.number ?? null)
 
     if (repeatAyahNumber !== null && !repeatSeekGuardRef.current) {
       const index = timings.findIndex(
@@ -4284,6 +4040,7 @@ export default function MushafPage() {
     repeatAyahNumber,
     requestedSurah,
     rightPageData,
+    riwaya,
     triggerToast,
   ])
 
@@ -4293,275 +4050,139 @@ export default function MushafPage() {
     targetAyahNumber?: number,
     reciterOverride?: LocalReciter | null,
     fallbackStartSeconds?: number,
+    targetRiwaya: Riwaya = riwaya,
   ) => {
-    if (!surahNumber) {
-      triggerToast('لم يتم تحديد السورة الحالية.')
-      return
-    }
-
-    const operationId = ++audioOperationRef.current
-    // Store the requested intent before any await. A Stop click will invalidate
-    // this operation and all of its pending network/metadata work.
-    const existing = audioRef.current as Samee3AudioElement | null
-    if (existing) {
-      existing.__samee3Continue = shouldPlay
-      existing.__samee3Serial = Number(existing.__samee3Serial || 0) + 1
-      existing.__samee3Switching = true
-      existing.pause()
-    }
+    const audio = audioRef.current as Samee3AudioElement | null
+    if (!audio || !Number.isInteger(surahNumber) || surahNumber < 1 || surahNumber > 114) return
+    const operation = ++audioOperationRef.current
+    const serial = Number(audio.__samee3Serial || 0) + 1
+    audio.__samee3Serial = serial
+    audio.__samee3Continue = shouldPlay
+    audio.__samee3Switching = true
+    audio.pause()
+    const isCurrent = () => operation === audioOperationRef.current && serial === audio.__samee3Serial
+    let pendingObjectUrl: string | null = null
     setAudioLoading(true)
     setAudioError('')
 
     try {
-      let server = reciterOverride?.server || selectedReciter?.server || ''
-      let activeReciter = reciterOverride || selectedReciter
-
-      if (activeReciter?.surahIds?.length && !activeReciter.surahIds.includes(surahNumber)) {
-        const currentAudio = audioRef.current as Samee3AudioElement | null
-        if (currentAudio) currentAudio.__samee3Continue = false
-        triggerToast(`السورة ${SURAH_LIST.find((item) => item.id === surahNumber)?.name || ''} غير متاحة لهذا القارئ. اختر سورة متاحة من القائمة.`)
-        setAudioLoading(false)
-        return
+      const expectedReciter = reciterOverride?.apiId || (hasRequestedReciter ? reciterApiId : selectedReciter?.apiId || selectedReciterId || reciterApiId)
+      const expectedMoshaf = reciterOverride?.moshafId ?? (targetRiwaya === riwaya && requestedMoshafId > 0 ? requestedMoshafId : null)
+      let activeReciter = reciterOverride || (targetRiwaya === riwaya ? selectedReciter : null)
+      if (activeReciter?.apiId !== expectedReciter || (expectedMoshaf && activeReciter?.moshafId !== expectedMoshaf)) activeReciter = null
+      if (!activeReciter) {
+        activeReciter = readSavedReciterSources(targetRiwaya).find((item) =>
+          item.apiId === expectedReciter && (!expectedMoshaf || item.moshafId === expectedMoshaf)) || null
       }
-
-      // First use the riwaya-specific server saved from a previous online visit.
-      // This is essential when a listener returns to the mushaf in airplane mode.
-      if (!server) {
-        server = savedServerForReciter(
-          riwaya,
-          activeReciter?.apiId || reciterApiId,
-          activeReciter?.moshafId ?? (requestedMoshafId > 0 ? requestedMoshafId : null),
-        )
-      }
-
-      if (!server && isBrowserOffline()) {
-        const libraryUrl = savedLibraryAudioUrl(
-          riwaya,
-          activeReciter?.apiId || reciterApiId,
-          surahNumber,
-          requestedMoshafId > 0,
-        )
-        if (libraryUrl) server = extractServerFromNetworkUrl(libraryUrl)
-      }
-
-      if (!server && reciterApiId && !isBrowserOffline()) {
-        const remote = await fetch(
-          `https://mp3quran.net/api/v3/reciters?language=ar&reciter=${reciterApiId}`,
+      if (!activeReciter && !isBrowserOffline()) {
+        const payload = await fetchMushafJson(
+          `https://mp3quran.net/api/v3/reciters?language=ar&reciter=${expectedReciter}`,
           { cache: 'no-store' },
-        )
-        const payload = await remote.json()
-        const source = Array.isArray(payload?.reciters)
-          ? (payload.reciters as ApiReciter[]).find(
-              (item) => Number(item.id) === reciterApiId,
-            )
-          : null
-        const moshaf = source ? getMoshafForRiwaya(source, riwaya, true) : null
-
-        if (moshaf?.server) {
-          server = String(moshaf.server).replace(/\/$/, '')
-          activeReciter = {
-            id: `${reciterApiId}-${moshaf.id ?? 'default'}`,
-            apiId: reciterApiId,
-            label: source?.name || reciterName,
-            moshafId: moshaf.id ?? null,
-            server,
-            surahIds: parseSurahList(moshaf.surah_list),
-          }
+        ) as { reciters?: ApiReciter[] }
+        if (!isCurrent()) return
+        const source = payload.reciters?.find((item) => Number(item.id) === expectedReciter)
+        const matching = source ? getMoshafForRiwaya({ ...source, moshaf: source.moshaf?.filter((item) => !expectedMoshaf || Number(item.id) === expectedMoshaf) }, targetRiwaya) : null
+        if (matching?.server && source) {
+          activeReciter = { id: `${expectedReciter}-${matching.id ?? 'default'}`, apiId: expectedReciter,
+            label: source.name, moshafId: matching.id ?? null, server: matching.server.replace(/\/$/, ''),
+            surahIds: parseSurahList(matching.surah_list) }
+          saveReciterSources(targetRiwaya, [...readSavedReciterSources(targetRiwaya).filter((item) => item.id !== activeReciter!.id), activeReciter])
         }
       }
-
-      if (!server) {
-        throw new Error(isBrowserOffline() ? 'لم يُحفظ مصدر صوتي لهذا القارئ والرواية على هذا الجهاز. اتصل بالإنترنت مرة واحدة ثم أعد المحاولة.' : 'لا يوجد رابط صوتي صالح للقارئ المختار.')
+      if (!isCurrent()) return
+      if (activeReciter?.surahIds.length && !activeReciter.surahIds.includes(surahNumber)) {
+        throw new Error('السورة غير متاحة لهذا القارئ. اختر إحدى سوره المتاحة.')
       }
-
-      const networkUrl = `${server}/${String(surahNumber).padStart(3, '0')}.mp3`
-      audioSurahRef.current = surahNumber
-      let finalUrl = networkUrl
-
-      const audio = audioRef.current as Samee3AudioElement | null
-      if (!audio) return
-
-      const cachedSource = await getCachedAudioSource(networkUrl)
-      if (operationId !== audioOperationRef.current) {
-        if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
-        return
+      let server = activeReciter?.server || savedServerForReciter(targetRiwaya, expectedReciter, expectedMoshaf)
+      if (!server && isBrowserOffline()) {
+        const savedUrl = savedLibraryAudioUrl(targetRiwaya, expectedReciter, surahNumber, Boolean(expectedMoshaf))
+        if (savedUrl) server = extractServerFromNetworkUrl(savedUrl)
       }
-
-      if (cachedSource) {
-        await releaseCachedObjectUrl(audio)
-        finalUrl = cachedSource.src
-        audio.__samee3ObjectUrl = cachedSource.objectUrl || undefined
-      } else if (isBrowserOffline()) {
-        setAudioError('السورة غير محفوظة للاستماع بدون إنترنت. شغّلها مرة واحدة أثناء الاتصال لحفظها تلقائيًا.')
-        triggerToast('هذه السورة غير محفوظة بعد للاستماع بدون إنترنت.')
-        setAudioLoading(false)
-        return
+      if (!server) throw new Error('تعذر العثور على التسجيل المطابق للقارئ والرواية. اتصل بالإنترنت وأعد المحاولة.')
+      const savedState = readPersistentAudioState()
+      const readId = activeReciter?.moshafId || expectedMoshaf || (
+        savedState?.riwaya === targetRiwaya && savedState.reciterId === expectedReciter ? savedState.moshafId : 0
+      ) || 0
+      const networkUrl = `${server.replace(/\/$/, '')}/${String(surahNumber).padStart(3, '0')}.mp3`
+      const [cachedSource, timings] = await Promise.all([
+        getCachedAudioSource(networkUrl), loadAyahTimings(surahNumber, readId),
+      ])
+      pendingObjectUrl = cachedSource?.objectUrl || null
+      if (!isCurrent()) return
+      if (!cachedSource && isBrowserOffline()) throw new Error('هذه السورة غير محفوظة بالكامل للاستماع دون إنترنت. حمّل التسجيل أثناء الاتصال أولًا.')
+      const effectiveTargetAyah = targetAyahNumber || Number(timings[0]?.ayah) || 1
+      const hasResume = Number.isFinite(fallbackStartSeconds) && Number(fallbackStartSeconds) >= 0
+      const timingStart = findTimingStart(timings, effectiveTargetAyah)
+      if (effectiveTargetAyah > 1 && timingStart === null && !hasResume) {
+        throw new Error('توقيت الآية غير متاح لهذا التسجيل؛ اختر قارئًا يدعم تحديد الآيات.')
       }
-
+      const targetStart = hasResume ? Number(fallbackStartSeconds) : timingStart ?? 0
+      await releaseCachedObjectUrl(audio)
+      if (!isCurrent()) return
       audio.__samee3NetworkUrl = networkUrl
       audio.__samee3Surah = surahNumber
-      audio.__samee3Riwaya = riwaya
-      audio.__samee3ReciterId = activeReciter?.apiId || reciterApiId
+      audio.__samee3Riwaya = targetRiwaya
+      audio.__samee3ReciterId = expectedReciter
       audio.__samee3ReciterName = activeReciter?.label || reciterName
-      audio.__samee3MoshafId = activeReciter?.moshafId ?? null
-      audio.__samee3Page = pageNumber
-      audio.__samee3Server = String(server).replace(/\/$/, '')
-      audio.__samee3SurahIds = Array.isArray(activeReciter?.surahIds)
-        ? [...activeReciter.surahIds]
-        : []
-
-      const timingsPromise = loadAyahTimings(
-        surahNumber,
-        activeReciter?.moshafId || (requestedMoshafId > 0 ? requestedMoshafId : 0),
-      )
-
-      const immediateCachedTimings = readCachedAyahTimings(
-        surahNumber,
-        activeReciter?.moshafId || (requestedMoshafId > 0 ? requestedMoshafId : 0),
-      )
-
-      const timings: AyahTiming[] = immediateCachedTimings.length
-        ? immediateCachedTimings
-        : await timingsPromise
-
-      if (operationId !== audioOperationRef.current) return
-
-      const fallbackFirstAyah = timings.find(
-        (item: AyahTiming) => Number(item.ayah) > 0,
-      )?.ayah
-      const effectiveTargetAyah =
-        targetAyahNumber ||
-        (shouldPlay && Number(fallbackFirstAyah) > 0 ? Number(fallbackFirstAyah) : undefined)
-
-      const targetStart =
-        findTimingStart(timings, effectiveTargetAyah) ??
-        (Number.isFinite(Number(fallbackStartSeconds)) ? Number(fallbackStartSeconds) : 0)
-
-      if (operationId !== audioOperationRef.current) return
-      if (effectiveTargetAyah && effectiveTargetAyah > 1 && findTimingStart(timings, effectiveTargetAyah) === null && !fallbackStartSeconds) {
-        throw new Error('توقيت الآية غير متاح لهذا التسجيل؛ اختر قارئًا آخر لبدء التلاوة من هذه الآية.')
-      }
+      audio.__samee3MoshafId = readId || null
+      audio.__samee3Page = clampPage(Number(new URLSearchParams(window.location.search).get('page') || pageNumber))
+      audio.__samee3Server = server.replace(/\/$/, '')
+      audio.__samee3SurahIds = activeReciter?.surahIds || []
+      audio.__samee3Timings = timings
+      audio.__samee3Juz = activeJuzRange ? { number: activeJuzRange.number, end: activeJuzRange.end } : null
+      audio.__samee3CurrentAyah = effectiveTargetAyah
+      audioSurahRef.current = surahNumber
       ayahTimingsRef.current = timings
-
-      audio.pause()
-      // pause() emits an asynchronous event on some WebKit builds.
-      // __samee3Switching keeps that transient event from revoking playback.
-      audio.src = finalUrl
+      audio.__samee3ObjectUrl = pendingObjectUrl || undefined
+      pendingObjectUrl = null
+      audio.src = cachedSource?.src || networkUrl
       audio.preload = 'auto'
       audio.load()
-      setAudioDisplayUrl(finalUrl)
-
-      await seekAudioBeforePlay(audio, targetStart, () => operationId === audioOperationRef.current)
-
-      if (operationId !== audioOperationRef.current) return
-
-      audio.__samee3Timings = timings
-      audio.__samee3CurrentAyah = effectiveTargetAyah
-
-      setPlayingAyahNumber(
-        effectiveTargetAyah
-          ? (
-              [pageData, rightPageData, leftPageData]
-                .filter(Boolean)
-                .flatMap((source) => (source as PageData).ayahs)
-                .find(
-                  (item) =>
-                    Number(item.surah?.number) === surahNumber &&
-                    Number(item.numberInSurah) === Number(effectiveTargetAyah),
-                )?.number ?? null
-            )
-          : null,
-      )
-
-      writePersistentAudioState({
-        networkUrl,
-        surah: surahNumber,
-        ayah: effectiveTargetAyah ? Number(effectiveTargetAyah) : null,
-        currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : targetStart,
-        playing: shouldPlay,
-        riwaya,
-        reciterId: activeReciter?.apiId || reciterApiId,
-        reciterName: activeReciter?.label || reciterName,
-        moshafId: activeReciter?.moshafId ?? null,
-        page: pageNumber,
-        updatedAt: Date.now(),
-      })
-
-      if (shouldPlay) {
-        if (!audio.__samee3Continue || operationId !== audioOperationRef.current) return
-        try {
-          await audio.play()
-          if (!audio.__samee3Continue || operationId !== audioOperationRef.current) {
-            audio.pause()
-            return
-          }
-        } catch (playError) {
-          if (operationId !== audioOperationRef.current) return
-          audio.__samee3Continue = false
-          audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
-          console.error(playError)
-          setIsPlaying(false)
-          const message = playError instanceof Error ? playError.message : ''
-          if (/not allowed|not supported|user agent/i.test(message)) {
-            setAudioError('')
-            triggerToast('اضغط تشغيل لبدء التلاوة.')
-          } else {
-            setAudioError('تعذر بدء التلاوة. اضغط تشغيل مرة أخرى.')
-          }
-        }
+      setAudioDisplayUrl(audio.src)
+      await seekAudioBeforePlay(audio, targetStart, isCurrent)
+      if (!isCurrent()) return
+      updatePlayingAyahFromTime(audio.currentTime)
+      persistAudioSnapshotFromElement(audio, false)
+      if (shouldPlay && audio.__samee3Continue) {
+        await audio.play()
+        if (!isCurrent()) return
+        if (!audio.__samee3Continue) { audio.pause(); return }
       }
-
-      // لا نؤخر بداية التلاوة بسبب التحميل إلى Offline cache.
-      // التخزين يتم في الخلفية بعد بدء التشغيل.
-      if (!cachedSource) {
-        void cacheAudioForOffline(networkUrl)
-      }
-
-      // Prefetch is useful only when continuous playback was requested.
-      if (!audio.__samee3Continue || operationId !== audioOperationRef.current) return
-      const preferredIds = activeReciter?.surahIds?.length
-        ? activeReciter.surahIds
-        : SURAH_LIST.map((item) => item.id)
-      const nextSurah = nextContinuousSurah(surahNumber, preferredIds)
-      if (nextSurah !== surahNumber) {
-        const nextUrl = `${String(server).replace(/\/$/, '')}/${String(nextSurah).padStart(3, '0')}.mp3`
-        void cacheAudioForOffline(nextUrl)
+      if (!cachedSource) void cacheAudioForOffline(networkUrl)
+      if (audio.__samee3Continue) {
+        const next = nextContinuousSurah(surahNumber, activeReciter?.surahIds)
+        if (next !== surahNumber) void cacheAudioForOffline(`${server.replace(/\/$/, '')}/${String(next).padStart(3, '0')}.mp3`)
       }
     } catch (error) {
-      if (operationId !== audioOperationRef.current) return
-      const failedAudio = audioRef.current as Samee3AudioElement | null
-      if (failedAudio) { failedAudio.__samee3Continue = false; failedAudio.pause(); failedAudio.removeAttribute('src'); failedAudio.load() }
-      audioSurahRef.current = 0
-      setAudioDisplayUrl('')
-      console.error(error)
-      const message = error instanceof Error ? error.message : ''
-      if (/not allowed|not supported|operation is not supported|user agent/i.test(message)) {
-        setAudioError('')
-        triggerToast('اضغط تشغيل لبدء التلاوة.')
+      if (!isCurrent()) return
+      audio.__samee3Continue = false
+      setIsPlaying(false)
+      if (error instanceof Error && error.name === 'NotAllowedError') {
+        triggerToast('اضغط تشغيل لبدء التلاوة من الموضع المحدد.')
       } else {
-        setAudioError(message || 'تعذر تشغيل التلاوة حاليًا.')
+        audio.pause()
+        audio.removeAttribute('src')
+        audio.load()
+        await releaseCachedObjectUrl(audio)
+        audio.__samee3NetworkUrl = undefined
+        audio.__samee3Surah = undefined
+        audio.__samee3Timings = []
+        audio.__samee3CurrentAyah = null
+        ayahTimingsRef.current = []
+        audioSurahRef.current = null
+        setAudioDisplayUrl('')
+        setPlayingAyahNumber(null)
+        setAudioError(error instanceof Error ? error.message : 'تعذر تشغيل التلاوة. أعد المحاولة.')
       }
     } finally {
-      if (operationId === audioOperationRef.current) {
-        const currentAudio = audioRef.current as Samee3AudioElement | null
-        if (currentAudio) currentAudio.__samee3Switching = false
+      if (pendingObjectUrl) URL.revokeObjectURL(pendingObjectUrl)
+      if (operation === audioOperationRef.current) {
+        audio.__samee3Switching = false
         setAudioLoading(false)
       }
     }
-  }, [
-    findTimingStart,
-    leftPageData,
-    loadAyahTimings,
-    pageData,
-    reciterApiId,
-    reciterName,
-    requestedSurah,
-    requestedMoshafId,
-    rightPageData,
-    riwaya,
-    selectedReciter,
-    triggerToast,
-  ])
+  }, [findTimingStart, loadAyahTimings, pageNumber, reciterApiId, selectedReciterId, reciterName,
+    requestedMoshafId, riwaya, selectedReciter, triggerToast, updatePlayingAyahFromTime, activeJuzRange, hasRequestedReciter])
 
   const loadAudioForCurrentSurah = useCallback(async (shouldPlay: boolean) => {
     const visible = (pageData?.ayahs || []).filter((ayah) => !ayah.page || ayah.page === pageNumber)
@@ -4579,8 +4200,8 @@ export default function MushafPage() {
       return
     }
     await loadAudioForSurah(surahNumber, shouldPlay, target.numberInSurah, undefined,
-      saved?.surah === surahNumber && saved.riwaya === riwaya && saved.reciterId === reciterApiId && target.numberInSurah === saved.ayah ? saved.currentTime : undefined)
-  }, [selectedAyah, ayahFromUrl, pageData, pageNumber, riwaya, requestedSurah, reciterApiId, loadAudioForSurah])
+      saved?.surah === surahNumber && saved.riwaya === riwaya && saved.reciterId === (selectedReciter?.apiId || reciterApiId) && (!requestedMoshafId || saved.moshafId === requestedMoshafId) && target.numberInSurah === saved.ayah ? saved.currentTime : undefined)
+  }, [selectedAyah, ayahFromUrl, pageData, pageNumber, riwaya, requestedSurah, reciterApiId, requestedMoshafId, selectedReciter, loadAudioForSurah])
 
   /*
    * جميع القيم الديناميكية تمر من خلال ref حتى لا يتم إنشاء
@@ -4588,6 +4209,28 @@ export default function MushafPage() {
    * هذا يمنع انقطاع التلاوة أثناء التقليب التلقائي.
    */
   const audioRuntimeRef = useRef<AudioRuntime | null>(null)
+
+  const repeatOnEnded = useCallback(() => {
+    const audio = audioRef.current as Samee3AudioElement | null
+    if (!audio || repeatAyahNumber === null) return false
+    const start = findTimingStart(audio.__samee3Timings || [], repeatAyahNumber)
+    if (start === null) return false
+    const remaining = repeatRemainingRef.current
+    if (remaining !== null && remaining <= 1) {
+      repeatRemainingRef.current = null
+      setRepeatAyahNumber(null)
+      audio.__samee3Continue = false
+      audio.pause()
+      setIsPlaying(false)
+      triggerToast('اكتمل تكرار الآية بالعدد المحدد.')
+    } else if (audio.__samee3Continue) {
+      if (remaining !== null) repeatRemainingRef.current = remaining - 1
+      audio.currentTime = start
+      audio.__samee3CurrentAyah = repeatAyahNumber
+      void audio.play().catch(() => { audio.__samee3Continue = false })
+    }
+    return true
+  }, [findTimingStart, repeatAyahNumber, triggerToast])
 
   audioRuntimeRef.current = {
     activeJuzNumber,
@@ -4609,6 +4252,7 @@ export default function MushafPage() {
     navigateTo,
     triggerToast,
     updateRouteAudioSelection,
+    repeatOnEnded,
   }
 
   useEffect(() => {
@@ -4634,6 +4278,9 @@ export default function MushafPage() {
     win.__samee3PersistentAudio = audio
     audioRef.current = audio
     audio.preload = 'auto'
+    audioSurahRef.current = audio.__samee3Surah || null
+    ayahTimingsRef.current = audio.__samee3Timings || []
+    if (audio.src) setAudioDisplayUrl(audio.src)
     // Keep the audio element alive across Next.js route navigation, but never
     // restore the "continue" intention from an earlier browser session.
     if (typeof audio.__samee3Continue !== 'boolean') {
@@ -4671,7 +4318,28 @@ export default function MushafPage() {
         persistAudioSnapshotFromElement(audio, false)
       }
 
+      const finishJuzIfNeeded = (ended = false) => {
+        const juz = audio.__samee3Juz
+        if (!juz || Number(audio.__samee3Surah) !== juz.end.surah) return false
+        const timings = audio.__samee3Timings || []
+        const index = timings.findIndex((row) => Number(row.ayah) === juz.end.ayah)
+        const end = Number(timings[index]?.end_time || timings[index + 1]?.start_time) / 1000
+        if (!ended && (!Number.isFinite(end) || end <= 0 || audio.currentTime < end - 0.03)) return false
+        audio.__samee3Juz = null
+        audio.__samee3Continue = false
+        audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
+        audio.pause()
+        const runtime = getRuntime()
+        if (runtime) runtime.notifyJuzCompleted(juz.number)
+        else {
+          try { localStorage.setItem('samee3_last_completed_juz', JSON.stringify({ number: juz.number })) } catch {}
+        }
+        persistAudioSnapshotFromElement(audio, false)
+        return true
+      }
+
       const persistentTimeUpdate = () => {
+        if (audio.__samee3Continue && finishJuzIfNeeded()) return
         const now = Date.now()
         if (now - Number(audio.__samee3LastPersist || 0) < 900) return
         audio.__samee3LastPersist = now
@@ -4687,35 +4355,12 @@ export default function MushafPage() {
         // Stop is authoritative, including a Stop during an ended/next-surah
         // race. An ended file must never silently restart a stopped recitation.
         if (!audio.__samee3Continue) return
-        const endOperation = audioOperationRef.current
         const endSerial = Number(audio.__samee3Serial || 0)
-        const runtime = getRuntime()
+        const mountedRuntime = getRuntime()
+        const runtime = mountedRuntime?.riwaya === audio.__samee3Riwaya ? mountedRuntime : null
 
-        // التكرار الصريح للآية يظل أعلى أولوية.
-        if (runtime && runtime.repeatAyahNumber !== null && ayahTimingsRef.current.length) {
-          const repeatStart = runtime.findTimingStart(
-            ayahTimingsRef.current,
-            runtime.repeatAyahNumber,
-          )
-          if (repeatStart !== null) {
-            const remaining = repeatRemainingRef.current
-            if (remaining !== null && remaining <= 1) {
-              repeatRemainingRef.current = null
-              setRepeatAyahNumber(null)
-              audio.__samee3Continue = false
-              audio.pause()
-              setIsPlaying(false)
-              return
-            }
-            if (remaining !== null) repeatRemainingRef.current = remaining - 1
-            if (!audio.__samee3Continue) return
-            audio.currentTime = repeatStart
-            audio.__samee3CurrentAyah = runtime.repeatAyahNumber
-            persistAudioSnapshotFromElement(audio, true)
-            void audio.play().catch(() => {})
-            return
-          }
-        }
+        if (runtime?.repeatOnEnded()) return
+        if (finishJuzIfNeeded(true)) return
 
         const finishedSurah = Number(audio.__samee3Surah || 0)
         if (!finishedSurah) return
@@ -4737,22 +4382,14 @@ export default function MushafPage() {
           ? runtimeIds
           : (audio.__samee3SurahIds || [])
         const nextSurah = nextContinuousSurah(finishedSurah, preferredIds)
-        const nextPage = SURAH_LIST.find((item) => item.id === nextSurah)?.page || 1
+        let nextPage = SURAH_LIST.find((item) => item.id === nextSurah)?.page || 1
 
         if (runtime) {
           if (!audio.__samee3Continue) return
-          setPlayingAyahNumber(null)
-          runtime.updateRouteAudioSelection(
-            runtime.riwaya,
-            activeReciter,
-            nextSurah,
-          )
-          void runtime.loadAudioForSurah(
-            nextSurah,
-            true,
-            undefined,
-            activeReciter,
-          )
+          void runtime.updateRouteAudioSelection(runtime.riwaya, activeReciter, nextSurah).then((updated) => {
+            if (!updated || !audio.__samee3Continue || endSerial !== Number(audio.__samee3Serial || 0)) return
+            return getRuntime()?.loadAudioForSurah(nextSurah, true, undefined, activeReciter)
+          })
           return
         }
 
@@ -4764,8 +4401,11 @@ export default function MushafPage() {
 
         const nextUrl = `${server.replace(/\/$/, '')}/${String(nextSurah).padStart(3, '0')}.mp3`
         const playNextCached = async () => {
-          const cachedSource = await getCachedAudioSource(nextUrl)
-          if (!audio.__samee3Continue || endOperation !== audioOperationRef.current || endSerial !== Number(audio.__samee3Serial || 0)) {
+          const [cachedSource, locations] = await Promise.all([
+            getCachedAudioSource(nextUrl), loadReadingMap(audio.__samee3Riwaya || 'hafs'),
+          ])
+          nextPage = readingReference(locations, nextSurah, 1)?.page || nextPage
+          if (!audio.__samee3Continue || endSerial !== Number(audio.__samee3Serial || 0)) {
             if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
             return
           }
@@ -4777,7 +4417,7 @@ export default function MushafPage() {
           }
 
           await releaseCachedObjectUrl(audio)
-          if (!audio.__samee3Continue || endOperation !== audioOperationRef.current || endSerial !== Number(audio.__samee3Serial || 0)) {
+          if (!audio.__samee3Continue || endSerial !== Number(audio.__samee3Serial || 0)) {
             if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
             return
           }
@@ -4799,20 +4439,17 @@ export default function MushafPage() {
           const timingReadId = Number(audio.__samee3MoshafId || 0)
           const cachedTimings = readCachedAyahTimings(nextSurah, timingReadId)
           audio.__samee3Timings = cachedTimings
-          ayahTimingsRef.current = cachedTimings
-          const stillCurrent = () => audio.__samee3Continue && endOperation === audioOperationRef.current && endSerial === Number(audio.__samee3Serial || 0) && audio.__samee3Surah === nextSurah && Number(audio.__samee3MoshafId || 0) === timingReadId
+          const stillCurrent = () => audio.__samee3Continue && endSerial === Number(audio.__samee3Serial || 0) && audio.__samee3Surah === nextSurah && Number(audio.__samee3MoshafId || 0) === timingReadId
           if (!stillCurrent()) return
           if (!cachedSource) void cacheAudioForOffline(nextUrl)
           void audio.play().catch(() => {
             if (!stillCurrent()) return
             audio.__samee3Continue = false
-            setIsPlaying(false)
-            setAudioError('تعذر تشغيل السورة التالية. اضغط تشغيل للمحاولة مجددًا.')
+            getRuntime()?.triggerToast('تعذر تشغيل السورة التالية. اضغط تشغيل للمحاولة مجددًا.')
           })
           void loadAyahTimings(nextSurah, timingReadId).then((timings) => {
             if (!stillCurrent()) return
             audio.__samee3Timings = timings
-            ayahTimingsRef.current = timings
           })
         }
 
@@ -4838,6 +4475,9 @@ export default function MushafPage() {
       const runtime = getRuntime()
       if (!runtime) return
 
+      if (audio.__samee3Riwaya !== runtime.riwaya) { setPlayingAyahNumber(null); return }
+      audioSurahRef.current = audio.__samee3Surah || null
+      ayahTimingsRef.current = audio.__samee3Timings || []
       runtime.updatePlayingAyahFromTime(audio.currentTime)
 
       /*
@@ -4885,7 +4525,7 @@ export default function MushafPage() {
               activeLocalAyah,
             ).then((targetPage) => {
               const currentRuntime = getRuntime()
-              if (!currentRuntime || !targetPage) {
+              if (!currentRuntime || !targetPage || audio.paused || currentRuntime.riwaya !== audio.__samee3Riwaya) {
                 lastPageSyncAyahRef.current = ''
                 return
               }
@@ -4932,10 +4572,7 @@ export default function MushafPage() {
 
     const onError = () => {
       setIsPlaying(false)
-      setAudioError('')
-      getRuntime()?.triggerToast(
-        'تعذر تحميل ملف التلاوة لهذا القارئ أو السورة.',
-      )
+      setAudioError('تعذر تحميل ملف التلاوة لهذا القارئ أو السورة. اضغط تشغيل لإعادة المحاولة.')
     }
 
     audio.addEventListener('play', onPlay)
@@ -4972,10 +4609,14 @@ export default function MushafPage() {
       window.removeEventListener('beforeunload', persistOnDocumentExit)
 
       audioOperationRef.current += 1
-      audio.__samee3Continue = false
-      audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
-      audio.pause()
-      persistAudioSnapshotFromElement(audio, false)
+      routeSelectionRef.current += 1
+      // A playing shared element survives navigation. Cancel only an unfinished
+      // source switch; its old component must not start audio after unmount.
+      if (audio.__samee3Switching && audio.paused) {
+        audio.__samee3Continue = false
+        audio.__samee3Serial = Number(audio.__samee3Serial || 0) + 1
+        audio.__samee3Switching = false
+      }
     }
   }, [])
 
@@ -4990,7 +4631,9 @@ export default function MushafPage() {
 
     // الصوت له الأولوية لأنه يحتوي على وقت التشغيل الدقيق.
     if (initialRouteRef.current) return
-    if (savedAudio && (!savedReading || savedAudio.updatedAt >= savedReading.updatedAt)) return
+    const manualReadingIsNewer = savedReading && savedAudio && savedReading.updatedAt > savedAudio.updatedAt &&
+      (savedReading.page !== savedAudio.page || savedReading.riwaya !== savedAudio.riwaya)
+    if (savedAudio && !manualReadingIsNewer) return
 
     const shouldRestoreRoute = searchParams.get('autoplay') !== '1'
     if (!shouldRestoreRoute || !savedReading) return
@@ -5015,160 +4658,85 @@ export default function MushafPage() {
     const audio = audioRef.current as Samee3AudioElement | null
     if (!audio || audioRestoreAttemptedRef.current) return
     audioRestoreAttemptedRef.current = true
-
+    const routeFor = (state: PersistentAudioState) => {
+      const params = new URLSearchParams({ page: String(state.page), riwaya: state.riwaya,
+        surah: String(state.surah), autoplay: '0' })
+      if (state.reciterId) params.set('reciterId', String(state.reciterId))
+      if (state.reciterName) params.set('reciterName', state.reciterName)
+      if (state.moshafId) params.set('moshafId', String(state.moshafId))
+      return `/mushaf?${params.toString()}`
+    }
+    // In-app navigation reuses the living element, including timings and its
+    // real currentTime. A saved snapshot never seeks a live recitation backwards.
+    if (audio.src && audio.__samee3NetworkUrl && audio.__samee3Surah) {
+      audioSurahRef.current = audio.__samee3Surah
+      ayahTimingsRef.current = audio.__samee3Timings || []
+      setAudioDisplayUrl(audio.src)
+      setIsPlaying(!audio.paused)
+      if (!initialRouteRef.current) {
+        const saved = readPersistentAudioState()
+        if (saved) window.history.replaceState(null, '', routeFor(saved))
+      }
+      return
+    }
     const saved = readPersistentAudioState()
-    if (!saved) return
-
+    if (!saved || autoplayRequested) return
+    const initial = new URLSearchParams(initialRouteRef.current)
+    const routeAyah = parseQuranReference(initial.get('ayah'))
+    const compatible = (!initial.has('riwaya') || riwaya === saved.riwaya) &&
+      (!initial.has('page') || pageNumber === saved.page) &&
+      (!initial.has('reciterId') || reciterApiId === saved.reciterId) &&
+      (!initial.has('moshafId') || requestedMoshafId === saved.moshafId) &&
+      (!initial.has('surah') || requestedSurah === saved.surah) &&
+      (!routeAyah || (routeAyah.surah === saved.surah && routeAyah.ayah === saved.ayah))
+    if (!compatible) return
     const reading = readPersistentReadingState()
-    if (initialRouteRef.current || (reading && reading.updatedAt > saved.updatedAt)) return
-    const explicitNewPlayback = searchParams.get('autoplay') === '1'
-    if (explicitNewPlayback || (searchParams.has('ayah') && searchParams.get('ayah') !== `${saved.surah}:${saved.ayah}`) || (searchParams.has('riwaya') && riwaya !== saved.riwaya)) return
-    const sameLoadedAudio =
-      audio.__samee3NetworkUrl === saved.networkUrl &&
-      !!audio.src
-
-    audio.__samee3NetworkUrl = saved.networkUrl
-    audio.__samee3Surah = saved.surah
-    audioSurahRef.current = saved.surah
-    audio.__samee3Riwaya = saved.riwaya
-    audio.__samee3ReciterId = saved.reciterId || DEFAULT_RECITER_API_ID
-    audio.__samee3ReciterName = saved.reciterName || DEFAULT_RECITER_NAME
-    audio.__samee3MoshafId = saved.moshafId
-    audio.__samee3Page = saved.page
-    audio.__samee3CurrentAyah = saved.ayah
-    audio.__samee3Server = extractServerFromNetworkUrl(saved.networkUrl)
-
-    const restoreSerial = Number(audio.__samee3Serial || 0)
-    const restoreAudioSource = async () => {
-      if (sameLoadedAudio) return true
-      // Never overwrite the source of a new player request.
-      if (audio.__samee3Continue) return false
-      const cachedSource = await getCachedAudioSource(saved.networkUrl)
-      if (restoreSerial !== Number(audio.__samee3Serial || 0) || audio.__samee3Continue) {
-        if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
-        return false
+    if (!initialRouteRef.current && reading && reading.updatedAt > saved.updatedAt &&
+      (reading.page !== saved.page || reading.riwaya !== saved.riwaya)) return
+    if (!initialRouteRef.current) window.history.replaceState(null, '', routeFor(saved))
+    const serial = Number(audio.__samee3Serial || 0)
+    const isCurrent = () => serial === Number(audio.__samee3Serial || 0)
+    const restore = async () => {
+      const cached = await getCachedAudioSource(saved.networkUrl)
+      if (!isCurrent()) { if (cached?.objectUrl) URL.revokeObjectURL(cached.objectUrl); return }
+      if (!cached && isBrowserOffline()) {
+        setAudioError('التلاوة السابقة غير محفوظة بالكامل على هذا الجهاز. اتصل بالإنترنت لاستكمالها.')
+        return
       }
-      if (!cachedSource && isBrowserOffline()) {
-        setAudioError('التلاوة المحفوظة غير متاحة بالكامل بدون اتصال على هذا الجهاز.')
-        setAudioDisplayUrl(saved.networkUrl)
-        return false
-      }
-
       await releaseCachedObjectUrl(audio)
-      if (restoreSerial !== Number(audio.__samee3Serial || 0) || audio.__samee3Continue) {
-        if (cachedSource?.objectUrl) URL.revokeObjectURL(cachedSource.objectUrl)
-        return false
-      }
-      const sourceUrl = cachedSource?.src || saved.networkUrl
-      audio.__samee3ObjectUrl = cachedSource?.objectUrl || undefined
-      audio.src = sourceUrl
+      if (!isCurrent()) { if (cached?.objectUrl) URL.revokeObjectURL(cached.objectUrl); return }
+      audio.__samee3NetworkUrl = saved.networkUrl
+      audio.__samee3Surah = saved.surah
+      audio.__samee3Riwaya = saved.riwaya
+      audio.__samee3ReciterId = saved.reciterId
+      audio.__samee3ReciterName = saved.reciterName
+      audio.__samee3MoshafId = saved.moshafId
+      audio.__samee3Page = saved.page
+      audio.__samee3CurrentAyah = saved.ayah
+      audio.__samee3Server = extractServerFromNetworkUrl(saved.networkUrl)
+      audio.__samee3SurahIds = readSavedReciterSources(saved.riwaya).find((item) =>
+        item.apiId === saved.reciterId && item.moshafId === saved.moshafId)?.surahIds || []
+      audio.__samee3Timings = readCachedAyahTimings(saved.surah, saved.moshafId || 0)
+      audio.__samee3Continue = false
+      audio.__samee3ObjectUrl = cached?.objectUrl || undefined
+      audioSurahRef.current = saved.surah
+      ayahTimingsRef.current = audio.__samee3Timings
+      audio.src = cached?.src || saved.networkUrl
       audio.load()
-      return true
-    }
-
-    const restorePosition = () => {
-      if (restoreSerial !== Number(audio.__samee3Serial || 0)) return
-      if (audio.__samee3NetworkUrl !== saved.networkUrl) return
-      try {
-        if (!sameLoadedAudio && saved.currentTime > 0) {
-          audio.currentTime = saved.currentTime
-        }
-      } catch {
-        // نبقي الموضع الذي استطاع المتصفح استعادته.
-      }
-    }
-
-    const restorePromise = restoreAudioSource()
-
-    if (audio.readyState >= 1) restorePosition()
-    else if (!sameLoadedAudio) {
-      audio.addEventListener('loadedmetadata', restorePosition, { once: true })
-    }
-
-    setAudioDisplayUrl(saved.networkUrl)
-    setSelectedReciterId(
-      searchParams.get('reciterId')
-        ? reciterApiId
-        : saved.reciterId || DEFAULT_RECITER_API_ID,
-    )
-
-    void loadAyahTimings(
-      saved.surah,
-      saved.moshafId || 0,
-    ).then(async (timings: AyahTiming[]) => {
-      if (restoreSerial !== Number(audio.__samee3Serial || 0)) return
+      setAudioDisplayUrl(audio.src)
+      await seekAudioBeforePlay(audio, saved.currentTime, isCurrent)
+      if (!isCurrent()) return
+      writePersistentAudioState({ ...saved, playing: false })
+      const timings = await loadAyahTimings(saved.surah, saved.moshafId || 0)
+      if (!isCurrent()) return
       audio.__samee3Timings = timings
       ayahTimingsRef.current = timings
-
-      const liveAyah = sameLoadedAudio && !audio.paused
-        ? getActiveAyahFromTimings(timings, audio.currentTime)
-        : null
-      const targetAyah = liveAyah || saved.ayah || null
-
-      if (targetAyah) {
-        audio.__samee3CurrentAyah = Number(targetAyah)
-        const visible = [pageData, rightPageData, leftPageData]
-          .filter(Boolean)
-          .flatMap((source) => (source as PageData).ayahs)
-        const match = visible.find(
-          (item) =>
-            Number(item.surah?.number) === Number(saved.surah) &&
-            Number(item.numberInSurah) === Number(targetAyah),
-        )
-        if (match) setPlayingAyahNumber(match.number)
-      }
-
-      if (!explicitNewPlayback && targetAyah) {
-        const exactPage = await resolveAyahPage(
-          saved.riwaya,
-          saved.surah,
-          Number(targetAyah),
-        )
-
-        if (exactPage) {
-          audio.__samee3Page = exactPage
-          persistAudioSnapshotFromElement(audio, !audio.paused, exactPage)
-
-          const params = new URLSearchParams(searchParams.toString())
-          params.set('page', String(exactPage))
-          params.set('riwaya', saved.riwaya)
-          if (saved.reciterId) params.set('reciterId', String(saved.reciterId))
-          if (saved.reciterName) params.set('reciterName', saved.reciterName)
-          if (saved.moshafId) params.set('moshafId', String(saved.moshafId))
-          params.set('surah', String(saved.surah))
-          params.set('ayah', `${saved.surah}:${targetAyah}`)
-          params.set('autoplay', '0')
-
-          const currentTarget = `/mushaf?${params.toString()}`
-          const currentPath = `/mushaf?${searchParams.toString()}`
-          if (currentPath !== currentTarget) window.history.replaceState(null, '', currentTarget)
-        }
-      }
-    }).catch(() => {})
-
-    // حالة عنصر Audio الحالية أهم من localStorage عند العودة لنفس العنصر.
-    // هذا يمنع الضغط على إيقاف من مشغل الهاتف من التحول إلى تشغيل تلقائي قديم.
-    setIsPlaying(!audio.paused)
-    void restorePromise.then((ready) => {
-      if (!ready) return
-      setAudioDisplayUrl(saved.networkUrl)
-      // Restore the saved position, never auto-start a new listening session.
-      // An existing live Audio element remains playing across in-app routes.
-      if (!sameLoadedAudio && restoreSerial === Number(audio.__samee3Serial || 0)) {
-        audio.__samee3Continue = false
-        writePersistentAudioState({ ...saved, playing: false })
-      }
+      audioRuntimeRef.current?.updatePlayingAyahFromTime(audio.currentTime)
+    }
+    void restore().catch((error: unknown) => {
+      if (isCurrent()) setAudioError(error instanceof Error ? error.message : 'تعذر استعادة التسجيل السابق.')
     })
-  }, [
-    leftPageData,
-    loadAyahTimings,
-    pageData,
-    reciterApiId,
-    resolveAyahPage,
-    rightPageData,
-    router,
-    searchParams,
-  ])
+  }, [autoplayRequested, loadAyahTimings, pageNumber, reciterApiId, requestedMoshafId, requestedSurah, riwaya])
 
 
   useEffect(() => {
@@ -5228,7 +4796,8 @@ export default function MushafPage() {
 
   useEffect(() => {
     autoplayConsumedRef.current = false
-  }, [activeJuzNumber, ayahFromUrl, reciterApiId, requestedSurah, riwaya])
+    audioUserStoppedRef.current = false
+  }, [activeJuzNumber, ayahFromUrl, reciterApiId, requestedMoshafId, requestedSurah, riwaya, autoplayRequested])
 
   useEffect(() => {
     if (
@@ -5242,12 +4811,18 @@ export default function MushafPage() {
     }
 
     autoplayConsumedRef.current = true
+    // Consume this route command once. Turning a page later must not replay
+    // the old index/search command or undo the reader's Stop.
+    const consumedParams = new URLSearchParams(window.location.search)
+    consumedParams.set('autoplay', '0')
+    window.history.replaceState(null, '', `/mushaf?${consumedParams.toString()}`)
     const existingAudio = audioRef.current as Samee3AudioElement | null
-    const persisted = readPersistentAudioState()
-    if (existingAudio?.__samee3NetworkUrl && persisted?.networkUrl === existingAudio.__samee3NetworkUrl && !existingAudio.paused) return
-    const initialAyah = ayahFromUrl.includes(':')
-      ? Number(ayahFromUrl.split(':')[1])
-      : undefined
+    const initialAyah = ayahFromUrl.includes(':') ? Number(ayahFromUrl.split(':')[1]) : undefined
+    const targetSurah = requestedSurah || currentSurahNumber || Number(ayahFromUrl.split(':')[0]) || 0
+    if (existingAudio && !existingAudio.paused && existingAudio.__samee3Riwaya === riwaya &&
+      existingAudio.__samee3Surah === targetSurah && existingAudio.__samee3ReciterId === reciterApiId &&
+      (!requestedMoshafId || existingAudio.__samee3MoshafId === requestedMoshafId) &&
+      (!initialAyah || existingAudio.__samee3CurrentAyah === initialAyah)) return
 
     void loadAudioForSurah(
       requestedSurah || currentSurahNumber || Number(ayahFromUrl.split(':')[0]) || 0,
@@ -5261,7 +4836,9 @@ export default function MushafPage() {
     loadAudioForSurah,
     pageData,
     reciterApiId,
+    requestedMoshafId,
     requestedSurah,
+    riwaya,
   ])
 
   /**
@@ -5328,7 +4905,8 @@ export default function MushafPage() {
       }
 
       const pageSurah = pageData?.ayahs.some((ayah) => ayah.surah?.number === requestedSurah) ? requestedSurah : currentSurahNumber
-      if (!audio || !audio.src || audio.__samee3Riwaya !== riwaya || audio.__samee3Surah !== (selectedSurah || pageSurah) || (selectedReciter && (audio.__samee3ReciterId !== selectedReciter.apiId || audio.__samee3MoshafId !== selectedReciter.moshafId)) || (audio.__samee3Page !== pageNumber && !selectedAyah)) {
+      const expectedReciter = hasRequestedReciter ? reciterApiId : selectedReciter?.apiId || selectedReciterId
+      if (!audio || !audio.src || (expectedReciter > 0 && audio.__samee3ReciterId !== expectedReciter) || (requestedMoshafId > 0 && audio.__samee3MoshafId !== requestedMoshafId) || audio.__samee3Riwaya !== riwaya || audio.__samee3Surah !== (selectedSurah || pageSurah) || (selectedReciter && (audio.__samee3ReciterId !== selectedReciter.apiId || audio.__samee3MoshafId !== selectedReciter.moshafId)) || (audio.__samee3Page !== pageNumber && !selectedAyah)) {
         await loadAudioForCurrentSurah(true)
         return
       }
@@ -5542,12 +5120,12 @@ export default function MushafPage() {
     try {
       const raw = JSON.parse(localStorage.getItem('samee3_bookmarks') || '[]')
       const saved = Array.isArray(raw) ? raw : []
-      const exists = saved.some((item: { number?: number; surahName?: string }) => item?.number === selectedAyah.number)
+      const exists = saved.some((item) => item && matchesBookmark(item, selectedAyah, riwaya))
       const next = exists
-        ? saved.filter((item: { number?: number }) => item?.number !== selectedAyah.number)
+        ? saved.filter((item) => !item || !matchesBookmark(item, selectedAyah, riwaya))
         : [...saved, {
           number: selectedAyah.number,
-          key: selectedAyah.key,
+          key: selectedAyah.key || `${selectedAyah.surah?.number}:${selectedAyah.numberInSurah}`,
           text: selectedAyah.text,
           numberInSurah: selectedAyah.numberInSurah,
           surahName: getSurahName(selectedAyah.surah?.number),
@@ -5686,7 +5264,7 @@ export default function MushafPage() {
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation()
-                  window.location.reload()
+                  setPageRetry((value) => value + 1)
                 }}
                 className="mt-4 rounded-2xl bg-[#0e99d4] px-5 py-2.5 text-sm font-black text-white"
               >
@@ -5982,6 +5560,7 @@ export default function MushafPage() {
                 </div>
               </div>
 
+              {audioError ? <div role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-xs leading-6 text-red-800">{audioError}</div> : null}
               <div className="samee3-bottom-nav">
                 <button type="button" onClick={() => router.push('/')}><Home size={22} /><span>الرئيسية</span></button>
                 <button type="button" className="active"><BookOpen size={22} /><span>المصحف</span></button>
