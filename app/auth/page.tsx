@@ -1,6 +1,8 @@
 
 'use client'
 
+import { safeReturnPath } from '@/lib/navigation'
+
 import {
   useRef,
   useState,
@@ -184,7 +186,7 @@ export default function AuthPage() {
    */
   const navigateToProfile = () => {
     const target = new URLSearchParams(window.location.search).get('next') || '/profile'
-    window.location.replace(target.startsWith('/') && !target.startsWith('//') && !target.startsWith('/auth') ? target : '/profile')
+    window.location.replace(safeReturnPath(target))
   }
 
   // ===========================================
