@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { compressZipEntry } from '@/lib/zip'
+import { fetchMushafJson } from '@/lib/quran/mushaf-cache'
+import { loadReadingLocations, readingReference } from '@/lib/quran/reading-map'
+import { HAFS_JUZ_RANGES } from '@/lib/quran/juz-boundaries'
 import {
   Archive,
   ArrowLeft,
@@ -23,7 +28,7 @@ import {
   X,
 } from 'lucide-react'
 
-const LOGO_URL = 'https://i.ibb.co/MyfNtDp9/8-F026-C85-439-E-4-C5-B-A8-AB-4-ED92-E0-DFB14.png'
+const LOGO_URL = '/logo.png'
 
 const surahsList = [
 { id: 1, name: 'الفاتحة', type: 'مكية', ayahs: 7, startPage: 1 },
@@ -158,6 +163,7 @@ type PanelType = 'surahs' | 'juz' | null
 
 type ApiMoshaf = {
   id?: number
+  rewaya_id?: number
   name?: string
   server?: string
   surah_total?: number
@@ -197,7 +203,8 @@ type OfflinePackage = {
 }
 
 const OFFLINE_PACKAGES_KEY = 'samee3_offline_packages_v1'
-const OFFLINE_AUDIO_CACHE = 'samee3-quran-audio-v1'
+const OFFLINE_AUDIO_CACHE = 'samee3-audio-v2'
+const REMOTE_READING_IDS: Record<RiwayaId, number> = { hafs: 1, warsh: 2, qalun: 5, douri: 13, shubah: 15, sousi: 7, bazzi: 4 }
 
 
 function pad3(value: number) {
@@ -278,38 +285,9 @@ type SearchMatch = {
   surah?: { number: number; name: string }
 }
 
-const JUZ_LIST = [
-  { number: 1, page: 1, surah: 1, ayah: 1 },
-  { number: 2, page: 22, surah: 2, ayah: 142 },
-  { number: 3, page: 42, surah: 2, ayah: 253 },
-  { number: 4, page: 62, surah: 3, ayah: 92 },
-  { number: 5, page: 82, surah: 4, ayah: 24 },
-  { number: 6, page: 102, surah: 5, ayah: 83 },
-  { number: 7, page: 122, surah: 6, ayah: 111 },
-  { number: 8, page: 142, surah: 7, ayah: 88 },
-  { number: 9, page: 162, surah: 8, ayah: 41 },
-  { number: 10, page: 182, surah: 9, ayah: 93 },
-  { number: 11, page: 202, surah: 10, ayah: 26 },
-  { number: 12, page: 222, surah: 11, ayah: 6 },
-  { number: 13, page: 242, surah: 12, ayah: 53 },
-  { number: 14, page: 262, surah: 15, ayah: 1 },
-  { number: 15, page: 282, surah: 17, ayah: 1 },
-  { number: 16, page: 302, surah: 18, ayah: 75 },
-  { number: 17, page: 322, surah: 21, ayah: 1 },
-  { number: 18, page: 342, surah: 23, ayah: 1 },
-  { number: 19, page: 362, surah: 25, ayah: 21 },
-  { number: 20, page: 382, surah: 27, ayah: 56 },
-  { number: 21, page: 402, surah: 29, ayah: 45 },
-  { number: 22, page: 422, surah: 33, ayah: 31 },
-  { number: 23, page: 442, surah: 36, ayah: 28 },
-  { number: 24, page: 462, surah: 39, ayah: 32 },
-  { number: 25, page: 482, surah: 41, ayah: 47 },
-  { number: 26, page: 502, surah: 46, ayah: 1 },
-  { number: 27, page: 522, surah: 51, ayah: 31 },
-  { number: 28, page: 542, surah: 58, ayah: 1 },
-  { number: 29, page: 562, surah: 67, ayah: 1 },
-  { number: 30, page: 582, surah: 78, ayah: 1 },
-] as const
+const JUZ_LIST = HAFS_JUZ_RANGES.map(({ number, page, start }) => ({
+  number, page, surah: start.surah, ayah: start.ayah,
+}))
 
 function toArabicNumber(value: number) {
   return String(value).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[Number(d)])
@@ -416,55 +394,7 @@ function concatUint8Arrays(parts: Uint8Array[]) {
 }
 
 async function compressForZip(data: Uint8Array) {
-  if (typeof CompressionStream !== 'function') {
-    return { data, method: 0 as const }
-  }
-
-  try {
-    const CompressionStreamCtor = CompressionStream as unknown as new (
-      format: string,
-    ) => CompressionStream
-
-    try {
-      const rawStream = new CompressionStreamCtor('deflate-raw')
-      const writer = rawStream.writable.getWriter()
-      const rawInputBuffer = new ArrayBuffer(data.byteLength)
-      new Uint8Array(rawInputBuffer).set(data)
-      await writer.write(rawInputBuffer)
-      await writer.close()
-
-      const compressed = new Uint8Array(await new Response(rawStream.readable).arrayBuffer())
-
-      if (compressed.length < data.length) {
-        return { data: compressed, method: 8 as const }
-      }
-    } catch {
-      // بعض المتصفحات لا تدعم deflate-raw، فنجرّب deflate الطبيعي ثم ننزع غلاف zlib.
-    }
-
-    const zlibStream = new CompressionStreamCtor('deflate')
-    const zlibWriter = zlibStream.writable.getWriter()
-    const zlibInputBuffer = new ArrayBuffer(data.byteLength)
-    new Uint8Array(zlibInputBuffer).set(data)
-    await zlibWriter.write(zlibInputBuffer)
-    await zlibWriter.close()
-
-    const wrapped = new Uint8Array(
-      await new Response(zlibStream.readable).arrayBuffer(),
-    )
-
-    // ZIP يحتاج stream خام DEFLATE، بينما format=deflate يعيد zlib wrapper.
-    if (wrapped.length > 6) {
-      const raw = wrapped.slice(2, -4)
-      if (raw.length < data.length) {
-        return { data: raw, method: 8 as const }
-      }
-    }
-  } catch {
-    // نكمل بملف ZIP صحيح حتى لو لم يتوفر الضغط الأصلي.
-  }
-
-  return { data, method: 0 as const }
+  return compressZipEntry(data)
 }
 
 function sanitizeFilename(value: string) {
@@ -583,10 +513,8 @@ function getMoshaf(reciter: ApiReciter, local: typeof RIWAYAT[number]) {
   // لا نأخذ أول مصحف كبديل؛ لأن ذلك قد يعرض قارئًا لا يملك الرواية المختارة.
   return (
     list.find((item) => {
-      const name = normalizeArabic(String(item.name || ''))
-      return local.keywords.some((keyword) =>
-        name.includes(normalizeArabic(keyword)),
-      )
+      if (item.rewaya_id) return Number(item.rewaya_id) === REMOTE_READING_IDS[local.id]
+      return normalizeArabic(String(item.name || '')).includes(normalizeArabic(local.label))
     }) || null
   )
 }
@@ -600,6 +528,10 @@ function parseSurahList(value?: string) {
 }
 
 export default function QuranIndexPage() {
+  const router = useRouter()
+  const reciterRequestRef = useRef(0)
+  const navigationRequestRef = useRef(0)
+
   const [riwaya, setRiwaya] = useState<RiwayaId>('hafs')
   const [riwayaSearch, setRiwayaSearch] = useState('')
   const [reciterSearch, setReciterSearch] = useState('')
@@ -634,6 +566,13 @@ export default function QuranIndexPage() {
 
   const offlineAbortRef = useRef<AbortController | null>(null)
   const deviceAbortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => {
+    reciterRequestRef.current += 1
+    navigationRequestRef.current += 1
+    offlineAbortRef.current?.abort()
+    deviceAbortRef.current?.abort()
+  }, [])
 
   useEffect(() => {
     try {
@@ -681,6 +620,8 @@ export default function QuranIndexPage() {
   }, [loadRiwayat])
 
   const loadRecitersForRiwaya = useCallback(async (riwayaId: RiwayaId) => {
+    const requestId = ++reciterRequestRef.current
+    const isCurrent = () => requestId === reciterRequestRef.current
     const localRiwaya = getRiwaya(riwayaId)
     const downloadedForRiwaya = offlinePackages.filter(
       (item) => item.riwayaId === riwayaId,
@@ -688,23 +629,26 @@ export default function QuranIndexPage() {
 
     setRecitersLoading(true)
 
-    const createOfflineReciters = (): Reciter[] =>
-      downloadedForRiwaya.map((pkg) => ({
-        id: `offline-${pkg.key}`,
-        apiId: pkg.reciterApiId,
-        label: pkg.reciterLabel,
-        moshaf: {
-          id: pkg.moshafId ?? undefined,
-          name: `${localRiwaya.label} — محفوظ دون اتصال`,
-          server: pkg.server,
-          surah_total: pkg.surahIds.length,
-          moshaf_type: undefined,
-          surah_list: pkg.surahIds.join(','),
-        },
-      }))
+    const createOfflineReciters = (): Reciter[] => {
+      const result: Reciter[] = downloadedForRiwaya.map((pkg) => ({ id: `offline-${pkg.key}`,
+        apiId: pkg.reciterApiId, label: pkg.reciterLabel, moshaf: { id: pkg.moshafId ?? undefined,
+          name: localRiwaya.label, rewaya_id: REMOTE_READING_IDS[riwayaId], server: pkg.server,
+          surah_total: pkg.surahIds.length, surah_list: pkg.surahIds.join(',') } }))
+      try {
+        const entries = JSON.parse(localStorage.getItem(`samee3_reciter_sources_v1:${riwayaId}`) || '[]')
+        if (Array.isArray(entries)) for (const row of entries) {
+          if (!row || !Number.isInteger(row.apiId) || !/^https:\/\//.test(row.server) || !Array.isArray(row.surahIds)) continue
+          if (result.some((item) => item.apiId === row.apiId && item.moshaf.id === row.moshafId)) continue
+          result.push({ id: row.id, apiId: row.apiId, label: row.label, moshaf: { id: row.moshafId,
+            name: localRiwaya.label, rewaya_id: REMOTE_READING_IDS[riwayaId], server: row.server,
+            surah_total: row.surahIds.length, surah_list: row.surahIds.join(',') } })
+        }
+      } catch {}
+      return result
+    }
 
     // عند انقطاع الإنترنت نستطيع إظهار القارئ المحفوظ محليًا دون الحاجة للمصدر.
-    if (!apiRiwayat.length) {
+    if (navigator.onLine === false) {
       const offlineReciters = createOfflineReciters()
       setReciters(offlineReciters)
       setSelectedReciter((current) =>
@@ -719,7 +663,7 @@ export default function QuranIndexPage() {
       return
     }
 
-    const remoteRiwaya = apiRiwayat.find((item) => matchesRemoteRiwaya(item.name, localRiwaya))
+    const remoteRiwaya = { id: REMOTE_READING_IDS[riwayaId] }
 
     setRecitersError('')
     setReciters([])
@@ -731,14 +675,10 @@ export default function QuranIndexPage() {
         throw new Error(`No source rewaya id for ${localRiwaya.label}`)
       }
 
-      const response = await fetch(
-        `https://mp3quran.net/api/v3/reciters?language=ar&rewaya=${remoteRiwaya.id}`,
-        { cache: 'no-store' },
-      )
-
-      if (!response.ok) throw new Error('Failed to load reciters for rewaya')
-
-      const payload = await response.json()
+      const payload = await fetchMushafJson(
+        `https://mp3quran.net/api/v3/reciters?language=ar&rewaya=${remoteRiwaya.id}`, { cache: 'no-store' },
+      ) as { reciters?: ApiReciter[] }
+      if (!isCurrent()) return
       const sourceReciters: ApiReciter[] = Array.isArray(payload?.reciters)
         ? payload.reciters
         : []
@@ -826,6 +766,13 @@ export default function QuranIndexPage() {
         return a.label.localeCompare(b.label, 'ar')
       })
 
+      if (!isCurrent()) return
+      try {
+        localStorage.setItem(`samee3_reciter_sources_v1:${riwayaId}`, JSON.stringify(uniqueReciters.map((item) => ({
+          id: item.id, apiId: item.apiId, label: item.label, moshafId: item.moshaf.id ?? null,
+          server: item.moshaf.server, surahIds: parseSurahList(item.moshaf.surah_list),
+        }))))
+      } catch {}
       setReciters(uniqueReciters)
 
       if (uniqueReciters.length) {
@@ -844,10 +791,14 @@ export default function QuranIndexPage() {
         setRecitersError('لا توجد تسجيلات لهذه الرواية في المصدر حاليًا.')
       }
     } catch (error) {
+      if (!isCurrent()) return
+      const fallback = createOfflineReciters()
+      setReciters(fallback)
+      setSelectedReciter(fallback[0] || null)
       console.error('Reciters by riwaya error:', error)
       setRecitersError('تعذر تحميل القراء الخاصين بهذه الرواية حاليًا.')
     } finally {
-      setRecitersLoading(false)
+      if (isCurrent()) setRecitersLoading(false)
     }
   }, [apiRiwayat, offlinePackages])
 
@@ -856,6 +807,7 @@ export default function QuranIndexPage() {
   }, [apiRiwayat, loadRecitersForRiwaya, offlinePackages, riwaya])
 
   const handleRiwayaChange = (value: RiwayaId) => {
+    navigationRequestRef.current += 1
     setRiwaya(value)
     setPanel(null)
     setReciterOpen(false)
@@ -866,6 +818,7 @@ export default function QuranIndexPage() {
   }
 
   const handleReciterChange = (value: Reciter) => {
+    navigationRequestRef.current += 1
     selectedReciterApiIdRef.current = value.apiId
     setSelectedReciter(value)
     setReciterSearch(value.label)
@@ -1026,8 +979,8 @@ export default function QuranIndexPage() {
         mode: 'cors',
       })
 
-      if (!response.ok) {
-        throw new Error(`تعذر حفظ السورة ${surahId}`)
+      if (response.status !== 200 || response.headers.has('Content-Range') || /text\/|json/i.test(response.headers.get('Content-Type') || '')) {
+        throw new Error(`التسجيل الكامل غير متاح للسورة ${surahId}`)
       }
 
       const cache = await caches.open(OFFLINE_AUDIO_CACHE)
@@ -1095,6 +1048,7 @@ export default function QuranIndexPage() {
         for (const surahId of pkg.downloadedSurahIds) {
           const audioUrl = `${server}${pad3(surahId)}.mp3`
           await cache.delete(audioUrl)
+          await caches.open('samee3-quran-audio-v1').then((old) => old.delete(audioUrl))
         }
       }
 
@@ -1194,7 +1148,7 @@ export default function QuranIndexPage() {
 
       saveBlobToDevice(zipBlob, filename)
       setDeviceDownloadProgress(100)
-      setDeviceDownloadLabel('تم تنزيل المصحف كاملًا في ملف ZIP واحد.')
+      setDeviceDownloadLabel('تم تنزيل تلاوات القارئ المتاحة في ملف ZIP واحد.')
     } catch (error) {
       if ((error as DOMException)?.name === 'AbortError') {
         setDeviceDownloadLabel('تم إيقاف تجهيز ملف ZIP.')
@@ -1263,7 +1217,9 @@ export default function QuranIndexPage() {
         const surahId = surahIds[index]
         const audioUrl = `${server}${pad3(surahId)}.mp3`
 
-        if (alreadyDownloaded.has(surahId)) {
+        const stored = await cache.match(audioUrl)
+        const legacy = await caches.open('samee3-quran-audio-v1').then((old) => old.match(audioUrl)).catch(() => undefined)
+        if (alreadyDownloaded.has(surahId) && (stored || legacy)) {
           setOfflineDownloadProgress(
             Math.round(((index + 1) / surahIds.length) * 100),
           )
@@ -1274,6 +1230,7 @@ export default function QuranIndexPage() {
           `جاري حفظ ${surahsList.find((item) => item.id === surahId)?.name || `السورة ${surahId}`}...`,
         )
 
+        alreadyDownloaded.delete(surahId)
         let response: Response
 
         try {
@@ -1292,7 +1249,7 @@ export default function QuranIndexPage() {
           })
         }
 
-        if (!response.ok && response.type !== 'opaque') {
+        if (response.type !== 'opaque' && (response.status !== 200 || response.headers.has('Content-Range') || /text\/|json/i.test(response.headers.get('Content-Type') || ''))) {
           throw new Error(`فشل حفظ السورة رقم ${surahId}`)
         }
 
@@ -1333,6 +1290,13 @@ export default function QuranIndexPage() {
           : 'تم حفظ الجزء المكتمل من التلاوة ويمكنك متابعة الحفظ لاحقًا.',
       )
     } catch (error) {
+      if (alreadyDownloaded.size) {
+        const partial: OfflinePackage = { key, riwayaId: riwaya, reciterApiId: selectedReciter.apiId,
+          reciterLabel: selectedReciter.label, moshafId: selectedReciter.moshaf.id ?? null, server, surahIds,
+          downloadedSurahIds: Array.from(alreadyDownloaded), status: 'partial', downloadedAt: new Date().toISOString() }
+        const packages = [...readOfflinePackages().filter((item) => item.key !== key), partial]
+        writeOfflinePackages(packages); setOfflinePackages(packages)
+      }
       if ((error as DOMException)?.name === 'AbortError') {
         const downloadedSurahIds = Array.from(alreadyDownloaded)
 
@@ -1544,14 +1508,25 @@ export default function QuranIndexPage() {
     return `/mushaf?${params.toString()}`
   }
 
-  const openMushaf = (
-    page: number,
-    surahId: number,
-    ayah?: number,
-    juzNumber?: number,
+  const openMushaf = async (
+    page: number, surahId: number, ayah?: number, juzNumber?: number,
   ) => {
     if (!selectedReciter) return
-    window.location.href = getMushafHref(page, surahId, ayah, juzNumber)
+    const requestId = ++navigationRequestRef.current
+    const locations = await loadReadingLocations(riwaya)
+    if (requestId !== navigationRequestRef.current) return
+    const start = readingReference(locations, surahId, ayah || 1, ayah ? 'hafs' : 'local')
+    if (!start) { setOfflineError('تعذر تحديد صفحة البداية في هذه الرواية. افتح المصحف أثناء الاتصال أولًا.'); return }
+    const params = new URL(getMushafHref(start.page, start.surah, start.ayah), window.location.origin).searchParams
+    if (juzNumber) {
+      const range = getJuzRange(juzNumber)
+      const finish = range && readingReference(locations, range.endSurah, range.endAyah, 'hafs')
+      if (!finish) { setOfflineError('تعذر تحديد نهاية الجزء في الرواية المختارة.'); return }
+      params.set('juz', String(juzNumber))
+      params.set('juzStart', `${start.surah}:${start.ayah}`)
+      params.set('juzEnd', `${finish.surah}:${finish.ayah}`)
+    }
+    router.push(`/mushaf?${params.toString()}`)
   }
 
   const makkiyaCount = surahsList.filter((item) => item.type === 'مكية').length
@@ -1825,6 +1800,7 @@ export default function QuranIndexPage() {
                       match.surah?.number || 1,
                       match.numberInSurah,
                     )}
+                    onClick={(event) => { event.preventDefault(); void openMushaf(match.page || 1, match.surah?.number || 1, match.numberInSurah) }}
                     className="rounded-xl border border-white bg-white p-3 transition hover:shadow-sm"
                   >
                     <div className="text-[10px] font-black text-[#0284C7]">
