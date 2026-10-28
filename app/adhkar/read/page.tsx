@@ -1,6 +1,7 @@
 'use client'
 
 import ShareCardDesigner from '@/components/ShareCardDesigner'
+import { bindAudioFocus } from '@/lib/audio-focus'
 import {
   Suspense,
   useCallback,
@@ -607,6 +608,7 @@ function ReadAdhkarContent() {
     }
 
     const audio = old || new Audio()
+    bindAudioFocus(audio)
     audioRef.current = audio
     objectUrlRef.current = cached
     audio.preload = 'auto'
@@ -694,6 +696,7 @@ function ReadAdhkarContent() {
   }
 
   const togglePlayback = () => {
+    if (audioLoading) { stopAudio(); return }
     const current = audioRef.current
     if (current && audioMode) {
       if (!current.paused) { current.pause(); return }
@@ -868,7 +871,7 @@ function ReadAdhkarContent() {
           <div className="mb-4 flex items-center justify-between gap-3"><div><p className="text-xs font-black text-[#b08b4e]">المشغّل الصوتي</p><h2 className="mt-1 text-base font-black">{audioMode === 'item' && activeItem ? 'تشغيل الذكر بالتكرار' : sectionTrack?.title || 'تسجيلات الأذكار'}</h2></div><span className="rounded-full bg-[#f7f1e7] px-3 py-1.5 text-[11px] font-bold text-[#927345]">{audioMode === 'item' ? 'متتابع' : audioMode === 'section' ? 'الورد كاملًا' : 'جاهز'}</span></div>
           <div className="rounded-[22px] bg-[#153f48] p-4 text-white">
             <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-[#ecc993]"><Volume2 size={20} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{selectedReader.name}</p><p className="mt-1 line-clamp-1 text-xs text-white/60">{audioMode === 'item' && activeItem ? activeItem.text : sectionTrack?.title || 'اختر ذكرًا مسجّلًا'}</p></div>
-              <button type="button" onClick={togglePlayback} disabled={!hasAudio || audioLoading} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#d9b77d] text-[#163a41] disabled:opacity-40">{audioLoading ? <Loader2 size={19} className="animate-spin" /> : playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>
+              <button type="button" onClick={togglePlayback} disabled={!hasAudio} aria-label={audioLoading ? 'إيقاف تحميل التسجيل' : playing ? 'إيقاف مؤقت' : 'تشغيل'} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#d9b77d] text-[#163a41] disabled:opacity-40">{audioLoading ? <Loader2 size={19} className="animate-spin" /> : playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>
               <button type="button" onClick={stopAudio} disabled={!audioMode} aria-label="إيقاف التسجيل" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 disabled:opacity-30"><Square size={16} fill="currentColor" /></button>
             </div>
             <div className="mt-4 flex items-center justify-between text-[11px] text-white/60"><span>{timeLabel(position)}</span><span>{timeLabel(duration)}</span></div>
