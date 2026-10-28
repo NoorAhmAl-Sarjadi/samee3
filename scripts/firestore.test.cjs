@@ -56,3 +56,23 @@ test('regular accounts cannot self-promote to admin',async()=>{
  await assertFails(updateDoc(ref,{role:'admin'}))
  await assertSucceeds(updateDoc(ref,{name:'اسم محدث',displayName:'اسم محدث',lastLoginAt:serverTimestamp(),updatedAt:serverTimestamp()}))
 })
+
+test('conversation messages and receipts reject foreign reads and sender spoofing',async()=>{
+ const db=user(),reference=doc(db,'conversations','learner','messages','message-1')
+ const data={senderId:'learner',senderName:'اسم الطالب',text:'رسالة تجريبية محلية',createdAt:serverTimestamp(),read:false}
+ await assertSucceeds(setDoc(reference,data))
+ await assertFails(getDoc(doc(user('other'),'conversations','learner','messages','message-1')))
+ await assertFails(setDoc(doc(db,'conversations','learner','messages','spoof'),{...data,senderId:'admin'}))
+ await assertFails(updateDoc(reference,{text:'تعديل غير مسموح'}))
+ await assertFails(updateDoc(reference,{read:true}))
+ await assertFails(setDoc(doc(db,'conversations','other','messages','message-2'),data))
+})
+
+test('disabled admin profiles cannot bypass the application gate through Firestore',async()=>{
+ await env.withSecurityRulesDisabled(async(context)=>{
+  await setDoc(doc(context.firestore(),'users','disabled-admin'),{role:'admin',status:'disabled'})
+  await setDoc(doc(context.firestore(),'users','active-admin'),{role:'admin',status:'active'})
+ })
+ await assertFails(getDocs(collection(user('disabled-admin'),'users')))
+ await assertSucceeds(getDocs(collection(user('active-admin'),'users')))
+})
