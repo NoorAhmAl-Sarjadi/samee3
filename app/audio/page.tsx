@@ -150,6 +150,7 @@ const AUDIO_CACHE_NAMES = [
   SAMEE3_QURAN_AUDIO_CACHE,
   'samee3-v2-audio',
   'samee-audio-v2',
+  'samee3-quran-audio-v1',
 ]
 
 const MAX_AUDIO_FILE_BYTES = 180 * 1024 * 1024
@@ -456,6 +457,7 @@ async function getSavedBlob(item: PlayerItem, maxBytes?: number): Promise<Blob |
   let record: OfflineRecord | null = null
   try { record = await getOffline(offlineKeyFor(item)) } catch {}
 
+  if (record?.item && record.item.audioUrl !== item.audioUrl) return null
   if (record?.blob instanceof Blob && record.blob.size) {
     checkSize(record.blob.size)
     return record.blob
@@ -1408,7 +1410,7 @@ export default function AudioPage() {
                 moshaf.surah_list.length > 0
               ),
             }))
-            .filter((reciter: Reciter) => reciter.moshaf.length > 0)
+            .filter((reciter: Reciter) => reciter.moshaf.length > 0 && getMoshafForRiwaya(reciter, activeRiwaya) !== null)
           : []
 
         nextReciters.sort((a, b) => {
@@ -1816,9 +1818,15 @@ export default function AudioPage() {
       return
     }
 
+    if (pendingPlayRef.current) {
+      pendingPlayRef.current = false
+      audio.pause()
+      return
+    }
     if (audio.paused) {
-      await audio.play().catch(() => {})
+      await audio.play().catch(() => notify('تعذر بدء التسجيل. أعد المحاولة.'))
     } else {
+      pendingPlayRef.current = false
       audio.pause()
     }
   }
