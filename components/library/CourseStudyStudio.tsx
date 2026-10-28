@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RotateCcw } from 'luc
 import { loadYoutubePlayer, youtubeSource, youtubeError, type StudyPlayer } from '@/lib/islamic/youtube-player'
 import type { LearningCourse } from '@/lib/islamic/curriculum'
 import PdfBookReader from './PdfBookReader'
+import { claimAudioFocus } from '@/lib/audio-focus'
 
 type Source = { key: string; label: string; url: string; list?: string; ids?: string[]; titles?: string[] }
 function sourcesFor(book: LearningCourse): Source[] {
@@ -61,7 +62,7 @@ export default function CourseStudyStudio({ book }: { book: LearningCourse }) {
           else current.cuePlaylist(source.ids||[],Math.min(savedIndex,(source.ids?.length||1)-1),savedTime)
           setReady(true);sync();interval=setInterval(sync,2500)
         },
-        onStateChange:()=>sync(),
+        onStateChange:(event)=>{ if (event.data === 1) claimAudioFocus(null); sync() },
         onError:(event)=>{if(alive){setReady(true);setError(youtubeError(event.data))}},
       }})
     }).catch((e:unknown)=>{if(alive)setError(e instanceof Error?e.message:'تعذر تحميل المشغل.')})
