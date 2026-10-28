@@ -18,6 +18,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
+import AndroidAppCard from '@/components/AndroidAppCard'
+import { APP_BUILD_ID } from '@/lib/app-version'
 import { db } from '@/lib/firebase'
 import { doc, getDoc, getDocFromCache } from 'firebase/firestore'
 
@@ -372,7 +374,7 @@ export default function HomePage() {
         <header className="mb-7 flex items-center justify-between gap-4 pt-1">
           <div className="flex min-w-0 items-center gap-3">
             <Image
-              src="/icon-192.png"
+              src={`/icon-192.png?v=${encodeURIComponent(APP_BUILD_ID)}`}
               alt="شعار مصحف سميع"
               width={58}
               height={58}
@@ -396,8 +398,8 @@ export default function HomePage() {
           </div>
 
           <Link
-            href="/profile"
-            aria-label="فتح الحساب والإشعارات"
+            href="/notifications"
+            aria-label="فتح إعدادات الإشعارات والتذكيرات"
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#d9c8a8] bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#b99863] hover:shadow-md active:scale-95"
           >
             <Bell
@@ -407,6 +409,8 @@ export default function HomePage() {
             />
           </Link>
         </header>
+
+        <AndroidAppCard />
 
         {isOffline && (
           <div
