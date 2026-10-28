@@ -1,4 +1,4 @@
-const SW_VERSION = 'samee3-sw-v8'
+const SW_VERSION = 'samee3-sw-v9'
 
 const SHELL_CACHE = `${SW_VERSION}-shell`
 const NAV_CACHE = `${SW_VERSION}-navigation`
@@ -30,6 +30,8 @@ const PUBLIC_ROUTES = new Set([
   '/prayer',
   '/islamic-library',
   '/index',
+  '/notifications',
+  '/notifications/hadith',
 ])
 
 const INSTALL_ROUTES = [
@@ -565,6 +567,12 @@ a{
 }
 
 function samePathKey(url) {
+  if (pathOf(url) === '/notifications/hadith') {
+    const key = new URL('/notifications/hadith', self.location.origin)
+    const id = url.searchParams.get('id')
+    if (id && /^bukhari-[0-9]+$/.test(id)) key.searchParams.set('id', id)
+    return key.href
+  }
   return new URL(
     pathOf(url),
     self.location.origin,
@@ -642,19 +650,20 @@ async function publicRsc(request) {
 // ========================================
 
 async function staticAsset(request) {
-  // Fonts, manifest and bundled data are precached in SHELL_CACHE on install.
+  const url = new URL(request.url)
+  // Hashed Next chunks are immutable. Public icons, CSS and data can change at the same URL.
+  const immutable = url.pathname.startsWith('/_next/static/')
   const cached = await getFromCaches([ASSET_CACHE, SHELL_CACHE], request)
-
-  if (cached) return cached
-
-  const response = await fetch(request)
-
+  if (immutable && cached) return cached
   try {
-    const cache = await caches.open(ASSET_CACHE)
-    await storeIfSafe(cache, request, response, 'asset')
-  } catch { /* A failed cache write must not discard a successful response. */ }
-
-  return response
+    const response = await fetch(request, immutable ? undefined : { cache: 'no-cache' })
+    if (response.ok) {
+      try { const cache = await caches.open(ASSET_CACHE); await storeIfSafe(cache, request, response, 'asset') } catch {}
+      return response
+    }
+    if (response.status >= 500 && cached) return cached
+    return response
+  } catch (error) { if (cached) return cached; throw error }
 }
 
 function isStaticAsset(url) {
@@ -882,6 +891,8 @@ self.addEventListener(
     } catch {
       return
     }
+
+    if (isSameOrigin(url) && (url.pathname.startsWith('/android/') || url.pathname === '/api/app-version')) return
 
     if (isQuranAudio(request, url)) {
       event.respondWith(
