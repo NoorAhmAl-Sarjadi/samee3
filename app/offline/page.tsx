@@ -1,5 +1,7 @@
 'use client'
 
+import { announceMushafDownloadsChanged } from '@/lib/quran/mushaf-downloads'
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
@@ -43,6 +45,7 @@ const AUDIO_CACHES = [
   'samee3-audio-v2',
   'samee3-v2-audio',
   'samee-audio-v2',
+  'samee3-quran-audio-v1',
 ]
 const AUDIO_DB_NAME = 'samee-audio-library'
 const AUDIO_DB_STORE = 'audio'
@@ -466,6 +469,7 @@ export default function OfflinePage() {
         setNotice(`تم حذف كتاب «${target.label}» من هذا الجهاز فقط.`)
       }
       setConfirm(null)
+      announceMushafDownloadsChanged()
       await refresh()
     } catch (cause) {
       console.error('SAMEE3 offline deletion:', cause)
