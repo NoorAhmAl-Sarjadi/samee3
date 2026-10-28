@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+  BellRing,
   BookOpen,
   Heart,
   Home,
@@ -126,6 +127,7 @@ const NAV_ITEMS = [
   { label: 'الرئيسية', icon: Home, href: '/' },
   { label: 'المصحف', icon: BookOpen, href: '/mushaf' },
   { label: 'الأذكار', icon: Heart, href: '/adhkar' },
+  { label: 'التذكير', icon: BellRing, href: '/notifications' },
   { label: 'الحساب', icon: User, href: '/profile' },
   { label: 'الفهرس', icon: List, href: '/surahs' },
 ] as const
