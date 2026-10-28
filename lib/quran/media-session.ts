@@ -1,5 +1,6 @@
 import { RIWAYAT, SURAH_NAMES_AR, type RiwayaId } from './Samee3DataAdapter'
 import { createMediaArtwork } from './media-artwork'
+import { bindAudioFocus } from '../audio-focus'
 
 type Timing = { ayah?: number; start_time?: number; end_time?: number }
 
@@ -307,6 +308,7 @@ function release(entry: Entry) {
 
 /** Bind the existing element; no second player, timers, or changes to its source. */
 export function bindQuranMediaSession(element: HTMLMediaElement, track?: MediaTrack): void {
+  if (typeof window !== 'undefined') bindAudioFocus(element)
   if (typeof window === 'undefined' || !('mediaSession' in navigator)) return
   let entry = entries.get(element)
   if (entry) {
