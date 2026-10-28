@@ -23,7 +23,7 @@ async function localFiles(): Promise<VideoFile[]> {
     const names = await readdir(folder)
     const found = await Promise.all(names.filter(validFilename).map(async filename => {
       const item = await stat(join(folder, filename))
-      return item.isFile() ? { filename, size: item.size } : null
+      return item.isFile() && item.size >= 1024 ? { filename, size: item.size } : null
     }))
     return found.filter((item): item is VideoFile => item !== null)
   } catch {
@@ -48,7 +48,7 @@ async function githubFiles(): Promise<VideoFile[]> {
   if (!Array.isArray(items)) throw new Error('فهرس GitHub غير صالح.')
   return (items as GitHubFile[])
     .filter((item): item is GitHubFile & { name: string } =>
-      item.type === 'file' && typeof item.name === 'string' && validFilename(item.name))
+      item.type === 'file' && typeof item.name === 'string' && validFilename(item.name) && Number(item.size) >= 1024)
     .map(item => ({ filename: item.name, size: Number(item.size) || 0 }))
 }
 
@@ -56,10 +56,12 @@ export async function GET() {
   const local = await localFiles()
   let remote: VideoFile[] = []
   let warning = ''
-  try {
-    remote = await githubFiles()
-  } catch {
-    warning = 'تعذّر تحديث قائمة GitHub؛ يمكنك تجربة تحديث المكتبة لاحقًا.'
+  if (!local.length) {
+    try {
+      remote = await githubFiles()
+    } catch {
+      warning = 'تعذّر تحديث قائمة GitHub؛ يمكنك تجربة تحديث المكتبة لاحقًا.'
+    }
   }
   const map = new Map<string, VideoFile>()
   for (const file of [...remote, ...local]) map.set(file.filename, file)
