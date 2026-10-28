@@ -13,6 +13,7 @@ import {
 } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
+  BellRing,
   BookOpen,
   Bookmark,
   Check,
@@ -863,7 +864,7 @@ function normalizeArabic(value: string) {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[ًٌٍَُِّْـ]/g, '')
+    .replace(/[ًٌٍَُِّْـ]/g, '')
     .replace(/[إأآٱ]/g, 'ا')
     .replace(/ى/g, 'ي')
     .replace(/ة/g, 'ه')
@@ -3747,7 +3748,7 @@ export default function MushafPage() {
     setSearchResults([])
 
     try {
-      const normalizedTerm = term.replace(/[ًٌٍَُِّْـ]/g, '').trim()
+      const normalizedTerm = term.replace(/[ًٌٍَُِّْـ]/g, '').trim()
       const response = await fetch(
         `https://api.alquran.cloud/v1/search/${encodeURIComponent(normalizedTerm)}/all/quran-uthmani`,
         { cache: 'no-store', headers: { Accept: 'application/json' } },
@@ -5565,6 +5566,7 @@ export default function MushafPage() {
                 <button type="button" onClick={() => router.push('/')}><Home size={22} /><span>الرئيسية</span></button>
                 <button type="button" className="active"><BookOpen size={22} /><span>المصحف</span></button>
                 <button type="button" onClick={() => router.push('/adhkar')}><Sparkles size={22} /><span>الأذكار</span></button>
+                <button type="button" onClick={() => router.push('/notifications')}><BellRing size={22} /><span>التذكير</span></button>
                 <button type="button" onClick={() => router.push('/surahs')}><List size={22} /><span>الفهرس</span></button>
               </div>
             </div>
@@ -6058,7 +6060,7 @@ export default function MushafPage() {
         .samee3-select-wrap select { position:absolute; inset:0; width:100%; height:100%; opacity:0.01; border:0; outline:0; background:transparent; appearance:auto; cursor:pointer; z-index:3; font-size:16px; }
         .samee3-select-wrap > svg { position:absolute; right:12px; top:50%; transform:translateY(-20%); pointer-events:none; color:#d27b0a; z-index:2; }
         .samee3-audio-error { padding:6px 8px; text-align:center; color:#a63e28; font-size:10px; font-weight:800; }
-        .samee3-bottom-nav { margin-top:8px; padding-top:8px; border-top:1px solid #ece4d7; display:grid; grid-template-columns:repeat(4,1fr); }
+        .samee3-bottom-nav { margin-top:8px; padding-top:8px; border-top:1px solid #ece4d7; display:grid; grid-template-columns:repeat(5,1fr); }
         .samee3-bottom-nav button { border:0; background:transparent; color:#91a3b8; display:flex; flex-direction:column; align-items:center; gap:3px; padding:3px 2px; font-weight:900; font-size:9px; }
         .samee3-bottom-nav button.active { color:#0e99d4; }
 
