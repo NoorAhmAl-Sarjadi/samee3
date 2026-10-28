@@ -127,10 +127,8 @@ export function activeAyahAt(
     index--
   ) {
     const row = timings[index]
-
-    const start =
-      Math.max(0, Number(row.start_time || 0)) /
-      1000
+    const start = Number(row.start_time) / 1000
+    if (!Number.isFinite(start) || start < 0 || seconds < start) continue
 
     const next =
       index + 1 < timings.length
@@ -139,18 +137,13 @@ export function activeAyahAt(
           ) / 1000
         : Infinity
 
-    const end = Number.isFinite(
-      Number(row.end_time),
-    )
-      ? Math.max(
-          start,
-          Number(row.end_time) / 1000,
-        )
-      : next
+    const declaredEnd = Number(row.end_time) / 1000
+    const end = Number.isFinite(declaredEnd) && declaredEnd > start
+      ? Math.min(declaredEnd, next) : next
 
     if (
       seconds >= start &&
-      seconds < Math.max(end, next) + 0.08
+      seconds < end
     ) {
       return Number(row.ayah) > 0
         ? Number(row.ayah)
