@@ -1,4 +1,3 @@
-
 import {
   fontById,
   type VideoDesign,
@@ -27,7 +26,7 @@ export function dimensions(design: VideoDesign) {
 
   if (design.ratio === '16:9') {
     return {
-      width: Math.round(q * 16 / 9),
+      width: Math.round((q * 16) / 9),
       height: q,
     }
   }
@@ -38,7 +37,7 @@ export function dimensions(design: VideoDesign) {
 
   return {
     width: q,
-    height: Math.round(q * 16 / 9),
+    height: Math.round((q * 16) / 9),
   }
 }
 
@@ -62,6 +61,7 @@ function wrapLines(
   }
 
   if (line) result.push(line)
+
   return result
 }
 
@@ -90,14 +90,16 @@ function roundedRect(
 function alpha(hex: string, opacityPercent: number) {
   const clean = hex.replace('#', '')
 
-  const full = clean.length === 3
-    ? clean.split('').map(c => c + c).join('')
-    : clean.padEnd(6, '0').slice(0, 6)
+  const full =
+    clean.length === 3
+      ? clean
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : clean.padEnd(6, '0').slice(0, 6)
 
-  const value = Math.max(
-    0,
-    Math.min(100, opacityPercent)
-  ) / 100
+  const value =
+    Math.max(0, Math.min(100, opacityPercent)) / 100
 
   const r = parseInt(full.slice(0, 2), 16)
   const g = parseInt(full.slice(2, 4), 16)
@@ -128,6 +130,7 @@ function drawFrameDecor(
   switch (design.frameStyle) {
     case 'double':
       ctx.strokeRect(x, y, boxW, boxH)
+
       ctx.strokeRect(
         x + w * 0.02,
         y + h * 0.02,
@@ -138,7 +141,11 @@ function drawFrameDecor(
 
     case 'rounded':
       roundedRect(
-        ctx, x, y, boxW, boxH,
+        ctx,
+        x,
+        y,
+        boxW,
+        boxH,
         design.cornerRadius
       )
       ctx.stroke()
@@ -147,10 +154,16 @@ function drawFrameDecor(
     case 'glow':
       ctx.shadowBlur = 18
       ctx.shadowColor = color
+
       roundedRect(
-        ctx, x, y, boxW, boxH,
+        ctx,
+        x,
+        y,
+        boxW,
+        boxH,
         design.cornerRadius
       )
+
       ctx.stroke()
       ctx.shadowBlur = 0
       break
@@ -184,8 +197,13 @@ function drawFrameDecor(
       ctx.beginPath()
       ctx.moveTo(x + w * 0.08, y)
       ctx.lineTo(x + boxW - w * 0.08, y)
+
       ctx.moveTo(x + w * 0.08, y + boxH)
-      ctx.lineTo(x + boxW - w * 0.08, y + boxH)
+      ctx.lineTo(
+        x + boxW - w * 0.08,
+        y + boxH
+      )
+
       ctx.stroke()
       break
 
@@ -221,11 +239,11 @@ function drawPanel(
       design.panelColor,
       design.panelOpacity
     )
+
     ctx.fill()
   } else if (design.panelStyle === 'gradient') {
-    const gradient = ctx.createLinearGradient(
-      x, y, x, y + h
-    )
+    const gradient =
+      ctx.createLinearGradient(x, y, x, y + h)
 
     gradient.addColorStop(
       0,
@@ -250,6 +268,7 @@ function drawPanel(
       design.panelColor,
       Math.max(5, design.panelOpacity - 12)
     )
+
     ctx.fill()
 
     ctx.lineWidth = 1.2
@@ -260,6 +279,7 @@ function drawPanel(
       design.panelColor,
       design.panelOpacity
     )
+
     ctx.fill()
 
     ctx.strokeStyle = alpha('#ffffff', 18)
@@ -275,8 +295,10 @@ export function drawVisualFrame(
   video: HTMLVideoElement | null,
   info: FrameInfo
 ): void {
-  const { width: w, height: h } =
-    dimensions(info.design)
+  const {
+    width: w,
+    height: h,
+  } = dimensions(info.design)
 
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width = w
@@ -291,14 +313,15 @@ export function drawVisualFrame(
   if (!rawContext) return
 
   const ctx: CanvasRenderingContext2D = rawContext
+
   const quranFont =
     fontById(info.design.quranFontId).family
+
   const uiFont =
     fontById(info.design.uiFontId).family
 
-  const background = ctx.createLinearGradient(
-    0, 0, w, h
-  )
+  const background =
+    ctx.createLinearGradient(0, 0, w, h)
 
   background.addColorStop(0, info.tint)
   background.addColorStop(1, '#091f1c')
@@ -328,6 +351,7 @@ export function drawVisualFrame(
     const vh = source.videoHeight * scale
 
     ctx.save()
+
     ctx.globalAlpha = Math.max(
       0,
       Math.min(1, opacity)
@@ -360,12 +384,13 @@ export function drawVisualFrame(
     )
   }
 
-  ctx.fillStyle = `rgba(0,0,0,${
-    Math.max(
-      0,
-      Math.min(80, info.design.shade)
-    ) / 100
-  })`
+  ctx.fillStyle =
+    `rgba(0,0,0,${
+      Math.max(
+        0,
+        Math.min(80, info.design.shade)
+      ) / 100
+    })`
 
   ctx.fillRect(0, 0, w, h)
 
@@ -390,11 +415,13 @@ export function drawVisualFrame(
     `سورة ${normalizeSurahName(info.surahName)}`
 
   let titleSize = Math.round(
-    w * 0.039 * (info.design.titleScale ?? 1)
+    w * 0.039 *
+    (info.design.titleScale ?? 1)
   )
 
   do {
-    ctx.font = `bold ${titleSize}px Amiri, serif`
+    ctx.font =
+      `bold ${titleSize}px Amiri, serif`
 
     if (
       ctx.measureText(title).width <= w * 0.83
@@ -416,7 +443,8 @@ export function drawVisualFrame(
     info.verse?.text || info.placeholder
 
   const maxTextWidth =
-    w * Math.max(
+    w *
+    Math.max(
       0.55,
       Math.min(
         0.9,
@@ -447,7 +475,8 @@ export function drawVisualFrame(
   let rows: string[] = []
 
   const maxTextHeight =
-    h * (
+    h *
+    (
       info.design.ratio === '16:9'
         ? 0.48
         : 0.43
@@ -455,6 +484,7 @@ export function drawVisualFrame(
 
   for (; size >= minSize; size -= 2) {
     ctx.font = `${size}px ${quranFont}`
+
     rows = wrapLines(
       ctx,
       text,
@@ -478,10 +508,8 @@ export function drawVisualFrame(
     maxTextWidth
   )
 
-  const effectiveSize = Math.max(
-    minSize,
-    size
-  )
+  const effectiveSize =
+    Math.max(minSize, size)
 
   const lineHeight =
     effectiveSize * spacing
@@ -490,7 +518,8 @@ export function drawVisualFrame(
     rows.length * lineHeight
 
   const middle =
-    h * Math.max(
+    h *
+    Math.max(
       0.32,
       Math.min(
         0.67,
@@ -509,8 +538,8 @@ export function drawVisualFrame(
   const scrollDistance = Math.max(
     0,
     blockHeight -
-    viewportHeight +
-    lineHeight * 0.6
+      viewportHeight +
+      lineHeight * 0.6
   )
 
   const progress = Math.max(
@@ -521,12 +550,15 @@ export function drawVisualFrame(
     )
   )
 
-  const scroll = scrollDistance * progress
+  const scroll =
+    scrollDistance * progress
 
   const firstBaseline =
     blockHeight > viewportHeight
       ? viewportY + lineHeight / 2 - scroll
-      : middle - blockHeight / 2 + lineHeight / 2
+      : middle -
+        blockHeight / 2 +
+        lineHeight / 2
 
   drawPanel(
     ctx,
@@ -566,7 +598,8 @@ export function drawVisualFrame(
   ctx.restore()
 
   if (info.verse) {
-    ctx.fillStyle = info.design.titleColor
+    ctx.fillStyle =
+      info.design.titleColor
 
     ctx.font =
       `${Math.round(w * 0.029)}px ${uiFont}`
@@ -577,20 +610,22 @@ export function drawVisualFrame(
       Math.min(
         h * 0.8,
         viewportY +
-        viewportHeight +
-        lineHeight * 0.85
+          viewportHeight +
+          lineHeight * 0.85
       )
     )
   }
 
-  ctx.fillStyle = info.design.readerColor
+  ctx.fillStyle =
+    info.design.readerColor
 
-  ctx.font = `${
-    Math.round(
-      w * 0.031 *
-      (info.design.readerScale ?? 1)
-    )
-  }px ${uiFont}`
+  ctx.font =
+    `${
+      Math.round(
+        w * 0.031 *
+        (info.design.readerScale ?? 1)
+      )
+    }px ${uiFont}`
 
   ctx.fillText(
     info.readerName,
@@ -609,12 +644,13 @@ export function drawVisualFrame(
     Math.max(1, w * 0.0016)
   )
 
-  ctx.font = `${
-    Math.round(
-      w * 0.024 *
-      (info.design.signatureScale ?? 1)
-    )
-  }px ${uiFont}`
+  ctx.font =
+    `${
+      Math.round(
+        w * 0.024 *
+        (info.design.signatureScale ?? 1)
+      )
+    }px ${uiFont}`
 
   ctx.fillText(
     info.design.signature.slice(0, 45),
@@ -651,7 +687,8 @@ export function cleanPrefatoryBasmala(
     return text
   }
 
-  const words = text.trim().split(/\s+/)
+  const words =
+    text.trim().split(/\s+/)
 
   if (words.length <= 4) return text
 
@@ -682,12 +719,133 @@ export function normalizeSurahName(
     .trim()
 }
 
+export type VideoWaitOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number
+}
+
+/** Wait for a decoded frame, including Safari paths that omit loadeddata. */
+export function waitForVideoFrame(
+  video: HTMLVideoElement,
+  options: VideoWaitOptions = {}
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+
+    const events = [
+      'loadeddata',
+      'canplay',
+      'seeked',
+      'playing',
+      'progress',
+    ]
+
+    const ready = () =>
+      video.readyState >= 2 &&
+      !video.seeking &&
+      video.videoWidth > 0 &&
+      video.videoHeight > 0
+
+    const cleanup = () => {
+      clearTimeout(timeout)
+      clearInterval(poll)
+
+      events.forEach((event) => {
+        video.removeEventListener(
+          event,
+          check
+        )
+      })
+
+      video.removeEventListener(
+        'error',
+        failed
+      )
+
+      options.signal?.removeEventListener(
+        'abort',
+        aborted
+      )
+    }
+
+    const finish = (error?: Error) => {
+      if (settled) return
+
+      settled = true
+      cleanup()
+
+      if (error) reject(error)
+      else resolve()
+    }
+
+    const check = () => {
+      if (ready()) finish()
+      else if (video.error) failed()
+    }
+
+    const failed = () =>
+      finish(
+        new Error(
+          'تعذّر قراءة الخلفية. جرّب فيديو MP4 بترميز H.264 أو خلفية أخرى.'
+        )
+      )
+
+    const aborted = () =>
+      finish(
+        new DOMException(
+          'تم إلغاء تحميل الخلفية.',
+          'AbortError'
+        )
+      )
+
+    const timeout = setTimeout(
+      () =>
+        finish(
+          new Error(
+            'لم تجهز الخلفية بعد. اضغط تشغيل الخلفية أو أعد تحميلها.'
+          )
+        ),
+      options.timeoutMs ?? 18000
+    )
+
+    const poll =
+      setInterval(check, 120)
+
+    events.forEach((event) => {
+      video.addEventListener(
+        event,
+        check
+      )
+    })
+
+    video.addEventListener(
+      'error',
+      failed
+    )
+
+    options.signal?.addEventListener(
+      'abort',
+      aborted,
+      { once: true }
+    )
+
+    if (options.signal?.aborted) {
+      aborted()
+    } else {
+      check()
+    }
+  })
+}
+
 export class SeamlessVideoLoop {
   private front: HTMLVideoElement
   private back: HTMLVideoElement
   private blending = false
   private opacity = 0
   private overlapSeconds: number
+  private pendingStart:
+    AbortController | null = null
+  private running = false
 
   constructor(
     first: HTMLVideoElement,
@@ -712,20 +870,186 @@ export class SeamlessVideoLoop {
     )
   }
 
-  async start(): Promise<void> {
-    try {
-      await this.front.play()
-    } catch {
-      // قد يمنع النظام التشغيل التلقائي.
+  get currentVideo(): HTMLVideoElement {
+    return this.front
+  }
+
+  async ready(
+    options: VideoWaitOptions = {}
+  ): Promise<HTMLVideoElement> {
+    for (
+      let attempt = 0;
+      attempt < 4;
+      attempt += 1
+    ) {
+      const video = this.front
+
+      await waitForVideoFrame(
+        video,
+        options
+      )
+
+      if (video === this.front) {
+        return video
+      }
     }
+
+    throw new Error(
+      'الخلفية تتبدل الآن؛ أعد محاولة إنشاء الفيديو.'
+    )
+  }
+
+  /** Called directly from a click when autoplay is blocked. */
+  start(
+    options: VideoWaitOptions = {}
+  ): Promise<boolean> {
+    this.pendingStart?.abort()
+
+    const controller =
+      new AbortController()
+
+    this.pendingStart = controller
+
+    const video = this.front
+    const cancel = () =>
+      controller.abort()
+
+    options.signal?.addEventListener(
+      'abort',
+      cancel,
+      { once: true }
+    )
+
+    if (options.signal?.aborted) {
+      cancel()
+    }
+
+    return new Promise<boolean>(
+      (resolve, reject) => {
+        let settled = false
+
+        const finish = (
+          error?: unknown
+        ) => {
+          if (settled) return
+
+          settled = true
+          clearTimeout(timeout)
+
+          controller.signal.removeEventListener(
+            'abort',
+            aborted
+          )
+
+          options.signal?.removeEventListener(
+            'abort',
+            cancel
+          )
+
+          if (
+            this.pendingStart ===
+            controller
+          ) {
+            this.running =
+              !error &&
+              !video.paused
+
+            this.pendingStart = null
+          }
+
+          if (
+            error &&
+            (error as { name?: string })
+              .name !==
+              'NotAllowedError'
+          ) {
+            reject(error)
+          } else {
+            resolve(
+              !error &&
+              !video.paused
+            )
+          }
+        }
+
+        const aborted = () =>
+          finish(
+            new DOMException(
+              'تم إلغاء تشغيل الخلفية.',
+              'AbortError'
+            )
+          )
+
+        const timeout = setTimeout(
+          () =>
+            finish(
+              new Error(
+                'تعذّر بدء الخلفية. اضغط تشغيل الخلفية للمحاولة مجددًا.'
+              )
+            ),
+          options.timeoutMs ?? 8000
+        )
+
+        controller.signal.addEventListener(
+          'abort',
+          aborted,
+          { once: true }
+        )
+
+        if (
+          controller.signal.aborted
+        ) {
+          aborted()
+          return
+        }
+
+        try {
+          video.muted = true
+          video.playsInline = true
+
+          // Keep play() inside the original click's synchronous call stack.
+          Promise.resolve(
+            video.play()
+          ).then(() => {
+            if (
+              controller.signal.aborted ||
+              settled
+            ) {
+              if (
+                !this.running &&
+                !this.pendingStart
+              ) {
+                video.pause()
+              }
+
+              return
+            }
+
+            finish()
+          }, finish)
+        } catch (error) {
+          finish(error)
+        }
+      }
+    )
   }
 
   frame(): {
     primary: HTMLVideoElement
-    secondary: HTMLVideoElement | null
+    secondary:
+      HTMLVideoElement | null
     mix: number
   } {
-    const duration = this.front.duration
+    if (!this.running) {
+      return {
+        primary: this.front,
+        secondary: null,
+        mix: 0,
+      }
+    }
+
+    const duration =
+      this.front.duration
 
     if (
       Number.isFinite(duration) &&
@@ -736,7 +1060,8 @@ export class SeamlessVideoLoop {
         duration * 0.24
       )
 
-      const begin = duration - overlap
+      const begin =
+        duration - overlap
 
       if (
         !this.blending &&
@@ -749,7 +1074,9 @@ export class SeamlessVideoLoop {
           this.back.currentTime = 0
         } catch {}
 
-        void this.back.play().catch(() => {})
+        void this.back
+          .play()
+          .catch(() => {})
       }
 
       if (this.blending) {
@@ -757,8 +1084,10 @@ export class SeamlessVideoLoop {
           0,
           Math.min(
             1,
-            (this.front.currentTime - begin) /
-              overlap
+            (
+              this.front.currentTime -
+              begin
+            ) / overlap
           )
         )
 
@@ -790,14 +1119,18 @@ export class SeamlessVideoLoop {
           this.front.currentTime = 0
         } catch {}
 
-        void this.front.play().catch(() => {})
+        void this.front
+          .play()
+          .catch(() => {})
       }
     } else if (this.front.ended) {
       try {
         this.front.currentTime = 0
       } catch {}
 
-      void this.front.play().catch(() => {})
+      void this.front
+        .play()
+        .catch(() => {})
     }
 
     return {
@@ -810,6 +1143,11 @@ export class SeamlessVideoLoop {
   }
 
   stop(): void {
+    this.running = false
+
+    this.pendingStart?.abort()
+    this.pendingStart = null
+
     this.front.pause()
     this.back.pause()
   }
