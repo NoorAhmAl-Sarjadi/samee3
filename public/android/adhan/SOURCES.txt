@@ -1,0 +1,4 @@
+Source: https://github.com/Kiwifu/adhan-mp3
+Pinned commit: b9180a2bb769f74cff8e378ef2cc7aaf8db5cd5b
+Names and audio retained as published. The source describes this collection as free for Islamic apps, prayer-time software and personal use.
+21 verified, distinct MP3 recordings: 20 named voices and one separate Fajr recording.
