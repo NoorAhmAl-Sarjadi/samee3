@@ -1,3 +1,5 @@
+// app/layout.tsx
+
 import './globals.css'
 import type { Metadata, Viewport } from 'next'
 import { Suspense, type ReactNode } from 'react'
@@ -8,6 +10,9 @@ import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 import ConnectionBanner from '@/components/ConnectionBanner'
 import MushafDownloadNotice from '@/components/MushafDownloadNotice'
 import AudioFocus from '@/components/AudioFocus'
+import { APP_BUILD_ID } from '@/lib/app-version'
+
+const iconVersion = encodeURIComponent(APP_BUILD_ID)
 
 export const metadata: Metadata = {
   title: {
@@ -46,36 +51,30 @@ export const metadata: Metadata = {
     follow: true,
   },
 
+  /*
+   * الأيقونة الأساسية موجودة فعليًا في:
+   * app/icon.svg
+   *
+   * Next.js يتعرف على app/icon.svg تلقائيًا،
+   * ونصرّح بها هنا أيضًا حتى يكون مرجع الـhead واضحًا وصريحًا.
+   *
+   * لا نضع SVG كـ apple-touch-icon لأن file convention
+   * الخاص بـ apple-icon في Next.js يعتمد على PNG/JPG.
+   */
   icons: {
-    apple: [
-      {
-        url: '/apple-touch-icon.png',
-        sizes: '180x180',
-        type: 'image/png',
-      },
-    ],
-
+    apple: [{ url: `/apple-touch-icon.png?v=${iconVersion}`, sizes: '180x180', type: 'image/png' }],
     icon: [
+      { url: `/icon-192.png?v=${iconVersion}`, type: 'image/png', sizes: '192x192' },
+      { url: `/icon-512.png?v=${iconVersion}`, type: 'image/png', sizes: '512x512' },
       {
-        url: '/icon-192.png',
-        sizes: '192x192',
-        type: 'image/png',
-      },
-      {
-        url: '/icon-512.png',
-        sizes: '512x512',
-        type: 'image/png',
-      },
-      {
-        url: '/icon.svg',
+        url: `/icon.svg?v=${iconVersion}`,
         type: 'image/svg+xml',
         sizes: 'any',
       },
     ],
-
     shortcut: [
       {
-        url: '/icon.svg',
+        url: `/icon.svg?v=${iconVersion}`,
         type: 'image/svg+xml',
         sizes: 'any',
       },
@@ -109,31 +108,11 @@ export default function RootLayout({
     <html lang="ar" dir="rtl">
       <body className="min-h-screen antialiased">
         <AuthProvider>
-          <div className="min-h-screen">
-            <Suspense
-              fallback={
-                <div
-                  dir="rtl"
-                  className="flex min-h-screen items-center justify-center text-[#8a642d]"
-                >
-                  جارٍ فتح سميع…
-                </div>
-              }
-            >
-              {children}
-            </Suspense>
-          </div>
-
+          <div className="min-h-screen"><Suspense fallback={<div dir="rtl" className="flex min-h-screen items-center justify-center text-[#8a642d]">جارٍ فتح سميع…</div>}>{children}</Suspense></div>
           <BottomNav />
-
           <ServiceWorkerRegistration />
-
           <ConnectionBanner />
-
-          <Suspense fallback={null}>
-            <MushafDownloadNotice />
-          </Suspense>
-
+          <Suspense fallback={null}><MushafDownloadNotice /></Suspense>
           <AudioFocus />
         </AuthProvider>
       </body>
