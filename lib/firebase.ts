@@ -33,15 +33,23 @@ const db: Firestore = getFirestore(app)
 let analytics: Analytics | null = null
 
 if (typeof window !== 'undefined') {
-  isSupported()
-    .then((supported) => {
-      if (supported) {
-        analytics = getAnalytics(app)
-      }
-    })
-    .catch((error) => {
-      console.warn('Firebase Analytics is not supported:', error)
-    })
+  let checkingAnalytics = false
+  const isOnline = () => navigator.onLine !== false
+  const startAnalytics = async () => {
+    // Analytics is optional. Firebase Installations can reject during an
+    // offline startup; it must never interrupt an already downloaded mushaf.
+    if (analytics || checkingAnalytics || !isOnline()) return
+    checkingAnalytics = true
+    try {
+      if (await isSupported() && isOnline()) analytics = getAnalytics(app)
+    } catch (error) {
+      console.warn('Firebase Analytics is not available:', error)
+    } finally {
+      checkingAnalytics = false
+    }
+  }
+  void startAnalytics()
+  window.addEventListener('online', () => { void startAnalytics() })
 }
 
 export {
