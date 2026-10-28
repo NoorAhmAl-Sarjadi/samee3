@@ -1,4 +1,3 @@
-
 'use client'
 
 import { claimAudioFocus } from '@/lib/audio-focus'
@@ -66,6 +65,7 @@ import {
   cleanPrefatoryBasmala,
   normalizeSurahName,
   SeamlessVideoLoop,
+  waitForVideoFrame,
 } from '@/lib/samee3-visual-render'
 
 type Prepared = {
@@ -82,6 +82,12 @@ type ExportFile = {
 }
 
 type Busy = 'idle' | 'prepare' | 'export'
+
+type BackgroundPhase =
+  | 'loading'
+  | 'ready'
+  | 'needs-play'
+  | 'error'
 
 type GalleryResponse = {
   files: Array<{
@@ -157,9 +163,10 @@ async function requestJSON<T>(
 
 function stopGlobalAudio() {
   claimAudioFocus(null)
+
   document
     .querySelectorAll<HTMLAudioElement>('audio')
-    .forEach(media => media.pause())
+    .forEach((media) => media.pause())
 
   const state = window as Window & {
     __samee3PersistentAudio?:
@@ -207,9 +214,8 @@ function SceneCard({
   disabled: boolean
   onPick: () => void
 }) {
-  const [preview, setPreview] = useState(
-    item.videoURL || ''
-  )
+  const [preview, setPreview] =
+    useState(item.videoURL || '')
 
   const [visible, setVisible] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -222,7 +228,9 @@ function SceneCard({
 
     if (!element) return
 
-    if (typeof IntersectionObserver === 'undefined') {
+    if (
+      typeof IntersectionObserver === 'undefined'
+    ) {
       setVisible(true)
       return
     }
@@ -266,12 +274,18 @@ function SceneCard({
       return
     }
 
-    if (!item.id.startsWith('local:') || !visible) {
+    if (
+      !item.id.startsWith('local:') ||
+      !visible
+    ) {
+      setPreview('')
       return
     }
 
+    setPreview('')
+
     readClip(item.id)
-      .then(file => {
+      .then((file) => {
         if (!active || !file) return
 
         objectURL = URL.createObjectURL(file)
@@ -286,7 +300,11 @@ function SceneCard({
         URL.revokeObjectURL(objectURL)
       }
     }
-  }, [item.id, item.videoURL, visible])
+  }, [
+    item.id,
+    item.videoURL,
+    visible,
+  ])
 
   return (
     <button
@@ -294,7 +312,10 @@ function SceneCard({
       disabled={disabled}
       aria-pressed={selected}
       onClick={() => {
-        void playerRef.current?.play().catch(() => {})
+        void playerRef.current
+          ?.play()
+          .catch(() => {})
+
         onPick()
       }}
       className={
@@ -377,6 +398,7 @@ function RangeSetting({
     <label className="block text-sm font-bold">
       <span className="flex justify-between gap-2">
         <span>{label}</span>
+
         <span className="text-xs font-normal text-[#778477]">
           {value.toFixed(step < 1 ? 2 : 0)}
         </span>
@@ -389,7 +411,7 @@ function RangeSetting({
         step={step}
         value={value}
         disabled={disabled}
-        onChange={event =>
+        onChange={(event) =>
           onChange(Number(event.target.value))
         }
         className="mt-3 w-full accent-[#ab8d51]"
@@ -417,7 +439,7 @@ function ColorSetting({
         type="color"
         value={value}
         disabled={disabled}
-        onChange={event =>
+        onChange={(event) =>
           onChange(event.target.value)
         }
         className="mt-2 h-12 w-full rounded-xl border border-[#e4ddce]"
@@ -431,27 +453,55 @@ export default function VisualAyahsPage() {
   const [category, setCategory] = useState('الكل')
   const [scene, setScene] = useState<Scene>(SCENES[0])
 
-  const [repository, setRepository] = useState<Scene[]>([])
-  const [local, setLocal] = useState<Scene[]>([])
+  const [repository, setRepository] =
+    useState<Scene[]>([])
 
-  const [galleryRefresh, setGalleryRefresh] = useState(0)
-  const [sceneRefresh, setSceneRefresh] = useState(0)
+  const [local, setLocal] =
+    useState<Scene[]>([])
 
-  const [galleryLoading, setGalleryLoading] = useState(false)
-  const [galleryWarning, setGalleryWarning] = useState('')
+  const [galleryRefresh, setGalleryRefresh] =
+    useState(0)
 
-  const [backgroundReady, setBackgroundReady] = useState(false)
-  const [backgroundStatus, setBackgroundStatus] = useState('')
-  const [backgroundPlaying, setBackgroundPlaying] = useState(false)
+  const [sceneRefresh, setSceneRefresh] =
+    useState(0)
+
+  const [galleryLoading, setGalleryLoading] =
+    useState(false)
+
+  const [galleryWarning, setGalleryWarning] =
+    useState('')
+
+  const [backgroundReady, setBackgroundReady] =
+    useState(false)
+
+  const [backgroundStatus, setBackgroundStatus] =
+    useState('')
+
+  const [backgroundPlaying, setBackgroundPlaying] =
+    useState(false)
+
+  const [backgroundPhase, setBackgroundPhase] =
+    useState<BackgroundPhase>('loading')
+
+  const [backgroundStarting, setBackgroundStarting] =
+    useState(false)
 
   const [surahs, setSurahs] =
     useState<SurahInfo[]>(FALLBACK_SURAHS)
 
   const [surah, setSurah] = useState(13)
-  const [verses, setVerses] = useState<Verse[]>([])
-  const [versesLoading, setVersesLoading] = useState(true)
-  const [versesError, setVersesError] = useState('')
-  const [versesRefresh, setVersesRefresh] = useState(0)
+
+  const [verses, setVerses] =
+    useState<Verse[]>([])
+
+  const [versesLoading, setVersesLoading] =
+    useState(true)
+
+  const [versesError, setVersesError] =
+    useState('')
+
+  const [versesRefresh, setVersesRefresh] =
+    useState(0)
 
   const [from, setFrom] = useState(28)
   const [to, setTo] = useState(28)
@@ -469,7 +519,9 @@ export default function VisualAyahsPage() {
   const [customTemplates, setCustomTemplates] =
     useState<StoredTemplate[]>([])
 
-  const [busy, setBusy] = useState<Busy>('idle')
+  const [busy, setBusy] =
+    useState<Busy>('idle')
+
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
 
@@ -480,13 +532,28 @@ export default function VisualAyahsPage() {
   const [result, setResult] =
     useState<ExportFile | null>(null)
 
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const loopVideoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const videoRef =
+    useRef<HTMLVideoElement>(null)
 
-  const loopEngine = useRef<SeamlessVideoLoop | null>(null)
+  const loopVideoRef =
+    useRef<HTMLVideoElement>(null)
 
-  const audioContext = useRef<AudioContext | null>(null)
+  const canvasRef =
+    useRef<HTMLCanvasElement>(null)
+
+  const loopEngine =
+    useRef<SeamlessVideoLoop | null>(null)
+
+  const backgroundRequest = useRef(0)
+
+  const backgroundController =
+    useRef<AbortController | null>(null)
+
+  const importRequest = useRef(0)
+  const exportBusy = useRef(false)
+
+  const audioContext =
+    useRef<AudioContext | null>(null)
 
   const playbackSources =
     useRef<AudioBufferSourceNode[]>([])
@@ -515,12 +582,15 @@ export default function VisualAyahsPage() {
   const preparationAbort =
     useRef<AbortController | null>(null)
 
-  const resultObjectURL = useRef<string | null>(null)
+  const resultObjectURL =
+    useRef<string | null>(null)
 
   const exportCancel =
     useRef<(() => void) | null>(null)
 
-  const exportTime = useRef<number | null>(null)
+  const exportTime =
+    useRef<number | null>(null)
+
   const pageMounted = useRef(true)
 
   preparedRef.current = prepared
@@ -536,46 +606,66 @@ export default function VisualAyahsPage() {
   }
 
   const chosenVerses = useMemo(
-    () => verses.filter(
-      verse =>
-        verse.number >= from &&
-        verse.number <= to
-    ),
+    () =>
+      verses.filter(
+        (verse) =>
+          verse.number >= from &&
+          verse.number <= to
+      ),
     [verses, from, to]
   )
 
   const allScenes = useMemo(
-    () => [...repository, ...local, ...SCENES],
+    () => [
+      ...repository,
+      ...local,
+      ...SCENES,
+    ],
     [repository, local]
   )
 
   const groups = useMemo(
     () => [
       'الكل',
-      ...Array.from(new Set(allScenes.map(s => s.group))),
+      ...Array.from(
+        new Set(
+          allScenes.map((s) => s.group)
+        )
+      ),
     ],
     [allScenes]
   )
 
   const shownScenes = useMemo(
-    () => category === 'الكل'
-      ? allScenes
-      : allScenes.filter(s => s.group === category),
+    () =>
+      category === 'الكل'
+        ? allScenes
+        : allScenes.filter(
+            (s) => s.group === category
+          ),
     [category, allScenes]
   )
 
-  const chapter = surahs.find(s => s.id === surah)
+  const chapter = surahs.find(
+    (s) => s.id === surah
+  )
+
   const working = busy !== 'idle'
 
-  const currentPreset = TEMPLATE_PRESETS.find(
-    item =>
-      item.design.quranFontId === design.quranFontId &&
-      item.design.uiFontId === design.uiFontId
-  )
+  const currentPreset =
+    TEMPLATE_PRESETS.find(
+      (item) =>
+        item.design.quranFontId ===
+          design.quranFontId &&
+        item.design.uiFontId ===
+          design.uiFontId
+    )
 
   const clearResult = useCallback(() => {
     if (resultObjectURL.current) {
-      URL.revokeObjectURL(resultObjectURL.current)
+      URL.revokeObjectURL(
+        resultObjectURL.current
+      )
     }
 
     resultObjectURL.current = null
@@ -586,7 +676,10 @@ export default function VisualAyahsPage() {
     (reset = false) => {
       const player = playback.current
 
-      if (player.playing && audioContext.current) {
+      if (
+        player.playing &&
+        audioContext.current
+      ) {
         player.position = Math.max(
           0,
           audioContext.current.currentTime -
@@ -596,7 +689,9 @@ export default function VisualAyahsPage() {
 
       player.playing = false
 
-      for (const source of playbackSources.current) {
+      for (
+        const source of playbackSources.current
+      ) {
         try {
           source.stop()
           source.disconnect()
@@ -613,23 +708,30 @@ export default function VisualAyahsPage() {
     []
   )
 
-  const invalidatePreparation = useCallback(() => {
-    requestId.current += 1
-    preparationAbort.current?.abort()
-    preparationAbort.current = null
+  const invalidatePreparation =
+    useCallback(() => {
+      requestId.current += 1
 
-    stopPlayback(true)
-    preparedRef.current = null
-    setPrepared(null)
-    setError('')
-    clearResult()
-  }, [stopPlayback, clearResult])
+      preparationAbort.current?.abort()
+      preparationAbort.current = null
+
+      stopPlayback(true)
+
+      preparedRef.current = null
+      setPrepared(null)
+
+      setError('')
+      clearResult()
+    }, [
+      stopPlayback,
+      clearResult,
+    ])
 
   const changeDesign = useCallback(
     (patch: Partial<VideoDesign>) => {
       clearResult()
 
-      setDesign(previous => ({
+      setDesign((previous) => ({
         ...previous,
         ...patch,
       }))
@@ -638,14 +740,10 @@ export default function VisualAyahsPage() {
   )
 
   const applyTemplate = useCallback(
-    (
-      preset: {
-        design: Partial<VideoDesign>
-      }
-    ) => {
+    (preset: { design: Partial<VideoDesign> }) => {
       clearResult()
 
-      setDesign(previous => ({
+      setDesign((previous) => ({
         ...previous,
         ...preset.design,
         signature:
@@ -672,11 +770,13 @@ export default function VisualAyahsPage() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(CUSTOM_KEY)
+      const raw =
+        localStorage.getItem(CUSTOM_KEY)
 
       if (!raw) return
 
-      const parsed = JSON.parse(raw) as StoredTemplate[]
+      const parsed =
+        JSON.parse(raw) as StoredTemplate[]
 
       if (Array.isArray(parsed)) {
         setCustomTemplates(parsed)
@@ -686,13 +786,14 @@ export default function VisualAyahsPage() {
 
   // تحميل فهرس السور مستقل عن الخلفيات.
   useEffect(() => {
-    const controller = new AbortController()
+    const controller =
+      new AbortController()
 
     requestJSON<{ surahs: SurahInfo[] }>(
       '/api/visual-ayahs?kind=surahs',
       controller.signal
     )
-      .then(data => {
+      .then((data) => {
         if (data.surahs?.length === 114) {
           setSurahs(data.surahs)
         }
@@ -704,7 +805,8 @@ export default function VisualAyahsPage() {
 
   // تحميل الآيات مكتوبة.
   useEffect(() => {
-    const controller = new AbortController()
+    const controller =
+      new AbortController()
 
     setVersesLoading(true)
     setVersesError('')
@@ -714,23 +816,32 @@ export default function VisualAyahsPage() {
       `/api/visual-ayahs?kind=verses&surah=${surah}`,
       controller.signal
     )
-      .then(data => {
+      .then((data) => {
         if (controller.signal.aborted) return
 
         setVerses(data.ayahs)
 
         const lastVerse =
           data.ayahs.length > 0
-            ? data.ayahs[data.ayahs.length - 1].number
+            ? data.ayahs[
+                data.ayahs.length - 1
+              ].number
             : 1
 
-        setFrom(value => Math.min(value, lastVerse))
-        setTo(value => Math.min(
-          Math.max(value, 1),
-          lastVerse
-        ))
+        setFrom(
+          (value) =>
+            Math.min(value, lastVerse)
+        )
+
+        setTo(
+          (value) =>
+            Math.min(
+              Math.max(value, 1),
+              lastVerse
+            )
+        )
       })
-      .catch(cause => {
+      .catch((cause) => {
         if (controller.signal.aborted) return
 
         setVersesError(
@@ -750,7 +861,8 @@ export default function VisualAyahsPage() {
 
   // قراءة فيديوهات GitHub.
   useEffect(() => {
-    const controller = new AbortController()
+    const controller =
+      new AbortController()
 
     setGalleryLoading(true)
 
@@ -758,21 +870,24 @@ export default function VisualAyahsPage() {
       '/api/visual-backgrounds',
       controller.signal
     )
-      .then(data => {
+      .then((data) => {
         if (controller.signal.aborted) return
 
         setRepository(
-          (data.files || []).map(item =>
-            sceneFromFile(
-              item.filename,
-              'repository'
-            )
+          (data.files || []).map(
+            (item) =>
+              sceneFromFile(
+                item.filename,
+                'repository'
+              )
           )
         )
 
-        setGalleryWarning(data.warning || '')
+        setGalleryWarning(
+          data.warning || ''
+        )
       })
-      .catch(cause => {
+      .catch((cause) => {
         if (controller.signal.aborted) return
 
         setGalleryWarning(
@@ -795,17 +910,21 @@ export default function VisualAyahsPage() {
     let active = true
 
     clipKeys()
-      .then(keys => {
+      .then((keys) => {
         if (!active) return
 
         setLocal(
           keys
-            .filter(key => key.startsWith('local:'))
-            .map(key =>
-              sceneFromFile(
-                key.slice('local:'.length),
-                'local'
-              )
+            .filter(
+              (key) =>
+                key.startsWith('local:')
+            )
+            .map(
+              (key) =>
+                sceneFromFile(
+                  key.slice('local:'.length),
+                  'local'
+                )
             )
         )
       })
@@ -816,126 +935,210 @@ export default function VisualAyahsPage() {
     }
   }, [])
 
-  // تحميل نسختين من الخلفية للتكرار السلس.
+  // Backgrounds are public. Only imported clips need optional local storage.
   useEffect(() => {
-    let canceled = false
-    let temporaryURL: string | null = null
+    const id =
+      ++backgroundRequest.current
 
-    const video = videoRef.current
+    const controller =
+      new AbortController()
+
+    backgroundController.current = controller
+
+    let temporaryURL:
+      string | null = null
+
+    let engine:
+      SeamlessVideoLoop | null = null
+
+    const element = videoRef.current
     const alternate = loopVideoRef.current
 
-    if (!video) return
+    if (!element) return
 
-    const element = video
+    const current = () =>
+      !controller.signal.aborted &&
+      id === backgroundRequest.current
 
     loopEngine.current?.stop()
     loopEngine.current = null
 
-    element.pause()
-    element.removeAttribute('src')
-    element.load()
+    for (
+      const video of [
+        element,
+        alternate,
+      ]
+    ) {
+      if (!video) continue
 
-    if (alternate) {
-      alternate.pause()
-      alternate.removeAttribute('src')
-      alternate.load()
+      video.pause()
+      video.removeAttribute('src')
+      video.muted = true
+      video.playsInline = true
+      video.preload = 'auto'
+      video.load()
     }
 
     setBackgroundReady(false)
     setBackgroundPlaying(false)
-    setBackgroundStatus('جارٍ تحميل الخلفية…')
+    setBackgroundStarting(false)
+    setBackgroundPhase('loading')
+    setBackgroundStatus(
+      'جارٍ تحميل الخلفية…'
+    )
 
     async function openScene() {
       try {
-        const stored = await readClip(scene.id)
-          .catch(() => null)
+        let url =
+          scene.videoURL ||
+          (
+            scene.id === 'flowers-demo'
+              ? '/api/visual-ayahs?kind=demo'
+              : ''
+          )
 
-        if (canceled) return
+        if (
+          scene.id.startsWith('local:')
+        ) {
+          const stored =
+            await readClip(scene.id)
 
-        let url = ''
+          if (!current()) return
 
-        if (stored) {
-          temporaryURL = URL.createObjectURL(stored)
-          url = temporaryURL
-        } else {
-          url = scene.videoURL ||
-            (
-              scene.id === 'flowers-demo'
-                ? '/api/visual-ayahs?kind=demo'
-                : ''
+          if (!stored) {
+            throw new Error(
+              'الفيديو المحلي غير متاح. استورده من جهازك مرة أخرى.'
             )
+          }
+
+          temporaryURL =
+            URL.createObjectURL(stored)
+
+          url = temporaryURL
         }
+
+        if (!current()) return
 
         if (!url) {
           throw new Error(
-            'الخلفية غير متاحة. استورد فيديو من جهازك.'
+            'الخلفية غير متاحة. اختر خلفية أخرى أو استورد فيديو من جهازك.'
           )
         }
 
-        await new Promise<void>((resolve, reject) => {
-          const timeout = window.setTimeout(() => {
-            cleanup()
-            reject(
-              new Error('انتهت مهلة تشغيل الخلفية.')
-            )
-          }, 18000)
-
-          const cleanup = () => {
-            clearTimeout(timeout)
-            element.onloadeddata = null
-            element.onerror = null
-          }
-
-          element.onloadeddata = () => {
-            cleanup()
-            resolve()
-          }
-
-          element.onerror = () => {
-            cleanup()
-            reject(
-              new Error(
-                'صيغة الفيديو غير مدعومة. جرّب MP4 H.264.'
-              )
-            )
-          }
-
-          element.src = url
-          element.load()
-        })
-
-        if (canceled) return
+        element!.src = url
+        element!.load()
 
         if (alternate) {
           alternate.src = url
-          alternate.muted = true
-          alternate.playsInline = true
-          alternate.loop = false
-          alternate.preload = 'auto'
           alternate.load()
 
-          const engine = new SeamlessVideoLoop(
-            element,
+          engine = new SeamlessVideoLoop(
+            element!,
             alternate,
-            design.loopFade
+            latest.current.design.loopFade
           )
 
           loopEngine.current = engine
-
-          await engine.start()
-        } else {
-          await element.play().catch(() => {})
         }
 
+        // A decoded frame and permission to autoplay are separate states.
+        const decoded = waitForVideoFrame(
+          element!,
+          {
+            signal: controller.signal,
+          }
+        )
+
+        if (engine) {
+          void engine
+            .start({
+              signal: controller.signal,
+            })
+            .then((playing) => {
+              if (
+                !current() ||
+                element!.error
+              ) {
+                return
+              }
+
+              setBackgroundPlaying(playing)
+
+              if (!playing) {
+                setBackgroundPhase(
+                  'needs-play'
+                )
+
+                setBackgroundStatus(
+                  'اضغط تشغيل الخلفية لتجهيزها في هذا المتصفح.'
+                )
+              }
+            })
+            .catch((cause: unknown) => {
+              if (
+                !current() ||
+                (
+                  cause as {
+                    name?: string
+                  }
+                )?.name === 'AbortError'
+              ) {
+                return
+              }
+
+              if (element!.error) return
+
+              setBackgroundPhase(
+                'needs-play'
+              )
+
+              setBackgroundStatus(
+                'اضغط تشغيل الخلفية، أو أعد تحميلها إذا استمر التعطل.'
+              )
+            })
+        }
+
+        await decoded
+
+        if (!current()) return
+
+        const video =
+          engine?.currentVideo ||
+          element!
+
         setBackgroundReady(true)
-        setBackgroundStatus('')
+        setBackgroundPlaying(!video.paused)
+
+        setBackgroundPhase(
+          video.paused
+            ? 'needs-play'
+            : 'ready'
+        )
+
+        setBackgroundStatus(
+          video.paused
+            ? 'الخلفية جاهزة؛ اضغط تشغيل الخلفية أو إنشاء الفيديو.'
+            : ''
+        )
       } catch (cause) {
-        if (canceled) return
+        if (!current()) return
+
+        const needsPlay =
+          !element!.error &&
+          element!.readyState >= 1
+
+        setBackgroundReady(false)
+
+        setBackgroundPhase(
+          needsPlay
+            ? 'needs-play'
+            : 'error'
+        )
 
         setBackgroundStatus(
           cause instanceof Error
             ? cause.message
-            : 'تعذّر فتح الخلفية.'
+            : 'تعذّر تحميل الخلفية. أعد المحاولة.'
         )
       }
     }
@@ -943,26 +1146,138 @@ export default function VisualAyahsPage() {
     void openScene()
 
     return () => {
-      canceled = true
+      controller.abort()
+      engine?.stop()
 
-      loopEngine.current?.stop()
-      loopEngine.current = null
+      if (
+        loopEngine.current === engine
+      ) {
+        loopEngine.current = null
+      }
 
-      element.pause()
-      element.onloadeddata = null
-      element.onerror = null
-      element.removeAttribute('src')
+      if (
+        backgroundController.current ===
+        controller
+      ) {
+        backgroundController.current = null
+      }
 
-      if (alternate) {
-        alternate.pause()
-        alternate.removeAttribute('src')
+      for (
+        const video of [
+          element,
+          alternate,
+        ]
+      ) {
+        video?.pause()
+        video?.removeAttribute('src')
       }
 
       if (temporaryURL) {
-        URL.revokeObjectURL(temporaryURL)
+        URL.revokeObjectURL(
+          temporaryURL
+        )
       }
     }
-  }, [scene.id, scene.videoURL, sceneRefresh])
+  }, [
+    scene.id,
+    scene.videoURL,
+    sceneRefresh,
+  ])
+
+  function syncBackgroundPlayback() {
+    const video =
+      loopEngine.current?.currentVideo ||
+      videoRef.current
+
+    setBackgroundPlaying(
+      Boolean(
+        video &&
+        !video.paused
+      )
+    )
+  }
+
+  async function activateBackground() {
+    const id =
+      backgroundRequest.current
+
+    const engine =
+      loopEngine.current
+
+    if (!engine) {
+      setSceneRefresh(
+        (value) => value + 1
+      )
+      return
+    }
+
+    const signal =
+      backgroundController.current?.signal
+
+    setBackgroundStarting(true)
+    setBackgroundStatus(
+      'جارٍ تجهيز الخلفية…'
+    )
+
+    // start() reaches play() immediately, while the click still grants playback permission.
+    const starting =
+      engine.start({ signal })
+
+    try {
+      const [playing] =
+        await Promise.all([
+          starting,
+          engine.ready({ signal }),
+        ])
+
+      if (
+        id !== backgroundRequest.current ||
+        signal?.aborted
+      ) {
+        return
+      }
+
+      setBackgroundReady(true)
+      setBackgroundPlaying(playing)
+
+      setBackgroundPhase(
+        playing
+          ? 'ready'
+          : 'needs-play'
+      )
+
+      setBackgroundStatus(
+        playing
+          ? ''
+          : 'المتصفح منع التشغيل. اضغط تشغيل الخلفية مرة أخرى أو راجع وضع توفير الطاقة.'
+      )
+    } catch (cause) {
+      if (
+        id !== backgroundRequest.current ||
+        signal?.aborted
+      ) {
+        return
+      }
+
+      setBackgroundPhase(
+        engine.currentVideo.error
+          ? 'error'
+          : 'needs-play'
+      )
+
+      setBackgroundStatus(
+        cause instanceof Error
+          ? cause.message
+          : 'تعذّر تشغيل الخلفية.'
+      )
+    } finally {
+      if (
+        id === backgroundRequest.current
+      ) {
+        setBackgroundStarting(false)
+      }
+    }
+  }
 
   // المعاينة تستخدم نفس الرسم المستخدم في التصدير.
   useEffect(() => {
@@ -978,7 +1293,8 @@ export default function VisualAyahsPage() {
           const player = playback.current
 
           let second =
-            exportTime.current ?? player.position
+            exportTime.current ??
+            player.position
 
           if (
             exportTime.current === null &&
@@ -992,54 +1308,71 @@ export default function VisualAyahsPage() {
             )
           }
 
-          const index = prep
-            ? verseIndexAt(prep.starts, second)
-            : 0
+          const index =
+            prep
+              ? verseIndexAt(
+                  prep.starts,
+                  second
+                )
+              : 0
 
           const verse =
             prep?.verses[index] ||
             data.verses.find(
-              item => item.number === data.from
+              (item) =>
+                item.number === data.from
             ) ||
             null
 
           const chapterName =
             data.surahs.find(
-              item => item.id === data.surah
-            )?.name || 'القرآن الكريم'
+              (item) =>
+                item.id === data.surah
+            )?.name ||
+            'القرآن الكريم'
 
           loopEngine.current?.setOverlap(
             data.design.loopFade
           )
 
-          const frame = loopEngine.current?.frame()
+          const frame =
+            loopEngine.current?.frame()
 
-          const verseForDisplay = verse
-            ? {
-                ...verse,
-                text: cleanPrefatoryBasmala(
-                  verse.text,
-                  data.surah,
-                  verse.number
-                ),
-              }
-            : null
+          const verseForDisplay =
+            verse
+              ? {
+                  ...verse,
+                  text: cleanPrefatoryBasmala(
+                    verse.text,
+                    data.surah,
+                    verse.number
+                  ),
+                }
+              : null
 
           drawVisualFrame(
             canvas,
-            frame?.primary || videoRef.current,
+            frame?.primary ||
+              videoRef.current,
             {
               surahName:
-                normalizeSurahName(chapterName),
+                normalizeSurahName(
+                  chapterName
+                ),
 
               readerName:
                 READERS.find(
-                  item => item.id === data.reader
+                  (item) =>
+                    item.id === data.reader
                 )?.name || '',
 
               verse: verseForDisplay,
-              alternateVideo: frame?.secondary,
-              backgroundMix: frame?.mix || 0,
+
+              alternateVideo:
+                frame?.secondary,
+
+              backgroundMix:
+                frame?.mix || 0,
 
               verseProgress:
                 prep &&
@@ -1064,11 +1397,15 @@ export default function VisualAyahsPage() {
             exportTime.current === null &&
             player.playing
           ) {
-            if (second >= prep.duration) {
+            if (
+              second >= prep.duration
+            ) {
               stopPlayback(true)
               setPosition(prep.duration)
             } else if (
-              Math.abs(second - player.position) >= 0.15
+              Math.abs(
+                second - player.position
+              ) >= 0.15
             ) {
               player.position = second
               setPosition(second)
@@ -1079,12 +1416,17 @@ export default function VisualAyahsPage() {
         lastPaint = now
       }
 
-      rafRef.current = requestAnimationFrame(paint)
+      rafRef.current =
+        requestAnimationFrame(paint)
     }
 
-    rafRef.current = requestAnimationFrame(paint)
+    rafRef.current =
+      requestAnimationFrame(paint)
 
-    return () => cancelAnimationFrame(rafRef.current)
+    return () =>
+      cancelAnimationFrame(
+        rafRef.current
+      )
   }, [stopPlayback])
 
   useEffect(() => {
@@ -1103,10 +1445,11 @@ export default function VisualAyahsPage() {
       onVisibility
     )
 
-    return () => document.removeEventListener(
-      'visibilitychange',
-      onVisibility
-    )
+    return () =>
+      document.removeEventListener(
+        'visibilitychange',
+        onVisibility
+      )
   }, [stopPlayback])
 
   useEffect(() => {
@@ -1118,58 +1461,93 @@ export default function VisualAyahsPage() {
       preparationAbort.current?.abort()
       exportCancel.current?.()
 
-      playbackSources.current.forEach(source => {
-        try {
-          source.stop()
-        } catch {}
-      })
+      playbackSources.current.forEach(
+        (source) => {
+          try {
+            source.stop()
+          } catch {}
+        }
+      )
 
       if (audioContext.current) {
-        void audioContext.current.close()
+        void audioContext.current
+          .close()
           .catch(() => {})
       }
 
       if (resultObjectURL.current) {
-        URL.revokeObjectURL(resultObjectURL.current)
+        URL.revokeObjectURL(
+          resultObjectURL.current
+        )
       }
     }
   }, [])
 
   async function importVideo(file: File) {
-    const message = validateVideo(file)
+    const message =
+      validateVideo(file)
 
     if (message) {
       setError(message)
       return
     }
 
-    setStatus('جارٍ حفظ الفيديو على هذا الجهاز…')
-    setError('')
+    const id =
+      ++importRequest.current
 
-    try {
-      const added = sceneFromFile(
+    const added =
+      sceneFromFile(
         file.name,
         'local'
       )
 
-      await saveClip(added.id, file)
+    setError('')
 
-      setLocal(old => [
-        added,
-        ...old.filter(item => item.id !== added.id),
-      ])
+    // saveClip exposes the file in memory synchronously; persistence is optional.
+    const saving =
+      saveClip(added.id, file)
 
-      setScene(added)
-      setSceneRefresh(value => value + 1)
+    setLocal((old) => [
+      added,
+      ...old.filter(
+        (item) =>
+          item.id !== added.id
+      ),
+    ])
 
-      setStatus(
-        'تم استيراد الفيديو باسمه الأصلي.'
-      )
-    } catch {
-      setError(
-        'تعذّر تخزين الفيديو. جرّب ملفًا أصغر.'
-      )
-    }
+    setBackgroundReady(false)
+    setBackgroundPhase('loading')
+    setScene(added)
+
+    setSceneRefresh(
+      (value) => value + 1
+    )
+
+    setStatus(
+      'تم فتح الفيديو؛ جارٍ محاولة حفظه للاستخدام لاحقًا…'
+    )
+
+    void saving
+      .then(() => {
+        if (
+          pageMounted.current &&
+          id === importRequest.current
+        ) {
+          setStatus(
+            'تم استيراد الفيديو وحفظه على هذا الجهاز.'
+          )
+        }
+      })
+      .catch(() => {
+        if (
+          pageMounted.current &&
+          id === importRequest.current
+        ) {
+          setStatus(
+            'الفيديو متاح في الجلسة الحالية. تعذّر حفظه للاستخدام بعد إغلاق الصفحة.'
+          )
+        }
+      })
   }
 
   function pickScene(next: Scene) {
@@ -1177,12 +1555,28 @@ export default function VisualAyahsPage() {
 
     stopPlayback(true)
     clearResult()
-
-    setScene(next)
     setError('')
+
+    if (
+      next.id === scene.id &&
+      backgroundPhase === 'needs-play'
+    ) {
+      void activateBackground()
+      return
+    }
+
+    setBackgroundReady(false)
+    setBackgroundPhase('loading')
+    setScene(next)
+
+    setSceneRefresh(
+      (value) => value + 1
+    )
   }
 
-  function changeSurah(nextSurah: number) {
+  function changeSurah(
+    nextSurah: number
+  ) {
     invalidatePreparation()
 
     setSurah(nextSurah)
@@ -1190,13 +1584,21 @@ export default function VisualAyahsPage() {
     setTo(1)
   }
 
-  function setRange(start: number, end: number) {
+  function setRange(
+    start: number,
+    end: number
+  ) {
     if (end < start) {
-      setError('اختر النهاية بعد البداية.')
+      setError(
+        'اختر النهاية بعد البداية.'
+      )
       return
     }
 
-    if (end - start + 1 > MAX_AYAH_COUNT) {
+    if (
+      end - start + 1 >
+      MAX_AYAH_COUNT
+    ) {
       setError(
         'الحد الأقصى عشر آيات متتابعة.'
       )
@@ -1210,20 +1612,31 @@ export default function VisualAyahsPage() {
     setTo(end)
   }
 
-  function chooseFirst(number: number) {
+  function chooseFirst(
+    number: number
+  ) {
     setRange(number, number)
   }
 
-  function chooseLast(number: number) {
+  function chooseLast(
+    number: number
+  ) {
     setRange(from, number)
   }
 
   async function prepareAudio() {
-    if (working || versesLoading) return
+    if (
+      working ||
+      versesLoading
+    ) {
+      return
+    }
 
     if (
-      chosenVerses.length !== to - from + 1 ||
-      chosenVerses.length > MAX_AYAH_COUNT ||
+      chosenVerses.length !==
+        to - from + 1 ||
+      chosenVerses.length >
+        MAX_AYAH_COUNT ||
       chosenVerses.length === 0
     ) {
       setError(
@@ -1232,28 +1645,38 @@ export default function VisualAyahsPage() {
       return
     }
 
-    const controller = new AbortController()
-    const id = ++requestId.current
+    const controller =
+      new AbortController()
+
+    const id =
+      ++requestId.current
 
     preparationAbort.current?.abort()
     preparationAbort.current = controller
 
     stopPlayback(true)
+
     preparedRef.current = null
+
     setPrepared(null)
     clearResult()
     stopGlobalAudio()
 
     setError('')
     setBusy('prepare')
-    setStatus('جارٍ تجهيز الآيات والتلاوة…')
+    setStatus(
+      'جارٍ تجهيز الآيات والتلاوة…'
+    )
 
     try {
       if (!audioContext.current) {
-        audioContext.current = new AudioContext()
+        audioContext.current =
+          new AudioContext()
       }
 
-      const context = audioContext.current
+      const context =
+        audioContext.current
+
       await context.resume()
 
       const buffers: AudioBuffer[] = []
@@ -1266,60 +1689,87 @@ export default function VisualAyahsPage() {
         index < chosenVerses.length;
         index++
       ) {
-        const verse = chosenVerses[index]
+        const verse =
+          chosenVerses[index]
 
-        if (id !== requestId.current) return
+        if (
+          id !== requestId.current
+        ) {
+          return
+        }
 
         setStatus(
-          `تحميل الآية ${digits(index + 1)} من ${
+          `تحميل الآية ${
+            digits(index + 1)
+          } من ${
             digits(chosenVerses.length)
           }`
         )
 
-        const params = new URLSearchParams({
-          kind: 'audio',
-          surah: String(surah),
-          ayah: String(verse.number),
-          reciter: reader,
-        })
+        const params =
+          new URLSearchParams({
+            kind: 'audio',
+            surah: String(surah),
+            ayah: String(verse.number),
+            reciter: reader,
+          })
 
         const response = await fetch(
           `/api/visual-ayahs?${params}`,
-          { signal: controller.signal }
+          {
+            signal: controller.signal,
+          }
         )
 
         if (!response.ok) {
-          const detail = await response
-            .json()
-            .catch(() => ({
-              error: 'تعذّر تحميل التلاوة.',
-            }))
+          const detail =
+            await response.json().catch(
+              () => ({
+                error:
+                  'تعذّر تحميل التلاوة.',
+              })
+            )
 
           throw new Error(
-            detail.error || 'تعذّر تحميل التلاوة.'
+            detail.error ||
+            'تعذّر تحميل التلاوة.'
           )
         }
 
-        const encoded = await response.arrayBuffer()
+        const encoded =
+          await response.arrayBuffer()
 
         const buffer =
-          await context.decodeAudioData(encoded)
+          await context.decodeAudioData(
+            encoded
+          )
 
-        if (id !== requestId.current) return
+        if (
+          id !== requestId.current
+        ) {
+          return
+        }
 
         starts.push(duration)
         buffers.push(buffer)
 
         duration += buffer.duration
 
-        if (duration > MAX_DURATION_SECONDS) {
+        if (
+          duration >
+          MAX_DURATION_SECONDS
+        ) {
           throw new Error(
             'مدة التلاوة تجاوزت 90 ثانية. اختر آيات أقل.'
           )
         }
       }
 
-      if (id !== requestId.current) return
+      if (
+        id !== requestId.current
+      ) {
+        return
+      }
 
       const created: Prepared = {
         verses: chosenVerses,
@@ -1336,7 +1786,9 @@ export default function VisualAyahsPage() {
 
       setTab(3)
     } catch (cause) {
-      if (id === requestId.current) {
+      if (
+        id === requestId.current
+      ) {
         setError(
           cause instanceof Error
             ? cause.message
@@ -1344,7 +1796,9 @@ export default function VisualAyahsPage() {
         )
       }
     } finally {
-      if (id === requestId.current) {
+      if (
+        id === requestId.current
+      ) {
         setBusy('idle')
         setStatus('')
         preparationAbort.current = null
@@ -1354,6 +1808,7 @@ export default function VisualAyahsPage() {
 
   function cancelPreparation() {
     requestId.current += 1
+
     preparationAbort.current?.abort()
     preparationAbort.current = null
 
@@ -1362,11 +1817,19 @@ export default function VisualAyahsPage() {
   }
 
   async function toggleAudio() {
-    const prep = preparedRef.current
+    const prep =
+      preparedRef.current
 
-    if (!prep || working) return
+    if (
+      !prep ||
+      working
+    ) {
+      return
+    }
 
-    if (playback.current.playing) {
+    if (
+      playback.current.playing
+    ) {
       stopPlayback()
       return
     }
@@ -1375,57 +1838,77 @@ export default function VisualAyahsPage() {
 
     try {
       if (!audioContext.current) {
-        audioContext.current = new AudioContext()
+        audioContext.current =
+          new AudioContext()
       }
 
-      const context = audioContext.current
+      const context =
+        audioContext.current
 
       await context.resume()
 
-      const player = playback.current
+      const player =
+        playback.current
 
-      if (player.position >= prep.duration - 0.05) {
+      if (
+        player.position >=
+        prep.duration - 0.05
+      ) {
         player.position = 0
       }
 
-      const offset = player.position
-      const base = context.currentTime + 0.08
+      const offset =
+        player.position
 
-      player.begin = base - offset
+      const base =
+        context.currentTime + 0.08
 
-      prep.buffers.forEach((buffer, index) => {
-        if (
-          prep.starts[index] +
-            buffer.duration <=
-          offset
-        ) {
-          return
-        }
+      player.begin =
+        base - offset
 
-        const node = context.createBufferSource()
+      prep.buffers.forEach(
+        (buffer, index) => {
+          if (
+            prep.starts[index] +
+              buffer.duration <=
+            offset
+          ) {
+            return
+          }
 
-        node.buffer = buffer
-        node.connect(context.destination)
+          const node =
+            context.createBufferSource()
 
-        node.start(
-          base +
+          node.buffer = buffer
+
+          node.connect(
+            context.destination
+          )
+
+          node.start(
+            base +
+              Math.max(
+                0,
+                prep.starts[index] -
+                  offset
+              ),
             Math.max(
               0,
-              prep.starts[index] - offset
-            ),
-          Math.max(
-            0,
-            offset - prep.starts[index]
+              offset -
+                prep.starts[index]
+            )
           )
-        )
 
-        playbackSources.current.push(node)
-      })
+          playbackSources.current.push(
+            node
+          )
+        }
+      )
 
       player.playing = true
       setPlaying(true)
 
-      await videoRef.current?.play().catch(() => {})
+      await loopEngine.current?.start()
     } catch {
       setError(
         'تعذّر تشغيل التلاوة. حاول مرة أخرى.'
@@ -1434,34 +1917,36 @@ export default function VisualAyahsPage() {
   }
 
   async function startExport() {
-    const prep = preparedRef.current
-    const canvas = canvasRef.current
-    const video = videoRef.current
-    const context = audioContext.current
+    const prep =
+      preparedRef.current
+
+    const canvas =
+      canvasRef.current
+
+    const engine =
+      loopEngine.current
+
+    const context =
+      audioContext.current
+
+    const backgroundId =
+      backgroundRequest.current
 
     if (
       !prep ||
       !canvas ||
-      !video ||
+      !engine ||
       !context ||
-      working
+      working ||
+      exportBusy.current
     ) {
-      return
-    }
-
-    if (
-      !backgroundReady ||
-      video.readyState < 2
-    ) {
-      setError(
-        'اختر خلفية متحركة جاهزة قبل إنشاء الفيديو.'
-      )
       return
     }
 
     if (
       !canvas.captureStream ||
-      typeof MediaRecorder === 'undefined'
+      typeof MediaRecorder ===
+        'undefined'
     ) {
       setError(
         'المتصفح لا يدعم تصدير الفيديو.'
@@ -1472,8 +1957,11 @@ export default function VisualAyahsPage() {
     const mime = [
       'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
       'video/mp4',
-    ].find(type =>
-      MediaRecorder.isTypeSupported(type)
+    ].find(
+      (type) =>
+        MediaRecorder.isTypeSupported(
+          type
+        )
     )
 
     if (!mime) {
@@ -1483,11 +1971,18 @@ export default function VisualAyahsPage() {
       return
     }
 
+    exportBusy.current = true
+
+    const controller =
+      new AbortController()
+
+    exportCancel.current =
+      () => controller.abort()
+
     setBusy('export')
+
     setStatus(
-      `جارٍ إنشاء فيديو مدته ${
-        durationText(prep.duration)
-      }…`
+      'جارٍ تجهيز الخلفية قبل إنشاء الفيديو…'
     )
 
     setProgress(0)
@@ -1497,216 +1992,345 @@ export default function VisualAyahsPage() {
     stopPlayback(true)
     stopGlobalAudio()
 
-    let recorder: MediaRecorder | null = null
+    let recorder:
+      MediaRecorder | null = null
 
     let destination:
-      MediaStreamAudioDestinationNode | null = null
+      MediaStreamAudioDestinationNode | null =
+        null
 
-    let canvasStream: MediaStream | null = null
-    let recordedStream: MediaStream | null = null
+    let canvasStream:
+      MediaStream | null = null
+
+    let recordedStream:
+      MediaStream | null = null
 
     let progressInterval = 0
     let deadline = 0
 
-    const nodes: AudioBufferSourceNode[] = []
+    const nodes:
+      AudioBufferSourceNode[] = []
 
     try {
-      await context.resume()
+      const [started] =
+        await Promise.all([
+          engine.start({
+            signal:
+              controller.signal,
+          }),
+          engine.ready({
+            signal:
+              controller.signal,
+          }),
+          context.resume(),
+        ])
+
+      if (!started) {
+        throw new Error(
+          'المتصفح منع تشغيل الخلفية. اضغط تشغيل الخلفية ثم أعد إنشاء الفيديو.'
+        )
+      }
+
+      if (
+        controller.signal.aborted ||
+        backgroundId !==
+          backgroundRequest.current
+      ) {
+        throw new Error(
+          'تم إلغاء إنشاء الفيديو.'
+        )
+      }
+
+      setBackgroundReady(true)
+      setBackgroundPhase('ready')
+      setBackgroundStatus('')
+
+      syncBackgroundPlayback()
 
       await Promise.all([
         document.fonts.load(
-          `24px ${fontById(design.quranFontId).family}`
+          `24px ${
+            fontById(
+              design.quranFontId
+            ).family
+          }`
         ),
         document.fonts.load(
-          `24px ${fontById(design.uiFontId).family}`
+          `24px ${
+            fontById(
+              design.uiFontId
+            ).family
+          }`
         ),
       ]).catch(() => [])
 
       await document.fonts.ready
-      await loopEngine.current?.start()
 
-      canvasStream = canvas.captureStream(30)
+      if (
+        controller.signal.aborted ||
+        backgroundId !==
+          backgroundRequest.current
+      ) {
+        throw new Error(
+          'تم إلغاء إنشاء الفيديو.'
+        )
+      }
+
+      await engine.ready({
+        signal:
+          controller.signal,
+      })
+
+      setStatus(
+        `جارٍ إنشاء فيديو مدته ${
+          durationText(prep.duration)
+        }…`
+      )
+
+      canvasStream =
+        canvas.captureStream(30)
 
       destination =
         context.createMediaStreamDestination()
 
-      recordedStream = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...destination.stream.getAudioTracks(),
-      ])
+      recordedStream =
+        new MediaStream([
+          ...canvasStream.getVideoTracks(),
+          ...destination.stream
+            .getAudioTracks(),
+        ])
 
-      const mediaRecorder = new MediaRecorder(
-        recordedStream,
-        {
-          mimeType: mime,
-          videoBitsPerSecond:
-            design.quality === 1080
-              ? 5_000_000
-              : 3_000_000,
-          audioBitsPerSecond: 128_000,
-        }
-      )
+      const mediaRecorder =
+        new MediaRecorder(
+          recordedStream,
+          {
+            mimeType: mime,
+            videoBitsPerSecond:
+              design.quality === 1080
+                ? 5_000_000
+                : 3_000_000,
+            audioBitsPerSecond:
+              128_000,
+          }
+        )
 
       recorder = mediaRecorder
 
-      const blob = await new Promise<Blob>(
-        (resolve, reject) => {
-          const chunks: BlobPart[] = []
+      const blob =
+        await new Promise<Blob>(
+          (resolve, reject) => {
+            const chunks:
+              BlobPart[] = []
 
-          let settled = false
-          let requestedStop = false
+            let settled = false
+            let requestedStop = false
 
-          const fail = (message: string) => {
-            if (settled) return
+            const fail = (
+              message: string
+            ) => {
+              if (settled) return
 
-            settled = true
-            reject(new Error(message))
-          }
+              settled = true
 
-          const stopRecording = () => {
-            if (requestedStop || settled) return
-
-            requestedStop = true
-
-            if (
-              mediaRecorder.state !== 'inactive'
-            ) {
-              try {
-                mediaRecorder.requestData()
-              } catch {}
-
-              mediaRecorder.stop()
-            }
-          }
-
-          exportCancel.current = () => {
-            fail('تم إلغاء إنشاء الفيديو.')
-
-            if (
-              mediaRecorder.state !== 'inactive'
-            ) {
-              mediaRecorder.stop()
-            }
-          }
-
-          mediaRecorder.onerror = () => {
-            fail(
-              'حدث خطأ أثناء تسجيل MP4.'
-            )
-          }
-
-          mediaRecorder.ondataavailable = event => {
-            if (event.data.size) {
-              chunks.push(event.data)
-            }
-          }
-
-          mediaRecorder.onstop = () => {
-            if (settled) return
-
-            const output = new Blob(
-              chunks,
-              { type: 'video/mp4' }
-            )
-
-            if (output.size < 3000) {
-              fail('ملف الفيديو الناتج غير صالح.')
-              return
-            }
-
-            settled = true
-            resolve(output)
-          }
-
-          mediaRecorder.start(250)
-
-          const startedAt =
-            context.currentTime + 0.12
-
-          const finishAt =
-            startedAt + prep.duration
-
-          prep.buffers.forEach((buffer, index) => {
-            const node =
-              context.createBufferSource()
-
-            node.buffer = buffer
-            node.connect(destination!)
-
-            node.start(
-              startedAt + prep.starts[index]
-            )
-
-            nodes.push(node)
-          })
-
-          const last =
-            nodes[nodes.length - 1]
-
-          if (last) {
-            last.onended = () => {
-              window.setTimeout(
-                stopRecording,
-                130
+              reject(
+                new Error(message)
               )
             }
-          }
 
-          progressInterval = window.setInterval(
-            () => {
-              const seconds = Math.max(
-                0,
-                context.currentTime - startedAt
-              )
-
-              exportTime.current = Math.min(
-                prep.duration,
-                seconds
-              )
-
-              setProgress(
-                Math.min(
-                  100,
-                  Math.round(
-                    seconds /
-                      prep.duration *
-                      100
-                  )
-                )
-              )
-
+            const stopRecording = () => {
               if (
-                context.currentTime >=
-                finishAt + 0.18
+                requestedStop ||
+                settled
               ) {
-                stopRecording()
+                return
               }
-            },
-            60
-          )
 
-          deadline = window.setTimeout(
-            () => {
+              requestedStop = true
+
+              if (
+                mediaRecorder.state !==
+                'inactive'
+              ) {
+                try {
+                  mediaRecorder
+                    .requestData()
+                } catch {}
+
+                mediaRecorder.stop()
+              }
+            }
+
+            exportCancel.current = () => {
+              controller.abort()
+
               fail(
-                'توقف إنشاء الفيديو بسبب انتهاء المهلة. قلل عدد الآيات.'
+                'تم إلغاء إنشاء الفيديو.'
               )
 
               if (
-                mediaRecorder.state !== 'inactive'
+                mediaRecorder.state !==
+                'inactive'
               ) {
                 mediaRecorder.stop()
               }
-            },
-            Math.ceil(
-              (prep.duration + 5) * 1000
+            }
+
+            mediaRecorder.onerror = () => {
+              fail(
+                'حدث خطأ أثناء تسجيل MP4.'
+              )
+            }
+
+            mediaRecorder
+              .ondataavailable =
+                (event) => {
+                  if (
+                    event.data.size
+                  ) {
+                    chunks.push(
+                      event.data
+                    )
+                  }
+                }
+
+            mediaRecorder.onstop = () => {
+              if (settled) return
+
+              const output = new Blob(
+                chunks,
+                {
+                  type: 'video/mp4',
+                }
+              )
+
+              if (
+                output.size < 3000
+              ) {
+                fail(
+                  'ملف الفيديو الناتج غير صالح.'
+                )
+                return
+              }
+
+              settled = true
+              resolve(output)
+            }
+
+            mediaRecorder.start(250)
+
+            const startedAt =
+              context.currentTime +
+              0.12
+
+            const finishAt =
+              startedAt +
+              prep.duration
+
+            prep.buffers.forEach(
+              (buffer, index) => {
+                const node =
+                  context
+                    .createBufferSource()
+
+                node.buffer = buffer
+
+                node.connect(
+                  destination!
+                )
+
+                node.start(
+                  startedAt +
+                    prep.starts[index]
+                )
+
+                nodes.push(node)
+              }
             )
-          )
-        }
-      )
 
-      if (!pageMounted.current) return
+            const last =
+              nodes[
+                nodes.length - 1
+              ]
 
-      const url = URL.createObjectURL(blob)
+            if (last) {
+              last.onended = () => {
+                window.setTimeout(
+                  stopRecording,
+                  130
+                )
+              }
+            }
+
+            progressInterval =
+              window.setInterval(
+                () => {
+                  const seconds =
+                    Math.max(
+                      0,
+                      context.currentTime -
+                        startedAt
+                    )
+
+                  exportTime.current =
+                    Math.min(
+                      prep.duration,
+                      seconds
+                    )
+
+                  setProgress(
+                    Math.min(
+                      100,
+                      Math.round(
+                        (
+                          seconds /
+                          prep.duration
+                        ) * 100
+                      )
+                    )
+                  )
+
+                  if (
+                    context.currentTime >=
+                    finishAt + 0.18
+                  ) {
+                    stopRecording()
+                  }
+                },
+                60
+              )
+
+            deadline =
+              window.setTimeout(
+                () => {
+                  fail(
+                    'توقف إنشاء الفيديو بسبب انتهاء المهلة. قلل عدد الآيات.'
+                  )
+
+                  if (
+                    mediaRecorder
+                      .state !==
+                    'inactive'
+                  ) {
+                    mediaRecorder.stop()
+                  }
+                },
+                Math.ceil(
+                  (
+                    prep.duration + 5
+                  ) * 1000
+                )
+              )
+          }
+        )
+
+      if (
+        !pageMounted.current
+      ) {
+        return
+      }
+
+      const url =
+        URL.createObjectURL(blob)
 
       resultObjectURL.current = url
 
@@ -1719,7 +2343,9 @@ export default function VisualAyahsPage() {
 
       setProgress(100)
     } catch (cause) {
-      if (pageMounted.current) {
+      if (
+        pageMounted.current
+      ) {
         setError(
           cause instanceof Error
             ? cause.message
@@ -1727,22 +2353,33 @@ export default function VisualAyahsPage() {
         )
       }
     } finally {
+      exportBusy.current = false
+
+      controller.abort()
+
       exportTime.current = null
       exportCancel.current = null
 
-      clearInterval(progressInterval)
+      clearInterval(
+        progressInterval
+      )
+
       clearTimeout(deadline)
 
       if (
         recorder &&
-        (recorder as MediaRecorder).state !== 'inactive'
+        (
+          recorder as MediaRecorder
+        ).state !== 'inactive'
       ) {
         try {
-          (recorder as MediaRecorder).stop()
+          ;(
+            recorder as MediaRecorder
+          ).stop()
         } catch {}
       }
 
-      nodes.forEach(node => {
+      nodes.forEach((node) => {
         node.onended = null
 
         try {
@@ -1753,17 +2390,23 @@ export default function VisualAyahsPage() {
 
       recordedStream
         ?.getTracks()
-        .forEach(track => track.stop())
+        .forEach(
+          (track) => track.stop()
+        )
 
       canvasStream
         ?.getTracks()
-        .forEach(track => track.stop())
+        .forEach(
+          (track) => track.stop()
+        )
 
       destination?.disconnect()
 
       playback.current.position = 0
 
-      if (pageMounted.current) {
+      if (
+        pageMounted.current
+      ) {
         setBusy('idle')
         setStatus('')
         setPosition(0)
@@ -1779,13 +2422,20 @@ export default function VisualAyahsPage() {
       const file = new File(
         [result.blob],
         result.filename,
-        { type: result.blob.type }
+        {
+          type: result.blob.type,
+        }
       )
 
-      if (navigator.canShare?.({ files: [file] })) {
+      if (
+        navigator.canShare?.({
+          files: [file],
+        })
+      ) {
         await navigator.share({
           files: [file],
-          title: 'آيات مرئية — سميع',
+          title:
+            'آيات مرئية — سميع',
         })
       } else {
         setError(
@@ -1796,7 +2446,8 @@ export default function VisualAyahsPage() {
       if (
         !(
           cause instanceof Error &&
-          cause.name === 'AbortError'
+          cause.name ===
+            'AbortError'
         )
       ) {
         setError(
@@ -1807,15 +2458,19 @@ export default function VisualAyahsPage() {
   }
 
   function saveCurrentTemplate() {
-    const name = customTemplateName.trim()
+    const name =
+      customTemplateName.trim()
 
     if (!name) {
-      setError('اكتب اسمًا للقالب أولًا.')
+      setError(
+        'اكتب اسمًا للقالب أولًا.'
+      )
       return
     }
 
     const item: StoredTemplate = {
-      id: `custom-${Date.now()}`,
+      id:
+        `custom-${Date.now()}`,
       name,
       design: { ...design },
     }
@@ -1826,17 +2481,28 @@ export default function VisualAyahsPage() {
     ])
 
     setCustomTemplateName('')
-    setStatus('تم حفظ القالب المخصص.')
+
+    setStatus(
+      'تم حفظ القالب المخصص.'
+    )
   }
 
-  function deleteCustomTemplate(id: string) {
+  function deleteCustomTemplate(
+    id: string
+  ) {
     persistTemplates(
-      customTemplates.filter(item => item.id !== id)
+      customTemplates.filter(
+        (item) =>
+          item.id !== id
+      )
     )
   }
 
   const verseNumbers = useMemo(
-    () => verses.map(v => v.number),
+    () =>
+      verses.map(
+        (v) => v.number
+      ),
     [verses]
   )
 
@@ -1904,9 +2570,14 @@ export default function VisualAyahsPage() {
               type="button"
               disabled={
                 working ||
-                (index === 2 && !prepared)
+                (
+                  index === 2 &&
+                  !prepared
+                )
               }
-              onClick={() => setTab(index + 1)}
+              onClick={() =>
+                setTab(index + 1)
+              }
               className={
                 'rounded-2xl px-2 py-3 text-xs font-bold ' +
                 (
@@ -1933,7 +2604,9 @@ export default function VisualAyahsPage() {
             <button
               type="button"
               aria-label="إغلاق التنبيه"
-              onClick={() => setError('')}
+              onClick={() =>
+                setError('')
+              }
             >
               <X size={17} />
             </button>
@@ -1950,9 +2623,8 @@ export default function VisualAyahsPage() {
                   </h2>
 
                   <p className="mt-2 text-sm leading-7 text-[#6e8071]">
-                    اختر فيديو من مكتبة سميع، أو استورد
-                    خلفية من جهازك. الفيديوهات تظهر
-                    متحركة داخل بطاقات الاختيار.
+                    اختر فيديو من مكتبة سميع، أو استورد خلفية من جهازك.
+                    الفيديوهات تظهر متحركة داخل بطاقات الاختيار.
                   </p>
 
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
@@ -1967,7 +2639,9 @@ export default function VisualAyahsPage() {
                       disabled={galleryLoading}
                       className={secondary}
                       onClick={() =>
-                        setGalleryRefresh(x => x + 1)
+                        setGalleryRefresh(
+                          (x) => x + 1
+                        )
                       }
                     >
                       <RefreshCcw
@@ -1990,7 +2664,7 @@ export default function VisualAyahsPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  {groups.map(group => (
+                  {groups.map((group) => (
                     <button
                       key={group}
                       type="button"
@@ -2012,7 +2686,7 @@ export default function VisualAyahsPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-                  {shownScenes.map(item => (
+                  {shownScenes.map((item) => (
                     <SceneCard
                       key={item.id}
                       item={item}
@@ -2039,9 +2713,12 @@ export default function VisualAyahsPage() {
                   </p>
 
                   <div className="flex flex-wrap gap-2">
-                    <label className={
-                      primary + ' cursor-pointer'
-                    }>
+                    <label
+                      className={
+                        primary +
+                        ' cursor-pointer'
+                      }
+                    >
                       <Upload size={17} />
                       استيراد فيديو من الهاتف
 
@@ -2064,6 +2741,27 @@ export default function VisualAyahsPage() {
                       />
                     </label>
 
+                    {(
+                      backgroundPhase ===
+                        'error' ||
+                      backgroundPhase ===
+                        'needs-play'
+                    ) && (
+                      <button
+                        type="button"
+                        disabled={working}
+                        className={secondary}
+                        onClick={() =>
+                          setSceneRefresh(
+                            (value) => value + 1
+                          )
+                        }
+                      >
+                        <RefreshCcw size={17} />
+                        إعادة تحميل الخلفية
+                      </button>
+                    )}
+
                     <a
                       href={scene.source}
                       target="_blank"
@@ -2085,8 +2783,13 @@ export default function VisualAyahsPage() {
                 <button
                   type="button"
                   disabled={working}
-                  className={primary + ' w-full'}
-                  onClick={() => setTab(2)}
+                  className={
+                    primary +
+                    ' w-full'
+                  }
+                  onClick={() =>
+                    setTab(2)
+                  }
                 >
                   التالي: اختيار الآيات
                 </button>
@@ -2100,8 +2803,7 @@ export default function VisualAyahsPage() {
                 </h2>
 
                 <p className="mt-2 text-sm leading-7 text-[#748174]">
-                  يمكنك الاختيار من نص الآيات أو
-                  بتحديد رقم البداية والنهاية.
+                  يمكنك الاختيار من نص الآيات أو بتحديد رقم البداية والنهاية.
                   الحد الأقصى عشر آيات.
                 </p>
 
@@ -2112,13 +2814,15 @@ export default function VisualAyahsPage() {
                     className={field}
                     value={surah}
                     disabled={working}
-                    onChange={event =>
+                    onChange={(event) =>
                       changeSurah(
-                        Number(event.target.value)
+                        Number(
+                          event.target.value
+                        )
                       )
                     }
                   >
-                    {surahs.map(item => (
+                    {surahs.map((item) => (
                       <option
                         key={item.id}
                         value={item.id}
@@ -2136,12 +2840,15 @@ export default function VisualAyahsPage() {
                     className={field}
                     value={reader}
                     disabled={working}
-                    onChange={event => {
+                    onChange={(event) => {
                       invalidatePreparation()
-                      setReader(event.target.value)
+
+                      setReader(
+                        event.target.value
+                      )
                     }}
                   >
-                    {READERS.map(item => (
+                    {READERS.map((item) => (
                       <option
                         key={item.id}
                         value={item.id}
@@ -2159,15 +2866,23 @@ export default function VisualAyahsPage() {
                     <select
                       className={field}
                       value={from}
-                      disabled={working || versesLoading}
-                      onChange={event => {
+                      disabled={
+                        working ||
+                        versesLoading
+                      }
+                      onChange={(event) => {
                         const first =
-                          Number(event.target.value)
+                          Number(
+                            event.target.value
+                          )
 
                         setRange(
                           first,
                           Math.min(
-                            Math.max(first, to),
+                            Math.max(
+                              first,
+                              to
+                            ),
                             first +
                               MAX_AYAH_COUNT -
                               1
@@ -2175,14 +2890,16 @@ export default function VisualAyahsPage() {
                         )
                       }}
                     >
-                      {verseNumbers.map(number => (
-                        <option
-                          key={`from-${number}`}
-                          value={number}
-                        >
-                          {digits(number)}
-                        </option>
-                      ))}
+                      {verseNumbers.map(
+                        (number) => (
+                          <option
+                            key={`from-${number}`}
+                            value={number}
+                          >
+                            {digits(number)}
+                          </option>
+                        )
+                      )}
                     </select>
                   </label>
 
@@ -2192,28 +2909,38 @@ export default function VisualAyahsPage() {
                     <select
                       className={field}
                       value={to}
-                      disabled={working || versesLoading}
-                      onChange={event => {
+                      disabled={
+                        working ||
+                        versesLoading
+                      }
+                      onChange={(event) => {
                         const last =
-                          Number(event.target.value)
+                          Number(
+                            event.target.value
+                          )
 
                         setRange(
                           Math.max(
                             1,
-                            Math.min(from, last)
+                            Math.min(
+                              from,
+                              last
+                            )
                           ),
                           last
                         )
                       }}
                     >
-                      {verseNumbers.map(number => (
-                        <option
-                          key={`to-${number}`}
-                          value={number}
-                        >
-                          {digits(number)}
-                        </option>
-                      ))}
+                      {verseNumbers.map(
+                        (number) => (
+                          <option
+                            key={`to-${number}`}
+                            value={number}
+                          >
+                            {digits(number)}
+                          </option>
+                        )
+                      )}
                     </select>
                   </label>
                 </div>
@@ -2249,7 +2976,9 @@ export default function VisualAyahsPage() {
                       type="button"
                       className="mr-3 underline"
                       onClick={() =>
-                        setVersesRefresh(v => v + 1)
+                        setVersesRefresh(
+                          (v) => v + 1
+                        )
                       }
                     >
                       إعادة المحاولة
@@ -2258,7 +2987,7 @@ export default function VisualAyahsPage() {
                 )}
 
                 <div className="mt-3 max-h-[65vh] space-y-2 overflow-y-auto rounded-xl border border-[#eee8da] p-2">
-                  {verses.map(verse => (
+                  {verses.map((verse) => (
                     <article
                       key={verse.number}
                       className={
@@ -2286,7 +3015,9 @@ export default function VisualAyahsPage() {
                                 : secondary
                             }
                             onClick={() =>
-                              chooseFirst(verse.number)
+                              chooseFirst(
+                                verse.number
+                              )
                             }
                           >
                             بداية
@@ -2301,7 +3032,9 @@ export default function VisualAyahsPage() {
                                 : secondary
                             }
                             onClick={() =>
-                              chooseLast(verse.number)
+                              chooseLast(
+                                verse.number
+                              )
                             }
                           >
                             نهاية
@@ -2333,16 +3066,22 @@ export default function VisualAyahsPage() {
 
                 {busy === 'prepare' ? (
                   <div className="mt-4 space-y-3">
-                    <p role="status" className="text-sm">
+                    <p
+                      role="status"
+                      className="text-sm"
+                    >
                       {status}
                     </p>
 
                     <button
                       type="button"
                       className={
-                        secondary + ' w-full'
+                        secondary +
+                        ' w-full'
                       }
-                      onClick={cancelPreparation}
+                      onClick={
+                        cancelPreparation
+                      }
                     >
                       إلغاء تحميل التلاوة
                     </button>
@@ -2351,7 +3090,8 @@ export default function VisualAyahsPage() {
                   <button
                     type="button"
                     className={
-                      primary + ' mt-5 w-full'
+                      primary +
+                      ' mt-5 w-full'
                     }
                     disabled={
                       working ||
@@ -2370,7 +3110,12 @@ export default function VisualAyahsPage() {
             )}
 
             {tab === 3 && prepared && (
-              <div className={section + ' space-y-5'}>
+              <div
+                className={
+                  section +
+                  ' space-y-5'
+                }
+              >
                 <h2 className="text-xl font-extrabold">
                   التصميم والمعاينة والحفظ
                 </h2>
@@ -2380,7 +3125,9 @@ export default function VisualAyahsPage() {
                   {' · '}
                   {digits(from)}–{digits(to)}
                   {' · '}
-                  {durationText(prepared.duration)}
+                  {durationText(
+                    prepared.duration
+                  )}
                 </p>
 
                 <div>
@@ -2395,29 +3142,33 @@ export default function VisualAyahsPage() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
-                    {TEMPLATE_PRESETS.map(preset => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        disabled={working}
-                        className="rounded-2xl border border-[#e5dfd2] bg-[#fffdf8] p-3 text-right"
-                        onClick={() =>
-                          applyTemplate(preset)
-                        }
-                      >
-                        <div className="mb-2 rounded-xl border border-[#eee4d0] bg-[#faf6eb] px-3 py-2 text-xs font-bold text-[#245343]">
-                          {preset.category}
-                        </div>
+                    {TEMPLATE_PRESETS.map(
+                      (preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          disabled={working}
+                          className="rounded-2xl border border-[#e5dfd2] bg-[#fffdf8] p-3 text-right"
+                          onClick={() =>
+                            applyTemplate(
+                              preset
+                            )
+                          }
+                        >
+                          <div className="mb-2 rounded-xl border border-[#eee4d0] bg-[#faf6eb] px-3 py-2 text-xs font-bold text-[#245343]">
+                            {preset.category}
+                          </div>
 
-                        <p className="font-bold">
-                          {preset.name}
-                        </p>
+                          <p className="font-bold">
+                            {preset.name}
+                          </p>
 
-                        <p className="mt-1 text-xs leading-6 text-[#748174]">
-                          {preset.description}
-                        </p>
-                      </button>
-                    ))}
+                          <p className="mt-1 text-xs leading-6 text-[#748174]">
+                            {preset.description}
+                          </p>
+                        </button>
+                      )
+                    )}
                   </div>
                 </div>
 
@@ -2436,11 +3187,16 @@ export default function VisualAyahsPage() {
 
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                     <input
-                      className={field + ' mt-0'}
+                      className={
+                        field +
+                        ' mt-0'
+                      }
                       placeholder="اسم القالب المخصص"
-                      value={customTemplateName}
+                      value={
+                        customTemplateName
+                      }
                       disabled={working}
-                      onChange={event =>
+                      onChange={(event) =>
                         setCustomTemplateName(
                           event.target.value
                         )
@@ -2451,7 +3207,9 @@ export default function VisualAyahsPage() {
                       type="button"
                       className={primary}
                       disabled={working}
-                      onClick={saveCurrentTemplate}
+                      onClick={
+                        saveCurrentTemplate
+                      }
                     >
                       <Save size={17} />
                       حفظ القالب الحالي
@@ -2460,40 +3218,46 @@ export default function VisualAyahsPage() {
 
                   {customTemplates.length > 0 && (
                     <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
-                      {customTemplates.map(item => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between gap-2 rounded-2xl border border-[#ece3d1] bg-white p-3"
-                        >
-                          <button
-                            type="button"
-                            disabled={working}
-                            className="flex-1 text-right"
-                            onClick={() =>
-                              applyTemplate(item)
-                            }
+                      {customTemplates.map(
+                        (item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-2 rounded-2xl border border-[#ece3d1] bg-white p-3"
                           >
-                            <p className="font-bold">
-                              {item.name}
-                            </p>
+                            <button
+                              type="button"
+                              disabled={working}
+                              className="flex-1 text-right"
+                              onClick={() =>
+                                applyTemplate(
+                                  item
+                                )
+                              }
+                            >
+                              <p className="font-bold">
+                                {item.name}
+                              </p>
 
-                            <p className="text-xs text-[#728174]">
-                              قالب محفوظ
-                            </p>
-                          </button>
+                              <p className="text-xs text-[#728174]">
+                                قالب محفوظ
+                              </p>
+                            </button>
 
-                          <button
-                            type="button"
-                            className={secondary}
-                            disabled={working}
-                            onClick={() =>
-                              deleteCustomTemplate(item.id)
-                            }
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      ))}
+                            <button
+                              type="button"
+                              className={secondary}
+                              disabled={working}
+                              onClick={() =>
+                                deleteCustomTemplate(
+                                  item.id
+                                )
+                              }
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        )
+                      )}
                     </div>
                   )}
                 </div>
@@ -2514,19 +3278,22 @@ export default function VisualAyahsPage() {
                         <select
                           className={field}
                           value={design.ratio}
-                          onChange={event =>
+                          onChange={(event) =>
                             changeDesign({
                               ratio:
-                                event.target.value as VideoRatio,
+                                event.target.value as
+                                  VideoRatio,
                             })
                           }
                         >
                           <option value="9:16">
                             عمودي 9:16
                           </option>
+
                           <option value="1:1">
                             مربع 1:1
                           </option>
+
                           <option value="16:9">
                             أفقي 16:9
                           </option>
@@ -2539,17 +3306,19 @@ export default function VisualAyahsPage() {
                         <select
                           className={field}
                           value={design.quality}
-                          onChange={event =>
+                          onChange={(event) =>
                             changeDesign({
-                              quality: Number(
-                                event.target.value
-                              ) as 720 | 1080,
+                              quality:
+                                Number(
+                                  event.target.value
+                                ) as 720 | 1080,
                             })
                           }
                         >
                           <option value={720}>
                             720p
                           </option>
+
                           <option value={1080}>
                             1080p
                           </option>
@@ -2563,22 +3332,26 @@ export default function VisualAyahsPage() {
 
                         <select
                           className={field}
-                          value={design.quranFontId}
-                          onChange={event =>
+                          value={
+                            design.quranFontId
+                          }
+                          onChange={(event) =>
                             changeDesign({
                               quranFontId:
                                 event.target.value,
                             })
                           }
                         >
-                          {FONT_OPTIONS.map(option => (
-                            <option
-                              key={option.id}
-                              value={option.id}
-                            >
-                              {option.name}
-                            </option>
-                          ))}
+                          {FONT_OPTIONS.map(
+                            (option) => (
+                              <option
+                                key={option.id}
+                                value={option.id}
+                              >
+                                {option.name}
+                              </option>
+                            )
+                          )}
                         </select>
                       </label>
 
@@ -2587,22 +3360,26 @@ export default function VisualAyahsPage() {
 
                         <select
                           className={field}
-                          value={design.uiFontId}
-                          onChange={event =>
+                          value={
+                            design.uiFontId
+                          }
+                          onChange={(event) =>
                             changeDesign({
                               uiFontId:
                                 event.target.value,
                             })
                           }
                         >
-                          {FONT_OPTIONS.map(option => (
-                            <option
-                              key={option.id}
-                              value={option.id}
-                            >
-                              {option.name}
-                            </option>
-                          ))}
+                          {FONT_OPTIONS.map(
+                            (option) => (
+                              <option
+                                key={option.id}
+                                value={option.id}
+                              >
+                                {option.name}
+                              </option>
+                            )
+                          )}
                         </select>
                       </label>
                     </div>
@@ -2613,32 +3390,43 @@ export default function VisualAyahsPage() {
 
                         <select
                           className={field}
-                          value={design.frameStyle}
-                          onChange={event =>
+                          value={
+                            design.frameStyle
+                          }
+                          onChange={(event) =>
                             changeDesign({
                               frameStyle:
-                                event.target.value as VideoDesign['frameStyle'],
+                                event.target.value as
+                                  VideoDesign[
+                                    'frameStyle'
+                                  ],
                             })
                           }
                         >
                           <option value="none">
                             بدون إطار
                           </option>
+
                           <option value="classic">
                             كلاسيكي
                           </option>
+
                           <option value="double">
                             مزدوج
                           </option>
+
                           <option value="rounded">
                             مستدير
                           </option>
+
                           <option value="glow">
                             مضيء
                           </option>
+
                           <option value="corners">
                             زوايا
                           </option>
+
                           <option value="top-bottom">
                             علوي وسفلي
                           </option>
@@ -2650,26 +3438,35 @@ export default function VisualAyahsPage() {
 
                         <select
                           className={field}
-                          value={design.panelStyle}
-                          onChange={event =>
+                          value={
+                            design.panelStyle
+                          }
+                          onChange={(event) =>
                             changeDesign({
                               panelStyle:
-                                event.target.value as VideoDesign['panelStyle'],
+                                event.target.value as
+                                  VideoDesign[
+                                    'panelStyle'
+                                  ],
                             })
                           }
                         >
                           <option value="glass">
                             زجاجي
                           </option>
+
                           <option value="solid">
                             مصمت
                           </option>
+
                           <option value="gradient">
                             متدرج
                           </option>
+
                           <option value="outline">
                             حد فقط
                           </option>
+
                           <option value="none">
                             بدون لوحة
                           </option>
@@ -2680,57 +3477,85 @@ export default function VisualAyahsPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <ColorSetting
                         label="لون الآية"
-                        value={design.textColor}
-                        onChange={textColor =>
-                          changeDesign({ textColor })
+                        value={
+                          design.textColor
+                        }
+                        onChange={(textColor) =>
+                          changeDesign({
+                            textColor,
+                          })
                         }
                       />
 
                       <ColorSetting
                         label="لون الإطار"
-                        value={design.frameColor}
-                        onChange={frameColor =>
-                          changeDesign({ frameColor })
+                        value={
+                          design.frameColor
+                        }
+                        onChange={(frameColor) =>
+                          changeDesign({
+                            frameColor,
+                          })
                         }
                       />
 
                       <ColorSetting
                         label="لون لوحة الآية"
-                        value={design.panelColor}
-                        onChange={panelColor =>
-                          changeDesign({ panelColor })
+                        value={
+                          design.panelColor
+                        }
+                        onChange={(panelColor) =>
+                          changeDesign({
+                            panelColor,
+                          })
                         }
                       />
 
                       <ColorSetting
                         label="لون الطبقة على الفيديو"
-                        value={design.overlayColor}
-                        onChange={overlayColor =>
-                          changeDesign({ overlayColor })
+                        value={
+                          design.overlayColor
+                        }
+                        onChange={(overlayColor) =>
+                          changeDesign({
+                            overlayColor,
+                          })
                         }
                       />
 
                       <ColorSetting
                         label="لون عنوان السورة"
-                        value={design.titleColor}
-                        onChange={titleColor =>
-                          changeDesign({ titleColor })
+                        value={
+                          design.titleColor
+                        }
+                        onChange={(titleColor) =>
+                          changeDesign({
+                            titleColor,
+                          })
                         }
                       />
 
                       <ColorSetting
                         label="لون اسم القارئ"
-                        value={design.readerColor}
-                        onChange={readerColor =>
-                          changeDesign({ readerColor })
+                        value={
+                          design.readerColor
+                        }
+                        onChange={(readerColor) =>
+                          changeDesign({
+                            readerColor,
+                          })
                         }
                       />
 
                       <ColorSetting
                         label="لون التوقيع"
-                        value={design.signatureColor}
-                        onChange={signatureColor =>
-                          changeDesign({ signatureColor })
+                        value={
+                          design.signatureColor
+                        }
+                        onChange={(signatureColor) =>
+                          changeDesign({
+                            signatureColor,
+                          })
                         }
                       />
                     </div>
@@ -2739,9 +3564,13 @@ export default function VisualAyahsPage() {
                       label="تعتيم الخلفية"
                       min={0}
                       max={80}
-                      value={design.shade}
-                      onChange={shade =>
-                        changeDesign({ shade })
+                      value={
+                        design.shade
+                      }
+                      onChange={(shade) =>
+                        changeDesign({
+                          shade,
+                        })
                       }
                     />
 
@@ -2749,9 +3578,13 @@ export default function VisualAyahsPage() {
                       label="شفافية لوحة الآية"
                       min={0}
                       max={90}
-                      value={design.panelOpacity}
-                      onChange={panelOpacity =>
-                        changeDesign({ panelOpacity })
+                      value={
+                        design.panelOpacity
+                      }
+                      onChange={(panelOpacity) =>
+                        changeDesign({
+                          panelOpacity,
+                        })
                       }
                     />
 
@@ -2759,9 +3592,13 @@ export default function VisualAyahsPage() {
                       label="طبقة اللون فوق الفيديو"
                       min={0}
                       max={60}
-                      value={design.overlayOpacity}
-                      onChange={overlayOpacity =>
-                        changeDesign({ overlayOpacity })
+                      value={
+                        design.overlayOpacity
+                      }
+                      onChange={(overlayOpacity) =>
+                        changeDesign({
+                          overlayOpacity,
+                        })
                       }
                     />
 
@@ -2770,9 +3607,13 @@ export default function VisualAyahsPage() {
                       min={0.7}
                       max={1.35}
                       step={0.05}
-                      value={design.fontScale}
-                      onChange={fontScale =>
-                        changeDesign({ fontScale })
+                      value={
+                        design.fontScale
+                      }
+                      onChange={(fontScale) =>
+                        changeDesign({
+                          fontScale,
+                        })
                       }
                     />
 
@@ -2781,9 +3622,13 @@ export default function VisualAyahsPage() {
                         label="سمك الإطار"
                         min={1}
                         max={6}
-                        value={design.frameWidth}
-                        onChange={frameWidth =>
-                          changeDesign({ frameWidth })
+                        value={
+                          design.frameWidth
+                        }
+                        onChange={(frameWidth) =>
+                          changeDesign({
+                            frameWidth,
+                          })
                         }
                       />
 
@@ -2792,9 +3637,13 @@ export default function VisualAyahsPage() {
                         min={0}
                         max={50}
                         step={2}
-                        value={design.cornerRadius}
-                        onChange={cornerRadius =>
-                          changeDesign({ cornerRadius })
+                        value={
+                          design.cornerRadius
+                        }
+                        onChange={(cornerRadius) =>
+                          changeDesign({
+                            cornerRadius,
+                          })
                         }
                       />
 
@@ -2803,9 +3652,13 @@ export default function VisualAyahsPage() {
                         min={0.6}
                         max={1.6}
                         step={0.05}
-                        value={design.titleScale}
-                        onChange={titleScale =>
-                          changeDesign({ titleScale })
+                        value={
+                          design.titleScale
+                        }
+                        onChange={(titleScale) =>
+                          changeDesign({
+                            titleScale,
+                          })
                         }
                       />
 
@@ -2814,9 +3667,13 @@ export default function VisualAyahsPage() {
                         min={0.6}
                         max={1.6}
                         step={0.05}
-                        value={design.readerScale}
-                        onChange={readerScale =>
-                          changeDesign({ readerScale })
+                        value={
+                          design.readerScale
+                        }
+                        onChange={(readerScale) =>
+                          changeDesign({
+                            readerScale,
+                          })
                         }
                       />
 
@@ -2825,9 +3682,13 @@ export default function VisualAyahsPage() {
                         min={0.6}
                         max={1.6}
                         step={0.05}
-                        value={design.signatureScale}
-                        onChange={signatureScale =>
-                          changeDesign({ signatureScale })
+                        value={
+                          design.signatureScale
+                        }
+                        onChange={(signatureScale) =>
+                          changeDesign({
+                            signatureScale,
+                          })
                         }
                       />
 
@@ -2835,9 +3696,13 @@ export default function VisualAyahsPage() {
                         label="مكان الآية رأسيًا"
                         min={32}
                         max={67}
-                        value={design.verseVertical}
-                        onChange={verseVertical =>
-                          changeDesign({ verseVertical })
+                        value={
+                          design.verseVertical
+                        }
+                        onChange={(verseVertical) =>
+                          changeDesign({
+                            verseVertical,
+                          })
                         }
                       />
 
@@ -2845,9 +3710,13 @@ export default function VisualAyahsPage() {
                         label="عرض نص الآية"
                         min={55}
                         max={90}
-                        value={design.textWidth}
-                        onChange={textWidth =>
-                          changeDesign({ textWidth })
+                        value={
+                          design.textWidth
+                        }
+                        onChange={(textWidth) =>
+                          changeDesign({
+                            textWidth,
+                          })
                         }
                       />
 
@@ -2856,9 +3725,13 @@ export default function VisualAyahsPage() {
                         min={1.3}
                         max={2.3}
                         step={0.05}
-                        value={design.lineSpacing}
-                        onChange={lineSpacing =>
-                          changeDesign({ lineSpacing })
+                        value={
+                          design.lineSpacing
+                        }
+                        onChange={(lineSpacing) =>
+                          changeDesign({
+                            lineSpacing,
+                          })
                         }
                       />
                     </div>
@@ -2868,9 +3741,13 @@ export default function VisualAyahsPage() {
                       min={0.4}
                       max={2}
                       step={0.1}
-                      value={design.loopFade}
-                      onChange={loopFade =>
-                        changeDesign({ loopFade })
+                      value={
+                        design.loopFade
+                      }
+                      onChange={(loopFade) =>
+                        changeDesign({
+                          loopFade,
+                        })
                       }
                     />
 
@@ -2880,8 +3757,10 @@ export default function VisualAyahsPage() {
                       <input
                         className={field}
                         maxLength={45}
-                        value={design.signature}
-                        onChange={event =>
+                        value={
+                          design.signature
+                        }
+                        onChange={(event) =>
                           changeDesign({
                             signature:
                               event.target.value,
@@ -2912,7 +3791,8 @@ export default function VisualAyahsPage() {
                     <button
                       type="button"
                       className={
-                        secondary + ' w-full'
+                        secondary +
+                        ' w-full'
                       }
                       onClick={() =>
                         exportCancel.current?.()
@@ -2925,22 +3805,57 @@ export default function VisualAyahsPage() {
                   <button
                     type="button"
                     className={
-                      primary + ' w-full'
+                      primary +
+                      ' w-full'
                     }
-                    disabled={!backgroundReady}
+                    disabled={
+                      backgroundPhase ===
+                        'loading' ||
+                      backgroundPhase ===
+                        'error'
+                    }
                     onClick={() =>
                       void startExport()
                     }
                   >
                     <Film size={18} />
-                    إنشاء الفيديو بالتلاوة
+
+                    {backgroundPhase === 'loading'
+                      ? 'جارٍ تحميل الخلفية…'
+                      : 'إنشاء الفيديو بالتلاوة'}
                   </button>
                 )}
 
-                {!backgroundReady && (
-                  <p className="text-xs text-amber-700">
-                    اختر خلفية جاهزة من تبويب الخلفيات.
-                  </p>
+                {backgroundPhase !== 'ready' && (
+                  <div
+                    className="space-y-2 text-xs leading-6 text-amber-800"
+                    role="status"
+                  >
+                    <p>
+                      {backgroundStatus ||
+                        'جارٍ تجهيز الخلفية…'}
+                    </p>
+
+                    {(
+                      backgroundPhase ===
+                        'error' ||
+                      backgroundPhase ===
+                        'needs-play'
+                    ) && (
+                      <button
+                        type="button"
+                        className={secondary}
+                        onClick={() =>
+                          setSceneRefresh(
+                            (value) => value + 1
+                          )
+                        }
+                      >
+                        <RefreshCcw size={16} />
+                        إعادة تحميل الخلفية
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {result && (
@@ -2959,10 +3874,15 @@ export default function VisualAyahsPage() {
                     <div className="flex gap-2">
                       <a
                         className={
-                          primary + ' flex-1'
+                          primary +
+                          ' flex-1'
                         }
-                        download={result.filename}
-                        href={result.url}
+                        download={
+                          result.filename
+                        }
+                        href={
+                          result.url
+                        }
                       >
                         <Download size={17} />
                         تنزيل
@@ -2998,7 +3918,10 @@ export default function VisualAyahsPage() {
               className="relative mx-auto max-w-[340px] overflow-hidden rounded-[24px] bg-[#133a33] shadow-lg"
               style={{
                 aspectRatio:
-                  design.ratio.replace(':', ' / '),
+                  design.ratio.replace(
+                    ':',
+                    ' / '
+                  ),
               }}
             >
               <video
@@ -3007,11 +3930,11 @@ export default function VisualAyahsPage() {
                 playsInline
                 preload="auto"
                 aria-hidden="true"
-                onPlay={() =>
-                  setBackgroundPlaying(true)
+                onPlay={
+                  syncBackgroundPlayback
                 }
-                onPause={() =>
-                  setBackgroundPlaying(false)
+                onPause={
+                  syncBackgroundPlayback
                 }
                 className="pointer-events-none absolute inset-0 h-full w-full object-cover"
               />
@@ -3022,6 +3945,12 @@ export default function VisualAyahsPage() {
                 playsInline
                 preload="auto"
                 aria-hidden="true"
+                onPlay={
+                  syncBackgroundPlayback
+                }
+                onPause={
+                  syncBackgroundPlayback
+                }
                 className="pointer-events-none absolute h-px w-px opacity-0"
               />
 
@@ -3031,30 +3960,40 @@ export default function VisualAyahsPage() {
                 className="absolute inset-0 h-full w-full"
               />
 
-              {backgroundReady && !backgroundPlaying && (
+              {(
+                backgroundPhase ===
+                  'needs-play' ||
+                (
+                  backgroundReady &&
+                  !backgroundPlaying
+                )
+              ) && (
                 <button
                   type="button"
                   className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/75 px-4 py-2 text-xs font-bold text-white"
+                  disabled={
+                    backgroundStarting ||
+                    working
+                  }
                   onClick={() =>
-                    void videoRef.current
-                      ?.play()
-                      .catch(() => setError(
-                        'تعذّر تشغيل الخلفية. جرّب إيقاف وضع توفير الطاقة.'
-                      ))
+                    void activateBackground()
                   }
                 >
                   <Play
                     size={14}
                     className="ml-1 inline"
                   />
-                  تشغيل الخلفية
+
+                  {backgroundStarting
+                    ? 'جارٍ تجهيز الخلفية…'
+                    : 'تشغيل الخلفية'}
                 </button>
               )}
 
               {!backgroundReady && (
                 <p
                   role="status"
-                  className="absolute inset-x-3 bottom-3 rounded-xl bg-black/75 px-3 py-3 text-center text-xs leading-6 text-white"
+                  className="absolute inset-x-3 top-3 rounded-xl bg-black/75 px-3 py-3 text-center text-xs leading-6 text-white"
                 >
                   {backgroundStatus}
                 </p>
@@ -3084,8 +4023,12 @@ export default function VisualAyahsPage() {
                 <div className="flex-1">
                   <progress
                     className="w-full accent-[#b18e51]"
-                    max={prepared.duration}
-                    value={position}
+                    max={
+                      prepared.duration
+                    }
+                    value={
+                      position
+                    }
                   />
 
                   <p
@@ -3094,7 +4037,9 @@ export default function VisualAyahsPage() {
                   >
                     {durationText(position)}
                     {' / '}
-                    {durationText(prepared.duration)}
+                    {durationText(
+                      prepared.duration
+                    )}
                   </p>
                 </div>
 
@@ -3113,9 +4058,7 @@ export default function VisualAyahsPage() {
             )}
 
             <p className="mt-3 text-center text-xs leading-6 text-[#748075]">
-              الخلفية صامتة، والفيديو النهائي
-              يحتوي على صوت التلاوة فقط،
-              من غير موسيقى.
+              الخلفية صامتة، والفيديو النهائي يحتوي على صوت التلاوة فقط، من غير موسيقى.
             </p>
           </aside>
         </div>
