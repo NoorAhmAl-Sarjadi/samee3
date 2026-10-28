@@ -2,7 +2,7 @@ export const PRAYERS = [
   { id: 'Fajr', name: 'الفجر' }, { id: 'Dhuhr', name: 'الظهر' },
   { id: 'Asr', name: 'العصر' }, { id: 'Maghrib', name: 'المغرب' }, { id: 'Isha', name: 'العشاء' },
 ] as const
-export type PrayerDay = { date: string; timezone: string; timings: Record<string, string>; hijri: string; gregorian: string }
+export type PrayerDay = { date: string; timezone: string; timings: Record<string, string>; instants?: Record<string, number>; isoTimings?: Record<string, string>; hijri: string; gregorian: string }
 
 export function locationDate(now: Date, timezone?: string): string {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
@@ -24,10 +24,21 @@ export function parsePrayerDay(payload: unknown): PrayerDay {
   const rawDate = data?.date?.gregorian?.date || ''
   const date = /^\d{2}-\d{2}-\d{4}$/.test(rawDate) ? rawDate.split('-').reverse().join('-') : ''
   const timezone = data?.meta?.timezone || ''
-  if (body?.code !== 200 || !date || !data?.timings || ![...PRAYERS.map((p) => p.id), 'Sunrise'].every((id) => validPrayerTime(data.timings![id]))) throw new Error('بيانات مواقيت الصلاة غير مكتملة.')
+  if (body?.code !== 200 || !date || !data?.timings) throw new Error('بيانات مواقيت الصلاة غير مكتملة.')
   if (new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) !== date) throw new Error('تاريخ المواقيت غير صالح.')
   locationDate(new Date(), timezone)
-  return { date, timezone, timings: Object.fromEntries(Object.entries(data.timings).map(([id, value]) => [id, typeof value === 'string' ? value.trim() : value])), gregorian: rawDate,
+  const timings: Record<string, string> = {}, instants: Record<string, number> = {}, isoTimings: Record<string, string> = {}
+  for (const [id, raw] of Object.entries(data.timings)) {
+    if (typeof raw !== 'string') continue
+    const value = raw.trim()
+    if (/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)$/.test(value) && Number.isFinite(Date.parse(value))) {
+      const prayerDate = value.slice(0, 10)
+      if (prayerDate !== date && !(id === 'Isha' && prayerDate === shiftPrayerDate(date, 1)) && !['Lastthird', 'Midnight', 'Firstthird'].includes(id)) throw new Error('موعد الصلاة لا ينتمي إلى اليوم المطلوب.')
+      timings[id] = value.slice(11, 16); instants[id] = Date.parse(value); isoTimings[id] = value
+    } else if (validPrayerTime(value)) timings[id] = value
+  }
+  if (![...PRAYERS.map((prayer) => prayer.id), 'Sunrise'].every((id) => validPrayerTime(timings[id]))) throw new Error('بيانات مواقيت الصلاة غير مكتملة.')
+  return { date, timezone, timings, ...(Object.keys(instants).length ? { instants, isoTimings } : {}), gregorian: rawDate,
     hijri: `${data.date?.hijri?.date || ''} ${data.date?.hijri?.month?.ar || ''}`.trim() }
 }
 
@@ -67,7 +78,7 @@ export function prayerInstant(date: string, time: string, timezone: string): num
 }
 export function nextPrayerFromDays(days: PrayerDay[], now: Date) {
   const candidates = days.flatMap((day) => PRAYERS.map((prayer) => ({ ...prayer,
-    time: day.timings[prayer.id], at: prayerInstant(day.date, day.timings[prayer.id], day.timezone),
+    time: day.timings[prayer.id], at: day.instants?.[prayer.id] ?? prayerInstant(day.date, day.timings[prayer.id], day.timezone),
     isTomorrow: day.date !== locationDate(now, day.timezone),
   }))).filter((p) => Number.isFinite(p.at) && p.at > now.getTime()).sort((a, b) => a.at - b.at)
   return candidates[0] || null
