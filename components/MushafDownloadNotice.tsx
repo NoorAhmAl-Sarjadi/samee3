@@ -16,7 +16,7 @@ export default function MushafDownloadNotice() {
   const selectedReading = searchParams.get('riwaya')
   const [notice, setNotice] = useState<Notice | null>(null)
   const request = useRef(0)
-  const hidden = /^\/(auth|admin|messages)(\/|$)/.test(pathname)
+  const hidden = /^\/(auth|admin|messages|notifications)(\/|$)/.test(pathname)
 
   useEffect(() => {
     let alive = true
@@ -59,7 +59,7 @@ export default function MushafDownloadNotice() {
     try { sessionStorage.setItem(`samee3_download_notice_v1:${notice.riwaya}`, 'later') } catch {}
     setNotice(null)
   }
-  if (!notice) return null
+  if (hidden || !notice) return null
   const label = RIWAYAT.find((item) => item.id === notice.riwaya)?.label
   return (
     <aside dir="rtl" aria-label="تنبيه تنزيل صفحات المصحف" role="status"
