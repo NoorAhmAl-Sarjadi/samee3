@@ -43,6 +43,7 @@ const AUDIO_CACHES = [
   'samee3-audio-v2',
   'samee3-v2-audio',
   'samee-audio-v2',
+  'samee3-quran-audio-v1',
 ] as const
 
 const AUDIO_DB = 'samee-audio-library'
