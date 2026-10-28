@@ -1,4 +1,4 @@
-const SW_VERSION = 'samee3-sw-v6'
+const SW_VERSION = 'samee3-sw-v8'
 
 const SHELL_CACHE = `${SW_VERSION}-shell`
 const NAV_CACHE = `${SW_VERSION}-navigation`
@@ -11,6 +11,7 @@ const OLD_IMAGE_CACHE = 'samee3-v3-riwaya-images'
 const AUDIO_CACHE = 'samee3-audio-v2'
 
 const OLD_AUDIO_CACHES = [
+  'samee3-quran-audio-v1',
   'samee3-v2-audio',
   'samee-audio-v2',
 ]
@@ -212,6 +213,10 @@ function isQuranPageRequest(request, url) {
     return false
   }
 
+  if (pathOf(url) === '/api/quran' && url.searchParams.get('mode') === 'index') {
+    return url.searchParams.get('v') === '1'
+  }
+
   const number = Number(
     url.searchParams.get('page'),
   )
@@ -249,16 +254,10 @@ async function serveQuranPage(request, url) {
       ? 'image'
       : 'json'
 
-  const cache = await caches.open(
-    MUSHAF_PAGE_CACHE,
-  )
-
-  await storeIfSafe(
-    cache,
-    request,
-    response,
-    category,
-  )
+  try {
+    const cache = await caches.open(MUSHAF_PAGE_CACHE)
+    await storeIfSafe(cache, request, response, category)
+  } catch { /* Storage restrictions must not break online reading. */ }
 
   return response
 }
@@ -324,7 +323,7 @@ async function serveQuranAudio(request) {
 
           if (
             blob.size > 0 &&
-            blob.size <= 64 * 1024 * 1024
+            blob.size <= 180 * 1024 * 1024
           ) {
             let start = match[1]
               ? Number(match[1])
@@ -386,6 +385,7 @@ async function serveQuranAudio(request) {
                 },
               )
             }
+            return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${blob.size}` } })
           }
         } catch {
           // The original audio is still cached.
@@ -572,10 +572,6 @@ function samePathKey(url) {
 }
 
 async function shellPage(request, url) {
-  const cache = await caches.open(
-    NAV_CACHE,
-  )
-
   const key = samePathKey(url)
 
   const fallback = async () => {
@@ -591,12 +587,10 @@ async function shellPage(request, url) {
     const response = await fetch(request)
 
     if (response.ok) {
-      await storeIfSafe(
-        cache,
-        key,
-        response,
-        'html',
-      )
+      try {
+        const cache = await caches.open(NAV_CACHE)
+        await storeIfSafe(cache, key, response, 'html')
+      } catch { /* Online navigation remains available without storage. */ }
 
       return response
     }
@@ -616,25 +610,16 @@ async function shellPage(request, url) {
 // ========================================
 
 async function publicRsc(request) {
-  const cache = await caches.open(
-    RSC_CACHE,
-  )
-
   try {
     const response = await fetch(request)
-
-    await storeIfSafe(
-      cache,
-      request,
-      response,
-      'rsc',
-    )
+    try {
+      const cache = await caches.open(RSC_CACHE)
+      await storeIfSafe(cache, request, response, 'rsc')
+    } catch { /* Storage is optional. */ }
 
     return response
   } catch {
-    const saved = await cache.match(
-      request,
-    )
+    const saved = await getFromCaches([RSC_CACHE], request)
 
     return (
       saved ||
@@ -657,30 +642,24 @@ async function publicRsc(request) {
 // ========================================
 
 async function staticAsset(request) {
-  const cache = await caches.open(
-    ASSET_CACHE,
-  )
-
-  const cached = await cache.match(
-    request,
-  )
+  // Fonts, manifest and bundled data are precached in SHELL_CACHE on install.
+  const cached = await getFromCaches([ASSET_CACHE, SHELL_CACHE], request)
 
   if (cached) return cached
 
   const response = await fetch(request)
 
-  await storeIfSafe(
-    cache,
-    request,
-    response,
-    'asset',
-  )
+  try {
+    const cache = await caches.open(ASSET_CACHE)
+    await storeIfSafe(cache, request, response, 'asset')
+  } catch { /* A failed cache write must not discard a successful response. */ }
 
   return response
 }
 
 function isStaticAsset(url) {
   return (
+    INSTALL_FILES.includes(url.pathname) ||
     url.pathname.startsWith('/_next/static/') ||
     /\.(?:js|css|woff2?|ttf|otf|png|jpe?g|webp|svg|ico|avif)$/i.test(
       url.pathname,
@@ -836,9 +815,9 @@ self.addEventListener(
   'install',
   (event) => {
     event.waitUntil(
-      prepareShell().then(
-        () => self.skipWaiting(),
-      ),
+      // An update waits for the existing explicit "Update" control. Otherwise
+      // it could delete the old chunks while an open reader still uses them.
+      prepareShell(),
     )
   },
 )
