@@ -1,0 +1,10 @@
+{
+  "available": false,
+  "versionCode": 2,
+  "versionName": "1.1.0",
+  "minSdk": 26,
+  "apkPath": "/android/Samee3-latest.apk",
+  "sha256": "",
+  "bytes": 0,
+  "notes": ["التذكيرات المحلية وتصميم الموقع الأساسي. يُفعّل التنزيل بعد بناء APK الموقّع والتحقق منه."]
+}
