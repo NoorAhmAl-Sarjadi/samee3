@@ -1,0 +1,74 @@
+{
+  "repository": "PSYMOHAMEDABOZAID/samee3",
+  "baseCommit": "69c2db0e1cd00b2a4edf72b4c8383b944a3bc3f2",
+  "installer": {
+    "passed": true,
+    "installer": {
+      "id": "x64",
+      "assetName": "Samee3-Windows-1.0.0-x64-Setup.exe",
+      "versionName": "1.0.0",
+      "minimumOS": "10",
+      "bytes": 167372328,
+      "sha256": "34b287da8d552149f8e0043282b35e59d8930d2c7e6a6177ea72a2060f60b124",
+      "format": "NSIS3 Unicode",
+      "scope": "current user",
+      "signed": false
+    },
+    "application": {
+      "machine": 34404,
+      "optionalHeader": 523,
+      "version": "1.0.0",
+      "filesCompared": 69,
+      "allFilesMatch": true
+    },
+    "uninstallerArchiveValid": true,
+    "toolchain": {
+      "electron": "45.1.0",
+      "electronBuilder": "26.18.0",
+      "runtime": {
+        "name": "electron-v45.1.0-win32-x64.zip",
+        "sha256": "55eaba17abff7b5bba6c3bbc85068967379024fe742fe9c7fdba9118922ccbe2",
+        "bytes": 158224448,
+        "url": "https://github.com/electron/electron/releases/download/v45.1.0/electron-v45.1.0-win32-x64.zip"
+      },
+      "linuxPackaging": "electron-builder UninstallerReader fallback; no Windows execution"
+    },
+    "windowsOSRun": false
+  },
+  "nativeUI": {
+    "passed": true,
+    "cases": [
+      "The real Electron reader runs with Node unavailable and the isolated preload API present",
+      "All seven readings render through page604 with their bundled fonts and working previous/next navigation",
+      "Bookmarks and last page survive reload; Quran search, selection, copy and night mode work offline",
+      "Reminder settings persist, contain20 muezzins plus Fajr, schedule the next events, and stop an audio preview",
+      "Small desktop layout fits at800x650 and sharing copies the website link"
+    ],
+    "pageErrors": [],
+    "environment": "actual Electron45.1.0 Linux runtime and production Windows app sources",
+    "productionWrites": false,
+    "limitations": [
+      "Windows OS installation, startup registration and native Windows notification delivery are not tested here",
+      "AF_UNIX single-instance locking is replaced only in the private Linux UI harness; shipped application retains it"
+    ]
+  },
+  "websiteUI": {
+    "passed": true,
+    "cases": [
+      "The production download API serves the Windows schema with no-store headers",
+      "Home and downloads show Android, Windows and both Mac options without overflow at320px",
+      "Home and downloads show Android, Windows and both Mac options without overflow at390px",
+      "Home and downloads show Android, Windows and both Mac options without overflow at1280px",
+      "Unpublished Windows installer stays unavailable while published Mac download links remain active"
+    ],
+    "pageErrors": [],
+    "releaseState": "published assets simulated only for display testing; actual installer is not uploaded to GitHub by this task",
+    "productionDatabaseWritten": false
+  },
+  "websiteTypecheck": "passed",
+  "websiteBuild": "passed",
+  "nativeTests": 11,
+  "downloadTests": 10,
+  "productionWrites": false,
+  "deployed": false
+}
