@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
-import AndroidAppCard from '@/components/AndroidAppCard'
+import AppDownloadsCard from '@/components/AppDownloadsCard'
 import { APP_BUILD_ID } from '@/lib/app-version'
 import { db } from '@/lib/firebase'
 import { doc, getDoc, getDocFromCache } from 'firebase/firestore'
@@ -410,7 +410,7 @@ export default function HomePage() {
           </Link>
         </header>
 
-        <AndroidAppCard />
+        <AppDownloadsCard />
 
         {isOffline && (
           <div
