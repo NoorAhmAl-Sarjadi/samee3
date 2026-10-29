@@ -20,7 +20,7 @@ public final class ReminderReceiver extends BroadcastReceiver {
         long expected = ReminderSettings.prefs(context).getLong("next:" + key, -2);
         boolean prayer = Arrays.asList(ReminderSettings.PRAYERS).contains(key);
         if (due != expected) return; // An alarm from a previous preference/location must not fire.
-        if (ReminderScheduler.enabled(ReminderSettings.read(context), key)
+        if (ReminderScheduler.allowed(context) && ReminderScheduler.enabled(ReminderSettings.read(context), key)
                 && now >= due && now - due < (prayer ? 5 : 30) * 60_000L) {
             boolean fullAdhan = prayer && ReminderSettings.read(context).optBoolean("fullAdhan", true)
                     && intent.getBooleanExtra("exact", false) && ReminderScheduler.exactAllowed(context);

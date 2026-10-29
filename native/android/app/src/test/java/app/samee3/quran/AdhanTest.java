@@ -68,6 +68,17 @@ public class AdhanTest {
         assertEquals("Fajr", started.getStringExtra("prayer"));
     }
 
+    @Test public void revokedNotificationsCancelAnAlreadyScheduledPrayerWithoutStartingAudio() throws Exception {
+        ReminderSettings.save(context, new JSONObject().put("prayer", true).put("fullAdhan", true));
+        long now = System.currentTimeMillis(); ReminderSettings.prefs(context).edit().putLong("next:Fajr", now).commit();
+        org.robolectric.Shadows.shadowOf(context.getSystemService(NotificationManager.class)).setNotificationsEnabled(false);
+        new ReminderReceiver().onReceive(context, new Intent(context, ReminderReceiver.class).setAction(ReminderScheduler.ACTION)
+                .putExtra("key", "Fajr").putExtra("at", now).putExtra("exact", true));
+        assertNull(org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedService());
+        assertEquals(0, org.robolectric.Shadows.shadowOf(context.getSystemService(NotificationManager.class)).size());
+        assertFalse(ReminderSettings.prefs(context).contains("next:Fajr"));
+    }
+
     @Test public void anInexactFallbackPostsNotificationWithoutAnIllegalBackgroundMediaStart() throws Exception {
         org.robolectric.Shadows.shadowOf(context.getSystemService(NotificationManager.class)).setNotificationsEnabled(true);
         ReminderSettings.save(context, new JSONObject().put("prayer", true).put("fullAdhan", true));
