@@ -14,9 +14,10 @@
     "test:library": "node scripts/test-library.cjs",
     "typecheck": "tsc --noEmit",
     "test:core": "node --test scripts/core.test.cjs",
-    "test": "npm run test:core && npm run test:library && npm run test:proxy && npm run test:android-web",
-    "test:rules": "npx --yes firebase-tools@14.22.0 emulators:exec --only firestore --project demo-samee3 'node --test scripts/firestore.test.cjs'",
-    "test:android-web": "node --test scripts/android-notifications.test.cjs"
+    "test": "npm run test:core && npm run test:library && npm run test:proxy && npm run test:android-web && npm run test:downloads",
+    "test:rules": "npx --yes firebase-tools@14.22.0 emulators:exec --only firestore --project demo-samee3 'node --test --test-concurrency=1 scripts/firestore.test.cjs scripts/support-messages.test.cjs'",
+    "test:android-web": "node --test scripts/android-notifications.test.cjs",
+    "test:downloads": "node --test scripts/app-downloads.test.cjs"
   },
   "dependencies": {
     "@quran.ws/text": "^0.1.0",
