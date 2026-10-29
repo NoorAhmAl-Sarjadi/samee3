@@ -1,10 +1,15 @@
 {
-  "available": false,
+  "available": true,
   "versionCode": 2,
   "versionName": "1.1.0",
   "minSdk": 26,
-  "apkPath": "/android/Samee3-latest.apk",
-  "sha256": "",
-  "bytes": 0,
-  "notes": ["التذكيرات المحلية وتصميم الموقع الأساسي. يُفعّل التنزيل بعد بناء APK الموقّع والتحقق منه."]
+  "apkPath": "/android/Samee3-1.1.0.apk",
+  "sha256": "c6f75d321101bd4f83dab6b890be32fdd57d76c6be9350cc172b483ded891e80",
+  "bytes": 4853021,
+  "certificateSha256": "e828d46ddaf544e98c5f592373f6d1b4451cfe3ed1f19415043f19b12b598582",
+  "notes": [
+    "تصميم سميع الأساسي مع قارئ محلي دون إنترنت",
+    "تذكيرات القرآن والأذكار والحديث وتنبيهات الصلاة",
+    "فحص تحديثات الموقع وإصدارات أندرويد"
+  ]
 }
