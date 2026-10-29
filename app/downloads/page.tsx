@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import AppDownloadsCard from '@/components/AppDownloadsCard'
 
-export const metadata = { title: 'تحميل تطبيق مصحف سميع لأندرويد والماك' }
+export const metadata = { title: 'تحميل تطبيق مصحف سميع لأندرويد وويندوز والماك' }
 
 export default function DownloadsPage() {
   return <main dir="rtl" className="min-h-screen bg-[var(--bg-main)] px-4 pb-32 pt-7"><div className="mx-auto max-w-3xl">

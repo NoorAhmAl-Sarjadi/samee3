@@ -13,7 +13,7 @@ const downloads = unstable_cache(async () => {
     })
     return resolveDownloads(config, response.ok ? await response.json() : null)
   } catch { return resolveDownloads(config, null) }
-}, ['samee3-app-downloads-v1', JSON.stringify(config)], { revalidate: 300 })
+}, ['samee3-desktop-downloads-v2', JSON.stringify(config)], { revalidate: 300 })
 
 export async function GET() {
   return Response.json(await downloads(), { headers: { 'Cache-Control': 'no-store, max-age=0' } })
