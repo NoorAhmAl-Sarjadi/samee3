@@ -355,158 +355,129 @@ service cloud.firestore {
     // Conversation metadata
     // =========================================
 
-    function validConversation(userId) {
-      return request.resource.data.keys().hasOnly([
-          'userId',
-          'userName',
-          'userEmail',
-          'lastMessage',
-          'lastSenderId',
-          'updatedAt',
-          'unreadForAdmin',
-          'unreadForUser'
-        ])
-        && request.resource.data.get('userId', '') == userId
-        && validName(
-          request.resource.data.get(
-            'userName',
-            'مستخدم مصحف سميع'
-          )
-        )
+    function validConversationFields(userId) {
+      return request.resource.data.get('userId', '') == userId
+        && validName(request.resource.data.get('userName', 'مستخدم مصحف سميع'))
         && request.resource.data.get('userEmail', '') is string
         && request.resource.data.get('userEmail', '').size() <= 320
-        && request.resource.data.get('lastMessage', '') is string
-        && request.resource.data.get('lastMessage', '').size() <= 5000
-        && request.resource.data.get('lastSenderId', '') is string
-        && request.resource.data.get('lastSenderId', '').size() <= 128
+        && validText(request.resource.data.get('lastMessage', ''), 5000)
+        && validText(request.resource.data.get('lastSenderId', ''), 128)
         && request.resource.data.get('unreadForAdmin', false) is bool
         && request.resource.data.get('unreadForUser', false) is bool
-        && request.resource.data.get('updatedAt', request.time)
-          == request.time;
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.updatedAt <= request.time
+        && (!request.resource.data.keys().hasAny(['lastMessageId'])
+          || validText(request.resource.data.lastMessageId, 128));
+    }
+
+    function validConversationCreate(userId) {
+      return request.resource.data.keys().hasOnly([
+          'userId', 'userName', 'userEmail', 'lastMessage', 'lastSenderId',
+          'lastMessageId', 'updatedAt', 'unreadForAdmin', 'unreadForUser'
+        ]) && validConversationFields(userId);
+    }
+
+    function linkedSummaryMessage(userId) {
+      let id = request.resource.data.get('lastMessageId', '');
+      return id == '' || (
+        getAfter(/databases/$(database)/documents/conversations/$(userId)/messages/$(id)).data.senderId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/conversations/$(userId)/messages/$(id)).data.text == request.resource.data.lastMessage
+        && getAfter(/databases/$(database)/documents/conversations/$(userId)/messages/$(id)).data.createdAt == request.time
+      );
     }
 
     function ownerConversationCreate(userId) {
-      return isOwner(userId)
-        && validConversation(userId)
-        && request.resource.data.get('userEmail', '')
-          == request.auth.token.get('email', '')
-        && request.resource.data.get('lastSenderId', userId)
-          == userId
-        && request.resource.data.get('unreadForUser', false)
-          == false;
+      return isOwner(userId) && validConversationCreate(userId)
+        && request.resource.data.userEmail == request.auth.token.get('email', '')
+        && request.resource.data.lastSenderId == userId
+        && request.resource.data.unreadForAdmin == true
+        && request.resource.data.unreadForUser == false
+        && request.resource.data.updatedAt == request.time
+        && linkedSummaryMessage(userId);
     }
 
-    function ownerConversationUpdate(userId) {
+    function ownerConversationSend(userId) {
+      // Legacy fields may remain unchanged. Owners cannot add or edit them.
       return isOwner(userId)
-        && request.resource.data.get('userId', '') == userId
-        && request.resource.data
-          .diff(resource.data)
-          .affectedKeys()
-          .hasOnly([
-            'userName',
-            'userEmail',
-            'lastMessage',
-            'lastSenderId',
-            'updatedAt',
-            'unreadForAdmin',
-            'unreadForUser'
-          ])
-        && validConversation(userId)
-        && request.resource.data.get('userEmail', '')
-          == request.auth.token.get('email', '')
-        && (
-          !isChanged('lastSenderId')
-          || request.resource.data.lastSenderId == userId
-        )
-        && (
-          !isChanged('unreadForAdmin')
-          || request.resource.data.unreadForAdmin == true
-        )
-        && (
-          !isChanged('unreadForUser')
-          || request.resource.data.unreadForUser == false
-        );
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'userId', 'userName', 'userEmail', 'lastMessage', 'lastSenderId',
+          'lastMessageId', 'updatedAt', 'unreadForAdmin', 'unreadForUser'
+        ])
+        && validConversationFields(userId)
+        && request.resource.data.userEmail == request.auth.token.get('email', '')
+        && request.resource.data.lastSenderId == userId
+        && request.resource.data.unreadForAdmin == true
+        && request.resource.data.unreadForUser == false
+        && request.resource.data.updatedAt == request.time
+        && (!isChanged('lastMessageId') || linkedSummaryMessage(userId));
     }
 
-    // =========================================
-    // Individual messages
-    // =========================================
+    function ownerConversationReceipt(userId) {
+      return isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadForUser', 'updatedAt'])
+        && request.resource.data.unreadForUser == false
+        && (!isChanged('updatedAt') || request.resource.data.updatedAt == request.time);
+    }
 
-    function validMessageCreate() {
-      return request.resource.data.keys().hasOnly([
-          'senderId',
-          'senderName',
-          'text',
-          'createdAt',
-          'read'
-        ])
-        && request.resource.data.keys().hasAll([
-          'senderId',
-          'senderName',
-          'text',
-          'createdAt',
-          'read'
-        ])
+    function adminConversationUpdate(userId) {
+      return isAdmin() && (
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadForAdmin', 'updatedAt'])
+          && request.resource.data.unreadForAdmin == false
+          && (!isChanged('updatedAt') || request.resource.data.updatedAt == request.time))
+        || (validConversationFields(userId)
+          && request.resource.data.lastSenderId == request.auth.uid
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.unreadForAdmin == false
+          && request.resource.data.unreadForUser == true
+          && (!isChanged('lastMessageId') || linkedSummaryMessage(userId)))
+      );
+    }
+
+    function validMessageCreate(userId) {
+      return request.resource.data.keys().hasOnly(['senderId', 'senderName', 'text', 'createdAt', 'read'])
+        && request.resource.data.keys().hasAll(['senderId', 'senderName', 'text', 'createdAt', 'read'])
         && request.resource.data.senderId == request.auth.uid
         && validName(request.resource.data.senderName)
         && validText(request.resource.data.text, 5000)
         && request.resource.data.createdAt == request.time
-        && request.resource.data.read == false;
+        && request.resource.data.read == false
+        // A subcollection alone never creates the inbox document. Require the
+        // message and its matching parent summary to be committed together.
+        && getAfter(/databases/$(database)/documents/conversations/$(userId)).data.userId == userId
+        && getAfter(/databases/$(database)/documents/conversations/$(userId)).data.lastSenderId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/conversations/$(userId)).data.lastMessage == request.resource.data.text
+        && getAfter(/databases/$(database)/documents/conversations/$(userId)).data.updatedAt == request.time;
     }
 
-    // Read receipts move from false to true only.
-    // Senders cannot mark their own messages as read.
     function validReadReceipt(userId) {
-      return (
-          isOwner(userId)
-          || isAdmin()
-        )
-        && request.resource.data
-          .diff(resource.data)
-          .affectedKeys()
-          .hasOnly(['read'])
-        && request.resource.data
-          .diff(resource.data)
-          .affectedKeys()
-          .hasAll(['read'])
-        && resource.data.get('read', false) == false
-        && request.resource.data.read == true
-        && resource.data.senderId != request.auth.uid;
+      let original = resource.data.get('senderId', resource.data.get('senderUid', resource.data.get('sender', '')));
+      let sender = original == 'user' ? userId : original;
+      return sender is string && sender != '' && sender != request.auth.uid
+        && ((isOwner(userId) && sender != userId) || (isAdmin() && sender == userId))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read == true;
     }
 
     match /conversations/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-
       allow create: if ownerConversationCreate(userId)
-        || (
-          isAdmin()
-          && validConversation(userId)
-        );
-
-      allow update: if ownerConversationUpdate(userId)
-        || (
-          isAdmin()
-          && request.resource.data.get('userId', '') == userId
-        );
-
+        || (isAdmin() && validConversationCreate(userId));
+      allow update: if ownerConversationSend(userId)
+        || ownerConversationReceipt(userId) || adminConversationUpdate(userId);
       allow delete: if isAdmin();
-
       match /messages/{messageId} {
         allow get, list: if isOwner(userId) || isAdmin();
-
-        allow create: if signedIn()
-          && (
-            isOwner(userId)
-            || isAdmin()
-          )
-          && validMessageCreate();
-
-        allow update: if signedIn()
-          && validReadReceipt(userId);
-
+        allow create: if signedIn() && (isOwner(userId) || isAdmin()) && validMessageCreate(userId);
+        allow update: if signedIn() && validReadReceipt(userId);
         allow delete: if isAdmin();
       }
+    }
+
+    // Read-only collection-group access for the explicit legacy recovery action.
+    // Normal users and disabled admins cannot scan private messages.
+    match /{parent=**}/messages/{messageId} {
+      allow list: if isAdmin();
     }
 
     // =========================================
