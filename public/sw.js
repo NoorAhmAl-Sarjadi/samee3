@@ -892,7 +892,7 @@ self.addEventListener(
       return
     }
 
-    if (isSameOrigin(url) && (url.pathname.startsWith('/android/') || url.pathname === '/api/app-version')) return
+    if (isSameOrigin(url) && (url.pathname.startsWith('/android/') || url.pathname === '/api/app-version' || url.pathname === '/api/app-downloads' || url.pathname === '/app-downloads.json')) return
 
     if (isQuranAudio(request, url)) {
       event.respondWith(
