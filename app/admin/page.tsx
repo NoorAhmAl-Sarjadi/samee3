@@ -32,9 +32,6 @@ import {
   doc,
   getDocs,
   onSnapshot,
-  serverTimestamp,
-  updateDoc,
-  writeBatch,
   type Timestamp,
 } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
@@ -42,6 +39,7 @@ import AdminGate from '@/components/AdminGate'
 import IslamicLibraryAdmin from '@/components/admin/IslamicLibraryAdmin'
 import { useAuth } from '@/context/AuthContext'
 import { auth, db } from '@/lib/firebase'
+import { recoverSupportConversations, sendSupportMessage, subscribeSupportMessages, supportMessageError, type SupportMessage } from '@/lib/support-messages'
 
 type Tab =
   | 'dashboard'
@@ -71,14 +69,7 @@ type Conversation = {
   updatedAt: unknown
 }
 
-type Message = {
-  id: string
-  senderId: string
-  senderName: string
-  text: string
-  read: boolean
-  createdAt: unknown
-}
+type Message = SupportMessage
 
 const MENU: {
   id: Tab
@@ -182,7 +173,7 @@ function displayValue(value: unknown): string {
 }
 
 function AdminDashboard() {
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const router = useRouter()
 
   const [tab, setTab] = useState<Tab>('dashboard')
@@ -198,6 +189,11 @@ function AdminDashboard() {
   const [threads, setThreads] = useState<Conversation[]>([])
   const [threadsLoading, setThreadsLoading] = useState(true)
   const [threadsError, setThreadsError] = useState('')
+  const [inboxRevision, setInboxRevision] = useState(0)
+  const [threadsFromCache, setThreadsFromCache] = useState(true)
+  const [recovering, setRecovering] = useState(false)
+  const [recoveryNotice, setRecoveryNotice] = useState('')
+  const [slowSending, setSlowSending] = useState(false)
   const [threadSearch, setThreadSearch] = useState('')
   const [selectedThreadId, setSelectedThreadId] =
     useState<string | null>(null)
@@ -209,7 +205,10 @@ function AdminDashboard() {
   const [sending, setSending] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
 
-  const markedInFlight = useRef<Set<string>>(new Set())
+  const recoveryController = useRef<AbortController | null>(null)
+  const sendingRef = useRef(false)
+  const selectedThreadRef = useRef(selectedThreadId)
+  selectedThreadRef.current = selectedThreadId
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
   const refreshUsers = async () => {
@@ -274,13 +273,26 @@ function AdminDashboard() {
   }
 
   useEffect(() => {
-    void refreshUsers()
-  }, [])
+    if (isAdmin && user?.uid) void refreshUsers()
+  }, [isAdmin, user?.uid])
+
+  useEffect(() => () => recoveryController.current?.abort(), [])
 
   useEffect(() => {
+    setSlowSending(false)
+    if (!sending) return
+    const timeout = window.setTimeout(() => setSlowSending(true), 12_000)
+    return () => window.clearTimeout(timeout)
+  }, [sending])
+
+  useEffect(() => {
+    if (!isAdmin || !user?.uid) return
+    setThreadsLoading(true); setThreadsError('')
     const unsubscribe = onSnapshot(
       collection(db, 'conversations'),
+      { includeMetadataChanges: true },
       (snapshot) => {
+        setThreadsFromCache(snapshot.metadata.fromCache)
         const next = snapshot.docs.map(
           (entry): Conversation => {
             const data = entry.data() as Record<string, unknown>
@@ -315,129 +327,38 @@ function AdminDashboard() {
         console.error('Admin conversations:', error)
         setThreadsLoading(false)
         setThreadsError(
-          'تعذر تحميل المحادثات. تحقق من صلاحيات Firestore.',
+          supportMessageError(error, true),
         )
       },
     )
 
     return () => unsubscribe()
-  }, [])
+  }, [isAdmin, user?.uid, inboxRevision])
 
   useEffect(() => {
-    if (!selectedThreadId || !user) {
-      setMessages([])
-      setMessagesLoading(false)
-      return
-    }
-
-    setMessages([])
+    setMessages([]); setMessageError('')
+    if (!selectedThreadId || !user?.uid || !isAdmin) { setMessagesLoading(false); return }
     setMessagesLoading(true)
-    setMessageError('')
-    markedInFlight.current.clear()
+    return subscribeSupportMessages(db, selectedThreadId, (next) => {
+      setMessages(next); setMessagesLoading(false)
+    }, (cause) => {
+      console.error('Admin messages:', cause)
+      setMessagesLoading(false); setMessageError(supportMessageError(cause, true))
+    }, 'admin')
+  }, [selectedThreadId, user?.uid, isAdmin, inboxRevision])
 
-    const messagesRef = collection(
-      db,
-      'conversations',
-      selectedThreadId,
-      'messages',
-    )
-
-    const unsubscribe = onSnapshot(
-      messagesRef,
-      (snapshot) => {
-        const next = snapshot.docs.map(
-          (entry): Message => {
-            const data = entry.data() as Record<string, unknown>
-
-            return {
-              id: entry.id,
-              senderId: textField(data.senderId),
-              senderName: textField(
-                data.senderName,
-                'مستخدم',
-              ),
-              text: textField(data.text),
-              read: data.read === true,
-              createdAt: data.createdAt,
-            }
-          },
-        )
-
-        next.sort(
-          (a, b) =>
-            toMillis(a.createdAt) -
-            toMillis(b.createdAt),
-        )
-
-        setMessages(next)
-        setMessagesLoading(false)
-
-        const unread = next.filter(
-          (item) =>
-            item.senderId !== user.uid &&
-            !item.read &&
-            !markedInFlight.current.has(item.id),
-        )
-
-        next
-          .filter((item) => item.read)
-          .forEach((item) =>
-            markedInFlight.current.delete(item.id),
-          )
-
-        if (unread.length) {
-          const batch = writeBatch(db)
-
-          unread.forEach((item) => {
-            markedInFlight.current.add(item.id)
-
-            batch.update(
-              doc(messagesRef, item.id),
-              { read: true },
-            )
-          })
-
-          void batch
-            .commit()
-            .then(async () => {
-              try {
-                await updateDoc(
-                  doc(
-                    db,
-                    'conversations',
-                    selectedThreadId,
-                  ),
-                  {
-                    unreadForAdmin: false,
-                    updatedAt: serverTimestamp(),
-                  },
-                )
-              } catch (error) {
-                console.warn(
-                  'Unread summary update:',
-                  error,
-                )
-              }
-            })
-            .catch((error) => {
-              unread.forEach((item) =>
-                markedInFlight.current.delete(item.id),
-              )
-              console.error('Admin mark read:', error)
-            })
-        }
-      },
-      (error) => {
-        console.error('Admin message listener:', error)
-        setMessagesLoading(false)
-        setMessageError(
-          'تعذر قراءة الرسائل في هذه المحادثة.',
-        )
-      },
-    )
-
-    return () => unsubscribe()
-  }, [selectedThreadId, user])
+  const recoverMessages = async () => {
+    if (recovering || !isAdmin) return
+    const controller = new AbortController(); recoveryController.current = controller
+    setRecovering(true); setThreadsError(''); setRecoveryNotice('جارٍ فحص المحادثات القديمة…')
+    try {
+      const result = await recoverSupportConversations(db, (scanned, recovered) => {
+        if (!controller.signal.aborted) setRecoveryNotice(`فُحصت ${scanned.toLocaleString('ar-EG')} رسالة؛ استُعيدت ${recovered.toLocaleString('ar-EG')} محادثة.`)
+      }, controller.signal)
+      if (!controller.signal.aborted) setRecoveryNotice(result.recovered ? `اكتملت المراجعة واستُعيدت ${result.recovered.toLocaleString('ar-EG')} محادثة غير ظاهرة.` : 'اكتملت المراجعة؛ لم نجد محادثات مفقودة من الصندوق.')
+    } catch (cause) { if (!controller.signal.aborted) { console.error('Recover conversations:', cause); setThreadsError(supportMessageError(cause, true)) } }
+    finally { if (!controller.signal.aborted) setRecovering(false) }
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({
@@ -495,7 +416,7 @@ function AdminDashboard() {
       !user ||
       !selectedThreadId ||
       !text ||
-      sending
+      sendingRef.current
     ) {
       return
     }
@@ -507,56 +428,24 @@ function AdminDashboard() {
       return
     }
 
+    sendingRef.current = true
     setSending(true)
     setMessageError('')
 
     try {
-      const threadRef = doc(
-        db,
-        'conversations',
-        selectedThreadId,
-      )
-
-      const messageRef = doc(
-        collection(threadRef, 'messages'),
-      )
-
-      const batch = writeBatch(db)
-
-      batch.set(
-        threadRef,
-        {
-          userId: selectedThreadId,
-          userName:
-            selectedThread?.userName ||
-            'مستخدم مصحف سميع',
-          userEmail:
-            selectedThread?.userEmail || '',
-          lastMessage: text,
-          lastSenderId: user.uid,
-          updatedAt: serverTimestamp(),
-          unreadForAdmin: false,
-          unreadForUser: true,
-        },
-        { merge: true },
-      )
-
-      batch.set(messageRef, {
-        senderId: user.uid,
-        senderName: 'إدارة مصحف سميع',
-        text,
-        createdAt: serverTimestamp(),
-        read: false,
+      const threadId = selectedThreadId
+      await sendSupportMessage(db, {
+        threadId, senderId: user.uid, senderName: 'إدارة مصحف سميع', side: 'admin', body: text,
+        userName: selectedThread?.userName || 'مستخدم مصحف سميع', userEmail: selectedThread?.userEmail || '',
       })
-
-      await batch.commit()
-      setDraft('')
+      if (selectedThreadRef.current === threadId) setDraft((value) => value.trim() === text ? '' : value)
     } catch (error) {
       console.error('Admin send:', error)
       setMessageError(
-        'تعذر إرسال الرد. تحقق من الاتصال وصلاحيات Firebase.',
+        supportMessageError(error, true),
       )
     } finally {
+      sendingRef.current = false
       setSending(false)
     }
   }
@@ -988,6 +877,14 @@ function AdminDashboard() {
                   <h3 className="font-extrabold">
                     محادثات المستخدمين
                   </h3>
+                  <p role="status" className={`mt-2 text-xs leading-6 ${threadsFromCache ? 'text-amber-700' : 'text-emerald-700'}`}>
+                    {threadsLoading ? 'جارٍ الاتصال بصندوق الرسائل…' : threadsError ? 'الاتصال بالصندوق يحتاج مراجعة.' : threadsFromCache ? 'تُعرض نسخة محفوظة؛ بانتظار الخادم.' : 'متصل بصندوق رسائل الإدارة.'}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => setInboxRevision((value) => value + 1)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-bold">إعادة اتصال</button>
+                    <button type="button" disabled={recovering} onClick={() => void recoverMessages()} className="rounded-lg border border-[#ddc99f] px-2 py-2 text-xs font-bold text-[#194f43] disabled:opacity-50">{recovering ? 'جارٍ الاستعادة…' : 'استعادة المحادثات غير الظاهرة'}</button>
+                  </div>
+                  {recoveryNotice && <p role="status" className="mt-2 text-xs leading-6 text-slate-600">{recoveryNotice}</p>}
 
                   <div className="relative mt-3">
                     <Search
@@ -1143,7 +1040,8 @@ function AdminDashboard() {
                                     )}
                                   </span>
 
-                                  {mine &&
+                                  {mine && message.pending && <Loader2 size={13} className="animate-spin" aria-label="بانتظار الخادم" />}
+                                  {mine && !message.pending &&
                                     message.read && (
                                       <CheckCheck
                                         size={13}
@@ -1159,6 +1057,7 @@ function AdminDashboard() {
                       <div ref={bottomRef} />
                     </div>
 
+                    {slowSending && <p role="status" className="mx-4 mb-2 text-xs leading-6 text-amber-800">بانتظار تأكيد حفظ الرد على الخادم؛ لا تعِد إرساله أثناء الانتظار.</p>}
                     {messageError && (
                       <p
                         role="alert"
