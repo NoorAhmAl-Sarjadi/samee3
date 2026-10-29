@@ -18,5 +18,15 @@
       "bytes": 158516165,
       "sha256": "a18858d24013ca432e970e9abb8dc99a42fca3f22f5f5e00c844b8f9b7165afb"
     }
+  ],
+  "windows": [
+    {
+      "id": "x64",
+      "assetName": "Samee3-Windows-1.0.0-x64-Setup.exe",
+      "versionName": "1.0.0",
+      "minimumOS": "10",
+      "bytes": 167372328,
+      "sha256": "34b287da8d552149f8e0043282b35e59d8930d2c7e6a6177ea72a2060f60b124"
+    }
   ]
 }
