@@ -22,17 +22,8 @@ import {
   ShieldCheck,
   WifiOff,
 } from 'lucide-react'
-import {
-  collection,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  writeBatch,
-  type Timestamp,
-} from 'firebase/firestore'
+import { type Timestamp } from 'firebase/firestore'
+import { sendSupportMessage, subscribeSupportMessages, supportMessageError, type SupportMessage } from '@/lib/support-messages'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/context/AuthContext'
 
@@ -41,20 +32,12 @@ import { useAuth } from '@/context/AuthContext'
  * Path: app/messages/page.tsx
  *
  * Text-only private conversations.
- * Compatible with Next.js 14, React 18 and ES5 target.
+ * Server acknowledgements and compatible reads for existing conversation history.
  */
 
-type ChatMessage = {
-  id: string
-  senderId: string
-  senderName: string
-  text: string
-  read: boolean
-  createdAt: Timestamp | null
-}
+type ChatMessage = SupportMessage
 
 const MAX_MESSAGE_LENGTH = 5000
-const READ_BATCH_SIZE = 350
 
 function timeOf(value: unknown): number {
   if (
@@ -97,37 +80,6 @@ function safeString(
     : fallback
 }
 
-function sameTimestamp(
-  a: unknown,
-  b: unknown,
-): boolean {
-  if (
-    !a ||
-    !b ||
-    typeof a !== 'object' ||
-    typeof b !== 'object'
-  ) {
-    return false
-  }
-
-  const left = a as {
-    seconds?: unknown
-    nanoseconds?: unknown
-  }
-
-  const right = b as {
-    seconds?: unknown
-    nanoseconds?: unknown
-  }
-
-  return (
-    typeof left.seconds === 'number' &&
-    typeof left.nanoseconds === 'number' &&
-    left.seconds === right.seconds &&
-    left.nanoseconds === right.nanoseconds
-  )
-}
-
 export default function MessagesPage() {
   const {
     user,
@@ -147,13 +99,12 @@ export default function MessagesPage() {
 
   const [error, setError] = useState('')
   const [online, setOnline] = useState(true)
+  const [fromCache, setFromCache] = useState(true)
+  const [listenerRevision, setListenerRevision] = useState(0)
+  const [slowSending, setSlowSending] = useState(false)
 
   const bottomRef = useRef<HTMLDivElement | null>(
     null,
-  )
-
-  const markingRef = useRef<Set<string>>(
-    new Set(),
   )
 
   const sendingRef = useRef(false)
@@ -177,6 +128,7 @@ export default function MessagesPage() {
   useEffect(() => {
     const update = () => {
       setOnline(navigator.onLine)
+      if (navigator.onLine) setListenerRevision((value) => value + 1)
     }
 
     update()
@@ -209,225 +161,23 @@ export default function MessagesPage() {
   // ==========================================
 
   useEffect(() => {
-    markingRef.current.clear()
-    setMessages([])
-    setError('')
-
-    if (!uid) {
-      setMessagesLoading(false)
-      return
-    }
-
+    setMessages([]); setError(''); setFromCache(true)
+    if (!uid) { setMessagesLoading(false); return }
     setMessagesLoading(true)
+    return subscribeSupportMessages(db, uid, (next, cached) => {
+      setMessages(next); setFromCache(cached); setMessagesLoading(false)
+    }, (cause) => {
+      console.error('SAMEE3 messages:', cause)
+      setMessagesLoading(false); setError(supportMessageError(cause))
+    }, 'user')
+  }, [uid, listenerRevision])
 
-    let active = true
-
-    const conversationRef = doc(
-      db,
-      'conversations',
-      uid,
-    )
-
-    const messagesRef = collection(
-      conversationRef,
-      'messages',
-    )
-
-    const feed = query(
-      messagesRef,
-      orderBy('createdAt', 'asc'),
-    )
-
-    const unsubscribe = onSnapshot(
-      feed,
-
-      (snapshot) => {
-        if (!active) return
-
-        const next: ChatMessage[] =
-          snapshot.docs.map((item) => {
-            const data =
-              item.data() as Record<
-                string,
-                unknown
-              >
-
-            return {
-              id: item.id,
-
-              senderId: safeString(
-                data.senderId,
-              ),
-
-              senderName: safeString(
-                data.senderName,
-                'مستخدم',
-              ),
-
-              text: safeString(data.text),
-
-              read: data.read === true,
-
-              createdAt:
-                (data.createdAt as
-                  | Timestamp
-                  | null) || null,
-            }
-          })
-
-        next.sort(
-          (a, b) =>
-            timeOf(a.createdAt) -
-            timeOf(b.createdAt),
-        )
-
-        setMessages(next)
-        setMessagesLoading(false)
-
-        // Clear completed read markers.
-        next
-          .filter((item) => item.read)
-          .forEach((item) => {
-            markingRef.current.delete(
-              item.id,
-            )
-          })
-
-        // Only incoming administration messages.
-        const unread = next.filter(
-          (item) =>
-            item.senderId.length > 0 &&
-            item.senderId !== uid &&
-            !item.read &&
-            !markingRef.current.has(
-              item.id,
-            ),
-        )
-
-        if (unread.length === 0) {
-          return
-        }
-
-        const subset = unread.slice(
-          0,
-          READ_BATCH_SIZE,
-        )
-
-        const batch = writeBatch(db)
-
-        subset.forEach((item) => {
-          markingRef.current.add(
-            item.id,
-          )
-
-          batch.update(
-            doc(messagesRef, item.id),
-            { read: true },
-          )
-        })
-
-        void batch
-          .commit()
-          .then(async () => {
-            const lastVisible =
-              next[next.length - 1]
-
-            if (
-              !lastVisible ||
-              lastVisible.senderId === uid ||
-              !lastVisible.createdAt
-            ) {
-              return
-            }
-
-            // Avoid clearing the conversation
-            // badge if a newer reply arrived.
-            try {
-              await runTransaction(
-                db,
-                async (transaction) => {
-                  const document =
-                    await transaction.get(
-                      conversationRef,
-                    )
-
-                  if (!document.exists()) {
-                    return
-                  }
-
-                  const data =
-                    document.data() as Record<
-                      string,
-                      unknown
-                    >
-
-                  if (
-                    data.unreadForUser !==
-                      true ||
-                    data.lastSenderId !==
-                      lastVisible.senderId ||
-                    data.lastMessage !==
-                      lastVisible.text ||
-                    !sameTimestamp(
-                      data.updatedAt,
-                      lastVisible.createdAt,
-                    )
-                  ) {
-                    return
-                  }
-
-                  transaction.update(
-                    conversationRef,
-                    {
-                      unreadForUser: false,
-                      updatedAt:
-                        serverTimestamp(),
-                    },
-                  )
-                },
-              )
-            } catch (receiptError) {
-              console.warn(
-                'SAMEE3 read summary:',
-                receiptError,
-              )
-            }
-          })
-          .catch((receiptError) => {
-            subset.forEach((item) => {
-              markingRef.current.delete(
-                item.id,
-              )
-            })
-
-            console.error(
-              'SAMEE3 mark read:',
-              receiptError,
-            )
-          })
-      },
-
-      (listenerError) => {
-        if (!active) return
-
-        console.error(
-          'SAMEE3 messages listener:',
-          listenerError,
-        )
-
-        setMessagesLoading(false)
-
-        setError(
-          'تعذر قراءة المحادثة. تحقق من الاتصال وقواعد Firestore.',
-        )
-      },
-    )
-
-    return () => {
-      active = false
-      unsubscribe()
-    }
-  }, [uid])
+  useEffect(() => {
+    setSlowSending(false)
+    if (!sending) return
+    const timeout = window.setTimeout(() => setSlowSending(true), 12_000)
+    return () => window.clearTimeout(timeout)
+  }, [sending])
 
   // ==========================================
   // Scroll to newest message
@@ -479,58 +229,10 @@ export default function MessagesPage() {
       setError('')
 
       try {
-        const conversationRef = doc(
-          db,
-          'conversations',
-          uid,
-        )
-
-        const messageRef = doc(
-          collection(
-            conversationRef,
-            'messages',
-          ),
-        )
-
-        const batch = writeBatch(db)
-
-        // Atomic update:
-        // message + conversation summary.
-        batch.set(
-          conversationRef,
-          {
-            userId: uid,
-            userName,
-
-            userEmail:
-              user.email || '',
-
-            lastMessage: text,
-            lastSenderId: uid,
-
-            unreadForAdmin: true,
-            unreadForUser: false,
-
-            updatedAt:
-              serverTimestamp(),
-          },
-          {
-            merge: true,
-          },
-        )
-
-        batch.set(messageRef, {
-          senderId: uid,
-          senderName: userName,
-          text,
-
-          createdAt:
-            serverTimestamp(),
-
-          read: false,
+        await sendSupportMessage(db, {
+          threadId: uid, senderId: uid, senderName: userName, side: 'user',
+          body: text, userName, userEmail: user.email || '',
         })
-
-        await batch.commit()
 
         setDraft((current) =>
           current.trim() === text
@@ -544,7 +246,7 @@ export default function MessagesPage() {
         )
 
         setError(
-          'تعذر إرسال الرسالة. النص ما زال موجودًا؛ حاول مرة أخرى.',
+          supportMessageError(sendError),
         )
       } finally {
         sendingRef.current = false
@@ -715,8 +417,8 @@ export default function MessagesPage() {
 
                 <p className="mt-2 max-w-sm text-sm leading-7 text-slate-500">
                   اكتب استفسارك في الأسفل.
-                  ستظهر رسالتك للإدارة بمجرد
-                  حفظها في Firestore.
+                  ستظهر رسالتك في صندوق الإدارة بعد
+                  تأكيد حفظها على الخادم.
                 </p>
               </div>
             ) : (
@@ -766,7 +468,9 @@ export default function MessagesPage() {
 
                         {mine &&
                           (
-                            message.read ? (
+                            message.pending ? (
+                              <Loader2 size={14} className="animate-spin" aria-label="بانتظار الخادم" />
+                            ) : message.read ? (
                               <CheckCheck
                                 size={14}
                                 aria-label="مقروءة"
@@ -774,7 +478,7 @@ export default function MessagesPage() {
                             ) : (
                               <Check
                                 size={14}
-                                aria-label="أُرسلت"
+                                aria-label="حُفظت على الخادم"
                               />
                             )
                           )}
@@ -787,6 +491,10 @@ export default function MessagesPage() {
 
             <div ref={bottomRef} />
           </div>
+
+          {fromCache && online && <p role="status" className="px-4 py-2 text-xs text-amber-800">تُعرض البيانات المحفوظة مؤقتًا؛ جارٍ التحقق من خادم الرسائل.</p>}
+          {slowSending && <p role="status" className="px-4 py-2 text-xs leading-6 text-amber-800">بانتظار تأكيد الخادم. ظهور الرسالة مؤقتًا لا يعني وصولها للإدارة بعد؛ لا تعِد إرسالها أثناء الانتظار.</p>}
+          {error && <div className="px-4 pb-2"><button type="button" onClick={() => setListenerRevision((value) => value + 1)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold">إعادة الاتصال بالمحادثة</button></div>}
 
           {/* Error */}
           {error && (
