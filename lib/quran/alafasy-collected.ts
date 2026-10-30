@@ -1,3 +1,77 @@
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
 /**
  * مشاري العفاسي – المصحف المجمع، تسجيل مستقل عن مصاحف MP3Quran.
  * The release must first contain 001.mp3 … 114.mp3 and timings-001.json … timings-114.json.
@@ -34,7 +108,9 @@ export function collectedAlafasyMushafReciter() {
     apiId: ALAFASY_COLLECTED_RECITER_ID,
     label: ALAFASY_COLLECTED_NAME,
     moshafId: ALAFASY_COLLECTED_MOSHAF_ID,
-    server: ALAFASY_COLLECTED_RELEASE,
+    // The SAMEE3 mushaf player appends '002.mp3' to this server URL.
+    // Keep the ending slash, matching the audio-library reciter.
+    server: `${ALAFASY_COLLECTED_RELEASE}/`,
     surahIds: ALAFASY_COLLECTED_SURAH_IDS,
   }
 }
