@@ -1,77 +1,3 @@
-1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-11
-12
-13
-14
-15
-16
-17
-18
-19
-20
-21
-22
-23
-24
-25
-26
-27
-28
-29
-30
-31
-32
-33
-34
-35
-36
-37
-38
-39
-40
-41
-42
-43
-44
-45
-46
-47
-48
-49
-50
-51
-52
-53
-54
-55
-56
-57
-58
-59
-60
-61
-62
-63
-64
-65
-66
-67
-68
-69
-70
-71
-72
-73
-74
 /**
  * مشاري العفاسي – المصحف المجمع، تسجيل مستقل عن مصاحف MP3Quran.
  * The release must first contain 001.mp3 … 114.mp3 and timings-001.json … timings-114.json.
@@ -81,6 +7,15 @@ export const ALAFASY_COLLECTED_MOSHAF_ID = 900012301
 export const ALAFASY_COLLECTED_NAME = 'مشاري العفاسي – مصحف مجمع'
 export const ALAFASY_COLLECTED_RELEASE =
   'https://github.com/PSYMOHAMEDABOZAID/alafasy-collected-quran/releases/download/v1.0.0'
+// Serve only this recording through a SAMEE3-origin streaming endpoint.
+// This avoids cross-origin media restrictions and preserves byte-range requests.
+export const ALAFASY_COLLECTED_AUDIO_SERVER = '/api/alafasy-audio/'
+function collectedAudioServer(): string {
+  // Use an absolute same-origin URL in the browser (some players require http(s)).
+  return typeof window === 'undefined'
+    ? ALAFASY_COLLECTED_AUDIO_SERVER
+    : `${window.location.origin}${ALAFASY_COLLECTED_AUDIO_SERVER}`
+}
 export const ALAFASY_COLLECTED_SURAH_IDS = Array.from({ length: 114 }, (_, index) => index + 1)
 export const ALAFASY_COLLECTED_SURAH_LIST = ALAFASY_COLLECTED_SURAH_IDS.join(',')
 
@@ -92,7 +27,7 @@ export function collectedAlafasyLibraryReciter(riwayaId: number) {
     moshaf: [{
       id: ALAFASY_COLLECTED_MOSHAF_ID,
       name: 'حفص عن عاصم – مصحف مجمع',
-      server: `${ALAFASY_COLLECTED_RELEASE}/`,
+      server: collectedAudioServer(),
       surah_total: 114,
       rewaya_id: riwayaId,
       moshaf_type: 0,
@@ -108,9 +43,8 @@ export function collectedAlafasyMushafReciter() {
     apiId: ALAFASY_COLLECTED_RECITER_ID,
     label: ALAFASY_COLLECTED_NAME,
     moshafId: ALAFASY_COLLECTED_MOSHAF_ID,
-    // The SAMEE3 mushaf player appends '002.mp3' to this server URL.
-    // Keep the ending slash, matching the audio-library reciter.
-    server: `${ALAFASY_COLLECTED_RELEASE}/`,
+    // The SAMEE3 player appends '002.mp3' to this same-origin server URL.
+    server: collectedAudioServer(),
     surahIds: ALAFASY_COLLECTED_SURAH_IDS,
   }
 }
