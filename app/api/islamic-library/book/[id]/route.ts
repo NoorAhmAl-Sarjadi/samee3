@@ -1,16 +1,9 @@
 import { courseById } from '@/lib/islamic/curriculum'
+import { mergeLibraryBook, mergeLessons, type StoredRecord } from '@/lib/islamic/managed-library'
 import { NextRequest, NextResponse } from 'next/server'
-import {
-  SUNNI_LIBRARY_BOOKS,
-  type SunniLibraryBook,
-} from '@/lib/islamic/sunniLibrary'
+import { SUNNI_LIBRARY_BOOKS, type SunniLibraryBook } from '@/lib/islamic/sunniLibrary'
 import { db } from '@/lib/firebase'
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-} from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -49,17 +42,12 @@ interface DynamicBookFields {
   } | null
 }
 
-function getQuranpediaId(
-  book: SunniLibraryBook & DynamicBookFields
-): number | null {
+function getQuranpediaId(book: SunniLibraryBook & DynamicBookFields): number | null {
   if (Number.isSafeInteger(book.quranpediaBookId) && Number(book.quranpediaBookId) > 0) {
     return Number(book.quranpediaBookId)
   }
 
-  const candidates = [
-    book.readingUrl || '',
-    book.sharhUrl || '',
-  ]
+  const candidates = [book.readingUrl || '', book.sharhUrl || '']
 
   for (const url of candidates) {
     const match = url.match(/quranpedia\.net\/book\/(\d+)/i)
@@ -96,7 +84,7 @@ function collectText(
     part?: number
     section?: string
   } = {},
-  depth = 0
+  depth = 0,
 ) {
   if (!value || depth > 20 || output.length >= 12000) {
     return
@@ -133,15 +121,9 @@ function collectText(
   const numericPart = Number(obj.part)
 
   const nextContext = {
-    page:
-      Number.isFinite(numericPage) && numericPage > 0
-        ? numericPage
-        : context.page,
+    page: Number.isFinite(numericPage) && numericPage > 0 ? numericPage : context.page,
 
-    part:
-      Number.isFinite(numericPart) && numericPart > 0
-        ? numericPart
-        : context.part,
+    part: Number.isFinite(numericPart) && numericPart > 0 ? numericPart : context.part,
 
     section:
       typeof obj.title === 'string'
@@ -151,12 +133,7 @@ function collectText(
           : context.section,
   }
 
-  const directKeys = [
-    'text',
-    'content',
-    'body',
-    'description',
-  ]
+  const directKeys = ['text', 'content', 'body', 'description']
 
   for (const key of directKeys) {
     if (typeof obj[key] === 'string') {
@@ -181,10 +158,7 @@ function collectText(
       continue
     }
 
-    if (
-      typeof child === 'object' &&
-      child !== null
-    ) {
+    if (typeof child === 'object' && child !== null) {
       collectText(child, output, nextContext, depth + 1)
     }
   }
@@ -194,15 +168,24 @@ function collectText(
 function safeQuranpediaUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'https:' && parsed.hostname.toLowerCase() === 'api.quranpedia.net' &&
-      (parsed.port === '' || parsed.port === '443') && !parsed.username && !parsed.password
-  } catch { return false }
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.hostname.toLowerCase() === 'api.quranpedia.net' &&
+      (parsed.port === '' || parsed.port === '443') &&
+      !parsed.username &&
+      !parsed.password
+    )
+  } catch {
+    return false
+  }
 }
 
 async function fetchJson(url: string, signal: AbortSignal): Promise<any> {
   if (!safeQuranpediaUrl(url)) throw new Error('UNTRUSTED_CONTENT_URL')
   const response = await fetch(url, {
-    cache: 'no-store', signal, redirect: 'error',
+    cache: 'no-store',
+    signal,
+    redirect: 'error',
     headers: { Accept: 'application/json' },
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -211,30 +194,23 @@ async function fetchJson(url: string, signal: AbortSignal): Promise<any> {
   if (declaredSize > limit) throw new Error('BOOK_TOO_LARGE')
   const raw = await response.text()
   if (raw.length > limit) throw new Error('BOOK_TOO_LARGE')
-  try { return JSON.parse(raw) as unknown }
-  catch { throw new Error('INVALID_BOOK_JSON') }
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    throw new Error('INVALID_BOOK_JSON')
+  }
 }
 
-function normalizeVideo(
-  value: unknown,
-  fallbackId: string,
-  fallbackOrder: number
-): LearningVideo | null {
+function normalizeVideo(value: unknown, fallbackId: string, fallbackOrder: number): LearningVideo | null {
   if (!value || typeof value !== 'object') {
     return null
   }
 
   const item = value as Record<string, unknown>
 
-  const id =
-    typeof item.id === 'string' && item.id.trim()
-      ? item.id.trim()
-      : fallbackId
+  const id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : fallbackId
 
-  const title =
-    typeof item.title === 'string' && item.title.trim()
-      ? item.title.trim()
-      : 'درس بدون عنوان'
+  const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : 'درس بدون عنوان'
 
   const url =
     typeof item.url === 'string' && item.url.trim()
@@ -245,10 +221,7 @@ function normalizeVideo(
 
   const numericOrder = Number(item.order)
 
-  const order =
-    Number.isFinite(numericOrder) && numericOrder >= 0
-      ? numericOrder
-      : fallbackOrder
+  const order = Number.isFinite(numericOrder) && numericOrder >= 0 ? numericOrder : fallbackOrder
 
   if (!url) {
     return null
@@ -270,11 +243,7 @@ function normalizeVideos(value: unknown): LearningVideo[] {
   const result: LearningVideo[] = []
 
   value.forEach((item, index) => {
-    const video = normalizeVideo(
-      item,
-      `video-${index + 1}`,
-      index
-    )
+    const video = normalizeVideo(item, `video-${index + 1}`, index)
 
     if (video) {
       result.push(video)
@@ -286,115 +255,30 @@ function normalizeVideos(value: unknown): LearningVideo[] {
       return a.order - b.order
     }
 
-    return a.title.localeCompare(
-      b.title,
-      'ar'
-    )
+    return a.title.localeCompare(b.title, 'ar')
   })
 }
 
-async function loadFirestoreBook(
-  bookId: string
-): Promise<{
+async function loadFirestoreBook(bookId: string): Promise<{
   exists: boolean
   book: DynamicBookFields | null
   videos: LearningVideo[]
 }> {
-  try {
-    const bookRef = doc(
-      db,
-      'islamicLibraryBooks',
-      bookId
-    )
-
-    const snapshot = await getDoc(bookRef)
-
-    if (!snapshot.exists()) {
-      return {
-        exists: false,
-        book: null,
-        videos: [],
-      }
-    }
-
-    const data =
-      snapshot.data() as DynamicBookFields
-
-    const storedVideos = normalizeVideos(
-      data.videos
-    )
-
-    let subcollectionVideos: LearningVideo[] = []
-
-    try {
-      const videosSnapshot = await getDocs(
-        collection(
-          db,
-          'islamicLibraryBooks',
-          bookId,
-          'videos'
-        )
-      )
-
-      subcollectionVideos = videosSnapshot.docs
-        .map((item, index) =>
-          normalizeVideo(
-            {
-              id: item.id,
-              ...item.data(),
-            },
-            item.id,
-            index
-          )
-        )
-        .filter(
-          (item): item is LearningVideo =>
-            Boolean(item)
-        )
-    } catch {
-      subcollectionVideos = []
-    }
-
-    const mergedMap = new Map<
-      string,
-      LearningVideo
-    >()
-
-    for (const video of storedVideos) {
-      mergedMap.set(video.id, video)
-    }
-
-    for (const video of subcollectionVideos) {
-      mergedMap.set(video.id, video)
-    }
-
-    const videos = Array.from(
-      mergedMap.values()
-    ).sort((a, b) => {
-      if (a.order !== b.order) {
-        return a.order - b.order
-      }
-
-      return a.title.localeCompare(
-        b.title,
-        'ar'
-      )
-    })
-
-    return {
-      exists: true,
-      book: {
-        ...data,
-        id: bookId,
-      },
-      videos,
-    }
-  } catch {
-    return {
-      exists: false,
-      book: null,
-      videos: [],
-    }
+  const results = await Promise.allSettled([
+    getDoc(doc(db, 'islamicLibraryBooks', bookId)),
+    getDocs(collection(db, 'islamicLibraryBooks', bookId, 'videos')),
+  ])
+  const snapshot = results[0].status === 'fulfilled' ? results[0].value : null
+  const lessons: StoredRecord[] =
+    results[1].status === 'fulfilled'
+      ? results[1].value.docs.map((item) => ({ id: item.id, data: item.data() }))
+      : []
+  const raw = snapshot?.data() || {},
+    book = mergeLibraryBook(bookId, raw)
+  return {
+    exists: snapshot?.exists() || false,
+    book: snapshot?.exists() ? (raw as DynamicBookFields) : null,
+    videos: mergeLessons(book?.videos, lessons).filter((lesson) => !lesson.deleted),
   }
 }
 
@@ -402,39 +286,35 @@ export async function GET(
   _request: NextRequest,
   context: {
     params: Promise<{ id: string }>
-  }
+  },
 ) {
-  const controller =
-    new AbortController()
+  const controller = new AbortController()
 
-  const timer = setTimeout(
-    () => controller.abort(),
-    15000
-  )
+  const timer = setTimeout(() => controller.abort(), 15000)
 
   try {
-    const rawId =
-      (await context.params).id || ''
+    const rawId = (await context.params).id || ''
 
     let bookId: string
-    try { bookId = decodeURIComponent(rawId) } catch {
+    try {
+      bookId = decodeURIComponent(rawId)
+    } catch {
       return NextResponse.json({ success: false, error: 'INVALID_BOOK_ID' }, { status: 400 })
     }
     if (!/^[a-zA-Z0-9_-]{1,120}$/.test(bookId)) {
       return NextResponse.json({ success: false, error: 'INVALID_BOOK_ID' }, { status: 400 })
     }
 
-    const staticBook =
-      courseById(bookId) || SUNNI_LIBRARY_BOOKS.find(
-        (item) => item.id === bookId
-      )
+    const staticBook = courseById(bookId) || SUNNI_LIBRARY_BOOKS.find((item) => item.id === bookId)
 
-    const firestoreResult =
-      await Promise.race([loadFirestoreBook(bookId), new Promise<{ exists: boolean; book: DynamicBookFields | null; videos: LearningVideo[] }>((resolve) => setTimeout(() => resolve({ exists: false, book: null, videos: [] }), 2500))])
+    const firestoreResult = await Promise.race([
+      loadFirestoreBook(bookId),
+      new Promise<{ exists: boolean; book: DynamicBookFields | null; videos: LearningVideo[] }>((resolve) =>
+        setTimeout(() => resolve({ exists: false, book: null, videos: [] }), 2500),
+      ),
+    ])
 
-    if (
-      (!staticBook && !firestoreResult.exists) || firestoreResult.book?.deleted === true
-    ) {
+    if ((!staticBook && !firestoreResult.exists) || firestoreResult.book?.deleted === true) {
       return NextResponse.json(
         {
           success: false,
@@ -442,147 +322,23 @@ export async function GET(
         },
         {
           status: 404,
-        }
+        },
       )
     }
 
-    const staticRecord =
-      (staticBook || {}) as SunniLibraryBook &
-        DynamicBookFields
+    const managedBook = mergeLibraryBook(bookId, firestoreResult.book || {}, staticBook)
+    if (!managedBook) return NextResponse.json({ success: false, error: 'BOOK_NOT_FOUND' }, { status: 404 })
+    const mergedBook = { ...managedBook, publication: firestoreResult.book?.publication || null }
+    const videos = firestoreResult.videos
 
-    const firestoreBook =
-      firestoreResult.book || {}
-
-    const mergedBook =
-      {
-        id:
-          bookId ||
-          staticRecord.id ||
-          firestoreBook.id ||
-          '',
-
-        title:
-          firestoreBook.title ||
-          staticRecord.title ||
-          'كتاب شرعي',
-
-        author:
-          firestoreBook.author ||
-          staticRecord.author ||
-          'غير محدد',
-
-        category:
-          firestoreBook.category ||
-          staticRecord.category ||
-          '',
-
-        level:
-          firestoreBook.level ||
-          staticRecord.level ||
-          'متوسط',
-
-        description:
-          firestoreBook.description ||
-          staticRecord.description ||
-          '',
-
-        readingUrl:
-          firestoreBook.readingUrl ??
-          staticRecord.readingUrl ??
-          null,
-
-        readingLabel:
-          firestoreBook.readingLabel ??
-          staticRecord.readingLabel ??
-          null,
-
-        sharhUrl:
-          firestoreBook.sharhUrl ??
-          staticRecord.sharhUrl ??
-          null,
-
-        sharhLabel:
-          firestoreBook.sharhLabel ??
-          staticRecord.sharhLabel ??
-          null,
-
-        sharhTitle:
-          firestoreBook.sharhTitle ??
-          staticRecord.sharhTitle ??
-          null,
-
-        sharhAuthor:
-          firestoreBook.sharhAuthor ??
-          staticRecord.sharhAuthor ??
-          null,
-
-        downloadUrl:
-          firestoreBook.downloadUrl ??
-          staticRecord.downloadUrl ??
-          null,
-
-        quranpediaBookId:
-          firestoreBook.quranpediaBookId ??
-          staticRecord.quranpediaBookId ??
-          null,
-
-        publication:
-          firestoreBook.publication ??
-          null,
-      }
-
-    const videos =
-      firestoreResult.videos.length
-        ? firestoreResult.videos
-        : normalizeVideos(
-            firestoreBook.videos ??
-              staticRecord.videos
-          )
-
-    const quranpediaId =
-      getQuranpediaId(
-        mergedBook as SunniLibraryBook &
-          DynamicBookFields
-      )
+    const quranpediaId = getQuranpediaId(mergedBook as SunniLibraryBook & DynamicBookFields)
 
     if (!quranpediaId) {
       return NextResponse.json({
         success: true,
         source: 'external',
 
-        book: {
-          id: mergedBook.id,
-          title: mergedBook.title,
-          author: mergedBook.author,
-          category: mergedBook.category,
-          level: mergedBook.level,
-          description:
-            mergedBook.description,
-
-          readingUrl:
-            mergedBook.readingUrl,
-
-          readingLabel:
-            mergedBook.readingLabel,
-
-          sharhUrl:
-            mergedBook.sharhUrl,
-
-          sharhLabel:
-            mergedBook.sharhLabel,
-
-          sharhTitle:
-            mergedBook.sharhTitle,
-
-          sharhAuthor:
-            mergedBook.sharhAuthor,
-
-          downloadUrl:
-            mergedBook.downloadUrl,
-
-          publication:
-            mergedBook.publication,
-        },
+        book: mergedBook,
 
         videos,
 
@@ -593,11 +349,7 @@ export async function GET(
       })
     }
 
-    const meta =
-      await fetchJson(
-        `${QURANPEDIA_BASE}/book/${quranpediaId}`,
-        controller.signal
-      )
+    const meta = await fetchJson(`${QURANPEDIA_BASE}/book/${quranpediaId}`, controller.signal)
 
     let rawContents: unknown = null
 
@@ -610,11 +362,7 @@ export async function GET(
 
     if (contentsUrl) {
       try {
-        rawContents =
-          await fetchJson(
-            contentsUrl,
-            controller.signal
-          )
+        rawContents = await fetchJson(contentsUrl, controller.signal)
       } catch {
         rawContents = null
       }
@@ -630,111 +378,57 @@ export async function GET(
     // A metadata blurb is not the book's actual text. Never label it as a complete edition.
     if (rawContents) collectText(rawContents, sections)
 
-    const deduped =
-      sections.filter(
-        (item, index) => {
-          if (!item.text) {
-            return false
-          }
+    const deduped = sections.filter((item, index) => {
+      if (!item.text) {
+        return false
+      }
 
-          const previous =
-            sections[index - 1]
+      const previous = sections[index - 1]
 
-          return (
-            !previous ||
-            previous.text !== item.text ||
-            previous.page !== item.page ||
-            previous.part !== item.part
-          )
-        }
+      return (
+        !previous || previous.text !== item.text || previous.page !== item.page || previous.part !== item.part
       )
+    })
 
     return NextResponse.json({
       success: true,
       source: 'quranpedia',
 
-      quranpediaBookId:
-        quranpediaId,
+      quranpediaBookId: quranpediaId,
 
       book: {
-        id: mergedBook.id,
-        title: mergedBook.title,
-        author: mergedBook.author,
-        category: mergedBook.category,
-        level: mergedBook.level,
-        description:
-          mergedBook.description,
-
-        readingUrl:
-          mergedBook.readingUrl,
-
-        readingLabel:
-          mergedBook.readingLabel,
-
-        sharhUrl:
-          mergedBook.sharhUrl,
-
-        sharhLabel:
-          mergedBook.sharhLabel,
-
-        sharhTitle:
-          mergedBook.sharhTitle,
-
-        sharhAuthor:
-          mergedBook.sharhAuthor,
-
-        downloadUrl:
-          mergedBook.downloadUrl,
+        ...mergedBook,
 
         publication: {
-          publishYear:
-            meta?.publish_year ??
-            meta?.publishYear ??
-            mergedBook.publication
-              ?.publishYear ??
-            null,
+          publishYear: meta?.publish_year ?? meta?.publishYear ?? mergedBook.publication?.publishYear ?? null,
 
-          edition:
-            meta?.edition ??
-            mergedBook.publication
-              ?.edition ??
-            null,
+          edition: meta?.edition ?? mergedBook.publication?.edition ?? null,
 
-          publisher:
-            meta?.nasher ??
-            meta?.publisher ??
-            mergedBook.publication
-              ?.publisher ??
-            null,
+          publisher: meta?.nasher ?? meta?.publisher ?? mergedBook.publication?.publisher ?? null,
 
-          parts:
-            meta?.parts ??
-            mergedBook.publication
-              ?.parts ??
-            null,
+          parts: meta?.parts ?? mergedBook.publication?.parts ?? null,
         },
       },
 
       videos,
 
       contents: deduped,
-      message: deduped.length === 0 ? 'لم يتوفر نص الكتاب كاملًا لدى المصدر حاليًا. استخدم رابط القراءة الخارجي المتاح.' : null,
+      message:
+        deduped.length === 0
+          ? 'لم يتوفر نص الكتاب كاملًا لدى المصدر حاليًا. استخدم رابط القراءة الخارجي المتاح.'
+          : null,
     })
   } catch (error) {
-    const isTimeout =
-      error instanceof DOMException &&
-      error.name === 'AbortError'
+    const isTimeout = error instanceof DOMException && error.name === 'AbortError'
 
     return NextResponse.json(
       {
         success: false,
-        error: isTimeout
-          ? 'TIMEOUT'
-          : 'LOAD_FAILED',
+        error: isTimeout ? 'TIMEOUT' : 'LOAD_FAILED',
       },
       {
         status: 500,
-      }
+      },
     )
   } finally {
     clearTimeout(timer)
