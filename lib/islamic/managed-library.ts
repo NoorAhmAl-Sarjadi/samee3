@@ -11,11 +11,17 @@ export type LessonPolicy = {
 export type ManagedLesson = LessonPolicy & {
   id: string
   title: string
+  author?: string
   url: string
   order: number
   deleted?: boolean
 }
-export type PlaylistOverride = LessonPolicy & { title?: string; url?: string; deleted?: boolean }
+export type PlaylistOverride = LessonPolicy & {
+  title?: string
+  author?: string
+  url?: string
+  deleted?: boolean
+}
 export type ManagedBook = Omit<LearningCourse, 'videos'> & {
   custom: boolean
   deleted: boolean
@@ -78,6 +84,7 @@ export function normalizeLesson(value: unknown, fallbackId: string, index = 0): 
   return {
     id,
     title: string(raw.title, `الدرس ${index + 1}`),
+    author: string(raw.author),
     url: safeIslamicLibraryLink(raw.url) || '',
     order: Number.isFinite(Number(raw.order)) && Number(raw.order) > 0 ? Number(raw.order) : index + 1,
     deleted: raw.deleted === true,
@@ -150,6 +157,7 @@ export function mergeLibraryBook(
     book.playlistPolicies[key] = {
       ...policy(item),
       ...(typeof item.title === 'string' ? { title: item.title } : {}),
+      ...(typeof item.author === 'string' ? { author: item.author } : {}),
       ...(typeof item.url === 'string' ? { url: safeIslamicLibraryLink(item.url) || '' } : {}),
       deleted: item.deleted === true,
     }

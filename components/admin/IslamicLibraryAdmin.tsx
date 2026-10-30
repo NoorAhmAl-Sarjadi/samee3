@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import {
   collection,
@@ -30,12 +30,7 @@ import {
 import { db } from '@/lib/firebase'
 import { SUNNI_LIBRARY_CATEGORIES, SUNNI_LIBRARY_LEVELS } from '@/lib/islamic/sunniLibrary'
 import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
-import {
-  loadYoutubePlayer,
-  youtubeSource,
-  youtubeError,
-  type StudyPlayer,
-} from '@/lib/islamic/youtube-player'
+import { youtubeSource } from '@/lib/islamic/youtube-player'
 import {
   BOOK_LINK_FIELDS,
   BOOK_TEXT_FIELDS,
@@ -50,6 +45,7 @@ import {
   type PlaylistOverride,
 } from '@/lib/islamic/managed-library'
 import { useManagedBook, useManagedCatalog } from '@/lib/islamic/use-managed-library'
+import CurrentExplanationEditor, { type CurrentLessonEdit } from './CurrentExplanationEditor'
 
 type Choice = 'inherit' | 'allow' | 'block'
 type Draft = Record<(typeof BOOK_TEXT_FIELDS)[number] | (typeof BOOK_LINK_FIELDS)[number], string> & {
@@ -134,120 +130,6 @@ function PolicySelect({
   )
 }
 
-function PlaylistInspector({
-  url,
-  onSelect,
-}: {
-  url: string
-  onSelect: (position: number, video: string) => void
-}) {
-  const host = useRef<HTMLDivElement>(null)
-  const [ids, setIds] = useState<string[]>([]),
-    [error, setError] = useState(''),
-    [page, setPage] = useState(0)
-  useEffect(() => {
-    let alive = true,
-      current: StudyPlayer | null = null,
-      interval: ReturnType<typeof setInterval> | undefined
-    const list = youtubeSource(url)?.list
-    if (!list) return
-    setIds([])
-    setError('')
-    setPage(0)
-    void loadYoutubePlayer()
-      .then((api) => {
-        if (!alive || !host.current) return
-        const iframe = document.createElement('iframe')
-        iframe.title = 'معاينة دروس قائمة YouTube'
-        iframe.referrerPolicy = 'strict-origin-when-cross-origin'
-        iframe.allow = 'encrypted-media; fullscreen'
-        iframe.allowFullscreen = true
-        iframe.src = `https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(list)}&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`
-        host.current.replaceChildren(iframe)
-        current = new api.Player(iframe, {
-          width: '100%',
-          height: '100%',
-          host: 'https://www.youtube.com',
-          playerVars: { controls: 1, origin: location.origin, playsinline: 1 },
-          events: {
-            onReady: (event) => {
-              current = event.target
-              current.cuePlaylist({ list, listType: 'playlist', index: 0, startSeconds: 0 })
-              interval = setInterval(() => {
-                if (!alive) return
-                const videos = current?.getPlaylist()
-                if (videos?.length) setIds((old) => (old.join(',') === videos.join(',') ? old : videos))
-              }, 800)
-            },
-            onStateChange: () => {},
-            onError: (event) => {
-              if (alive) setError(youtubeError(event.data))
-            },
-          },
-        })
-      })
-      .catch((error) => {
-        if (alive) setError(errorText(error))
-      })
-    return () => {
-      alive = false
-      clearInterval(interval)
-      try {
-        current?.destroy()
-      } catch {
-        /* player already removed */
-      }
-    }
-  }, [url])
-  return (
-    <div className="space-y-3 rounded-xl border border-slate-200 p-3">
-      <div
-        ref={host}
-        className="mx-auto aspect-video min-h-[200px] w-full max-w-2xl bg-slate-900 [&>iframe]:h-full [&>iframe]:w-full"
-      />
-      {error && (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
-      )}
-      <p className="text-xs leading-6 text-slate-500">
-        اختر رقم الدرس لتعديل عنوانه أو رابطه أو صلاحياته. إذا لم تصل قائمة الدروس من YouTube، اكتب الرقم
-        يدويًا بالأسفل.
-      </p>
-      <div className="grid max-h-56 grid-cols-2 gap-2 overflow-auto sm:grid-cols-4">
-        {ids.slice(page * 40, (page + 1) * 40).map((id, i) => (
-          <button
-            type="button"
-            key={`${id}-${i}`}
-            className={button}
-            onClick={() => onSelect(page * 40 + i + 1, `https://www.youtube.com/watch?v=${id}`)}
-          >
-            تعديل الدرس {page * 40 + i + 1}
-          </button>
-        ))}
-      </div>
-      {ids.length > 40 && (
-        <div className="flex items-center justify-between">
-          <button type="button" className={button} disabled={!page} onClick={() => setPage(page - 1)}>
-            السابق
-          </button>
-          <span>
-            {page + 1} / {Math.ceil(ids.length / 40)}
-          </span>
-          <button
-            type="button"
-            className={button}
-            disabled={(page + 1) * 40 >= ids.length}
-            onClick={() => setPage(page + 1)}
-          >
-            التالي
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function IslamicLibraryAdmin() {
   const catalog = useManagedCatalog()
   const [selectedId, setSelectedId] = useState<string | null>(null),
@@ -270,12 +152,7 @@ export default function IslamicLibraryAdmin() {
   const [scope, setScope] = useState<'book' | 'library'>('book'),
     [bulkSeek, setBulkSeek] = useState(true),
     [bulkSpeed, setBulkSpeed] = useState(true)
-  const [list, setList] = useState(''),
-    [position, setPosition] = useState('1'),
-    [playlistDraft, setPlaylistDraft] = useState<LessonDraft>(blankLesson),
-    [inspect, setInspect] = useState(false),
-    [playlistDirty, setPlaylistDirty] = useState(false)
-  const [originalLinks, setOriginalLinks] = useState<Record<string, string>>({})
+  const [playlistDirty, setPlaylistDirty] = useState(false)
   const filtered = useMemo(
     () =>
       catalog.books.filter(
@@ -289,48 +166,6 @@ export default function IslamicLibraryAdmin() {
       ),
     [catalog.books, query, level, category, visibility],
   )
-  const playlists = selected ? studySources(selected).filter((source) => source.list) : []
-  const activeList = playlists.find((source) => source.list === list) || playlists[0]
-  const activeListId = activeList?.list || ''
-  const currentPlaylistPolicy =
-    selected && activeListId ? playlistOverride(selected, activeListId, Number(position)) : undefined
-  const policyTarget = useRef('')
-  useEffect(() => {
-    const target = `${selectedId}:${activeListId}:${position}`
-    if (playlistDirty && policyTarget.current === target) return
-    policyTarget.current = target
-    setPlaylistDirty(false)
-    const current = currentPlaylistPolicy
-    const isCurrent =
-      !selected?.lessonPolicyRevision || current?.policyRevision === selected.lessonPolicyRevision
-    setPlaylistDraft({
-      title: current?.title || '',
-      url: current?.url || '',
-      order: position,
-      seeking: choice(isCurrent ? current?.allowSeeking : null),
-      speed: choice(isCurrent ? current?.allowSpeed : null),
-      deleted: current?.deleted === true,
-    })
-  }, [
-    selectedId,
-    activeListId,
-    position,
-    currentPlaylistPolicy,
-    selected?.lessonPolicyRevision,
-    playlistDirty,
-  ])
-  const choosePosition = (value: string) => {
-    if (playlistDirty && !window.confirm('توجد تعديلات للدرس لم تُحفظ. الانتقال دون حفظها؟')) return
-    setPlaylistDirty(false)
-    setPosition(value)
-  }
-  const chooseList = (value: string) => {
-    if (playlistDirty && !window.confirm('توجد تعديلات للدرس لم تُحفظ. الانتقال دون حفظها؟')) return
-    setPlaylistDirty(false)
-    setList(value)
-    setPosition('1')
-    setInspect(false)
-  }
   const clearMessages = () => {
     setError('')
     setNotice('')
@@ -343,11 +178,8 @@ export default function IslamicLibraryAdmin() {
     setDraft(draftFrom(book))
     setDirty(false)
     setTab('details')
-    setSection('info')
+    setSection(book ? 'links' : 'info')
     setLessonId(null)
-    setList('')
-    setPosition('1')
-    setInspect(false)
     setBulkSeek(book?.lessonSeekDefault ?? true)
     setBulkSpeed(book?.lessonSpeedDefault ?? true)
     clearMessages()
@@ -539,50 +371,48 @@ export default function IslamicLibraryAdmin() {
         `تم تطبيق الإعداد على كل دروس ${scope === 'book' ? 'الكتاب' : `المكتبة (${committed} كتاب)`}، بما فيها الدروس الأصلية وقوائم YouTube. أُلغيت استثناءات الصلاحيات القديمة؛ ويمكن إضافة استثناء جديد لكل درس.`,
       )
     })
-  const savePlaylistLesson = (reset = false) =>
-    void run(async () => {
-      if (!selectedId || !selected || !activeListId) return
-      const number = Number(position)
-      if (!Number.isSafeInteger(number) || number < 1 || number > 10000)
-        throw new Error('اكتب رقم درس صحيحًا من 1 إلى 10000.')
-      let replacement = ''
-      if (playlistDraft.url.trim()) {
-        const link = safeIslamicLibraryLink(playlistDraft.url)
-        if (!link) throw new Error('أدخل رابط فيديو YouTube صالحًا.')
-        const single = new URL(link)
-        single.searchParams.delete('list')
-        const videoId = youtubeSource(single.href)?.video
-        if (!videoId) throw new Error('الرابط البديل لدرس القائمة يجب أن يشير إلى فيديو YouTube واحد.')
-        replacement = `https://www.youtube.com/watch?v=${videoId}`
-      }
-      const reference = doc(db, 'islamicLibraryBooks', selectedId)
-      await runTransaction(db, async (transaction) => {
-        const snapshot = await transaction.get(reference),
-          fresh = mergeLibraryBook(selectedId, snapshot.data())
-        const policies: Record<string, PlaylistOverride> = { ...(fresh?.playlistPolicies || {}) }
-        if (youtubeSource(fresh?.videoUrl)?.list === activeListId) delete policies[String(number)]
-        const key = playlistPolicyKey(activeListId, number)
-        if (reset) delete policies[key]
-        else
-          policies[key] = {
-            title: playlistDraft.title.trim(),
-            url: replacement,
-            deleted: playlistDraft.deleted,
-            allowSeeking: bool(playlistDraft.seeking),
-            allowSpeed: bool(playlistDraft.speed),
-            policyRevision: fresh?.lessonPolicyRevision || '',
-          }
-        const payload = { playlistPolicies: policies, updatedAt: serverTimestamp() }
-        if (snapshot.exists()) transaction.update(reference, payload)
-        else transaction.set(reference, payload)
-      })
-      setPlaylistDirty(false)
-      setNotice(
-        reset
-          ? `تم استعادة بيانات الدرس ${number} من قائمة الناشر وإعداد الكتاب.`
-          : `تم حفظ تعديلات الدرس ${number} من قائمة YouTube.`,
-      )
+  const saveCurrentLesson = async (
+    listId: string,
+    number: number,
+    edit: CurrentLessonEdit,
+    reset: boolean,
+  ) => {
+    if (!selectedId || !selected) throw new Error('اختر الكتاب الحالي أولًا.')
+    if (!reset && (!edit.title.trim() || !safeIslamicLibraryLink(edit.url)))
+      throw new Error('أكمل عنوان الدرس ورابطه الحالي.')
+    let replacement = ''
+    if (!reset && edit.url.trim()) {
+      const single = new URL(edit.url.trim())
+      single.searchParams.delete('list')
+      const videoId = youtubeSource(single.href)?.video
+      if (!videoId) throw new Error('أدخل رابط فيديو YouTube واحد لهذا الدرس.')
+      replacement = `https://www.youtube.com/watch?v=${videoId}`
+    }
+    const reference = doc(db, 'islamicLibraryBooks', selectedId)
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(reference),
+        fresh = mergeLibraryBook(selectedId, snapshot.data())
+      const policies: Record<string, PlaylistOverride> = { ...(fresh?.playlistPolicies || {}) }
+      const key = playlistPolicyKey(listId, number)
+      if (youtubeSource(fresh?.videoUrl)?.list === listId) delete policies[String(number)]
+      if (reset) delete policies[key]
+      else
+        policies[key] = {
+          title: edit.title.trim(),
+          url: replacement,
+          author: edit.author.trim(),
+          deleted: edit.deleted,
+          allowSeeking: bool(edit.seeking),
+          allowSpeed: bool(edit.speed),
+          policyRevision: fresh?.lessonPolicyRevision || '',
+        }
+      const payload = { playlistPolicies: policies, updatedAt: serverTimestamp() }
+      if (snapshot.exists()) transaction.update(reference, payload)
+      else transaction.set(reference, payload)
     })
+    setPlaylistDirty(false)
+    setNotice(reset ? 'تمت استعادة الدرس الأصلي.' : 'تم تعديل الدرس الحالي ورابطه الذي يظهر للجمهور.')
+  }
   const linkLabels: Record<(typeof BOOK_LINK_FIELDS)[number], string> = {
     readingUrl: 'رابط قراءة الكتاب',
     downloadUrl: 'رابط تحميل الكتاب PDF',
@@ -708,7 +538,7 @@ export default function IslamicLibraryAdmin() {
                     {book.author} · {book.level}
                   </span>
                   <span className="mt-2 inline-block text-xs text-teal-700">
-                    {book.deleted ? 'مخفي · يمكنك إظهاره' : 'تعديل الكتاب والشرح والروابط'}
+                    {book.deleted ? 'مخفي · يمكنك إظهاره' : 'تعديل الشرح الحالي والكتاب'}
                   </span>
                 </button>
               ))}
@@ -745,13 +575,21 @@ export default function IslamicLibraryAdmin() {
                     className={`${button} ${tab === 'details' ? '!bg-teal-800 !text-white' : ''}`}
                     onClick={() => setTab('details')}
                   >
-                    بيانات الكتاب والروابط
+                    الشرح الحالي وبيانات الكتاب
                   </button>
                   <button
                     type="button"
                     disabled={creating || !detail.ready}
                     className={`${button} ${tab === 'lessons' ? '!bg-teal-800 !text-white' : ''}`}
-                    onClick={() => setTab('lessons')}
+                    onClick={() => {
+                      if (
+                        playlistDirty &&
+                        !window.confirm('توجد تعديلات للدرس الحالي لم تُحفظ. الانتقال دون حفظها؟')
+                      )
+                        return
+                      setPlaylistDirty(false)
+                      setTab('lessons')
+                    }}
                   >
                     <Video size={17} />
                     الدروس الحالية
@@ -763,7 +601,7 @@ export default function IslamicLibraryAdmin() {
                       {(
                         [
                           ['info', 'البيانات والظهور'],
-                          ['links', 'الشرح والروابط الحالية'],
+                          ['links', 'الشرح الحالي والروابط'],
                           ['pdf', 'أجزاء PDF'],
                         ] as const
                       ).map(([id, label]) => (
@@ -771,7 +609,16 @@ export default function IslamicLibraryAdmin() {
                           type="button"
                           key={id}
                           className={`${button} ${section === id ? '!border-teal-700 !text-teal-800' : ''}`}
-                          onClick={() => setSection(id)}
+                          onClick={() => {
+                            if (
+                              playlistDirty &&
+                              id !== section &&
+                              !window.confirm('توجد تعديلات للدرس الحالي لم تُحفظ. الانتقال دون حفظها؟')
+                            )
+                              return
+                            if (id !== section) setPlaylistDirty(false)
+                            setSection(id)
+                          }}
                         >
                           {label}
                         </button>
@@ -851,37 +698,69 @@ export default function IslamicLibraryAdmin() {
                         <p className="rounded-xl bg-teal-50 p-3 text-sm leading-7 text-teal-900">
                           هذه الروابط والبيانات الحالية. يمكنك استبدال أي رابط أو إفراغه لإزالته من العرض.
                         </p>
+                        <section className="space-y-4 rounded-2xl border-2 border-teal-700 bg-white p-4">
+                          <h4 className="font-black text-teal-900">الشرح الحالي المعروض للجمهور</h4>
+                          <Label title="اسم الشارح الحالي">
+                            <input
+                              className={field}
+                              value={draft.videoAuthor}
+                              onChange={(event) => update('videoAuthor', event.target.value)}
+                            />
+                          </Label>
+                          <Label title="رابط الشرح / قائمة الدروس الحالية">
+                            <input
+                              type="url"
+                              dir="ltr"
+                              className={field}
+                              value={draft.videoUrl}
+                              onChange={(event) => update('videoUrl', event.target.value)}
+                            />
+                          </Label>
+                          <button
+                            type="button"
+                            className={`${button} !bg-teal-800 !text-white`}
+                            disabled={busy || (!creating && !detail.ready)}
+                            onClick={saveBook}
+                          >
+                            <Save size={16} />
+                            حفظ تعديل الشرح الحالي
+                          </button>
+                        </section>
+                        {selected && detail.ready && (
+                          <CurrentExplanationEditor
+                            key={selected.id}
+                            book={selected}
+                            disabled={busy}
+                            onSave={saveCurrentLesson}
+                            onDirtyChange={setPlaylistDirty}
+                            onBusyChange={setBusy}
+                          />
+                        )}
                         <div className="grid gap-4 sm:grid-cols-2">
-                          {(
-                            [
-                              'sharhTitle',
-                              'sharhAuthor',
-                              'videoAuthor',
-                              'readingLabel',
-                              'sharhLabel',
-                            ] as const
-                          ).map((key) => (
-                            <Label
-                              key={key}
-                              title={
-                                {
-                                  sharhTitle: 'عنوان الشرح المكتوب',
-                                  sharhAuthor: 'مؤلف الشرح المكتوب',
-                                  videoAuthor: 'اسم الشارح المرئي',
-                                  readingLabel: 'نص زر القراءة',
-                                  sharhLabel: 'نص زر الشرح',
-                                }[key]
-                              }
-                            >
-                              <input
-                                className={field}
-                                value={draft[key]}
-                                onChange={(event) => update(key, event.target.value)}
-                              />
-                            </Label>
-                          ))}
+                          {(['sharhTitle', 'sharhAuthor', 'readingLabel', 'sharhLabel'] as const).map(
+                            (key) => (
+                              <Label
+                                key={key}
+                                title={
+                                  {
+                                    sharhTitle: 'عنوان الشرح المكتوب',
+                                    sharhAuthor: 'مؤلف الشرح المكتوب',
+                                    videoAuthor: 'اسم الشارح المرئي',
+                                    readingLabel: 'نص زر القراءة',
+                                    sharhLabel: 'نص زر الشرح',
+                                  }[key]
+                                }
+                              >
+                                <input
+                                  className={field}
+                                  value={draft[key]}
+                                  onChange={(event) => update(key, event.target.value)}
+                                />
+                              </Label>
+                            ),
+                          )}
                         </div>
-                        {BOOK_LINK_FIELDS.map((key) => (
+                        {BOOK_LINK_FIELDS.filter((key) => key !== 'videoUrl').map((key) => (
                           <Label title={linkLabels[key]} key={key}>
                             <div className="flex items-center gap-2">
                               <input
@@ -1149,128 +1028,9 @@ export default function IslamicLibraryAdmin() {
                         </div>
                       </div>
                     )}
-                    {!!playlists.length && (
-                      <section className="space-y-4 rounded-2xl border border-teal-200 bg-teal-50/30 p-4">
-                        <h4 className="font-black">تعديل درس داخل قائمة YouTube الحالية</h4>
-                        <select
-                          className={field}
-                          aria-label="قائمة الشرح"
-                          value={activeListId}
-                          onChange={(event) => chooseList(event.target.value)}
-                        >
-                          {playlists.map((source) => (
-                            <option key={source.key} value={source.list}>
-                              {source.title}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="button" className={button} onClick={() => setInspect(!inspect)}>
-                          {inspect ? 'إغلاق معاينة القائمة' : 'عرض دروس القائمة واختيار درس'}
-                        </button>
-                        {inspect && activeList && (
-                          <PlaylistInspector
-                            url={activeList.url}
-                            onSelect={(number, videoUrl) => {
-                              setOriginalLinks((current) => ({
-                                ...current,
-                                [playlistPolicyKey(activeListId, number)]: videoUrl,
-                              }))
-                              choosePosition(String(number))
-                            }}
-                          />
-                        )}
-                        <Label title="رقم الدرس داخل قائمة الناشر">
-                          <input
-                            className={field}
-                            type="number"
-                            min={1}
-                            max={10000}
-                            value={position}
-                            onChange={(event) => choosePosition(event.target.value)}
-                          />
-                        </Label>
-                        {originalLinks[playlistPolicyKey(activeListId, Number(position))] && (
-                          <a
-                            className="inline-flex items-center gap-2 break-all text-sm text-teal-800 underline"
-                            href={originalLinks[playlistPolicyKey(activeListId, Number(position))]}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <ExternalLink size={15} />
-                            رابط الدرس الأصلي الحالي:{' '}
-                            {originalLinks[playlistPolicyKey(activeListId, Number(position))]}
-                          </a>
-                        )}
-                        <Label title="عنوان بديل (فارغ = عنوان الدرس الأصلي)">
-                          <input
-                            className={field}
-                            value={playlistDraft.title}
-                            onChange={(event) => {
-                              setPlaylistDirty(true)
-                              setPlaylistDraft({ ...playlistDraft, title: event.target.value })
-                            }}
-                          />
-                        </Label>
-                        <Label title="رابط YouTube بديل (فارغ = رابط الناشر الحالي)">
-                          <input
-                            className={field}
-                            dir="ltr"
-                            value={playlistDraft.url}
-                            onChange={(event) => {
-                              setPlaylistDirty(true)
-                              setPlaylistDraft({ ...playlistDraft, url: event.target.value })
-                            }}
-                          />
-                        </Label>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <PolicySelect
-                            label="التقديم والتأخير لهذا الدرس"
-                            value={playlistDraft.seeking}
-                            onChange={(value) => {
-                              setPlaylistDirty(true)
-                              setPlaylistDraft({ ...playlistDraft, seeking: value })
-                            }}
-                          />
-                          <PolicySelect
-                            label="السرعة لهذا الدرس"
-                            value={playlistDraft.speed}
-                            onChange={(value) => {
-                              setPlaylistDirty(true)
-                              setPlaylistDraft({ ...playlistDraft, speed: value })
-                            }}
-                          />
-                        </div>
-                        <label className="flex gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={!playlistDraft.deleted}
-                            onChange={(event) => {
-                              setPlaylistDirty(true)
-                              setPlaylistDraft({ ...playlistDraft, deleted: !event.target.checked })
-                            }}
-                          />
-                          إظهار هذا الدرس
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            className={`${button} !bg-teal-800 !text-white`}
-                            disabled={busy || !detail.ready}
-                            onClick={() => savePlaylistLesson()}
-                          >
-                            حفظ تعديل درس القائمة
-                          </button>
-                          <button
-                            type="button"
-                            className={button}
-                            disabled={busy || !detail.ready}
-                            onClick={() => savePlaylistLesson(true)}
-                          >
-                            استعادة بيانات الناشر وإعداد الكتاب
-                          </button>
-                        </div>
-                      </section>
-                    )}
+                    <p className="rounded-xl bg-teal-50 p-3 text-sm leading-7 text-teal-900">
+                      لتعديل دروس قائمة الشرح الحالية وروابطها، افتح «الشرح الحالي والروابط» من بيانات الكتاب.
+                    </p>
                   </div>
                 )}
               </div>

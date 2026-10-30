@@ -1,24 +1,10 @@
 'use client'
 
-import {
-  useEffect,
-  useRef,
-  useState,
-} from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import {
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  ExternalLink,
-  Loader2,
-  RotateCw,
-  Upload,
-} from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, RotateCw, Upload } from 'lucide-react'
 
-import {
-  safeIslamicLibraryLink,
-} from '@/lib/islamic/safeLinks'
+import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
 
 type RenderTask = {
   promise: Promise<void>
@@ -26,10 +12,7 @@ type RenderTask = {
 }
 
 type PdfPage = {
-  getViewport: (options: {
-    scale: number
-    rotation?: number
-  }) => {
+  getViewport: (options: { scale: number; rotation?: number }) => {
     width: number
     height: number
   }
@@ -63,13 +46,12 @@ type PdfBookReaderProps = {
   title: string
   url?: string
   readingUrl?: string
+  fill?: boolean
 }
 
-const PDFJS_URL =
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.296/pdf.min.mjs'
+const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.296/pdf.min.mjs'
 
-const PDF_ASSETS =
-  'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/'
+const PDF_ASSETS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/'
 
 let enginePromise: Promise<PdfEngine> | null = null
 
@@ -96,17 +78,10 @@ function loadPdf(): Promise<PdfEngine> {
   return enginePromise
 }
 
-export default function PdfBookReader({
-  bookId,
-  title,
-  url,
-  readingUrl,
-}: PdfBookReaderProps) {
-  const [pdf, setPdf] =
-    useState<PdfDocument | null>(null)
+export default function PdfBookReader({ bookId, title, url, readingUrl, fill = false }: PdfBookReaderProps) {
+  const [pdf, setPdf] = useState<PdfDocument | null>(null)
 
-  const [file, setFile] =
-    useState<File | null>(null)
+  const [file, setFile] = useState<File | null>(null)
 
   const [page, setPage] = useState(1)
   const [pageInput, setPageInput] = useState('1')
@@ -121,13 +96,11 @@ export default function PdfBookReader({
   const viewport = useRef<HTMLDivElement>(null)
   const canvasHost = useRef<HTMLDivElement>(null)
 
-  const key =
-    `samee3_pdf_v1:${bookId}:${file?.name || url || ''}`
+  const key = `samee3_pdf_v1:${bookId}:${file?.name || url || ''}`
 
   const safeUrl = safeIslamicLibraryLink(url)
 
-  const external =
-    safeUrl || safeIslamicLibraryLink(readingUrl)
+  const external = safeUrl || safeIslamicLibraryLink(readingUrl)
 
   useEffect(() => {
     const target = viewport.current
@@ -137,9 +110,7 @@ export default function PdfBookReader({
     }
 
     const resize = () => {
-      setWidth(
-        Math.max(200, target.clientWidth - 24)
-      )
+      setWidth(Math.max(200, target.clientWidth - 24))
     }
 
     resize()
@@ -170,11 +141,7 @@ export default function PdfBookReader({
       try {
         const engine = await loadPdf()
 
-        const data = file
-          ? new Uint8Array(
-              await file.arrayBuffer()
-            )
-          : null
+        const data = file ? new Uint8Array(await file.arrayBuffer()) : null
 
         if (!alive) {
           return
@@ -184,9 +151,7 @@ export default function PdfBookReader({
           ...(data
             ? { data }
             : {
-                url:
-                  '/api/library-pdf?url=' +
-                  encodeURIComponent(safeUrl!),
+                url: '/api/library-pdf?url=' + encodeURIComponent(safeUrl!),
               }),
 
           isEvalSupported: false,
@@ -195,16 +160,13 @@ export default function PdfBookReader({
           disableStream: true,
           rangeChunkSize: 65536,
 
-          cMapUrl:
-            PDF_ASSETS + 'cmaps/',
+          cMapUrl: PDF_ASSETS + 'cmaps/',
 
           cMapPacked: true,
 
-          standardFontDataUrl:
-            PDF_ASSETS + 'standard_fonts/',
+          standardFontDataUrl: PDF_ASSETS + 'standard_fonts/',
 
-          wasmUrl:
-            PDF_ASSETS + 'wasm/',
+          wasmUrl: PDF_ASSETS + 'wasm/',
         })
 
         const document = await task.promise
@@ -216,17 +178,10 @@ export default function PdfBookReader({
         let saved = 1
 
         try {
-          saved =
-            Number(localStorage.getItem(key)) || 1
+          saved = Number(localStorage.getItem(key)) || 1
         } catch {}
 
-        const initial = Math.max(
-          1,
-          Math.min(
-            document.numPages,
-            Math.floor(saved)
-          )
-        )
+        const initial = Math.max(1, Math.min(document.numPages, Math.floor(saved)))
 
         setPage(initial)
         setPageInput(String(initial))
@@ -234,7 +189,7 @@ export default function PdfBookReader({
       } catch {
         if (alive) {
           setError(
-            'تعذر فتح PDF من المصدر. أعد المحاولة أو اختر نسخة PDF من جهازك؛ سيستمر الشرح أثناء القراءة.'
+            'تعذر فتح PDF من المصدر. أعد المحاولة أو اختر نسخة PDF من جهازك؛ سيستمر الشرح أثناء القراءة.',
           )
         }
       } finally {
@@ -262,16 +217,12 @@ export default function PdfBookReader({
     let task: RenderTask | null = null
     let pdfPage: PdfPage | null = null
 
-    const canvas =
-      document.createElement('canvas')
+    const canvas = document.createElement('canvas')
 
     canvas.dir = 'ltr'
     canvas.style.direction = 'ltr'
 
-    canvas.setAttribute(
-      'aria-label',
-      `${title}، صفحة ${page}`
-    )
+    canvas.setAttribute('aria-label', `${title}، صفحة ${page}`)
 
     canvas.setAttribute('role', 'img')
 
@@ -296,33 +247,23 @@ export default function PdfBookReader({
         })
 
         const view = pdfPage.getViewport({
-          scale:
-            width / natural.width * zoom,
+          scale: (width / natural.width) * zoom,
           rotation,
         })
 
         const density = Math.min(
           window.devicePixelRatio || 1,
           2,
-          Math.sqrt(
-            3_000_000 /
-            (view.width * view.height)
-          )
+          Math.sqrt(3_000_000 / (view.width * view.height)),
         )
 
-        canvas.width = Math.floor(
-          view.width * density
-        )
+        canvas.width = Math.floor(view.width * density)
 
-        canvas.height = Math.floor(
-          view.height * density
-        )
+        canvas.height = Math.floor(view.height * density)
 
-        canvas.style.width =
-          `${view.width}px`
+        canvas.style.width = `${view.width}px`
 
-        canvas.style.height =
-          `${view.height}px`
+        canvas.style.height = `${view.height}px`
 
         const ctx = canvas.getContext('2d')
 
@@ -338,24 +279,14 @@ export default function PdfBookReader({
           canvasContext: ctx,
           viewport: view,
 
-          transform: [
-            density,
-            0,
-            0,
-            density,
-            0,
-            0,
-          ],
+          transform: [density, 0, 0, density, 0, 0],
         })
 
         await task.promise
 
         if (alive) {
           try {
-            localStorage.setItem(
-              key,
-              String(page)
-            )
+            localStorage.setItem(key, String(page))
           } catch {}
 
           viewport.current?.scrollTo({
@@ -363,15 +294,10 @@ export default function PdfBookReader({
           })
         }
       } catch (e) {
-        const cancelled =
-          e instanceof Error &&
-          e.name ===
-            'RenderingCancelledException'
+        const cancelled = e instanceof Error && e.name === 'RenderingCancelledException'
 
         if (alive && !cancelled) {
-          setError(
-            'تعذر رسم هذه الصفحة. جرّب صفحة أخرى أو افتح نسخة المصدر.'
-          )
+          setError('تعذر رسم هذه الصفحة. جرّب صفحة أخرى أو افتح نسخة المصدر.')
         }
       } finally {
         if (alive) {
@@ -403,45 +329,25 @@ export default function PdfBookReader({
 
       canvas.remove()
     }
-  }, [
-    pdf,
-    page,
-    zoom,
-    rotation,
-    width,
-    key,
-    title,
-  ])
+  }, [pdf, page, zoom, rotation, width, key, title])
 
   const choose = (value: number) => {
     if (!pdf) {
       return
     }
 
-    setPage(
-      Math.max(
-        1,
-        Math.min(
-          pdf.numPages,
-          Math.floor(value) || 1
-        )
-      )
-    )
+    setPage(Math.max(1, Math.min(pdf.numPages, Math.floor(value) || 1)))
   }
 
-  const button =
-    'rounded-xl border border-[#d7ccb7] bg-white p-2 text-xs font-bold disabled:opacity-30'
+  const button = 'rounded-xl border border-[#d7ccb7] bg-white p-2 text-xs font-bold disabled:opacity-30'
 
   return (
     <section
-      className="overflow-hidden rounded-2xl border border-[#ded3bf] bg-[#e8e3d8]"
+      data-study-pdf
+      className={`overflow-hidden rounded-2xl border border-[#ded3bf] bg-[#e8e3d8] ${fill ? 'flex min-h-0 flex-1 flex-col' : ''}`}
     >
-      <header
-        className="flex flex-wrap items-center gap-2 bg-[#faf7ef] p-3"
-      >
-        <strong className="ml-auto text-sm">
-          الكتاب أثناء الشرح
-        </strong>
+      <header className="flex shrink-0 flex-wrap items-center gap-1.5 bg-[#faf7ef] p-2">
+        <strong className="ml-auto text-sm">الكتاب أثناء الشرح</strong>
 
         {pdf && (
           <>
@@ -469,9 +375,7 @@ export default function PdfBookReader({
                 max={pdf.numPages}
                 value={pageInput}
                 onChange={(event) => {
-                  setPageInput(
-                    event.target.value
-                  )
+                  setPageInput(event.target.value)
                 }}
                 onBlur={() => {
                   choose(Number(pageInput))
@@ -479,20 +383,13 @@ export default function PdfBookReader({
                 className="w-16 rounded-lg border bg-white p-2 text-center"
               />
 
-              <span>
-                من{' '}
-                {pdf.numPages.toLocaleString(
-                  'ar-EG'
-                )}
-              </span>
+              <span>من {pdf.numPages.toLocaleString('ar-EG')}</span>
             </form>
 
             <button
               type="button"
               className={button}
-              disabled={
-                page >= pdf.numPages
-              }
+              disabled={page >= pdf.numPages}
               onClick={() => choose(page + 1)}
               aria-label="الصفحة التالية"
             >
@@ -504,39 +401,25 @@ export default function PdfBookReader({
               className={button}
               value={zoom}
               onChange={(event) => {
-                setZoom(
-                  Number(event.target.value)
-                )
+                setZoom(Number(event.target.value))
               }}
             >
-              <option value={1}>
-                عرض الصفحة
-              </option>
+              <option value={1}>عرض الصفحة</option>
 
-              <option value={1.25}>
-                125٪
-              </option>
+              <option value={1.25}>125٪</option>
 
-              <option value={1.5}>
-                150٪
-              </option>
+              <option value={1.5}>150٪</option>
 
-              <option value={2}>
-                200٪
-              </option>
+              <option value={2}>200٪</option>
 
-              <option value={2.5}>
-                250٪
-              </option>
+              <option value={2.5}>250٪</option>
             </select>
 
             <button
               type="button"
               className={button}
               onClick={() => {
-                setRotation(
-                  (value) => (value + 90) % 360
-                )
+                setRotation((value) => (value + 90) % 360)
               }}
               aria-label="تدوير الصفحة"
             >
@@ -545,31 +428,22 @@ export default function PdfBookReader({
           </>
         )}
 
-        <label
-          className={`${button} inline-flex cursor-pointer items-center gap-1`}
-        >
+        <label className={`${button} inline-flex cursor-pointer items-center gap-1`}>
           <Upload size={15} />
           PDF من جهازي
-
           <input
             type="file"
             accept="application/pdf,.pdf"
             className="sr-only"
             onChange={(event) => {
-              const selected =
-                event.target.files?.[0]
+              const selected = event.target.files?.[0]
 
               if (!selected) {
                 return
               }
 
-              if (
-                selected.size >
-                100 * 1024 * 1024
-              ) {
-                setError(
-                  'اختر ملفًا أصغر من ١٠٠ ميجابايت.'
-                )
+              if (selected.size > 100 * 1024 * 1024) {
+                setError('اختر ملفًا أصغر من ١٠٠ ميجابايت.')
                 return
               }
 
@@ -593,11 +467,7 @@ export default function PdfBookReader({
         {safeUrl && (
           <a
             className={button}
-            href={
-              '/api/library-pdf?url=' +
-              encodeURIComponent(safeUrl) +
-              '&download=1'
-            }
+            href={'/api/library-pdf?url=' + encodeURIComponent(safeUrl) + '&download=1'}
             download
             target="_blank"
             rel="noopener noreferrer"
@@ -609,10 +479,7 @@ export default function PdfBookReader({
       </header>
 
       {error && (
-        <div
-          role="alert"
-          className="bg-amber-50 p-4 text-xs leading-7 text-amber-900"
-        >
+        <div role="alert" className="bg-amber-50 p-4 text-xs leading-7 text-amber-900">
           {error}
 
           <button
@@ -629,7 +496,8 @@ export default function PdfBookReader({
 
       <div
         ref={viewport}
-        className="relative max-h-[54dvh] min-h-52 overflow-auto p-3"
+        data-study-pdf-scroll
+        className={`relative overflow-auto p-2 ${fill ? 'min-h-0 flex-1' : 'max-h-[54dvh] min-h-52'}`}
         style={{
           WebkitOverflowScrolling: 'touch',
           overscrollBehavior: 'contain',
@@ -640,22 +508,14 @@ export default function PdfBookReader({
             role="status"
             className="sticky top-2 z-10 mx-auto mb-3 flex w-fit items-center gap-2 rounded-xl bg-white/95 px-4 py-2 text-xs shadow"
           >
-            <Loader2
-              size={17}
-              className="animate-spin"
-            />
-
+            <Loader2 size={17} className="animate-spin" />
             جارٍ تجهيز الصفحة…
           </div>
         )}
 
         {!safeUrl && !file && (
-          <p
-            className="p-5 text-center text-sm leading-8"
-          >
-            اختر نسخة PDF من جهازك لقراءتها
-            تحت الشرح، أو افتح مصدر الكتاب.
-            يمكنك إضافة رابط PDF للكتاب من
+          <p className="p-5 text-center text-sm leading-8">
+            اختر نسخة PDF من جهازك لقراءتها تحت الشرح، أو افتح مصدر الكتاب. يمكنك إضافة رابط PDF للكتاب من
             لوحة إدارة المكتبة.
           </p>
         )}
@@ -668,13 +528,10 @@ export default function PdfBookReader({
       </div>
 
       {file && (
-        <p
-          className="bg-white/80 px-3 py-2 text-xs text-[#7b715e]"
-        >
+        <p className="bg-white/80 px-3 py-2 text-xs text-[#7b715e]">
           {file.name}
           {' · '}
-          يظل الملف على جهازك. آخر صفحة
-          تُحفظ لهذا المتصفح.
+          يظل الملف على جهازك. آخر صفحة تُحفظ لهذا المتصفح.
         </p>
       )}
     </section>

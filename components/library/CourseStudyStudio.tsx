@@ -30,6 +30,7 @@ import {
   type ManagedLesson,
 } from '@/lib/islamic/managed-library'
 import PdfBookReader from './PdfBookReader'
+import StudyWorkspace from './StudyWorkspace'
 
 const input = 'w-full rounded-xl border border-[#d2c4a7] bg-white p-3 text-base text-slate-900 outline-none'
 const btn =
@@ -342,33 +343,35 @@ export default function CourseStudyStudio({
   )
   const pages = Math.max(1, Math.ceil(filtered.length / 40)),
     shownPage = Math.min(page, pages - 1)
-  return (
-    <div dir="rtl" className="space-y-4 text-slate-900">
-      {sources.length > 1 && (
-        <label className="block text-sm font-bold">
-          الشروح المتاحة
-          <select
-            className={`mt-2 ${input}`}
-            value={sourceKey}
-            onChange={(event) => {
-              setSelected(event.target.value)
-              setQuery('')
-              setPage(0)
-            }}
-          >
-            {sources.map((item) => (
-              <option key={item.key} value={item.key}>
-                {item.title}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+  const sourcePicker = sources.length > 1 && (
+    <label className="block text-sm font-bold">
+      الشروح المتاحة
+      <select
+        className={`mt-2 ${input}`}
+        value={sourceKey}
+        onChange={(event) => {
+          setSelected(event.target.value)
+          setQuery('')
+          setPage(0)
+        }}
+      >
+        {sources.map((item) => (
+          <option key={item.key} value={item.key}>
+            {item.title}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+  const mediaPanel = (
+    <>
       <section
         ref={stage}
-        className="sticky top-0 z-20 overflow-hidden rounded-2xl border border-[#ded3bd] bg-[#f7f2e7] shadow-sm [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen>div:first-child]:min-h-0 [&:fullscreen>div:first-child]:flex-1 [&:fullscreen>div:first-child]:aspect-auto"
+        className="shrink-0 overflow-hidden rounded-2xl border border-[#ded3bd] bg-[#f7f2e7] shadow-sm [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen>div:first-child]:min-h-0 [&:fullscreen>div:first-child]:flex-1 [&:fullscreen>div:first-child]:aspect-auto"
       >
-        <div className="relative aspect-video min-h-[200px] w-full bg-[#102e32]">
+        <div
+          className={`relative min-h-[200px] w-full bg-[#102e32] ${showPdf ? 'h-[200px] lg:h-[203px]' : 'aspect-video'}`}
+        >
           {!source && <p className="p-5 text-sm text-white">لا يوجد شرح مرئي لهذا الكتاب حاليًا.</p>}
           {source?.external ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 p-5 text-center text-white">
@@ -440,8 +443,11 @@ export default function CourseStudyStudio({
             <div ref={host} className="absolute inset-0 [&>iframe]:h-full [&>iframe]:w-full" />
           )}
         </div>
-        <div className="space-y-3 p-3">
+        <div className="space-y-2 p-2">
           <p className="text-sm font-bold">{active?.title || source?.title || 'شرح الكتاب'}</p>
+          {(active?.author || book.videoAuthor) && (
+            <p className="text-xs text-slate-600">شرح {active?.author || book.videoAuthor}</p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={btn} disabled={!ready || !active} onClick={toggle}>
               {playing ? <Pause size={16} /> : <Play size={16} />} {playing ? 'إيقاف مؤقت' : 'تشغيل'}
@@ -510,7 +516,7 @@ export default function CourseStudyStudio({
                   value={Math.min(time, duration)}
                   step={1}
                   onChange={(event) => seek(Number(event.target.value))}
-                  className="w-full accent-teal-700"
+                  className="block h-3 w-full accent-teal-700"
                 />
               </div>
             ) : (
@@ -528,7 +534,7 @@ export default function CourseStudyStudio({
                 />
               </div>
             ))}
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <span dir="ltr">
               {format(time)} / {format(duration)}
             </span>
@@ -553,10 +559,11 @@ export default function CourseStudyStudio({
               </label>
             )}
             {source && (
-              <label className="flex items-center gap-2">
+              <label className="flex min-w-0 items-center gap-1.5">
                 <Volume2 size={15} />
                 <input
                   aria-label="مستوى الصوت"
+                  className="h-3 w-20 min-w-0 accent-teal-700"
                   type="range"
                   min={0}
                   max={100}
@@ -587,64 +594,68 @@ export default function CourseStudyStudio({
           </button>
         </p>
       )}
-      {!isFile && !source?.external && (
-        <details className="rounded-2xl border bg-white p-3">
-          <summary className="cursor-pointer text-sm font-bold">الدروس المتاحة ({lessons.length})</summary>
-          <div className="mt-3 space-y-3">
-            <input
-              aria-label="البحث في الدروس"
-              className={input}
-              placeholder="ابحث برقم الدرس أو عنوانه"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value)
-                setPage(0)
-              }}
-            />
-            <div className="grid max-h-64 grid-cols-2 gap-2 overflow-auto sm:grid-cols-3">
-              {filtered.slice(shownPage * 40, (shownPage + 1) * 40).map((lesson) => (
-                <button
-                  type="button"
-                  key={lesson.id}
-                  className={`${btn} ${lesson.id === active?.id ? '!bg-teal-700 !text-white' : ''}`}
-                  disabled={!ready}
-                  onClick={() => goto(lesson)}
-                >
-                  {lesson.title}
-                </button>
-              ))}
-            </div>
-            {pages > 1 && (
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  className={btn}
-                  disabled={!shownPage}
-                  onClick={() => setPage(shownPage - 1)}
-                >
-                  السابق
-                </button>
-                <span>
-                  {shownPage + 1} / {pages}
-                </span>
-                <button
-                  type="button"
-                  className={btn}
-                  disabled={shownPage + 1 >= pages}
-                  onClick={() => setPage(shownPage + 1)}
-                >
-                  التالي
-                </button>
-              </div>
-            )}
-            {!lessons.length && (
-              <p className="text-xs text-slate-500">
-                قد يستغرق تحميل دروس قائمة الناشر لحظات. إذا لم تظهر، أعد المحاولة.
-              </p>
-            )}
+    </>
+  )
+  const lessonMenu = !isFile && !source?.external && (
+    <details className="rounded-2xl border bg-white p-3">
+      <summary className="cursor-pointer text-sm font-bold">الدروس المتاحة ({lessons.length})</summary>
+      <div className="mt-3 space-y-3">
+        <input
+          aria-label="البحث في الدروس"
+          className={input}
+          placeholder="ابحث برقم الدرس أو عنوانه"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setPage(0)
+          }}
+        />
+        <div className="grid max-h-64 grid-cols-2 gap-2 overflow-auto sm:grid-cols-3">
+          {filtered.slice(shownPage * 40, (shownPage + 1) * 40).map((lesson) => (
+            <button
+              type="button"
+              key={lesson.id}
+              className={`${btn} ${lesson.id === active?.id ? '!bg-teal-700 !text-white' : ''}`}
+              disabled={!ready}
+              onClick={() => goto(lesson)}
+            >
+              {lesson.title}
+            </button>
+          ))}
+        </div>
+        {pages > 1 && (
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              className={btn}
+              disabled={!shownPage}
+              onClick={() => setPage(shownPage - 1)}
+            >
+              السابق
+            </button>
+            <span>
+              {shownPage + 1} / {pages}
+            </span>
+            <button
+              type="button"
+              className={btn}
+              disabled={shownPage + 1 >= pages}
+              onClick={() => setPage(shownPage + 1)}
+            >
+              التالي
+            </button>
           </div>
-        </details>
-      )}
+        )}
+        {!lessons.length && (
+          <p className="text-xs text-slate-500">
+            قد يستغرق تحميل دروس قائمة الناشر لحظات. إذا لم تظهر، أعد المحاولة.
+          </p>
+        )}
+      </div>
+    </details>
+  )
+  const bookPanel = (
+    <>
       {showPdf && pdfParts.length > 1 && (
         <label className="block text-sm font-bold">
           جزء الكتاب
@@ -663,6 +674,7 @@ export default function CourseStudyStudio({
       )}
       {showPdf && (
         <PdfBookReader
+          fill
           key={`${book.id}:${pdfParts[chosenPart]?.url || ''}`}
           bookId={book.id}
           title={book.title}
@@ -670,6 +682,21 @@ export default function CourseStudyStudio({
           readingUrl={book.readingUrl}
         />
       )}
+    </>
+  )
+  return showPdf ? (
+    <StudyWorkspace
+      media={mediaPanel}
+      book={bookPanel}
+      sourcePicker={sourcePicker}
+      lessons={lessonMenu}
+      hasVideo={!!source}
+    />
+  ) : (
+    <div dir="rtl" className="space-y-3 text-slate-900">
+      {sourcePicker}
+      {mediaPanel}
+      {lessonMenu}
     </div>
   )
 }

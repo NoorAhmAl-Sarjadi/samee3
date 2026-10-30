@@ -6,14 +6,26 @@ import { createPortal } from 'react-dom'
 const dialogs: Array<{ id: symbol; element: HTMLElement | null }> = []
 let bodyOverflow = ''
 
-export default function Modal({ title, onClose, children, wide = false }: {
-  title: string; onClose: () => void; children: ReactNode; wide?: boolean
+export default function Modal({
+  title,
+  onClose,
+  children,
+  wide = false,
+  fullHeight = false,
+}: {
+  title: string
+  onClose: () => void
+  children: ReactNode
+  wide?: boolean
+  fullHeight?: boolean
 }) {
   const root = useRef<HTMLElement>(null)
   const close = useRef(onClose)
   const [mounted, setMounted] = useState(false)
   close.current = onClose
-  useEffect(() => { setMounted(true) }, [])
+  useEffect(() => {
+    setMounted(true)
+  }, [])
   useEffect(() => {
     if (!mounted) return
     const previous = document.activeElement as HTMLElement | null
@@ -24,13 +36,28 @@ export default function Modal({ title, onClose, children, wide = false }: {
     root.current?.focus()
     const keydown = (event: KeyboardEvent) => {
       if (dialogs[dialogs.length - 1]?.id !== id) return
-      if (event.key === 'Escape') { event.stopPropagation(); close.current(); return }
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        close.current()
+        return
+      }
       if (event.key !== 'Tab') return
-      const controls = root.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select,textarea,[tabindex="0"]')
-      if (!controls?.length) { event.preventDefault(); return }
-      const first = controls[0], last = controls[controls.length - 1]
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === root.current)) { event.preventDefault(); last.focus() }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      const controls = root.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled),a[href],input:not(:disabled),select,textarea,[tabindex="0"]',
+      )
+      if (!controls?.length) {
+        event.preventDefault()
+        return
+      }
+      const first = controls[0],
+        last = controls[controls.length - 1]
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === root.current)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     document.addEventListener('keydown', keydown)
     return () => {
@@ -46,7 +73,28 @@ export default function Modal({ title, onClose, children, wide = false }: {
     }
   }, [mounted])
   if (!mounted) return null
-  return createPortal(<div dir="rtl" className="fixed inset-0 z-[300] flex items-center justify-center bg-[#071a20]/75 p-2 backdrop-blur-sm sm:p-5" onPointerDown={(event) => event.stopPropagation()} onPointerMove={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <section ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`max-h-[94dvh] w-full overflow-auto rounded-3xl bg-[#faf8f3] p-4 text-[#173f43] shadow-2xl outline-none sm:p-6 ${wide ? 'max-w-5xl' : 'max-w-xl'}`}>{children}</section>
-  </div>, document.body)
+  return createPortal(
+    <div
+      dir="rtl"
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-[#071a20]/75 p-2 backdrop-blur-sm sm:p-5"
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerMove={(event) => event.stopPropagation()}
+      onPointerUp={(event) => event.stopPropagation()}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <section
+        ref={root}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`max-h-[94dvh] w-full rounded-3xl bg-[#faf8f3] text-[#173f43] shadow-2xl outline-none ${fullHeight ? 'flex h-[94dvh] min-h-0 flex-col overflow-hidden p-3 sm:p-5' : 'overflow-auto p-4 sm:p-6'} ${wide ? (fullHeight ? 'max-w-7xl' : 'max-w-5xl') : 'max-w-xl'}`}
+      >
+        {children}
+      </section>
+    </div>,
+    document.body,
+  )
 }

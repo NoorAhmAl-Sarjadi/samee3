@@ -224,8 +224,13 @@ export default function ManagedBookStudyView({ bookId }: { bookId: string }) {
           </aside>
         </div>
         {mode && (
-          <Modal title={mode === 'video' ? 'شرح الكتاب' : 'الشرح الصوتي'} onClose={() => setMode(null)} wide>
-            <div className="mb-4 flex items-center justify-between gap-3">
+          <Modal
+            title={mode === 'video' ? 'شرح الكتاب' : 'الشرح الصوتي'}
+            onClose={() => setMode(null)}
+            wide
+            fullHeight={mode === 'video'}
+          >
+            <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
               <h2 className="font-black">{book.title}</h2>
               <button type="button" aria-label="إغلاق الشرح" onClick={() => setMode(null)}>
                 <X />
