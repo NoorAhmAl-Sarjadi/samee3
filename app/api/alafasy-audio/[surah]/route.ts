@@ -22,7 +22,7 @@ function errorResponse(message: string, status: number): Response {
   return Response.json({ error: message }, { status, headers: ERROR_HEADERS })
 }
 
-type RouteContext = { params: { surah: string } | Promise<{ surah: string }> }
+type RouteContext = { params: Promise<{ surah: string }> }
 
 async function relay(request: Request, context: RouteContext): Promise<Response> {
   const { surah: raw } = await context.params
