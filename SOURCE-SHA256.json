@@ -1,0 +1,14 @@
+{
+  "lib/islamic/managed-library.ts": "3b011e6fbd7e273310c6849a71df56160c4728c2756bba46d196b7fbf9e2613b",
+  "lib/islamic/use-managed-library.ts": "2d89a6181b3f2b87d0180edd7461a55989c4afc029d31967a9f5297b32a30ca0",
+  "lib/islamic/youtube-player.ts": "a4d728747759005a88567713b08437f1869da917bfdfbe08f24f0ec005cf185b",
+  "components/library/CourseStudyStudio.tsx": "a370289c7ea0d1397e8b2be533a09d7ce180ec709bd2be6e2ef6224f1caeb9d7",
+  "components/library/ManagedBookStudyView.tsx": "1fd8e7b7b1b81b0cbe57bedfc57cf570885ada127265d30910482077d1ae031e",
+  "components/library/ManagedCategoryView.tsx": "ecd77c81f3187bc79e2b26acdf8436d33f7010e840e1a3c3d68a87d86165e3f8",
+  "components/library/LearningLibrary.tsx": "7845863157dd8f9660a0497cf61dc7151f83d23e6d9165aa7f724947ea76aad6",
+  "components/admin/IslamicLibraryAdmin.tsx": "b676250ab0ba7965fc20be2e2e776f76140511cbe3b3ef5aafd8c46fa667fa7a",
+  "app/islamic-library/book/[id]/page.tsx": "cef4618b1971aa3cd0193ea2c6973071523f557acedadd49e2954a79497e0f02",
+  "app/islamic-library/book/[id]/read/page.tsx": "4e133841fdbb79d48d1c752709b4be4027147552473cc6a488ecebfb53f20e4b",
+  "app/api/islamic-library/book/[id]/route.ts": "4aa0d895739abb2dfbe94adf1a3118e5828ba9aa082415e16079b976fcf19260",
+  "scripts/managed-library.test.cjs": "52814dc16d07e3b59da4a41ec8c3be3b2cb83856ead62a7ccc94629ef7121f88"
+}
