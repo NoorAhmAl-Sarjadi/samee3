@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, ShieldCheck, WifiOff } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
+import Samee3ViewportGuard from '@/components/mobile/Samee3ViewportGuard'
 
 /**
  * The public /messages address opens the personal chat for regular users.
@@ -46,5 +47,5 @@ export default function MessagesLayout({ children }: { children: ReactNode }) {
     )
   }
 
-  return <>{children}</>
+  return <Samee3ViewportGuard scope="messages">{children}</Samee3ViewportGuard>
 }
