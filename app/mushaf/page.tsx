@@ -1,4 +1,10 @@
 'use client'
+import {
+  ALAFASY_COLLECTED_RECITER_ID,
+  ALAFASY_COLLECTED_MOSHAF_ID,
+  collectedAlafasyMushafReciter,
+  loadCollectedAlafasyTimings,
+} from '@/lib/quran/alafasy-collected'
 
 import { inspectMushafDownloads as inspectAllMushafCaches, announceMushafDownloadsChanged } from '@/lib/quran/mushaf-downloads'
 import { tafsirReferences } from '@/lib/quran/tafsir-reference'
@@ -3392,7 +3398,9 @@ export default function MushafPage() {
     const requestId = ++recitersRequestRef.current
 
     setRecitersLoading(true)
-    const savedReciters = readSavedReciterSources(riwayaId)
+    const savedReciters = riwayaId === 'hafs'
+      ? [collectedAlafasyMushafReciter(), ...readSavedReciterSources(riwayaId).filter((item) => item.apiId !== ALAFASY_COLLECTED_RECITER_ID)]
+      : readSavedReciterSources(riwayaId)
     if (isBrowserOffline()) {
       if (requestId === recitersRequestRef.current) {
         setReciterCatalog({ riwaya: riwayaId, entries: savedReciters })
@@ -3489,12 +3497,16 @@ export default function MushafPage() {
         ).values(),
       )
 
+      // Keep the dedicated collected Mushaf distinct from the MP3Quran Alafasy reciter.
+      if (riwayaId === 'hafs') unique.unshift(collectedAlafasyMushafReciter())
       if (requestId !== recitersRequestRef.current) {
         return unique
       }
 
       const timed = new Set(timingReads.map((read) => read.id))
-      unique.sort((a,b) => Number(timed.has(b.moshafId || 0)) - Number(timed.has(a.moshafId || 0)))
+      unique.sort((a,b) =>
+        Number(b.apiId === ALAFASY_COLLECTED_RECITER_ID) - Number(a.apiId === ALAFASY_COLLECTED_RECITER_ID) ||
+        Number(timed.has(b.moshafId || 0)) - Number(timed.has(a.moshafId || 0)))
       if (unique.length) saveReciterSources(riwayaId, unique)
       setReciterCatalog({ riwaya: riwayaId, entries: unique.length ? unique : savedReciters })
       return unique.length ? unique : savedReciters
@@ -3829,6 +3841,17 @@ export default function MushafPage() {
     }
 
     const cachedTimings = readCachedAyahTimings(surahNumber, readId)
+    if (readId === ALAFASY_COLLECTED_MOSHAF_ID) {
+      if (cachedTimings.length || isBrowserOffline()) return cachedTimings
+      try {
+        const collected = await loadCollectedAlafasyTimings(surahNumber)
+        if (collected.length) writeCachedAyahTimings(surahNumber, readId, collected)
+        return collected
+      } catch (error) {
+        console.warn('SAMEE3 collected Alafasy timings unavailable', error)
+        return [] as AyahTiming[] // Never use the other Alafasy recording's timings.
+      }
+    }
     if (cachedTimings.length) return cachedTimings
 
     if (isBrowserOffline()) {
@@ -4074,6 +4097,9 @@ export default function MushafPage() {
       if (!activeReciter) {
         activeReciter = readSavedReciterSources(targetRiwaya).find((item) =>
           item.apiId === expectedReciter && (!expectedMoshaf || item.moshafId === expectedMoshaf)) || null
+      }
+      if (!activeReciter && targetRiwaya === 'hafs' && expectedReciter === ALAFASY_COLLECTED_RECITER_ID) {
+        activeReciter = collectedAlafasyMushafReciter()
       }
       if (!activeReciter && !isBrowserOffline()) {
         const payload = await fetchMushafJson(

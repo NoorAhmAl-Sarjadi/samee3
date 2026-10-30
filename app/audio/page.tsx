@@ -1,4 +1,5 @@
 'use client'
+import { collectedAlafasyLibraryReciter } from '@/lib/quran/alafasy-collected'
 
 import { KHUTBAH_SCHOLARS, libraryAudioSource } from '@/lib/audio-catalog'
 import { bindQuranMediaSession } from '@/lib/quran/media-session'
@@ -1413,7 +1414,13 @@ export default function AudioPage() {
             .filter((reciter: Reciter) => reciter.moshaf.length > 0 && getMoshafForRiwaya(reciter, activeRiwaya) !== null)
           : []
 
+        // SAMEE3 COLLECTED ALAFASY: only expose this Hafs recording as a separate reciter.
+        if (normalizeArabic(activeRiwaya.name).includes(normalizeArabic('حفص'))) {
+          nextReciters.unshift(collectedAlafasyLibraryReciter(activeRiwaya.id))
+        }
         nextReciters.sort((a, b) => {
+          if (a.id === 9000123) return -1
+          if (b.id === 9000123) return 1
           const aIndex = FAVORITE_RECITER_NAMES.findIndex(name =>
             normalizeArabic(a.name).includes(normalizeArabic(name))
           )
