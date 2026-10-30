@@ -70,7 +70,9 @@ function AdministrationInbox() {
   const [recoveryMessage, setRecoveryMessage] = useState('')
   const [revision, setRevision] = useState(0)
   const [mobileChat, setMobileChat] = useState(false)
-  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const [visibleHeight, setVisibleHeight] = useState<number | null>(null)
+  const messagesPanelRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const sendingRef = useRef(false)
   const activeIdRef = useRef<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -131,9 +133,41 @@ function AdministrationInbox() {
     )
   }, [isAdmin, activeId, revision])
 
+  // Never scroll the whole page: that would push the composer behind the nav.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
-  }, [activeId, messages.length])
+    const list = messagesPanelRef.current
+    if (list) list.scrollTop = list.scrollHeight
+  }, [activeId, messages.length, mobileChat])
+
+  // On iPhone the keyboard often resizes only visualViewport, not 100dvh.
+  useEffect(() => {
+    const viewport = window.visualViewport
+    const updateHeight = () => {
+      const next = viewport?.height ?? window.innerHeight
+      if (Number.isFinite(next) && next > 0) {
+        setVisibleHeight(Math.round(next))
+      }
+    }
+    updateHeight()
+    viewport?.addEventListener('resize', updateHeight)
+    viewport?.addEventListener('scroll', updateHeight)
+    window.addEventListener('resize', updateHeight)
+    window.addEventListener('orientationchange', updateHeight)
+    return () => {
+      viewport?.removeEventListener('resize', updateHeight)
+      viewport?.removeEventListener('scroll', updateHeight)
+      window.removeEventListener('resize', updateHeight)
+      window.removeEventListener('orientationchange', updateHeight)
+    }
+  }, [])
+
+  // Keep the draft visible and allow it to grow without covering the chat.
+  useEffect(() => {
+    const textarea = composerRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 52), 120)}px`
+  }, [draft, mobileChat])
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -223,9 +257,19 @@ function AdministrationInbox() {
   }
 
   return (
-    <main dir="rtl" className="min-h-screen bg-[#f4f9fe] px-3 py-5 text-slate-900 sm:px-6 sm:py-8">
-      <div className="mx-auto max-w-7xl">
-        <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <main
+      dir="rtl"
+      className="samee3-admin-inbox-page flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-[#f4f9fe] px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-[max(12px,env(safe-area-inset-top))] text-slate-900 sm:px-6 sm:py-6"
+      style={visibleHeight ? { height: `${visibleHeight}px` } : undefined}
+    >
+      {/* The global floating nav must never cover the admin message input. */}
+      <style>{`
+        body:has(.samee3-admin-inbox-page) nav[aria-label="التنقل الرئيسي"] { display: none !important; }
+        body:has(.samee3-admin-inbox-page) aside[aria-label="التحكم في تلاوة المصحف"] { display: none !important; }
+        body:has(.samee3-admin-inbox-page) p[role="alert"][title="خطأ التلاوة"] { display: none !important; }
+      `}</style>
+      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col">
+        <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span className="rounded-2xl bg-[#103d4c] p-3 text-[#e9d5aa]"><ShieldCheck size={25} /></span>
             <div>
@@ -241,12 +285,12 @@ function AdministrationInbox() {
         </header>
 
         {fromCache && (
-          <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"><WifiOff className="ml-2 inline" size={16} /> البيانات المعروضة من الذاكرة المؤقتة؛ يُفضَّل الاتصال بالخادم.</p>
+          <p className="mb-2 shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800"><WifiOff className="ml-2 inline" size={16} /> البيانات المعروضة من الذاكرة المؤقتة؛ يُفضَّل الاتصال بالخادم.</p>
         )}
-        {inboxError && <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{inboxError}</p>}
-        {recoveryMessage && <p className="mb-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">{recoveryMessage}</p>}
+        {inboxError && <p role="alert" className="mb-2 max-h-24 shrink-0 overflow-y-auto rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">{inboxError}</p>}
+        {recoveryMessage && <p className="mb-2 shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600">{recoveryMessage}</p>}
 
-        <section className="grid h-[min(780px,calc(100dvh-155px))] min-h-[540px] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-900/5 md:grid-cols-[320px_minmax(0,1fr)]">
+        <section className="grid min-h-0 flex-1 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-900/5 md:max-h-[780px] md:grid-cols-[320px_minmax(0,1fr)]">
           <aside className={`${mobileChat ? 'hidden md:flex' : 'flex'} min-h-0 flex-col border-l border-slate-100`}>
             <div className="border-b border-slate-100 p-4">
               <div className="relative">
@@ -287,7 +331,7 @@ function AdministrationInbox() {
                   </div>
                   <button type="button" onClick={() => setMobileChat(false)} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold md:hidden"><ArrowRight size={17} className="inline" /> المحادثات</button>
                 </div>
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[#f8fafb] p-4 sm:p-6">
+                <div ref={messagesPanelRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-[#f8fafb] p-4 sm:p-6" aria-live="polite">
                   {messagesLoading ? <p className="text-center text-sm text-slate-500">جارٍ تحميل المحادثة…</p> : messages.length === 0 ? <p className="py-10 text-center text-sm text-slate-500">لا توجد رسائل داخل هذه المحادثة.</p> : messages.map((item) => {
                     const mine = item.senderId !== active.id
                     return (
@@ -303,15 +347,14 @@ function AdministrationInbox() {
                       </div>
                     )
                   })}
-                  <div ref={bottomRef} />
                 </div>
-                <form onSubmit={(event) => void send(event)} className="border-t border-slate-100 bg-white p-4">
+                <form onSubmit={(event) => void send(event)} className="shrink-0 border-t border-slate-100 bg-white px-3 py-3 sm:p-4">
                   {messageError && <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{messageError}</p>}
                   <div className="flex items-end gap-2">
-                    <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={enterToSend} maxLength={5000} rows={2} disabled={sending} placeholder="اكتب رد الإدارة…" aria-label="رد الإدارة" className="max-h-40 min-h-12 flex-1 resize-y rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#14596e] disabled:opacity-60" />
+                    <textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={enterToSend} maxLength={5000} rows={2} disabled={sending} placeholder="اكتب رد الإدارة…" aria-label="رد الإدارة" dir="auto" className="min-h-[52px] min-w-0 max-h-[120px] flex-1 resize-none overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#14596e] focus:bg-white disabled:opacity-60" />
                     <button type="submit" disabled={!draft.trim() || sending} aria-label="إرسال الرد" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#14596e] text-white disabled:opacity-50">{sending ? <Loader2 className="animate-spin" size={19} /> : <Send size={19} />}</button>
                   </div>
-                  <p className="mt-2 text-[11px] text-slate-400">Enter للإرسال · Shift + Enter لسطر جديد · {draft.length}/5000</p>
+                  <p className="mt-1 text-[11px] text-slate-500">{draft.length}/5000 · Enter للإرسال، Shift + Enter لسطر جديد</p>
                 </form>
               </>
             ) : (
