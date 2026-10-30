@@ -1,0 +1,45 @@
+name: SAMEE3 - Integrate Collected Alafasy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply surgical, repeat-safe changes to existing pages
+        run: node scripts/integrate-alafasy-collected.cjs
+      - name: Check patched source files are present
+        shell: bash
+        run: |
+          grep -q 'collectedAlafasyLibraryReciter' app/audio/page.tsx
+          grep -q 'loadCollectedAlafasyTimings' app/mushaf/page.tsx
+          test -f 'app/api/alafasy-timings/[surah]/route.ts'
+      - name: Install existing project dependencies
+        run: npm ci
+      - name: TypeScript check
+        run: npm run typecheck
+      - name: Production build check
+        run: npm run build
+      - name: Commit the integrated pages
+        shell: bash
+        run: |
+          if git diff --quiet -- app/audio/page.tsx app/mushaf/page.tsx; then
+            echo "Already integrated; no change needed."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/audio/page.tsx app/mushaf/page.tsx
+          git commit -m 'feat(audio): add separate Alafasy collected Mushaf to player and library'
+          git push
