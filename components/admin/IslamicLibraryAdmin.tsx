@@ -1,2580 +1,1346 @@
 'use client'
 
-import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from 'react'
-
-import {
-  BookOpen,
-  Plus,
-  Pencil,
-  Trash2,
-  Save,
-  X,
-  Video,
-  Download,
-  Search,
-  Layers3,
-  GraduationCap,
-  Loader2,
-  RefreshCw,
-  Eye,
-  EyeOff,
-  ExternalLink,
-  PlayCircle,
-  UserRound,
-  FileText,
-} from 'lucide-react'
-
-import { db } from '@/lib/firebase'
-
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import Link from 'next/link'
 import {
   collection,
   deleteDoc,
   doc,
   getDocs,
+  getDocsFromServer,
+  runTransaction,
   serverTimestamp,
   setDoc,
+  writeBatch,
 } from 'firebase/firestore'
-
 import {
-  SUNNI_LIBRARY_BOOKS,
-  SUNNI_LIBRARY_CATEGORIES,
-  SUNNI_LIBRARY_LEVELS,
-  type SunniLibraryBook,
-  type SunniLibraryCategoryId,
-  type SunniLibraryLevel,
-} from '@/lib/islamic/sunniLibrary'
+  BookOpen,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Loader2,
+  Pencil,
+  Plus,
+  Save,
+  Search,
+  Settings2,
+  Video,
+  X,
+} from 'lucide-react'
+import { db } from '@/lib/firebase'
+import { SUNNI_LIBRARY_CATEGORIES, SUNNI_LIBRARY_LEVELS } from '@/lib/islamic/sunniLibrary'
+import { safeIslamicLibraryLink } from '@/lib/islamic/safeLinks'
+import {
+  loadYoutubePlayer,
+  youtubeSource,
+  youtubeError,
+  type StudyPlayer,
+} from '@/lib/islamic/youtube-player'
+import {
+  BOOK_LINK_FIELDS,
+  BOOK_TEXT_FIELDS,
+  effectivePolicy,
+  mergeLibraryBook,
+  mergeLibraryCatalog,
+  playlistOverride,
+  playlistPolicyKey,
+  studySources,
+  type ManagedBook,
+  type ManagedLesson,
+  type PlaylistOverride,
+} from '@/lib/islamic/managed-library'
+import { useManagedBook, useManagedCatalog } from '@/lib/islamic/use-managed-library'
 
-import { LEARNING_COURSES } from '@/lib/islamic/curriculum'
-const ADMIN_CATALOG = Array.from(new Map([...SUNNI_LIBRARY_BOOKS, ...LEARNING_COURSES].map((book) => [book.id, book])).values())
-
-interface VideoLesson {
-  id: string
-  title: string
-  url: string
-  order: number
-}
-
-interface FirestoreBookData {
-  id?: unknown
-  title?: unknown
-  author?: unknown
-  category?: unknown
-  level?: unknown
-  description?: unknown
-  readingUrl?: unknown
-  readingLabel?: unknown
-  sharhTitle?: unknown
-  sharhAuthor?: unknown
-  sharhUrl?: unknown
-  sharhLabel?: unknown
-  videoUrl?: unknown
-  audioUrl?: unknown
-  audioSourceUrl?: unknown
-  videoDownloadUrl?: unknown
-  downloadUrl?: unknown
-  quranpediaBookId?: unknown
-  deleted?: unknown
-}
-
-interface AdminBook extends SunniLibraryBook {
-  isCustom: boolean
+type Choice = 'inherit' | 'allow' | 'block'
+type Draft = Record<(typeof BOOK_TEXT_FIELDS)[number] | (typeof BOOK_LINK_FIELDS)[number], string> & {
+  category: ManagedBook['category']
+  level: ManagedBook['level']
   deleted: boolean
+  lessonSeekDefault: boolean
+  lessonSpeedDefault: boolean
+  quranpediaBookId: string
+  pdfParts: { label: string; url: string }[]
 }
-
-interface BookFormState {
-  title: string
-  author: string
-  category: SunniLibraryCategoryId
-  level: SunniLibraryLevel
-  description: string
-  readingUrl: string
-  readingLabel: string
-  videoUrl: string
-  audioUrl: string
-  audioSourceUrl: string
-  videoDownloadUrl: string
-  downloadUrl: string
-  sharhTitle: string
-  sharhAuthor: string
-  sharhUrl: string
-  sharhLabel: string
-}
-
-interface VideoFormState {
+type LessonDraft = {
   title: string
   url: string
   order: string
+  seeking: Choice
+  speed: Choice
+  deleted: boolean
 }
-
-const EMPTY_BOOK_FORM: BookFormState = {
-  title: '',
-  author: '',
-  category: 'aqidah',
-  level: 'مبتدئ',
-  description: '',
-  readingUrl: '',
-  readingLabel: 'قراءة الكتاب',
-  videoUrl: '',
-  audioUrl: '',
-  audioSourceUrl: '',
-  videoDownloadUrl: '',
-  downloadUrl: '',
-  sharhTitle: '',
-  sharhAuthor: '',
-  sharhUrl: '',
-  sharhLabel: 'فتح الشرح',
-}
-
-const EMPTY_VIDEO_FORM: VideoFormState = {
+const blankLesson: LessonDraft = {
   title: '',
   url: '',
   order: '1',
+  seeking: 'inherit',
+  speed: 'inherit',
+  deleted: false,
 }
-
-function toStringValue(
-  value: unknown,
-  fallback = '',
-): string {
-  if (typeof value === 'string') {
-    return value
-  }
-
-  return fallback
+const field =
+  'w-full min-w-0 rounded-xl border border-slate-300 bg-white p-3 text-base text-slate-900 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-100'
+const button =
+  'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-teal-600 disabled:cursor-not-allowed disabled:opacity-40'
+const uid = () => `added-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
+const errorText = (error: unknown) => {
+  const code = (error as { code?: string })?.code
+  return code === 'permission-denied'
+    ? 'الحساب الحالي لا يملك صلاحية الإدارة. تحقق من تسجيل الدخول وصلاحية المدير.'
+    : error instanceof Error
+      ? error.message
+      : 'تعذّر تنفيذ الطلب. تحقق من الاتصال.'
 }
-
-function isLibraryLevel(
-  value: unknown,
-): value is SunniLibraryLevel {
+const choice = (value: boolean | null | undefined): Choice =>
+  typeof value === 'boolean' ? (value ? 'allow' : 'block') : 'inherit'
+const bool = (value: Choice) => (value === 'inherit' ? null : value === 'allow')
+function draftFrom(book?: ManagedBook | null): Draft {
+  const result = {
+    category: book?.category || 'aqidah',
+    level: book?.level || 'مبتدئ',
+    deleted: book?.deleted || false,
+    lessonSeekDefault: book?.lessonSeekDefault ?? true,
+    lessonSpeedDefault: book?.lessonSpeedDefault ?? true,
+    quranpediaBookId: book?.quranpediaBookId ? String(book.quranpediaBookId) : '',
+    pdfParts: book?.pdfParts?.map((part) => ({ ...part })) || [],
+  } as Draft
+  for (const key of [...BOOK_TEXT_FIELDS, ...BOOK_LINK_FIELDS]) result[key] = book?.[key] || ''
+  return result
+}
+function Label({ title, children }: { title: string; children: ReactNode }) {
   return (
-    value === 'مبتدئ' ||
-    value === 'متوسط' ||
-    value === 'متقدم'
+    <label className="block min-w-0 space-y-2 text-sm font-bold text-slate-700">
+      <span>{title}</span>
+      {children}
+    </label>
+  )
+}
+function PolicySelect({
+  value,
+  onChange,
+  label,
+}: {
+  value: Choice
+  onChange: (value: Choice) => void
+  label: string
+}) {
+  return (
+    <Label title={label}>
+      <select className={field} value={value} onChange={(event) => onChange(event.target.value as Choice)}>
+        <option value="inherit">يتبع إعداد الكتاب</option>
+        <option value="allow">مسموح</option>
+        <option value="block">غير مسموح</option>
+      </select>
+    </Label>
   )
 }
 
-function isLibraryCategory(
-  value: unknown,
-): value is SunniLibraryCategoryId {
+function PlaylistInspector({
+  url,
+  onSelect,
+}: {
+  url: string
+  onSelect: (position: number, video: string) => void
+}) {
+  const host = useRef<HTMLDivElement>(null)
+  const [ids, setIds] = useState<string[]>([]),
+    [error, setError] = useState(''),
+    [page, setPage] = useState(0)
+  useEffect(() => {
+    let alive = true,
+      current: StudyPlayer | null = null,
+      interval: ReturnType<typeof setInterval> | undefined
+    const list = youtubeSource(url)?.list
+    if (!list) return
+    setIds([])
+    setError('')
+    setPage(0)
+    void loadYoutubePlayer()
+      .then((api) => {
+        if (!alive || !host.current) return
+        const iframe = document.createElement('iframe')
+        iframe.title = 'معاينة دروس قائمة YouTube'
+        iframe.referrerPolicy = 'strict-origin-when-cross-origin'
+        iframe.allow = 'encrypted-media; fullscreen'
+        iframe.allowFullscreen = true
+        iframe.src = `https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(list)}&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`
+        host.current.replaceChildren(iframe)
+        current = new api.Player(iframe, {
+          width: '100%',
+          height: '100%',
+          host: 'https://www.youtube.com',
+          playerVars: { controls: 1, origin: location.origin, playsinline: 1 },
+          events: {
+            onReady: (event) => {
+              current = event.target
+              current.cuePlaylist({ list, listType: 'playlist', index: 0, startSeconds: 0 })
+              interval = setInterval(() => {
+                if (!alive) return
+                const videos = current?.getPlaylist()
+                if (videos?.length) setIds((old) => (old.join(',') === videos.join(',') ? old : videos))
+              }, 800)
+            },
+            onStateChange: () => {},
+            onError: (event) => {
+              if (alive) setError(youtubeError(event.data))
+            },
+          },
+        })
+      })
+      .catch((error) => {
+        if (alive) setError(errorText(error))
+      })
+    return () => {
+      alive = false
+      clearInterval(interval)
+      try {
+        current?.destroy()
+      } catch {
+        /* player already removed */
+      }
+    }
+  }, [url])
   return (
-    value === 'aqidah' ||
-    value === 'fiqh' ||
-    value === 'seerah' ||
-    value === 'usul-tafsir' ||
-    value === 'usul-fiqh' ||
-    value === 'usul-hadith' ||
-    value === 'tafsir' ||
-    value === 'hadith-books'
+    <div className="space-y-3 rounded-xl border border-slate-200 p-3">
+      <div
+        ref={host}
+        className="mx-auto aspect-video min-h-[200px] w-full max-w-2xl bg-slate-900 [&>iframe]:h-full [&>iframe]:w-full"
+      />
+      {error && (
+        <p role="alert" className="text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      <p className="text-xs leading-6 text-slate-500">
+        اختر رقم الدرس لتعديل عنوانه أو رابطه أو صلاحياته. إذا لم تصل قائمة الدروس من YouTube، اكتب الرقم
+        يدويًا بالأسفل.
+      </p>
+      <div className="grid max-h-56 grid-cols-2 gap-2 overflow-auto sm:grid-cols-4">
+        {ids.slice(page * 40, (page + 1) * 40).map((id, i) => (
+          <button
+            type="button"
+            key={`${id}-${i}`}
+            className={button}
+            onClick={() => onSelect(page * 40 + i + 1, `https://www.youtube.com/watch?v=${id}`)}
+          >
+            تعديل الدرس {page * 40 + i + 1}
+          </button>
+        ))}
+      </div>
+      {ids.length > 40 && (
+        <div className="flex items-center justify-between">
+          <button type="button" className={button} disabled={!page} onClick={() => setPage(page - 1)}>
+            السابق
+          </button>
+          <span>
+            {page + 1} / {Math.ceil(ids.length / 40)}
+          </span>
+          <button
+            type="button"
+            className={button}
+            disabled={(page + 1) * 40 >= ids.length}
+            onClick={() => setPage(page + 1)}
+          >
+            التالي
+          </button>
+        </div>
+      )}
+    </div>
   )
-}
-
-function createBookFromFirestore(
-  id: string,
-  data: FirestoreBookData,
-  fallback?: SunniLibraryBook,
-): AdminBook | null {
-  const title =
-    toStringValue(data.title) ||
-    fallback?.title ||
-    ''
-
-  if (!title) {
-    return null
-  }
-
-  const author =
-    toStringValue(data.author) ||
-    fallback?.author ||
-    'غير محدد'
-
-  const category = isLibraryCategory(data.category)
-    ? data.category
-    : fallback?.category || 'aqidah'
-
-  const level = isLibraryLevel(data.level)
-    ? data.level
-    : fallback?.level || 'مبتدئ'
-
-  const description =
-    toStringValue(data.description) ||
-    fallback?.description ||
-    ''
-
-  const readingUrl =
-    toStringValue(data.readingUrl) ||
-    fallback?.readingUrl
-
-  const readingLabel =
-    toStringValue(data.readingLabel) ||
-    fallback?.readingLabel
-
-  const sharhTitle =
-    toStringValue(data.sharhTitle) ||
-    fallback?.sharhTitle
-
-  const sharhAuthor =
-    toStringValue(data.sharhAuthor) ||
-    fallback?.sharhAuthor
-
-  const sharhUrl =
-    toStringValue(data.sharhUrl) ||
-    fallback?.sharhUrl
-
-  const sharhLabel =
-    toStringValue(data.sharhLabel) ||
-    fallback?.sharhLabel
-
-  const downloadUrl =
-    toStringValue(data.downloadUrl) ||
-    fallback?.downloadUrl
-
-  const quranpediaBookId =
-    typeof data.quranpediaBookId === 'number'
-      ? data.quranpediaBookId
-      : fallback?.quranpediaBookId
-
-  return {
-    id,
-    title,
-    author,
-    category,
-    level,
-    description,
-    readingUrl,
-    readingLabel,
-    videoUrl: toStringValue(data.videoUrl) || fallback?.videoUrl,
-    audioUrl: toStringValue(data.audioUrl) || fallback?.audioUrl,
-    audioSourceUrl: toStringValue(data.audioSourceUrl) || fallback?.audioSourceUrl,
-    videoDownloadUrl: toStringValue(data.videoDownloadUrl) || fallback?.videoDownloadUrl,
-    downloadUrl,
-    sharhTitle,
-    sharhAuthor,
-    sharhUrl,
-    sharhLabel,
-    quranpediaBookId,
-    isCustom: !fallback,
-    deleted: data.deleted === true,
-  }
-}
-
-function makeBookId(
-  title: string,
-): string {
-  const cleaned = title
-    .trim()
-    .toLowerCase()
-    .replace(
-      /[^a-z0-9\u0600-\u06ff\s-]/gi,
-      '',
-    )
-    .replace(
-      /\s+/g,
-      '-',
-    )
-    .replace(
-      /-+/g,
-      '-',
-    )
-    .replace(
-      /^-+|-+$/g,
-      '',
-    )
-
-  const suffix =
-    Math.random()
-      .toString(36)
-      .slice(2, 7)
-
-  return `${cleaned || 'book'}-${suffix}`
-}
-
-function makeVideoId(): string {
-  return `video-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 7)}`
-}
-
-function buildBookForm(
-  book: SunniLibraryBook,
-): BookFormState {
-  return {
-    title: book.title || '',
-    author: book.author || '',
-    category: book.category,
-    level: book.level,
-    description: book.description || '',
-    readingUrl: book.readingUrl || '',
-    readingLabel:
-      book.readingLabel || 'قراءة الكتاب',
-    videoUrl: book.videoUrl || '',
-    audioUrl: book.audioUrl || '',
-    audioSourceUrl: book.audioSourceUrl || '',
-    videoDownloadUrl: book.videoDownloadUrl || '',
-    downloadUrl: book.downloadUrl || '',
-    sharhTitle: book.sharhTitle || '',
-    sharhAuthor: book.sharhAuthor || '',
-    sharhUrl: book.sharhUrl || '',
-    sharhLabel:
-      book.sharhLabel || 'فتح الشرح',
-  }
 }
 
 export default function IslamicLibraryAdmin() {
-  const [books, setBooks] = useState<AdminBook[]>([])
-  const [videos, setVideos] = useState<VideoLesson[]>([])
-
-  const [loadingBooks, setLoadingBooks] =
-    useState(true)
-
-  const [loadingVideos, setLoadingVideos] =
-    useState(false)
-
-  const [savingBook, setSavingBook] =
-    useState(false)
-
-  const [savingVideo, setSavingVideo] =
-    useState(false)
-
-  const [search, setSearch] = useState('')
-
-  const [levelFilter, setLevelFilter] =
-    useState<'الكل' | SunniLibraryLevel>('الكل')
-
-  const [categoryFilter, setCategoryFilter] =
-    useState<
-      'الكل' | SunniLibraryCategoryId
-    >('الكل')
-
-  const [selectedBookId, setSelectedBookId] =
-    useState<string | null>(null)
-
-  const [bookModalOpen, setBookModalOpen] =
-    useState(false)
-
-  const [videoModalOpen, setVideoModalOpen] =
-    useState(false)
-
-  const [editingBookId, setEditingBookId] =
-    useState<string | null>(null)
-
-  const [editingVideoId, setEditingVideoId] =
-    useState<string | null>(null)
-
-  const [deletingBookId, setDeletingBookId] =
-    useState<string | null>(null)
-
-  const [deletingVideoId, setDeletingVideoId] =
-    useState<string | null>(null)
-
-  const [bookForm, setBookForm] =
-    useState<BookFormState>({
-      ...EMPTY_BOOK_FORM,
-    })
-
-  const [videoForm, setVideoForm] =
-    useState<VideoFormState>({
-      ...EMPTY_VIDEO_FORM,
-    })
-
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
-
-  const selectedBook = useMemo(() => {
-    if (!selectedBookId) {
-      return null
-    }
-
-    return (
-      books.find(
+  const catalog = useManagedCatalog()
+  const [selectedId, setSelectedId] = useState<string | null>(null),
+    [creating, setCreating] = useState(false)
+  const detail = useManagedBook(selectedId)
+  const selected = detail.book || catalog.books.find((book) => book.id === selectedId)
+  const [draft, setDraft] = useState<Draft>(() => draftFrom())
+  const [tab, setTab] = useState<'details' | 'lessons'>('details'),
+    [section, setSection] = useState<'info' | 'links' | 'pdf'>('info')
+  const [query, setQuery] = useState(''),
+    [level, setLevel] = useState('all'),
+    [category, setCategory] = useState('all'),
+    [visibility, setVisibility] = useState('all')
+  const [busy, setBusy] = useState(false),
+    [notice, setNotice] = useState(''),
+    [error, setError] = useState(''),
+    [dirty, setDirty] = useState(false)
+  const [lessonId, setLessonId] = useState<string | null>(null),
+    [lesson, setLesson] = useState<LessonDraft>(blankLesson)
+  const [scope, setScope] = useState<'book' | 'library'>('book'),
+    [bulkSeek, setBulkSeek] = useState(true),
+    [bulkSpeed, setBulkSpeed] = useState(true)
+  const [list, setList] = useState(''),
+    [position, setPosition] = useState('1'),
+    [playlistDraft, setPlaylistDraft] = useState<LessonDraft>(blankLesson),
+    [inspect, setInspect] = useState(false),
+    [playlistDirty, setPlaylistDirty] = useState(false)
+  const [originalLinks, setOriginalLinks] = useState<Record<string, string>>({})
+  const filtered = useMemo(
+    () =>
+      catalog.books.filter(
         (book) =>
-          book.id === selectedBookId,
-      ) || null
-    )
-  }, [books, selectedBookId])
-
-  const filteredBooks = useMemo(() => {
-    const normalizedSearch =
-      search.trim().toLowerCase()
-
-    return books.filter((book) => {
-      const matchesSearch =
-        !normalizedSearch ||
-        book.title
-          .toLowerCase()
-          .includes(normalizedSearch) ||
-        book.author
-          .toLowerCase()
-          .includes(normalizedSearch) ||
-        book.description
-          .toLowerCase()
-          .includes(normalizedSearch)
-
-      const matchesLevel =
-        levelFilter === 'الكل' ||
-        book.level === levelFilter
-
-      const matchesCategory =
-        categoryFilter === 'الكل' ||
-        book.category === categoryFilter
-
-      return (
-        matchesSearch &&
-        matchesLevel &&
-        matchesCategory
-      )
+          `${book.title} ${book.author} ${book.videoAuthor || ''}`
+            .toLowerCase()
+            .includes(query.trim().toLowerCase()) &&
+          (level === 'all' || book.level === level) &&
+          (category === 'all' || book.category === category) &&
+          (visibility === 'all' || book.deleted === (visibility === 'hidden')),
+      ),
+    [catalog.books, query, level, category, visibility],
+  )
+  const playlists = selected ? studySources(selected).filter((source) => source.list) : []
+  const activeList = playlists.find((source) => source.list === list) || playlists[0]
+  const activeListId = activeList?.list || ''
+  const currentPlaylistPolicy =
+    selected && activeListId ? playlistOverride(selected, activeListId, Number(position)) : undefined
+  const policyTarget = useRef('')
+  useEffect(() => {
+    const target = `${selectedId}:${activeListId}:${position}`
+    if (playlistDirty && policyTarget.current === target) return
+    policyTarget.current = target
+    setPlaylistDirty(false)
+    const current = currentPlaylistPolicy
+    const isCurrent =
+      !selected?.lessonPolicyRevision || current?.policyRevision === selected.lessonPolicyRevision
+    setPlaylistDraft({
+      title: current?.title || '',
+      url: current?.url || '',
+      order: position,
+      seeking: choice(isCurrent ? current?.allowSeeking : null),
+      speed: choice(isCurrent ? current?.allowSpeed : null),
+      deleted: current?.deleted === true,
     })
   }, [
-    books,
-    search,
-    levelFilter,
-    categoryFilter,
+    selectedId,
+    activeListId,
+    position,
+    currentPlaylistPolicy,
+    selected?.lessonPolicyRevision,
+    playlistDirty,
   ])
-
-  const visibleBooksCount = useMemo(
-    () =>
-      books.filter(
-        (book) => !book.deleted,
-      ).length,
-    [books],
-  )
-
-  const hiddenBooksCount = useMemo(
-    () =>
-      books.filter(
-        (book) => book.deleted,
-      ).length,
-    [books],
-  )
-
-  useEffect(() => {
-    void loadBooks()
-  }, [])
-
-  useEffect(() => {
-    if (!selectedBookId) {
-      setVideos([])
-      return
-    }
-
-    void loadVideos(selectedBookId)
-  }, [selectedBookId])
-
-  function showMessage(
-    text: string,
-  ): void {
-    setMessage(text)
+  const choosePosition = (value: string) => {
+    if (playlistDirty && !window.confirm('توجد تعديلات للدرس لم تُحفظ. الانتقال دون حفظها؟')) return
+    setPlaylistDirty(false)
+    setPosition(value)
+  }
+  const chooseList = (value: string) => {
+    if (playlistDirty && !window.confirm('توجد تعديلات للدرس لم تُحفظ. الانتقال دون حفظها؟')) return
+    setPlaylistDirty(false)
+    setList(value)
+    setPosition('1')
+    setInspect(false)
+  }
+  const clearMessages = () => {
     setError('')
-
-    window.setTimeout(() => {
-      setMessage('')
-    }, 3500)
+    setNotice('')
   }
-
-  function showError(
-    text: string,
-  ): void {
-    setError(text)
-    setMessage('')
-
-    window.setTimeout(() => {
-      setError('')
-    }, 5000)
+  const selectBook = (book?: ManagedBook) => {
+    if ((dirty || lessonId || playlistDirty) && !window.confirm('توجد تعديلات لم تُحفظ. الانتقال دون حفظها؟'))
+      return
+    setSelectedId(book?.id || null)
+    setCreating(!book)
+    setDraft(draftFrom(book))
+    setDirty(false)
+    setTab('details')
+    setSection('info')
+    setLessonId(null)
+    setList('')
+    setPosition('1')
+    setInspect(false)
+    setBulkSeek(book?.lessonSeekDefault ?? true)
+    setBulkSpeed(book?.lessonSpeedDefault ?? true)
+    clearMessages()
   }
-
-  async function loadBooks(): Promise<void> {
-    try {
-      setLoadingBooks(true)
-      setError('')
-
-      const snapshot = await getDocs(
-        collection(
-          db,
-          'islamicLibraryBooks',
-        ),
-      )
-
-      const firestoreBooks =
-        snapshot.docs.map((item) => ({
-          id: item.id,
-          data: item.data() as FirestoreBookData,
-        }))
-
-      const mergedBooks: AdminBook[] = []
-
-      ADMIN_CATALOG.forEach(
-        (staticBook) => {
-          let firestoreData: FirestoreBookData | null =
-            null
-
-          for (
-            let i = 0;
-            i < firestoreBooks.length;
-            i += 1
-          ) {
-            if (
-              firestoreBooks[i].id ===
-              staticBook.id
-            ) {
-              firestoreData =
-                firestoreBooks[i].data
-              break
-            }
-          }
-
-          if (firestoreData) {
-            const mergedBook =
-              createBookFromFirestore(
-                staticBook.id,
-                firestoreData,
-                staticBook,
-              )
-
-            if (mergedBook) {
-              mergedBooks.push(
-                mergedBook,
-              )
-            }
-          } else {
-            mergedBooks.push({
-              ...staticBook,
-              isCustom: false,
-              deleted: false,
-            })
-          }
-        },
-      )
-
-      for (
-        let i = 0;
-        i < firestoreBooks.length;
-        i += 1
-      ) {
-        const firestoreBook =
-          firestoreBooks[i]
-
-        const existsInStatic =
-          ADMIN_CATALOG.some(
-            (book) =>
-              book.id ===
-              firestoreBook.id,
-          )
-
-        if (existsInStatic) {
-          continue
-        }
-
-        const customBook =
-          createBookFromFirestore(
-            firestoreBook.id,
-            firestoreBook.data,
-          )
-
-        if (customBook) {
-          mergedBooks.push(
-            customBook,
-          )
-        }
-      }
-
-      mergedBooks.sort(
-        (a, b) =>
-          a.title.localeCompare(
-            b.title,
-            'ar',
-          ),
-      )
-
-      setBooks(
-        mergedBooks,
-      )
-
+  useEffect(() => {
+    if (!dirty && !lessonId && !playlistDirty) return
+    const protect = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', protect)
+    return () => window.removeEventListener('beforeunload', protect)
+  }, [dirty, lessonId, playlistDirty])
+  const update = <K extends keyof Draft>(key: K, value: Draft[K]) => {
+    setDraft((current) => {
+      const next = { ...current, [key]: value }
       if (
-        selectedBookId &&
-        !mergedBooks.some(
-          (book) =>
-            book.id === selectedBookId,
-        )
-      ) {
-        setSelectedBookId(null)
-      }
-    } catch (loadError) {
-      console.error(
-        'Islamic library admin load error:',
-        loadError,
+        key === 'downloadUrl' &&
+        current.pdfParts.length === 1 &&
+        current.pdfParts[0].url === current.downloadUrl
       )
-
-      showError(
-        'تعذر تحميل كتب المكتبة من Firestore.',
-      )
-    } finally {
-      setLoadingBooks(false)
-    }
+        next.pdfParts = String(value).trim() ? [{ ...current.pdfParts[0], url: String(value) }] : []
+      return next
+    })
+    setDirty(true)
   }
-
-  async function loadVideos(
-    bookId: string,
-  ): Promise<void> {
+  const run = async (work: () => Promise<void>) => {
+    setBusy(true)
+    clearMessages()
     try {
-      setLoadingVideos(true)
-
-      const snapshot = await getDocs(
-        collection(
-          db,
-          'islamicLibraryBooks',
-          bookId,
-          'videos',
-        ),
-      )
-
-      const nextVideos =
-        snapshot.docs
-          .map(
-            (item, index) => {
-              const data =
-                item.data() as Record<
-                  string,
-                  unknown
-                >
-
-              const numericOrder =
-                Number(data.order)
-
-              return {
-                id: item.id,
-                title:
-                  toStringValue(
-                    data.title,
-                  ) ||
-                  `الدرس ${index + 1}`,
-                url:
-                  toStringValue(
-                    data.url,
-                  ),
-                order:
-                  Number.isFinite(
-                    numericOrder,
-                  ) &&
-                  numericOrder > 0
-                    ? numericOrder
-                    : index + 1,
-              }
-            },
-          )
-          .filter(
-            (video) =>
-              video.url.trim().length > 0,
-          )
-          .sort(
-            (a, b) =>
-              a.order - b.order,
-          )
-
-      setVideos(nextVideos)
-    } catch (loadError) {
-      console.error(
-        'Islamic library videos load error:',
-        loadError,
-      )
-
-      setVideos([])
-
-      showError(
-        'تعذر تحميل دروس الكتاب.',
-      )
+      await work()
+    } catch (error) {
+      setError(errorText(error))
     } finally {
-      setLoadingVideos(false)
+      setBusy(false)
     }
   }
-
-  function openCreateBook(): void {
-    setEditingBookId(null)
-
-    setBookForm({
-      ...EMPTY_BOOK_FORM,
-    })
-
-    setBookModalOpen(true)
-  }
-
-  function openEditBook(
-    book: AdminBook,
-  ): void {
-    setEditingBookId(book.id)
-
-    setBookForm(
-      buildBookForm(book),
-    )
-
-    setBookModalOpen(true)
-  }
-
-  function closeBookModal(): void {
-    if (savingBook) {
-      return
-    }
-
-    setBookModalOpen(false)
-    setEditingBookId(null)
-
-    setBookForm({
-      ...EMPTY_BOOK_FORM,
-    })
-  }
-
-  async function saveBook(): Promise<void> {
-    const title =
-      bookForm.title.trim()
-
-    const author =
-      bookForm.author.trim()
-
-    const description =
-      bookForm.description.trim()
-
-    if (!title) {
-      showError(
-        'اكتب اسم الكتاب كاملًا.',
-      )
-      return
-    }
-
-    if (!author) {
-      showError(
-        'اكتب اسم المؤلف.',
-      )
-      return
-    }
-
-    if (!description) {
-      showError(
-        'اكتب وصف الكتاب.',
-      )
-      return
-    }
-
-    for (const [label, url] of [
-      ['رابط القراءة', bookForm.readingUrl],
-      ['رابط التحميل', bookForm.downloadUrl],
-      ['رابط الشرح', bookForm.sharhUrl],
-      ['فيديو YouTube', bookForm.videoUrl],
-      ['الملف الصوتي', bookForm.audioUrl],
-      ['مصدر الصوت', bookForm.audioSourceUrl],
-      ['تحميل الفيديو', bookForm.videoDownloadUrl],
-
-    ]) {
-      if (url.trim() && !safeIslamicLibraryLink(url.trim())) {
-        showError(`${label}: أدخل رابط HTTPS صالحًا وآمنًا.`)
-        return
-      }
-    }
-
-    try {
-      setSavingBook(true)
-      setError('')
-
-      const bookId =
-        editingBookId ||
-        makeBookId(title)
-
-      const currentBook =
-        books.find(
-          (book) =>
-            book.id === editingBookId,
-        )
-
-      await setDoc(
-        doc(
-          db,
-          'islamicLibraryBooks',
-          bookId,
-        ),
-        {
-          id: bookId,
-          title,
-          author,
-          category:
-            bookForm.category,
-          level:
-            bookForm.level,
-          description,
-          readingUrl:
-            bookForm.readingUrl.trim() ||
-            null,
-          readingLabel:
-            bookForm.readingLabel.trim() ||
-            null,
-          videoUrl: bookForm.videoUrl.trim() || null,
-          audioUrl: bookForm.audioUrl.trim() || null,
-          audioSourceUrl: bookForm.audioSourceUrl.trim() || null,
-          videoDownloadUrl: bookForm.videoDownloadUrl.trim() || null,
-          downloadUrl:
-            bookForm.downloadUrl.trim() ||
-            null,
-          sharhTitle:
-            bookForm.sharhTitle.trim() ||
-            null,
-          sharhAuthor:
-            bookForm.sharhAuthor.trim() ||
-            null,
-          sharhUrl:
-            bookForm.sharhUrl.trim() ||
-            null,
-          sharhLabel:
-            bookForm.sharhLabel.trim() ||
-            null,
-          deleted:
-            currentBook?.deleted ||
-            false,
-          updatedAt:
-            serverTimestamp(),
-          ...(editingBookId
-            ? {}
-            : {
-                createdAt:
-                  serverTimestamp(),
-              }),
-        },
-        {
-          merge: true,
-        },
-      )
-
-      await loadBooks()
-
-      setSelectedBookId(bookId)
-
-      closeBookModal()
-
-      showMessage(
-        editingBookId
-          ? 'تم تحديث الكتاب بنجاح.'
-          : 'تمت إضافة الكتاب بنجاح.',
-      )
-    } catch (saveError) {
-      console.error(
-        'Islamic library book save error:',
-        saveError,
-      )
-
-      showError(
-        'تعذر حفظ الكتاب. تأكد من صلاحيات حساب الإدارة.',
-      )
-    } finally {
-      setSavingBook(false)
-    }
-  }
-
-  async function toggleBookVisibility(
-    book: AdminBook,
-  ): Promise<void> {
-    try {
-      setDeletingBookId(book.id)
-
-      await setDoc(
-        doc(
-          db,
-          'islamicLibraryBooks',
-          book.id,
-        ),
-        {
-          id: book.id,
-          deleted:
-            !book.deleted,
-          updatedAt:
-            serverTimestamp(),
-        },
-        {
-          merge: true,
-        },
-      )
-
-      await loadBooks()
-
-      showMessage(
-        book.deleted
-          ? 'تم إظهار الكتاب.'
-          : 'تم إخفاء الكتاب.',
-      )
-    } catch (toggleError) {
-      console.error(
-        'Islamic library visibility error:',
-        toggleError,
-      )
-
-      showError(
-        'تعذر تغيير حالة ظهور الكتاب.',
-      )
-    } finally {
-      setDeletingBookId(null)
-    }
-  }
-
-  async function deleteCustomBook(
-    book: AdminBook,
-  ): Promise<void> {
-    if (!book.isCustom) {
-      await toggleBookVisibility(
-        book,
-      )
-      return
-    }
-
-    const confirmed =
-      window.confirm(
-        `هل تريد حذف الكتاب نهائيًا؟\n\n${book.title}`,
-      )
-
-    if (!confirmed) {
-      return
-    }
-
-    try {
-      setDeletingBookId(book.id)
-
-      await deleteDoc(
-        doc(
-          db,
-          'islamicLibraryBooks',
-          book.id,
-        ),
-      )
-
-      if (
-        selectedBookId ===
-        book.id
-      ) {
-        setSelectedBookId(null)
-        setVideos([])
-      }
-
-      await loadBooks()
-
-      showMessage(
-        'تم حذف الكتاب بنجاح.',
-      )
-    } catch (deleteError) {
-      console.error(
-        'Islamic library delete error:',
-        deleteError,
-      )
-
-      showError(
-        'تعذر حذف الكتاب.',
-      )
-    } finally {
-      setDeletingBookId(null)
-    }
-  }
-
-  function openCreateVideo(): void {
-    if (!selectedBook) {
-      showError(
-        'اختر كتابًا أولًا.',
-      )
-      return
-    }
-
-    setEditingVideoId(null)
-
-    setVideoForm({
-      title: '',
-      url: '',
-      order: String(
-        videos.length + 1,
-      ),
-    })
-
-    setVideoModalOpen(true)
-  }
-
-  function openCreateVideoForBook(
-    book: AdminBook,
-  ): void {
-    setSelectedBookId(book.id)
-
-    setEditingVideoId(null)
-
-    setVideoForm({
-      title: '',
-      url: '',
-      order: '1',
-    })
-
-    setVideoModalOpen(true)
-  }
-
-  function openEditVideo(
-    video: VideoLesson,
-  ): void {
-    setEditingVideoId(
-      video.id,
-    )
-
-    setVideoForm({
-      title: video.title,
-      url: video.url,
-      order: String(
-        video.order,
-      ),
-    })
-
-    setVideoModalOpen(true)
-  }
-
-  function closeVideoModal(): void {
-    if (savingVideo) {
-      return
-    }
-
-    setVideoModalOpen(false)
-    setEditingVideoId(null)
-
-    setVideoForm({
-      ...EMPTY_VIDEO_FORM,
-    })
-  }
-
-  async function saveVideo(): Promise<void> {
-    if (!selectedBook) {
-      showError(
-        'اختر كتابًا أولًا.',
-      )
-      return
-    }
-
-    const title =
-      videoForm.title.trim()
-
-    const url =
-      videoForm.url.trim()
-
-    const orderNumber =
-      Number(
-        videoForm.order,
-      )
-
-    if (!title) {
-      showError(
-        'اكتب اسم الدرس.',
-      )
-      return
-    }
-
-    if (!url) {
-      showError(
-        'أدخل رابط الفيديو.',
-      )
-      return
-    }
-
+  const removeBook = () => {
     if (
-      !Number.isFinite(
-        orderNumber,
-      ) ||
-      orderNumber < 1
-    ) {
-      showError(
-        'أدخل ترتيبًا صحيحًا للدرس.',
-      )
+      !selectedId ||
+      !selected?.custom ||
+      !window.confirm(`حذف الكتاب المضاف «${selected.title}» ودروسه نهائيًا؟`)
+    )
       return
-    }
-
-    try {
-      setSavingVideo(true)
-      setError('')
-
-      const videoId =
-        editingVideoId ||
-        makeVideoId()
-
-      await setDoc(
-        doc(
-          db,
-          'islamicLibraryBooks',
-          selectedBook.id,
-          'videos',
-          videoId,
-        ),
-        {
-          id: videoId,
-          title,
-          url,
-          order:
-            Math.floor(
-              orderNumber,
-            ),
-          updatedAt:
-            serverTimestamp(),
-          ...(editingVideoId
-            ? {}
-            : {
-                createdAt:
-                  serverTimestamp(),
-              }),
-        },
-        {
-          merge: true,
-        },
-      )
-
-      await loadVideos(
-        selectedBook.id,
-      )
-
-      closeVideoModal()
-
-      showMessage(
-        editingVideoId
-          ? 'تم تحديث الدرس.'
-          : 'تمت إضافة الدرس.',
-      )
-    } catch (saveError) {
-      console.error(
-        'Islamic library video save error:',
-        saveError,
-      )
-
-      showError(
-        'تعذر حفظ الدرس. تأكد من صلاحيات حساب الإدارة.',
-      )
-    } finally {
-      setSavingVideo(false)
-    }
+    void run(async () => {
+      if (!creating && (!detail.ready || detail.error))
+        throw new Error('تعذّر تحميل البيانات الحالية. أعد تحميل الصفحة قبل تعديل الكتاب.')
+      const snapshot = await getDocs(collection(db, 'islamicLibraryBooks', selectedId, 'videos'))
+      for (let start = 0; start < snapshot.docs.length; start += 400) {
+        const batch = writeBatch(db)
+        snapshot.docs.slice(start, start + 400).forEach((item) => batch.delete(item.ref))
+        await batch.commit()
+      }
+      await deleteDoc(doc(db, 'islamicLibraryBooks', selectedId))
+      setSelectedId(null)
+      setCreating(false)
+      setDirty(false)
+      setLessonId(null)
+      setPlaylistDirty(false)
+      setNotice('تم حذف الكتاب المضاف ودروسه.')
+    })
   }
-
-  async function deleteVideo(
-    video: VideoLesson,
-  ): Promise<void> {
-    if (!selectedBook) {
-      return
-    }
-
-    const confirmed =
-      window.confirm(
-        `هل تريد حذف الدرس؟\n\n${video.title}`,
+  const saveBook = () =>
+    void run(async () => {
+      if (!creating && (!detail.ready || detail.error))
+        throw new Error('تعذّر تحميل البيانات الحالية. أعد تحميل الصفحة قبل تعديل الكتاب.')
+      if (!draft.title.trim() || !draft.author.trim()) throw new Error('اكتب اسم الكتاب والمؤلف أولًا.')
+      for (const key of BOOK_LINK_FIELDS)
+        if (draft[key].trim() && !safeIslamicLibraryLink(draft[key]))
+          throw new Error('أحد الروابط غير صالح. استخدم رابط HTTPS كاملًا.')
+      if (
+        draft.quranpediaBookId &&
+        (!Number.isSafeInteger(Number(draft.quranpediaBookId)) || Number(draft.quranpediaBookId) <= 0)
       )
-
-    if (!confirmed) {
-      return
-    }
-
-    try {
-      setDeletingVideoId(
-        video.id,
-      )
-
-      await deleteDoc(
-        doc(
-          db,
-          'islamicLibraryBooks',
-          selectedBook.id,
-          'videos',
-          video.id,
-        ),
-      )
-
-      await loadVideos(
-        selectedBook.id,
-      )
-
-      showMessage(
-        'تم حذف الدرس.',
-      )
-    } catch (deleteError) {
-      console.error(
-        'Islamic library video delete error:',
-        deleteError,
-      )
-
-      showError(
-        'تعذر حذف الدرس.',
-      )
-    } finally {
-      setDeletingVideoId(null)
-    }
-  }
-
-  function getCategoryLabel(
-    categoryId: SunniLibraryCategoryId,
-  ): string {
-    const category =
-      SUNNI_LIBRARY_CATEGORIES.find(
-        (item) =>
-          item.id === categoryId,
-      )
-
-    return (
-      category?.label ||
-      'تصنيف'
+        throw new Error('معرّف الكتاب النصي يجب أن يكون رقمًا صحيحًا موجبًا، أو اتركه فارغًا.')
+      for (const part of draft.pdfParts)
+        if (!part.label.trim() || !safeIslamicLibraryLink(part.url))
+          throw new Error('أكمل اسم ورابط HTTPS لكل جزء PDF، أو احذف الجزء الفارغ.')
+      const id = selectedId || uid(),
+        payload: Record<string, unknown> = {
+          category: draft.category,
+          level: draft.level,
+          deleted: draft.deleted,
+          lessonSeekDefault: draft.lessonSeekDefault,
+          lessonSpeedDefault: draft.lessonSpeedDefault,
+          quranpediaBookId: draft.quranpediaBookId ? Number(draft.quranpediaBookId) : null,
+          pdfParts: draft.pdfParts.map((part) => ({ label: part.label.trim(), url: part.url.trim() })),
+          updatedAt: serverTimestamp(),
+        }
+      for (const key of [...BOOK_TEXT_FIELDS, ...BOOK_LINK_FIELDS]) payload[key] = draft[key].trim()
+      if (creating) payload.createdAt = serverTimestamp()
+      await setDoc(doc(db, 'islamicLibraryBooks', id), payload, { merge: true })
+      setDirty(false)
+      setCreating(false)
+      setSelectedId(id)
+      setNotice('تم حفظ الكتاب والشرح والروابط. التغييرات مرتبطة مباشرة بصفحات الجمهور.')
+    })
+  const editLesson = (row?: ManagedLesson) => {
+    const isCurrent = !selected?.lessonPolicyRevision || row?.policyRevision === selected.lessonPolicyRevision
+    setLessonId(row?.id || '__new__')
+    setLesson(
+      row
+        ? {
+            title: row.title,
+            url: row.url,
+            order: String(row.order),
+            seeking: choice(isCurrent ? row.allowSeeking : null),
+            speed: choice(isCurrent ? row.allowSpeed : null),
+            deleted: row.deleted === true,
+          }
+        : {
+            ...blankLesson,
+            order: String(Math.max(0, ...(selected?.videos || []).map((item) => item.order)) + 1),
+          },
     )
   }
-
+  const saveLesson = () =>
+    void run(async () => {
+      if (!selectedId || !selected || !detail.lessonsReady) throw new Error('انتظر تحميل الدروس الحالية.')
+      if (!lesson.title.trim() || !safeIslamicLibraryLink(lesson.url))
+        throw new Error('اكتب عنوان الدرس ورابط HTTPS صالحًا.')
+      if (!Number.isSafeInteger(Number(lesson.order)) || Number(lesson.order) < 1)
+        throw new Error('ترتيب الدرس يجب أن يكون رقمًا صحيحًا موجبًا.')
+      await setDoc(
+        doc(db, 'islamicLibraryBooks', selectedId, 'videos', lessonId === '__new__' ? uid() : lessonId!),
+        {
+          title: lesson.title.trim(),
+          url: lesson.url.trim(),
+          order: Number(lesson.order),
+          deleted: lesson.deleted,
+          allowSeeking: bool(lesson.seeking),
+          allowSpeed: bool(lesson.speed),
+          policyRevision: selected.lessonPolicyRevision,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      setLessonId(null)
+      setNotice('تم حفظ عنوان الدرس ورابطه وترتيبه وصلاحياته.')
+    })
+  const toggleLesson = (row: ManagedLesson) =>
+    void run(async () => {
+      if (!selectedId) return
+      await setDoc(
+        doc(db, 'islamicLibraryBooks', selectedId, 'videos', row.id),
+        { deleted: !row.deleted, updatedAt: serverTimestamp() },
+        { merge: true },
+      )
+      setNotice(row.deleted ? 'تم إظهار الدرس.' : 'تم إخفاء الدرس عن الجمهور.')
+    })
+  const applyBulk = () =>
+    void run(async () => {
+      if (!catalog.ready || catalog.error) throw new Error('انتظر تحميل جميع الكتب قبل التطبيق الجماعي.')
+      if (scope === 'book' && !selected) throw new Error('اختر كتابًا أولًا.')
+      if (dirty || lessonId || playlistDirty)
+        throw new Error('احفظ التعديلات المفتوحة للكتاب أو الدرس أولًا قبل تطبيق الإعداد الجماعي.')
+      const snapshot = await getDocsFromServer(collection(db, 'islamicLibraryBooks'))
+      const currentBooks = mergeLibraryCatalog(
+        snapshot.docs.map((item) => ({ id: item.id, data: item.data() })),
+      )
+      const targets = scope === 'book' ? currentBooks.filter((book) => book.id === selectedId) : currentBooks
+      if (!targets.length) throw new Error('الكتاب المحدد لم يعد موجودًا. حدّث القائمة ثم أعد المحاولة.')
+      const revision = uid()
+      let committed = 0
+      try {
+        for (let start = 0; start < targets.length; start += 400) {
+          const batch = writeBatch(db)
+          targets.slice(start, start + 400).forEach((book) =>
+            batch.set(
+              doc(db, 'islamicLibraryBooks', book.id),
+              {
+                lessonSeekDefault: bulkSeek,
+                lessonSpeedDefault: bulkSpeed,
+                lessonPolicyRevision: revision,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true },
+            ),
+          )
+          await batch.commit()
+          committed += Math.min(400, targets.length - start)
+        }
+      } catch (error) {
+        throw new Error(`تم تحديث ${committed} كتاب قبل توقف الطلب. يمكنك إعادة التطبيق. ${errorText(error)}`)
+      }
+      setDraft((current) => ({ ...current, lessonSeekDefault: bulkSeek, lessonSpeedDefault: bulkSpeed }))
+      setLessonId(null)
+      setNotice(
+        `تم تطبيق الإعداد على كل دروس ${scope === 'book' ? 'الكتاب' : `المكتبة (${committed} كتاب)`}، بما فيها الدروس الأصلية وقوائم YouTube. أُلغيت استثناءات الصلاحيات القديمة؛ ويمكن إضافة استثناء جديد لكل درس.`,
+      )
+    })
+  const savePlaylistLesson = (reset = false) =>
+    void run(async () => {
+      if (!selectedId || !selected || !activeListId) return
+      const number = Number(position)
+      if (!Number.isSafeInteger(number) || number < 1 || number > 10000)
+        throw new Error('اكتب رقم درس صحيحًا من 1 إلى 10000.')
+      let replacement = ''
+      if (playlistDraft.url.trim()) {
+        const link = safeIslamicLibraryLink(playlistDraft.url)
+        if (!link) throw new Error('أدخل رابط فيديو YouTube صالحًا.')
+        const single = new URL(link)
+        single.searchParams.delete('list')
+        const videoId = youtubeSource(single.href)?.video
+        if (!videoId) throw new Error('الرابط البديل لدرس القائمة يجب أن يشير إلى فيديو YouTube واحد.')
+        replacement = `https://www.youtube.com/watch?v=${videoId}`
+      }
+      const reference = doc(db, 'islamicLibraryBooks', selectedId)
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(reference),
+          fresh = mergeLibraryBook(selectedId, snapshot.data())
+        const policies: Record<string, PlaylistOverride> = { ...(fresh?.playlistPolicies || {}) }
+        if (youtubeSource(fresh?.videoUrl)?.list === activeListId) delete policies[String(number)]
+        const key = playlistPolicyKey(activeListId, number)
+        if (reset) delete policies[key]
+        else
+          policies[key] = {
+            title: playlistDraft.title.trim(),
+            url: replacement,
+            deleted: playlistDraft.deleted,
+            allowSeeking: bool(playlistDraft.seeking),
+            allowSpeed: bool(playlistDraft.speed),
+            policyRevision: fresh?.lessonPolicyRevision || '',
+          }
+        const payload = { playlistPolicies: policies, updatedAt: serverTimestamp() }
+        if (snapshot.exists()) transaction.update(reference, payload)
+        else transaction.set(reference, payload)
+      })
+      setPlaylistDirty(false)
+      setNotice(
+        reset
+          ? `تم استعادة بيانات الدرس ${number} من قائمة الناشر وإعداد الكتاب.`
+          : `تم حفظ تعديلات الدرس ${number} من قائمة YouTube.`,
+      )
+    })
+  const linkLabels: Record<(typeof BOOK_LINK_FIELDS)[number], string> = {
+    readingUrl: 'رابط قراءة الكتاب',
+    downloadUrl: 'رابط تحميل الكتاب PDF',
+    sharhUrl: 'رابط الشرح المكتوب',
+    videoUrl: 'رابط الشرح المرئي الرئيسي / قائمة YouTube',
+    audioUrl: 'رابط ملف الشرح الصوتي',
+    audioSourceUrl: 'رابط مصدر الصوت',
+    videoDownloadUrl: 'رابط تحميل الفيديو من الناشر',
+  }
   return (
-    <section
-      dir="rtl"
-      className="mt-6 space-y-5"
-    >
-      <div className="rounded-[30px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1.5 text-[11px] font-black text-sky-700">
-                <BookOpen size={14} />
-                إدارة المكتبة الشرعية
-              </span>
-
-              <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-black text-emerald-700">
-                {visibleBooksCount.toLocaleString(
-                  'ar-EG',
-                )}{' '}
-                كتاب ظاهر
-              </span>
-
-              {hiddenBooksCount > 0 ? (
-                <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-black text-slate-500">
-                  {hiddenBooksCount.toLocaleString(
-                    'ar-EG',
-                  )}{' '}
-                  مخفي
-                </span>
-              ) : null}
+    <section dir="rtl" className="mt-6 space-y-5 text-slate-900">
+      <fieldset disabled={busy} className="min-w-0 space-y-5">
+        <header className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <span className="text-sm font-bold text-teal-700">إدارة المكتبة الشرعية</span>
+              <h2 className="mt-2 text-2xl font-black">عدّل ما يراه الجمهور</h2>
+              <p className="mt-2 text-sm leading-7 text-slate-500">
+                اختر كتابًا حاليًا لتعديل بياناته وشرحه وروابطه ودروسه. جميع الكتب الأصلية والمضافة موجودة
+                هنا.
+              </p>
             </div>
-
-            <h2 className="mt-3 text-2xl font-black text-slate-900">
-              الكتب والدروس والشروحات
-            </h2>
-
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-500">
-              أضف الكتب وعدّل بياناتها وأدخل رابط التحميل وروابط
-              القراءة والشرح، ثم أضف دروس الفيديو بالترتيب الذي
-              تريده.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={
-                openCreateBook
-              }
-              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-sky-600 px-5 text-xs font-black text-white transition hover:bg-sky-700"
+              className={`${button} !bg-teal-800 !text-white`}
+              disabled={busy || !catalog.ready}
+              onClick={() => selectBook()}
             >
-              <Plus size={17} />
-              إضافة كتاب
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                void loadBooks()
-              }
-              disabled={
-                loadingBooks
-              }
-              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              <RefreshCw
-                size={16}
-                className={
-                  loadingBooks
-                    ? 'animate-spin'
-                    : ''
-                }
-              />
-              تحديث
+              <Plus size={18} />
+              إضافة كتاب جديد
             </button>
           </div>
-        </div>
-
-        {message || error ? (
-          <div
-            className={`mt-5 rounded-2xl border px-4 py-3 text-xs font-bold leading-6 ${
-              error
-                ? 'border-red-200 bg-red-50 text-red-700'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-            }`}
+          <div className="mt-4 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-teal-50 px-3 py-2">
+              {catalog.books.filter((book) => !book.deleted).length} كتاب ظاهر
+            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-2">
+              {catalog.books.filter((book) => book.deleted).length} كتاب مخفي
+            </span>
+          </div>
+        </header>
+        {(error || notice || catalog.error || detail.error) && (
+          <p
+            role={error || catalog.error || detail.error ? 'alert' : 'status'}
+            className={`sticky top-2 z-30 rounded-xl border p-4 text-sm leading-7 shadow-sm ${error || catalog.error || detail.error ? 'border-red-200 bg-red-50 text-red-800' : 'border-teal-200 bg-teal-50 text-teal-900'}`}
           >
-            {error || message}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="min-w-0">
-          <div className="rounded-[30px] border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 p-5 sm:p-6">
-              <div className="flex flex-col gap-3">
-                <div className="relative">
-                  <Search
-                    size={18}
-                    className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
-
-                  <input
-                    type="search"
-                    value={
-                      search
-                    }
-                    onChange={(
-                      event,
-                    ) =>
-                      setSearch(
-                        event.target.value,
-                      )
-                    }
-                    placeholder="ابحث باسم الكتاب أو المؤلف..."
-                    className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-11 text-sm font-bold text-slate-800 outline-none transition focus:border-sky-400 focus:bg-white"
-                  />
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <select
-                    value={
-                      levelFilter
-                    }
-                    onChange={(
-                      event,
-                    ) =>
-                      setLevelFilter(
-                        event.target.value as
-                          | 'الكل'
-                          | SunniLibraryLevel,
-                      )
-                    }
-                    className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 outline-none"
-                  >
-                    <option value="الكل">
-                      كل المستويات
-                    </option>
-
-                    {SUNNI_LIBRARY_LEVELS.map(
-                      (
-                        level,
-                      ) => (
-                        <option
-                          key={
-                            level.id
-                          }
-                          value={
-                            level.id
-                          }
-                        >
-                          {
-                            level.label
-                          }
-                        </option>
-                      ),
-                    )}
-                  </select>
-
-                  <select
-                    value={
-                      categoryFilter
-                    }
-                    onChange={(
-                      event,
-                    ) =>
-                      setCategoryFilter(
-                        event.target
-                          .value as
-                          | 'الكل'
-                          | SunniLibraryCategoryId,
-                      )
-                    }
-                    className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 outline-none"
-                  >
-                    <option value="الكل">
-                      كل التصنيفات
-                    </option>
-
-                    {SUNNI_LIBRARY_CATEGORIES.map(
-                      (
-                        category,
-                      ) => (
-                        <option
-                          key={
-                            category.id
-                          }
-                          value={
-                            category.id
-                          }
-                        >
-                          {
-                            category.label
-                          }
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </div>
-              </div>
+            {error || catalog.error || detail.error || notice}
+          </p>
+        )}
+        <div className="grid items-start gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="rounded-3xl border border-slate-200 bg-white p-4">
+            <h3 className="mb-3 flex items-center gap-2 font-black">
+              <BookOpen size={18} />
+              الكتب الحالية
+            </h3>
+            <label className="relative block">
+              <Search size={17} className="absolute right-3 top-4 text-slate-400" />
+              <input
+                className={`${field} !pr-10`}
+                aria-label="البحث في الكتب الحالية"
+                placeholder="الكتاب أو المؤلف أو الشارح"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+            <div className="my-3 grid grid-cols-2 gap-2">
+              <select
+                aria-label="تصفية بالمستوى"
+                className={field}
+                value={level}
+                onChange={(event) => setLevel(event.target.value)}
+              >
+                <option value="all">كل المستويات</option>
+                {SUNNI_LIBRARY_LEVELS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.id}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="تصفية بالمجال"
+                className={field}
+                value={category}
+                onChange={(event) => setCategory(event.target.value)}
+              >
+                <option value="all">كل المجالات</option>
+                {SUNNI_LIBRARY_CATEGORIES.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="تصفية بالظهور"
+                className={`${field} col-span-2`}
+                value={visibility}
+                onChange={(event) => setVisibility(event.target.value)}
+              >
+                <option value="all">الظاهر والمخفي</option>
+                <option value="visible">الظاهر للجمهور</option>
+                <option value="hidden">المخفي</option>
+              </select>
             </div>
-
-            <div className="p-5 sm:p-6">
-              {loadingBooks ? (
-                <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 text-sky-600">
-                  <Loader2
-                    size={34}
-                    className="animate-spin"
-                  />
-
-                  <p className="text-sm font-black">
-                    جاري تحميل الكتب...
-                  </p>
-                </div>
-              ) : filteredBooks.length === 0 ? (
-                <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
-                    <Search size={28} />
-                  </div>
-
-                  <h3 className="mt-4 text-lg font-black text-slate-800">
-                    لا توجد نتائج
-                  </h3>
-
-                  <p className="mt-2 text-sm text-slate-500">
-                    جرّب تغيير البحث أو الفلاتر.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  {filteredBooks.map(
-                    (book) => {
-                      const selected =
-                        selectedBookId ===
-                        book.id
-
-                      return (
-                        <article
-                          key={
-                            book.id
-                          }
-                          className={`rounded-[26px] border p-5 transition ${
-                            selected
-                              ? 'border-sky-300 bg-sky-50/50 shadow-md'
-                              : 'border-slate-200 bg-white hover:border-sky-200 hover:shadow-md'
-                          } ${
-                            book.deleted
-                              ? 'opacity-70'
-                              : ''
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setSelectedBookId(
-                                  book.id,
-                                )
-                              }
-                              className="min-w-0 flex-1 text-right"
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sky-600">
-                                  <BookOpen
-                                    size={23}
-                                  />
-                                </div>
-
-                                <div className="min-w-0">
-                                  <div className="flex flex-wrap gap-2">
-                                    <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-black text-amber-700">
-                                      {
-                                        book.level
-                                      }
-                                    </span>
-
-                                    {book.isCustom ? (
-                                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700">
-                                        مضاف من الإدارة
-                                      </span>
-                                    ) : null}
-
-                                    {book.deleted ? (
-                                      <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[10px] font-black text-slate-500">
-                                        مخفي
-                                      </span>
-                                    ) : null}
-                                  </div>
-
-                                  <h3 className="mt-2 line-clamp-2 text-base font-black leading-7 text-slate-900">
-                                    {
-                                      book.title
-                                    }
-                                  </h3>
-
-                                  <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-slate-500">
-                                    <UserRound
-                                      size={13}
-                                    />
-
-                                    {
-                                      book.author
-                                    }
-                                  </p>
-                                </div>
-                              </div>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openEditBook(
-                                  book,
-                                )
-                              }
-                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:border-sky-200 hover:text-sky-600"
-                              title="تعديل"
-                            >
-                              <Pencil
-                                size={16}
-                              />
-                            </button>
-                          </div>
-
-                          <p className="mt-4 line-clamp-2 text-xs leading-6 text-slate-500">
-                            {
-                              book.description
-                            }
-                          </p>
-
-                          <div className="mt-4 grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openCreateVideoForBook(
-                                  book,
-                                )
-                              }
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-600 transition hover:bg-slate-100"
-                            >
-                              <Video
-                                size={15}
-                              />
-                              إضافة درس
-                            </button>
-
-                            {book.downloadUrl ? (
-                              <a
-                                href={
-                                  book.downloadUrl
-                                }
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-50 px-3 text-[11px] font-black text-emerald-700 transition hover:bg-emerald-100"
-                              >
-                                <Download
-                                  size={15}
-                                />
-                                التحميل
-                              </a>
-                            ) : (
-                              <span className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-400">
-                                <Download
-                                  size={15}
-                                />
-                                لا يوجد تحميل
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
-                            <span className="text-[10px] font-bold text-slate-400">
-                              {getCategoryLabel(
-                                book.category,
-                              )}
-                            </span>
-
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setSelectedBookId(
-                                    book.id,
-                                  )
-                                }
-                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-[10px] font-black text-sky-600 hover:bg-sky-50"
-                              >
-                                <Video
-                                  size={13}
-                                />
-                                الدروس
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void toggleBookVisibility(
-                                    book,
-                                  )
-                                }
-                                disabled={
-                                  deletingBookId ===
-                                  book.id
-                                }
-                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-[10px] font-black text-slate-500 hover:bg-slate-50"
-                              >
-                                {book.deleted ? (
-                                  <Eye
-                                    size={13}
-                                  />
-                                ) : (
-                                  <EyeOff
-                                    size={13}
-                                  />
-                                )}
-
-                                {book.deleted
-                                  ? 'إظهار'
-                                  : 'إخفاء'}
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void deleteCustomBook(
-                                    book,
-                                  )
-                                }
-                                disabled={
-                                  deletingBookId ===
-                                  book.id
-                                }
-                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-[10px] font-black text-red-500 hover:bg-red-50"
-                              >
-                                {deletingBookId ===
-                                book.id ? (
-                                  <Loader2
-                                    size={13}
-                                    className="animate-spin"
-                                  />
-                                ) : (
-                                  <Trash2
-                                    size={13}
-                                  />
-                                )}
-
-                                {
-                                  book.isCustom
-                                    ? 'حذف'
-                                    : 'إخفاء'
-                                }
-                              </button>
-                            </div>
-                          </div>
-                        </article>
-                      )
-                    },
-                  )}
-                </div>
+            {!catalog.ready && (
+              <p className="p-3 text-sm">
+                <Loader2 className="inline animate-spin" size={18} /> تحميل الكتب الحالية…
+              </p>
+            )}
+            <div className="max-h-[65dvh] space-y-2 overflow-y-auto">
+              {filtered.map((book) => (
+                <button
+                  type="button"
+                  key={book.id}
+                  disabled={busy || !catalog.ready}
+                  onClick={() => selectBook(book)}
+                  className={`w-full rounded-2xl border p-3 text-right disabled:opacity-50 ${selectedId === book.id ? 'border-teal-700 bg-teal-50' : 'border-slate-200 bg-white'}`}
+                >
+                  <span className="flex items-start justify-between gap-2 font-bold">
+                    <span>{book.title}</span>
+                    <Pencil size={16} className="shrink-0 text-teal-700" />
+                  </span>
+                  <span className="mt-1 block text-xs leading-6 text-slate-500">
+                    {book.author} · {book.level}
+                  </span>
+                  <span className="mt-2 inline-block text-xs text-teal-700">
+                    {book.deleted ? 'مخفي · يمكنك إظهاره' : 'تعديل الكتاب والشرح والروابط'}
+                  </span>
+                </button>
+              ))}
+              {catalog.ready && !filtered.length && (
+                <p className="p-4 text-sm text-slate-500">لا توجد نتائج مطابقة.</p>
               )}
             </div>
-          </div>
-        </div>
-
-        <aside className="min-w-0">
-          <div className="sticky top-5 rounded-[30px] border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-black text-sky-600">
-                    إدارة دروس الكتاب
-                  </p>
-
-                  <h3 className="mt-1 text-lg font-black text-slate-900">
-                    الفيديوهات والشرح
-                  </h3>
+          </aside>
+          <div className="min-w-0 space-y-5">
+            {selectedId || creating ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-6">
+                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-teal-700">
+                      {creating ? 'إضافة كتاب' : 'تعديل كتاب موجود'}
+                    </p>
+                    <h3 className="mt-1 text-xl font-black">{draft.title || 'كتاب جديد'}</h3>
+                  </div>
+                  {selectedId && (
+                    <Link href={`/islamic-library/book/${selectedId}`} target="_blank" className={button}>
+                      <ExternalLink size={16} />
+                      معاينة للجمهور
+                    </Link>
+                  )}
+                  {selected?.custom && (
+                    <button type="button" className={`${button} !text-red-700`} onClick={removeBook}>
+                      حذف الكتاب المضاف
+                    </button>
+                  )}
                 </div>
-
-                {selectedBook ? (
+                <div className="mb-5 flex gap-2 border-b pb-4">
                   <button
                     type="button"
-                    onClick={
-                      openCreateVideo
-                    }
-                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-600 text-white"
-                    title="إضافة درس"
+                    className={`${button} ${tab === 'details' ? '!bg-teal-800 !text-white' : ''}`}
+                    onClick={() => setTab('details')}
                   >
-                    <Plus size={18} />
+                    بيانات الكتاب والروابط
                   </button>
-                ) : null}
-              </div>
-
-              {selectedBook ? (
-                <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                  <p className="text-[10px] font-black text-slate-400">
-                    الكتاب المحدد
-                  </p>
-
-                  <p className="mt-1 text-sm font-black leading-6 text-slate-800">
-                    {
-                      selectedBook.title
-                    }
-                  </p>
-
-                  <p className="mt-1 text-xs font-bold text-slate-500">
-                    {
-                      selectedBook.author
-                    }
-                  </p>
+                  <button
+                    type="button"
+                    disabled={creating || !detail.ready}
+                    className={`${button} ${tab === 'lessons' ? '!bg-teal-800 !text-white' : ''}`}
+                    onClick={() => setTab('lessons')}
+                  >
+                    <Video size={17} />
+                    الدروس الحالية
+                  </button>
                 </div>
-              ) : (
-                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center">
-                  <Video
-                    size={25}
-                    className="mx-auto text-slate-300"
-                  />
-
-                  <p className="mt-3 text-xs font-black text-slate-500">
-                    اختر كتابًا لإدارة دروسه.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {selectedBook ? (
-              <div className="p-5">
-                <div className="mb-4 grid grid-cols-2 gap-2">
-                  <div className="rounded-2xl bg-sky-50 p-3 text-center">
-                    <div className="text-xl font-black text-sky-700">
-                      {
-                        videos.length.toLocaleString(
-                          'ar-EG',
-                        )
-                      }
-                    </div>
-
-                    <div className="mt-1 text-[10px] font-black text-slate-500">
-                      درس
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl bg-amber-50 p-3 text-center">
-                    <div className="text-sm font-black text-amber-700">
-                      {
-                        selectedBook.level
-                      }
-                    </div>
-
-                    <div className="mt-1 text-[10px] font-black text-slate-500">
-                      المستوى
-                    </div>
-                  </div>
-                </div>
-
-                {loadingVideos ? (
-                  <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 text-sky-600">
-                    <Loader2
-                      size={30}
-                      className="animate-spin"
-                    />
-
-                    <p className="text-xs font-black">
-                      جاري تحميل الدروس...
-                    </p>
-                  </div>
-                ) : videos.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center">
-                    <Video
-                      size={27}
-                      className="mx-auto text-slate-300"
-                    />
-
-                    <p className="mt-3 text-sm font-black text-slate-700">
-                      لا توجد دروس
-                    </p>
-
-                    <p className="mt-2 text-xs leading-6 text-slate-400">
-                      أضف اسم الدرس والرابط وسيظهر للمستخدم داخل المنصة.
-                    </p>
-
-                    <button
-                      type="button"
-                      onClick={
-                        openCreateVideo
-                      }
-                      className="mt-5 inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-black text-white"
-                    >
-                      <Plus
-                        size={15}
-                      />
-                      إضافة أول درس
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {videos.map(
-                      (
-                        video,
-                        index,
-                      ) => (
-                        <article
-                          key={
-                            video.id
-                          }
-                          className="rounded-2xl border border-slate-200 p-4"
+                {tab === 'details' ? (
+                  <>
+                    <nav aria-label="أقسام تعديل الكتاب" className="mb-5 flex flex-wrap gap-2">
+                      {(
+                        [
+                          ['info', 'البيانات والظهور'],
+                          ['links', 'الشرح والروابط الحالية'],
+                          ['pdf', 'أجزاء PDF'],
+                        ] as const
+                      ).map(([id, label]) => (
+                        <button
+                          type="button"
+                          key={id}
+                          className={`${button} ${section === id ? '!border-teal-700 !text-teal-800' : ''}`}
+                          onClick={() => setSection(id)}
                         >
-                          <div className="flex items-start gap-3">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-[11px] font-black text-sky-700">
-                              {(
-                                index +
-                                1
-                              ).toLocaleString(
-                                'ar-EG',
+                          {label}
+                        </button>
+                      ))}
+                    </nav>
+                    {section === 'info' && (
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Label title="اسم الكتاب">
+                          <input
+                            className={field}
+                            value={draft.title}
+                            onChange={(event) => update('title', event.target.value)}
+                          />
+                        </Label>
+                        <Label title="المؤلف">
+                          <input
+                            className={field}
+                            value={draft.author}
+                            onChange={(event) => update('author', event.target.value)}
+                          />
+                        </Label>
+                        <Label title="المستوى">
+                          <select
+                            className={field}
+                            value={draft.level}
+                            onChange={(event) => update('level', event.target.value as Draft['level'])}
+                          >
+                            {SUNNI_LIBRARY_LEVELS.map((item) => (
+                              <option key={item.id}>{item.id}</option>
+                            ))}
+                          </select>
+                        </Label>
+                        <Label title="المجال">
+                          <select
+                            className={field}
+                            value={draft.category}
+                            onChange={(event) => update('category', event.target.value as Draft['category'])}
+                          >
+                            {SUNNI_LIBRARY_CATEGORIES.map((item) => (
+                              <option value={item.id} key={item.id}>
+                                {item.label}
+                              </option>
+                            ))}
+                          </select>
+                        </Label>
+                        <div className="sm:col-span-2">
+                          <Label title="وصف الكتاب">
+                            <textarea
+                              rows={4}
+                              className={field}
+                              value={draft.description}
+                              onChange={(event) => update('description', event.target.value)}
+                            />
+                          </Label>
+                        </div>
+                        <label className="flex items-center gap-3 rounded-xl bg-slate-50 p-4 text-sm font-bold">
+                          <input
+                            type="checkbox"
+                            checked={!draft.deleted}
+                            onChange={(event) => update('deleted', !event.target.checked)}
+                          />
+                          ظاهر للجمهور
+                        </label>
+                        <Label title="معرّف Quranpedia للنص الداخلي (اختياري)">
+                          <input
+                            type="number"
+                            min={1}
+                            className={field}
+                            value={draft.quranpediaBookId}
+                            onChange={(event) => update('quranpediaBookId', event.target.value)}
+                          />
+                        </Label>
+                      </div>
+                    )}
+                    {section === 'links' && (
+                      <div className="space-y-5">
+                        <p className="rounded-xl bg-teal-50 p-3 text-sm leading-7 text-teal-900">
+                          هذه الروابط والبيانات الحالية. يمكنك استبدال أي رابط أو إفراغه لإزالته من العرض.
+                        </p>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {(
+                            [
+                              'sharhTitle',
+                              'sharhAuthor',
+                              'videoAuthor',
+                              'readingLabel',
+                              'sharhLabel',
+                            ] as const
+                          ).map((key) => (
+                            <Label
+                              key={key}
+                              title={
+                                {
+                                  sharhTitle: 'عنوان الشرح المكتوب',
+                                  sharhAuthor: 'مؤلف الشرح المكتوب',
+                                  videoAuthor: 'اسم الشارح المرئي',
+                                  readingLabel: 'نص زر القراءة',
+                                  sharhLabel: 'نص زر الشرح',
+                                }[key]
+                              }
+                            >
+                              <input
+                                className={field}
+                                value={draft[key]}
+                                onChange={(event) => update(key, event.target.value)}
+                              />
+                            </Label>
+                          ))}
+                        </div>
+                        {BOOK_LINK_FIELDS.map((key) => (
+                          <Label title={linkLabels[key]} key={key}>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="url"
+                                dir="ltr"
+                                className={field}
+                                value={draft[key]}
+                                onChange={(event) => update(key, event.target.value)}
+                                placeholder="https://…"
+                              />
+                              {safeIslamicLibraryLink(draft[key]) && (
+                                <a
+                                  aria-label={`فتح ${linkLabels[key]}`}
+                                  className={button}
+                                  href={safeIslamicLibraryLink(draft[key])!}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  <ExternalLink size={16} />
+                                </a>
                               )}
                             </div>
-
-                            <div className="min-w-0 flex-1">
-                              <h4 className="text-sm font-black leading-6 text-slate-800">
-                                {
-                                  video.title
+                          </Label>
+                        ))}
+                        <Label title="ملاحظة المصادر المعروضة للجمهور">
+                          <textarea
+                            className={field}
+                            rows={3}
+                            value={draft.resourceNote}
+                            onChange={(event) => update('resourceNote', event.target.value)}
+                          />
+                        </Label>
+                        <p className="text-xs leading-6 text-slate-500">
+                          عند تغيير ملف PDF، حدّث أجزاءه من تبويب «أجزاء PDF» أو احذف الأجزاء القديمة لاستخدام
+                          رابط التحميل الجديد.
+                        </p>
+                      </div>
+                    )}
+                    {section === 'pdf' && (
+                      <div className="space-y-4">
+                        <p className="text-sm leading-7 text-slate-500">
+                          تُعرض الأجزاء بالترتيب التالي. إذا كانت القائمة فارغة، يستخدم القارئ رابط تحميل
+                          الكتاب الحالي.
+                        </p>
+                        {draft.pdfParts.map((part, index) => (
+                          <div key={index} className="space-y-3 rounded-xl border p-3">
+                            <div className="flex items-center gap-2">
+                              <input
+                                aria-label={`اسم الجزء ${index + 1}`}
+                                className={field}
+                                value={part.label}
+                                onChange={(event) =>
+                                  update(
+                                    'pdfParts',
+                                    draft.pdfParts.map((item, i) =>
+                                      i === index ? { ...item, label: event.target.value } : item,
+                                    ),
+                                  )
                                 }
+                              />
+                              <button
+                                type="button"
+                                className={button}
+                                aria-label={`حذف الجزء ${index + 1}`}
+                                onClick={() =>
+                                  update(
+                                    'pdfParts',
+                                    draft.pdfParts.filter((_, i) => i !== index),
+                                  )
+                                }
+                              >
+                                <X size={17} />
+                              </button>
+                            </div>
+                            <input
+                              type="url"
+                              dir="ltr"
+                              aria-label={`رابط الجزء ${index + 1}`}
+                              className={field}
+                              value={part.url}
+                              onChange={(event) =>
+                                update(
+                                  'pdfParts',
+                                  draft.pdfParts.map((item, i) =>
+                                    i === index ? { ...item, url: event.target.value } : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          className={button}
+                          onClick={() =>
+                            update('pdfParts', [
+                              ...draft.pdfParts,
+                              { label: `الجزء ${draft.pdfParts.length + 1}`, url: '' },
+                            ])
+                          }
+                        >
+                          <Plus size={17} />
+                          إضافة جزء PDF
+                        </button>
+                      </div>
+                    )}
+                    <div className="mt-6 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-2">
+                      <label className="flex items-center gap-3 text-sm font-bold">
+                        <input
+                          type="checkbox"
+                          checked={draft.lessonSeekDefault}
+                          onChange={(event) => update('lessonSeekDefault', event.target.checked)}
+                        />
+                        السماح بتقديم وتأخير الفيديو افتراضيًا
+                      </label>
+                      <label className="flex items-center gap-3 text-sm font-bold">
+                        <input
+                          type="checkbox"
+                          checked={draft.lessonSpeedDefault}
+                          onChange={(event) => update('lessonSpeedDefault', event.target.checked)}
+                        />
+                        السماح بتغيير السرعة افتراضيًا
+                      </label>
+                      <p className="text-xs leading-6 text-slate-500 sm:col-span-2">
+                        حفظ الإعداد الافتراضي يحافظ على استثناءات الدروس. لتطبيق إعداد واحد على كل الدروس،
+                        استخدم التحكم الجماعي أدناه.
+                      </p>
+                    </div>
+                    <div className="sticky bottom-3 mt-6 flex flex-wrap items-center gap-3 rounded-xl border bg-white p-3 shadow-sm">
+                      <button
+                        type="button"
+                        disabled={busy || (!creating && !detail.ready)}
+                        className={`${button} !bg-teal-800 !text-white`}
+                        onClick={saveBook}
+                      >
+                        {busy ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}حفظ كل
+                        بيانات الكتاب
+                      </button>
+                      {dirty && (
+                        <span className="text-xs font-bold text-amber-700">توجد تعديلات لم تُحفظ</span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-sm text-slate-600">الدروس المنفردة وقوائم الشرح الإضافية</p>
+                      <button
+                        type="button"
+                        className={button}
+                        disabled={busy || !detail.lessonsReady}
+                        onClick={() => editLesson()}
+                      >
+                        <Plus size={16} />
+                        إضافة درس / قائمة
+                      </button>
+                    </div>
+                    <p className="rounded-xl bg-slate-50 p-3 text-xs leading-6">
+                      رابط الشرح الرئيسي موجود في «الشرح والروابط الحالية». القائمة أدناه تشمل الدروس الأصلية
+                      المضمّنة والدروس المضافة سابقًا.
+                    </p>
+                    {!detail.lessonsReady && <p className="text-sm">جارٍ تحميل الدروس الحالية…</p>}
+                    {selected?.videos.map((row) => {
+                      const p = effectivePolicy(selected, row)
+                      return (
+                        <article key={row.id} className="rounded-xl border p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <h4 className="font-bold">
+                                {row.order}. {row.title}
                               </h4>
-
-                              <p className="mt-1 break-all text-[10px] leading-5 text-slate-400">
-                                {
-                                  video.url
-                                }
+                              <p className="mt-1 break-all text-xs text-slate-500" dir="ltr">
+                                {row.url}
+                              </p>
+                              <p className="mt-2 text-xs text-slate-500">
+                                {row.deleted ? 'مخفي' : 'ظاهر'} · الشريط {p.allowSeeking ? 'مسموح' : 'ممنوع'}{' '}
+                                · السرعة {p.allowSpeed ? 'مسموحة' : 'ممنوعة'}
                               </p>
                             </div>
-                          </div>
-
-                          <div className="mt-3 flex items-center gap-2">
-                            <a
-                              href={
-                                video.url
-                              }
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-50 py-2.5 text-[10px] font-black text-slate-600"
-                            >
-                              <ExternalLink
-                                size={14}
-                              />
-                              اختبار
-                            </a>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openEditVideo(
-                                  video,
-                                )
-                              }
-                              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
-                            >
-                              <Pencil
-                                size={14}
-                              />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void deleteVideo(
-                                  video,
-                                )
-                              }
-                              disabled={
-                                deletingVideoId ===
-                                video.id
-                              }
-                              className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-100 text-red-500"
-                            >
-                              {deletingVideoId ===
-                              video.id ? (
-                                <Loader2
-                                  size={14}
-                                  className="animate-spin"
-                                />
-                              ) : (
-                                <Trash2
-                                  size={14}
-                                />
-                              )}
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                className={button}
+                                disabled={busy}
+                                onClick={() => editLesson(row)}
+                              >
+                                <Pencil size={16} />
+                                تعديل
+                              </button>
+                              <button
+                                type="button"
+                                className={button}
+                                disabled={busy}
+                                onClick={() => toggleLesson(row)}
+                              >
+                                {row.deleted ? <Eye size={16} /> : <EyeOff size={16} />}{' '}
+                                {row.deleted ? 'إظهار' : 'إخفاء'}
+                              </button>
+                            </div>
                           </div>
                         </article>
-                      ),
+                      )
+                    })}
+                    {lessonId && (
+                      <div className="space-y-4 rounded-2xl border-2 border-teal-700 bg-teal-50/30 p-4">
+                        <h4 className="font-black">
+                          {lessonId === '__new__' ? 'درس جديد' : 'تعديل الدرس الحالي'}
+                        </h4>
+                        <Label title="عنوان الدرس / القائمة">
+                          <input
+                            className={field}
+                            value={lesson.title}
+                            onChange={(event) => setLesson({ ...lesson, title: event.target.value })}
+                          />
+                        </Label>
+                        <Label title="رابط الدرس الحالي">
+                          <input
+                            className={field}
+                            dir="ltr"
+                            value={lesson.url}
+                            onChange={(event) => setLesson({ ...lesson, url: event.target.value })}
+                          />
+                        </Label>
+                        <Label title="الترتيب">
+                          <input
+                            type="number"
+                            min={1}
+                            className={field}
+                            value={lesson.order}
+                            onChange={(event) => setLesson({ ...lesson, order: event.target.value })}
+                          />
+                        </Label>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <PolicySelect
+                            label="التقديم والتأخير"
+                            value={lesson.seeking}
+                            onChange={(value) => setLesson({ ...lesson, seeking: value })}
+                          />
+                          <PolicySelect
+                            label="تغيير السرعة"
+                            value={lesson.speed}
+                            onChange={(value) => setLesson({ ...lesson, speed: value })}
+                          />
+                        </div>
+                        <label className="flex gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={!lesson.deleted}
+                            onChange={(event) => setLesson({ ...lesson, deleted: !event.target.checked })}
+                          />
+                          إظهار الدرس للجمهور
+                        </label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            className={`${button} !bg-teal-800 !text-white`}
+                            disabled={busy}
+                            onClick={saveLesson}
+                          >
+                            حفظ الدرس
+                          </button>
+                          <button type="button" className={button} onClick={() => setLessonId(null)}>
+                            إلغاء
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {!!playlists.length && (
+                      <section className="space-y-4 rounded-2xl border border-teal-200 bg-teal-50/30 p-4">
+                        <h4 className="font-black">تعديل درس داخل قائمة YouTube الحالية</h4>
+                        <select
+                          className={field}
+                          aria-label="قائمة الشرح"
+                          value={activeListId}
+                          onChange={(event) => chooseList(event.target.value)}
+                        >
+                          {playlists.map((source) => (
+                            <option key={source.key} value={source.list}>
+                              {source.title}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="button" className={button} onClick={() => setInspect(!inspect)}>
+                          {inspect ? 'إغلاق معاينة القائمة' : 'عرض دروس القائمة واختيار درس'}
+                        </button>
+                        {inspect && activeList && (
+                          <PlaylistInspector
+                            url={activeList.url}
+                            onSelect={(number, videoUrl) => {
+                              setOriginalLinks((current) => ({
+                                ...current,
+                                [playlistPolicyKey(activeListId, number)]: videoUrl,
+                              }))
+                              choosePosition(String(number))
+                            }}
+                          />
+                        )}
+                        <Label title="رقم الدرس داخل قائمة الناشر">
+                          <input
+                            className={field}
+                            type="number"
+                            min={1}
+                            max={10000}
+                            value={position}
+                            onChange={(event) => choosePosition(event.target.value)}
+                          />
+                        </Label>
+                        {originalLinks[playlistPolicyKey(activeListId, Number(position))] && (
+                          <a
+                            className="inline-flex items-center gap-2 break-all text-sm text-teal-800 underline"
+                            href={originalLinks[playlistPolicyKey(activeListId, Number(position))]}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <ExternalLink size={15} />
+                            رابط الدرس الأصلي الحالي:{' '}
+                            {originalLinks[playlistPolicyKey(activeListId, Number(position))]}
+                          </a>
+                        )}
+                        <Label title="عنوان بديل (فارغ = عنوان الدرس الأصلي)">
+                          <input
+                            className={field}
+                            value={playlistDraft.title}
+                            onChange={(event) => {
+                              setPlaylistDirty(true)
+                              setPlaylistDraft({ ...playlistDraft, title: event.target.value })
+                            }}
+                          />
+                        </Label>
+                        <Label title="رابط YouTube بديل (فارغ = رابط الناشر الحالي)">
+                          <input
+                            className={field}
+                            dir="ltr"
+                            value={playlistDraft.url}
+                            onChange={(event) => {
+                              setPlaylistDirty(true)
+                              setPlaylistDraft({ ...playlistDraft, url: event.target.value })
+                            }}
+                          />
+                        </Label>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <PolicySelect
+                            label="التقديم والتأخير لهذا الدرس"
+                            value={playlistDraft.seeking}
+                            onChange={(value) => {
+                              setPlaylistDirty(true)
+                              setPlaylistDraft({ ...playlistDraft, seeking: value })
+                            }}
+                          />
+                          <PolicySelect
+                            label="السرعة لهذا الدرس"
+                            value={playlistDraft.speed}
+                            onChange={(value) => {
+                              setPlaylistDirty(true)
+                              setPlaylistDraft({ ...playlistDraft, speed: value })
+                            }}
+                          />
+                        </div>
+                        <label className="flex gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={!playlistDraft.deleted}
+                            onChange={(event) => {
+                              setPlaylistDirty(true)
+                              setPlaylistDraft({ ...playlistDraft, deleted: !event.target.checked })
+                            }}
+                          />
+                          إظهار هذا الدرس
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className={`${button} !bg-teal-800 !text-white`}
+                            disabled={busy || !detail.ready}
+                            onClick={() => savePlaylistLesson()}
+                          >
+                            حفظ تعديل درس القائمة
+                          </button>
+                          <button
+                            type="button"
+                            className={button}
+                            disabled={busy || !detail.ready}
+                            onClick={() => savePlaylistLesson(true)}
+                          >
+                            استعادة بيانات الناشر وإعداد الكتاب
+                          </button>
+                        </div>
+                      </section>
                     )}
                   </div>
                 )}
               </div>
-            ) : null}
-          </div>
-        </aside>
-      </div>
-
-      {bookModalOpen ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-[30px] bg-white shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white p-5">
-              <div>
-                <p className="text-xs font-black text-sky-600">
-                  {editingBookId
-                    ? 'تعديل الكتاب'
-                    : 'إضافة كتاب جديد'}
+            ) : (
+              <div className="rounded-3xl border border-dashed border-teal-300 bg-teal-50 p-8 text-center">
+                <Pencil className="mx-auto mb-4 text-teal-700" />
+                <h3 className="text-lg font-black">اختر كتابًا حاليًا لبدء تعديله</h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600">
+                  ستظهر بياناته وروابطه وشروحه المحفوظة، مع تعديل كل درس على حدة.
                 </p>
-
-                <h3 className="mt-1 text-xl font-black text-slate-900">
-                  بيانات الكتاب
-                </h3>
               </div>
-
-              <button
-                type="button"
-                onClick={
-                  closeBookModal
-                }
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-slate-500"
+            )}
+            <section className="space-y-4 rounded-3xl border border-teal-200 bg-white p-5">
+              <h3 className="flex items-center gap-2 font-black">
+                <Settings2 size={20} />
+                التحكم الجماعي في كل الدروس
+              </h3>
+              <select
+                aria-label="نطاق التطبيق الجماعي"
+                className={field}
+                value={scope}
+                onChange={(event) => setScope(event.target.value as typeof scope)}
               >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-5 p-5 sm:p-6">
-              <div className="grid gap-4 md:grid-cols-2">
-                <AdminInput
-                  label="اسم الكتاب كاملًا"
-                  required
-                  value={
-                    bookForm.title
-                  }
-                  onChange={(value) =>
-                    setBookForm(
-                      (
-                        current,
-                      ) => ({
-                        ...current,
-                        title:
-                          value,
-                      }),
-                    )
-                  }
-                  placeholder="اسم الكتاب كاملًا"
-                />
-
-                <AdminInput
-                  label="المؤلف"
-                  required
-                  value={
-                    bookForm.author
-                  }
-                  onChange={(value) =>
-                    setBookForm(
-                      (
-                        current,
-                      ) => ({
-                        ...current,
-                        author:
-                          value,
-                      }),
-                    )
-                  }
-                  placeholder="اسم المؤلف"
-                />
+                <option value="book">كل دروس الكتاب المحدد</option>
+                <option value="library">كل دروس جميع كتب المكتبة</option>
+              </select>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
+                  <input
+                    type="checkbox"
+                    checked={bulkSeek}
+                    onChange={(event) => setBulkSeek(event.target.checked)}
+                  />
+                  السماح بتحريك شريط الفيديو
+                </label>
+                <label className="flex gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
+                  <input
+                    type="checkbox"
+                    checked={bulkSpeed}
+                    onChange={(event) => setBulkSpeed(event.target.checked)}
+                  />
+                  السماح بتغيير سرعة التشغيل
+                </label>
               </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <AdminSelect
-                  label="المستوى"
-                  value={
-                    bookForm.level
-                  }
-                  onChange={(value) =>
-                    setBookForm(
-                      (
-                        current,
-                      ) => ({
-                        ...current,
-                        level:
-                          value as SunniLibraryLevel,
-                      }),
-                    )
-                  }
-                  options={SUNNI_LIBRARY_LEVELS.map(
-                    (
-                      level,
-                    ) => ({
-                      value:
-                        level.id,
-                      label:
-                        level.label,
-                    }),
-                  )}
-                />
-
-                <AdminSelect
-                  label="التصنيف"
-                  value={
-                    bookForm.category
-                  }
-                  onChange={(value) =>
-                    setBookForm(
-                      (
-                        current,
-                      ) => ({
-                        ...current,
-                        category:
-                          value as SunniLibraryCategoryId,
-                      }),
-                    )
-                  }
-                  options={SUNNI_LIBRARY_CATEGORIES.map(
-                    (
-                      category,
-                    ) => ({
-                      value:
-                        category.id,
-                      label:
-                        category.label,
-                    }),
-                  )}
-                />
-              </div>
-
-              <AdminTextArea
-                label="وصف الكتاب"
-                required
-                value={
-                  bookForm.description
-                }
-                onChange={(value) =>
-                  setBookForm(
-                    (
-                      current,
-                    ) => ({
-                      ...current,
-                      description:
-                        value,
-                    }),
-                  )
-                }
-                placeholder="وصف الكتاب..."
-              />
-
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <div className="flex items-center gap-2 text-sm font-black text-sky-700">
-                  <Download size={17} />
-                  روابط الكتاب
-                </div>
-
-                <div className="mt-4 space-y-4">
-                  {([['videoUrl', 'رابط فيديو أو قائمة YouTube'], ['audioUrl', 'رابط ملف صوتي مباشر (اختياري)'], ['audioSourceUrl', 'صفحة مصدر الشرح الصوتي'], ['videoDownloadUrl', 'ملف فيديو مسموح بتنزيله من الناشر (اختياري)']] as const).map(([key, label]) => <AdminInput key={key} label={label} value={bookForm[key]} onChange={(value) => setBookForm((current) => ({ ...current, [key]: value }))} placeholder="https://..." />)}
-                  <AdminInput
-                    label="رابط تحميل الكتاب"
-                    value={
-                      bookForm.downloadUrl
-                    }
-                    onChange={(value) =>
-                      setBookForm(
-                        (
-                          current,
-                        ) => ({
-                          ...current,
-                          downloadUrl:
-                            value,
-                        }),
-                      )
-                    }
-                    placeholder="https://..."
-                  />
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <AdminInput
-                      label="رابط القراءة"
-                      value={
-                        bookForm.readingUrl
-                      }
-                      onChange={(value) =>
-                        setBookForm(
-                          (
-                            current,
-                          ) => ({
-                            ...current,
-                            readingUrl:
-                              value,
-                          }),
-                        )
-                      }
-                      placeholder="https://..."
-                    />
-
-                    <AdminInput
-                      label="اسم زر القراءة"
-                      value={
-                        bookForm.readingLabel
-                      }
-                      onChange={(value) =>
-                        setBookForm(
-                          (
-                            current,
-                          ) => ({
-                            ...current,
-                            readingLabel:
-                              value,
-                          }),
-                        )
-                      }
-                      placeholder="قراءة الكتاب"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <div className="flex items-center gap-2 text-sm font-black text-amber-700">
-                  <GraduationCap
-                    size={17}
-                  />
-                  بيانات الشرح
-                </div>
-
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <AdminInput
-                    label="اسم الشرح"
-                    value={
-                      bookForm.sharhTitle
-                    }
-                    onChange={(value) =>
-                      setBookForm(
-                        (
-                          current,
-                        ) => ({
-                          ...current,
-                          sharhTitle:
-                            value,
-                        }),
-                      )
-                    }
-                    placeholder="اسم الشرح"
-                  />
-
-                  <AdminInput
-                    label="اسم الشارح"
-                    value={
-                      bookForm.sharhAuthor
-                    }
-                    onChange={(value) =>
-                      setBookForm(
-                        (
-                          current,
-                        ) => ({
-                          ...current,
-                          sharhAuthor:
-                            value,
-                        }),
-                      )
-                    }
-                    placeholder="اسم الشيخ أو المدرس"
-                  />
-
-                  <AdminInput
-                    label="رابط الشرح"
-                    value={
-                      bookForm.sharhUrl
-                    }
-                    onChange={(value) =>
-                      setBookForm(
-                        (
-                          current,
-                        ) => ({
-                          ...current,
-                          sharhUrl:
-                            value,
-                        }),
-                      )
-                    }
-                    placeholder="https://..."
-                  />
-
-                  <AdminInput
-                    label="اسم زر الشرح"
-                    value={
-                      bookForm.sharhLabel
-                    }
-                    onChange={(value) =>
-                      setBookForm(
-                        (
-                          current,
-                        ) => ({
-                          ...current,
-                          sharhLabel:
-                            value,
-                        }),
-                      )
-                    }
-                    placeholder="فتح الشرح"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-white p-5 sm:flex-row sm:justify-end">
+              <p className="text-xs leading-7 text-slate-600">
+                زر واحد يطبّق الاختيار على جميع الدروس الحالية، وأي دروس تُضاف لهذه الكتب لاحقًا، ويلغي
+                استثناءات الصلاحيات القديمة. عناوين الدروس وروابطها وظهورها تبقى كما حفظتها، ويمكنك إضافة
+                استثناء لأي درس بعد التطبيق.
+              </p>
               <button
                 type="button"
-                onClick={
-                  closeBookModal
-                }
+                className={`${button} !bg-teal-800 !text-white`}
                 disabled={
-                  savingBook
+                  busy ||
+                  !catalog.ready ||
+                  !!catalog.error ||
+                  (scope === 'book' && (!selectedId || !detail.ready))
                 }
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 text-xs font-black text-slate-600"
+                onClick={applyBulk}
               >
-                <X size={16} />
-                إلغاء
+                {busy ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}تطبيق على{' '}
+                {scope === 'book' ? 'كل دروس الكتاب' : 'كل دروس المكتبة'}
               </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  void saveBook()
-                }
-                disabled={
-                  savingBook
-                }
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-600 px-6 text-xs font-black text-white disabled:opacity-60"
-              >
-                {savingBook ? (
-                  <Loader2
-                    size={17}
-                    className="animate-spin"
-                  />
-                ) : (
-                  <Save size={17} />
-                )}
-
-                {editingBookId
-                  ? 'حفظ التعديلات'
-                  : 'إضافة الكتاب'}
-              </button>
-            </div>
+              <p className="text-xs leading-6 text-slate-500">
+                تعمل هذه الإعدادات داخل مشغل سميع. عند فتح المصدر الخارجي، تكون أدوات التشغيل تابعة للمصدر.
+              </p>
+            </section>
           </div>
         </div>
-      ) : null}
-
-      {videoModalOpen &&
-      selectedBook ? (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-[30px] bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 p-5">
-              <div>
-                <p className="text-xs font-black text-sky-600">
-                  {editingVideoId
-                    ? 'تعديل الدرس'
-                    : 'إضافة درس جديد'}
-                </p>
-
-                <h3 className="mt-1 line-clamp-2 text-lg font-black leading-7 text-slate-900">
-                  {
-                    selectedBook.title
-                  }
-                </h3>
-              </div>
-
-              <button
-                type="button"
-                onClick={
-                  closeVideoModal
-                }
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-slate-500"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-4 p-5 sm:p-6">
-              <AdminInput
-                label="اسم الدرس"
-                required
-                value={
-                  videoForm.title
-                }
-                onChange={(value) =>
-                  setVideoForm(
-                    (
-                      current,
-                    ) => ({
-                      ...current,
-                      title:
-                        value,
-                    }),
-                  )
-                }
-                placeholder="الدرس الأول — مقدمة الكتاب"
-              />
-
-              <AdminInput
-                label="رابط الفيديو"
-                required
-                value={
-                  videoForm.url
-                }
-                onChange={(value) =>
-                  setVideoForm(
-                    (
-                      current,
-                    ) => ({
-                      ...current,
-                      url:
-                        value,
-                    }),
-                  )
-                }
-                placeholder="https://youtube.com/..."
-                type="url"
-              />
-
-              <AdminInput
-                label="ترتيب الدرس"
-                value={
-                  videoForm.order
-                }
-                onChange={(value) =>
-                  setVideoForm(
-                    (
-                      current,
-                    ) => ({
-                      ...current,
-                      order:
-                        value,
-                    }),
-                  )
-                }
-                placeholder="1"
-                type="number"
-              />
-
-              <div className="rounded-2xl bg-sky-50 p-4 text-xs font-bold leading-6 text-sky-800">
-                <div className="flex items-center gap-2 font-black">
-                  <PlayCircle size={16} />
-                  ملاحظة
-                </div>
-
-                <p className="mt-2">
-                  أدخل الرابط فقط. المستخدم سيشاهد
-                  الفيديو من داخل منصة مصحف سميع.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-col-reverse gap-2 border-t border-slate-100 p-5 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={
-                  closeVideoModal
-                }
-                disabled={
-                  savingVideo
-                }
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 text-xs font-black text-slate-600"
-              >
-                <X size={16} />
-                إلغاء
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  void saveVideo()
-                }
-                disabled={
-                  savingVideo
-                }
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-600 px-6 text-xs font-black text-white disabled:opacity-60"
-              >
-                {savingVideo ? (
-                  <Loader2
-                    size={17}
-                    className="animate-spin"
-                  />
-                ) : (
-                  <Save size={17} />
-                )}
-
-                {editingVideoId
-                  ? 'حفظ التعديل'
-                  : 'إضافة الدرس'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      </fieldset>
     </section>
-  )
-}
-
-function AdminInput({
-  label,
-  required,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-}: {
-  label: string
-  required?: boolean
-  value: string
-  onChange: (
-    value: string,
-  ) => void
-  placeholder?: string
-  type?: string
-}) {
-  return (
-    <label className="block">
-      <span className="mb-2 flex items-center gap-1 text-xs font-black text-slate-700">
-        {type === 'url' ? (
-          <LinkIconSmall />
-        ) : null}
-
-        {label}
-
-        {required ? (
-          <span className="text-red-500">
-            *
-          </span>
-        ) : null}
-      </span>
-
-      <input
-        type={type}
-        value={value}
-        onChange={(event) =>
-          onChange(
-            event.target.value,
-          )
-        }
-        placeholder={
-          placeholder
-        }
-        className={`h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-sky-400 ${
-          type === 'url'
-            ? 'pr-9'
-            : ''
-        }`}
-        dir="rtl"
-      />
-    </label>
-  )
-}
-
-function AdminTextArea({
-  label,
-  required,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string
-  required?: boolean
-  value: string
-  onChange: (
-    value: string,
-  ) => void
-  placeholder?: string
-}) {
-  return (
-    <label className="block">
-      <span className="mb-2 flex items-center gap-1 text-xs font-black text-slate-700">
-        <FileText
-          size={14}
-          className="text-sky-500"
-        />
-
-        {label}
-
-        {required ? (
-          <span className="text-red-500">
-            *
-          </span>
-        ) : null}
-      </span>
-
-      <textarea
-        value={value}
-        onChange={(event) =>
-          onChange(
-            event.target.value,
-          )
-        }
-        placeholder={
-          placeholder
-        }
-        className="min-h-[120px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold leading-7 text-slate-800 outline-none transition focus:border-sky-400"
-        dir="rtl"
-      />
-    </label>
-  )
-}
-
-function AdminSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string
-  value: string
-  onChange: (
-    value: string,
-  ) => void
-  options: Array<{
-    value: string
-    label: string
-  }>
-}) {
-  return (
-    <label className="block">
-      <span className="mb-2 flex items-center gap-1 text-xs font-black text-slate-700">
-        <Layers3
-          size={14}
-          className="text-sky-500"
-        />
-
-        {label}
-      </span>
-
-      <select
-        value={value}
-        onChange={(event) =>
-          onChange(
-            event.target.value,
-          )
-        }
-        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-black text-slate-800 outline-none transition focus:border-sky-400"
-      >
-        {options.map(
-          (option) => (
-            <option
-              key={
-                option.value
-              }
-              value={
-                option.value
-              }
-            >
-              {
-                option.label
-              }
-            </option>
-          ),
-        )}
-      </select>
-    </label>
-  )
-}
-
-function LinkIconSmall() {
-  return (
-    <span className="text-sky-500">
-      <ExternalLink
-        size={14}
-      />
-    </span>
   )
 }
