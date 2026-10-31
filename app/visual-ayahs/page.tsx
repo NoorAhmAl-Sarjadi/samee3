@@ -1,4 +1,9 @@
 'use client'
+// SAMEE3_COLLECTED_MANUAL_TRIM_V4
+import {
+  Samee3CollectedTrimEditor,
+  applyStoredCollectedTrim,
+} from './Samee3CollectedTrimEditor'
 
 import { claimAudioFocus } from '@/lib/audio-focus'
 
@@ -77,7 +82,13 @@ type Prepared = {
     url: string
     startSeconds: number
   }
-}
+
+      collectedOriginal?: {
+        startSeconds: number
+        duration: number
+        starts: number[]
+      }
+    }
 
 // SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V2
 type CollectedClip = {
@@ -1981,16 +1992,23 @@ export default function VisualAyahsPage() {
 
         if (id !== requestId.current) return
 
+        const samee3AdjustedClip = applyStoredCollectedTrim(clip, surah, from, to)
         const created: Prepared = {
           verses: chosenVerses,
           buffers: [],
-          starts: clip.starts,
-          duration: clip.duration,
+          starts: samee3AdjustedClip.starts,
+          duration: samee3AdjustedClip.duration,
           stream: {
             url: clip.url,
-            startSeconds: clip.startSeconds,
+            startSeconds: samee3AdjustedClip.startSeconds,
           },
-        }
+
+      collectedOriginal: {
+        startSeconds: clip.startSeconds,
+        duration: clip.duration,
+        starts: clip.starts,
+      },
+    }
 
         preparedRef.current = created
         setPrepared(created)
@@ -4390,7 +4408,44 @@ export default function VisualAyahsPage() {
               )}
             </div>
 
-            {prepared && (
+
+  {reader === 'alafasy-collected' &&
+    prepared?.stream &&
+    prepared.collectedOriginal && (
+      <Samee3CollectedTrimEditor
+        key={reader + ':' + surah + ':' + from + ':' + to}
+        surah={surah}
+        from={from}
+        to={to}
+        streamUrl={prepared.stream.url}
+        original={prepared.collectedOriginal}
+        disabled={working}
+        onStop={() => stopPlayback(true)}
+        onApply={timing => {
+          const current = preparedRef.current
+
+          if (!current?.stream || working) return
+
+          stopPlayback(true)
+          clearResult()
+
+          const updated: Prepared = {
+            ...current,
+            starts: timing.starts,
+            duration: timing.duration,
+            stream: {
+              ...current.stream,
+              startSeconds: timing.startSeconds,
+            },
+          }
+
+          preparedRef.current = updated
+          setPrepared(updated)
+        }}
+      />
+    )}
+
+{prepared && (
               <div className="mx-auto mt-3 flex max-w-[340px] items-center gap-3 rounded-2xl bg-white p-3">
                 <button
                   type="button"
