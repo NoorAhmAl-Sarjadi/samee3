@@ -13,42 +13,71 @@ jobs:
     timeout-minutes: 35
 
     steps:
-      - name: Checkout SAMEE3 repository
+      - name: Checkout SAMEE3
         uses: actions/checkout@v4
         with:
           persist-credentials: true
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
 
-      - name: Integrate collected Alafasy
+      - name: Integrate Collected Alafasy V2
         run: node scripts/integrate-alafasy-index-visual.cjs
 
-      - name: Verify index integration V2
-        shell: bash
+      - name: Verify Index Integration
         run: |
-          set -e
           grep -Fq 'SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V2' app/surahs/page.tsx
-          echo "Index integration verified."
 
-      - name: Verify visual reciter
-        shell: bash
+      - name: Verify Visual Ayahs Integration
         run: |
-          set -e
           grep -Fq 'alafasy-collected' lib/samee3-visual-config.ts
           grep -Fq 'loadCollectedVisualClip' app/visual-ayahs/page.tsx
-          echo "Visual Ayahs integration verified."
 
-      - name: Install dependencies
+      - name: Fix TypeScript Optional Stream Error
+        shell: bash
+        run: |
+          node <<'NODE'
+          'use strict'
+
+          const fs = require('node:fs')
+
+          const file = 'app/visual-ayahs/page.tsx'
+          const source = fs.readFileSync(file, 'utf8')
+
+          const oldCode = 'clip.stream.startSeconds'
+          const newCode = 'clip.stream!.startSeconds'
+
+          if (source.includes(newCode) && !source.includes(oldCode)) {
+            console.log('TypeScript fix already applied.')
+            process.exit(0)
+          }
+
+          const occurrences = source.split(oldCode).length - 1
+
+          if (occurrences !== 1) {
+            throw new Error(
+              'Expected exactly one collected stream reference. Found: ' +
+              occurrences
+            )
+          }
+
+          const updated = source.replace(oldCode, newCode)
+
+          fs.writeFileSync(file, updated, 'utf8')
+
+          console.log('Fixed TS18048 in visual ayahs.')
+          NODE
+
+      - name: Install Dependencies
         run: npm ci
 
-      - name: Verify production build
+      - name: Check Production Build
         run: npm run build
 
-      - name: Commit verified changes
+      - name: Commit Verified Changes
         shell: bash
         run: |
           set -e
@@ -62,12 +91,12 @@ jobs:
             lib/samee3-visual-config.ts
 
           if git diff --cached --quiet; then
-            echo "Integration already committed."
+            echo "No changes to commit."
             exit 0
           fi
 
-          git commit -m "feat: integrate collected Alafasy in index and visual ayahs"
+          git commit -m "fix: collected Alafasy visual streaming and index integration"
 
           git push origin HEAD:main
 
-          echo "Collected Alafasy integration successfully committed."
+          echo "Changes committed successfully."
