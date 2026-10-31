@@ -11,33 +11,63 @@ jobs:
   integrate:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout SAMEE3 repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
-      - name: Patch existing pages without replacing their features
+
+      - name: Integrate collected Alafasy
         run: node scripts/integrate-alafasy-index-visual.cjs
-      - name: Verify the collected reader is present in both sections
+
+      - name: Verify index integration V2
         shell: bash
         run: |
-          grep -q 'SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V1' app/surahs/page.tsx
-          grep -q "alafasy-collected" lib/samee3-visual-config.ts
-          grep -q 'loadCollectedVisualClip' app/visual-ayahs/page.tsx
-      - name: Install project dependencies
+          set -e
+          grep -Fq 'SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V2' app/surahs/page.tsx
+          echo "Index integration verified."
+
+      - name: Verify visual reciter
+        shell: bash
+        run: |
+          set -e
+          grep -Fq 'alafasy-collected' lib/samee3-visual-config.ts
+          grep -Fq 'loadCollectedVisualClip' app/visual-ayahs/page.tsx
+          echo "Visual Ayahs integration verified."
+
+      - name: Install dependencies
         run: npm ci
-      - name: Check production build before saving modifications
+
+      - name: Verify production build
         run: npm run build
-      - name: Commit only if the full production build succeeded
+
+      - name: Commit verified changes
         shell: bash
         run: |
-          if git diff --quiet -- app/surahs/page.tsx lib/samee3-visual-config.ts app/visual-ayahs/page.tsx; then
-            echo 'Already applied. Nothing to commit.'
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            app/surahs/page.tsx \
+            app/visual-ayahs/page.tsx \
+            lib/samee3-visual-config.ts
+
+          if git diff --cached --quiet; then
+            echo "Integration already committed."
             exit 0
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app/surahs/page.tsx lib/samee3-visual-config.ts app/visual-ayahs/page.tsx
-          git commit -m 'feat: collected Alafasy in surah index and visual ayahs'
-          git push
+
+          git commit -m "feat: integrate collected Alafasy in index and visual ayahs"
+
+          git push origin HEAD:main
+
+          echo "Collected Alafasy integration successfully committed."
