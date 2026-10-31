@@ -1,3 +1,4 @@
+
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -15,6 +16,7 @@ import {
   Clapperboard,
   LibraryBig,
   MessageCircle,
+  GraduationCap,
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -569,6 +571,13 @@ export default function HomePage() {
               icon={LibraryBig}
               title="المكتبة الشرعية"
               description="كتب ومراجع"
+            />
+
+            <QuickServiceCard
+              href="/tarbiyah-iman"
+              icon={GraduationCap}
+              title="التربية الإيمانية للأبناء"
+              description="دروس مرئية ومادة علمية"
             />
 
             <QuickServiceCard
