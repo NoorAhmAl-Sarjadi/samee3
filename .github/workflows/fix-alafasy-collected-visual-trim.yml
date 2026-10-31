@@ -1,5 +1,5 @@
 
-name: SAMEE3 - Install and Repair Alafasy Precision Trim
+name: SAMEE3 - Alafasy Precision Trim V3
 
 on:
   workflow_dispatch:
@@ -8,21 +8,20 @@ permissions:
   contents: write
 
 concurrency:
-  group: samee3-alafasy-precision-install
+  group: samee3-alafasy-trim-v3
   cancel-in-progress: false
 
 jobs:
-  install-and-verify:
-    name: Install, Repair, Build and Commit
+  install:
+    name: Install, Test and Commit
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
     steps:
-      - name: Checkout full repository history
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
           persist-credentials: true
 
       - name: Setup Node.js
@@ -31,303 +30,1093 @@ jobs:
           node-version: "24"
           cache: npm
 
-      - name: Recover and correct previous V2 installer
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create independent precision editor
         shell: bash
         run: |
-          node <<'NODE'
-          'use strict'
+          cat > app/visual-ayahs/Samee3CollectedTrimEditor.tsx <<'TSX'
+          'use client'
 
-          const fs = require('node:fs')
-          const { execFileSync } = require('node:child_process')
+          // SAMEE3_COLLECTED_MANUAL_TRIM_V3
+          // Only for the collected Alafasy recording.
 
-          const workflowPath =
-            '.github/workflows/fix-alafasy-collected-visual-trim.yml'
+          import {
+            useCallback,
+            useEffect,
+            useRef,
+            useState,
+          } from 'react'
 
-          const outputPath = '/tmp/samee3-collected-trim-installer.cjs'
+          import {
+            MAX_DURATION_SECONDS,
+          } from '@/lib/samee3-visual-config'
 
-          const commits = execFileSync(
-            'git',
-            [
-              'log',
-              '--all',
-              '--format=%H',
-              '--',
-              workflowPath,
-            ],
-            { encoding: 'utf8' }
-          )
-            .trim()
-            .split(/\r?\n/)
-            .filter(Boolean)
+          export type CollectedTiming = {
+            startSeconds: number
+            duration: number
+            starts: number[]
+          }
 
-          let historicalWorkflow = ''
-          let historicalCommit = ''
+          type Offsets = {
+            startOffset: number
+            endOffset: number
+          }
 
-          for (const commit of commits) {
-            let content = ''
+          type EditorProps = {
+            surah: number
+            from: number
+            to: number
+            streamUrl: string
+            original: CollectedTiming
+            disabled: boolean
+            onStop: () => void
+            onApply: (timing: CollectedTiming) => void
+          }
 
+          const EMPTY: Offsets = {
+            startOffset: 0,
+            endOffset: 0,
+          }
+
+          function storageKey(
+            surah: number,
+            from: number,
+            to: number
+          ) {
+            return (
+              'samee3_collected_visual_trim_v3:' +
+              surah + ':' + from + ':' + to
+            )
+          }
+
+          function normalize(value: number) {
+            if (!Number.isFinite(value)) return 0
+
+            return (
+              Math.round(
+                Math.max(-30, Math.min(30, value)) * 20
+              ) / 20
+            )
+          }
+
+          function readSaved(
+            surah: number,
+            from: number,
+            to: number
+          ): Offsets {
             try {
-              content = execFileSync(
-                'git',
-                ['show', commit + ':' + workflowPath],
-                {
-                  encoding: 'utf8',
-                  stdio: ['ignore', 'pipe', 'ignore'],
-                }
+              const raw = localStorage.getItem(
+                storageKey(surah, from, to)
               )
+
+              if (!raw) return { ...EMPTY }
+
+              const parsed: unknown = JSON.parse(raw)
+
+              if (
+                !parsed ||
+                typeof parsed !== 'object' ||
+                Array.isArray(parsed)
+              ) {
+                return { ...EMPTY }
+              }
+
+              const data = parsed as Record<string, unknown>
+
+              if (
+                typeof data.startOffset !== 'number' ||
+                typeof data.endOffset !== 'number' ||
+                !Number.isFinite(data.startOffset) ||
+                !Number.isFinite(data.endOffset)
+              ) {
+                return { ...EMPTY }
+              }
+
+              return {
+                startOffset: normalize(data.startOffset),
+                endOffset: normalize(data.endOffset),
+              }
             } catch {
-              continue
+              return { ...EMPTY }
             }
+          }
+
+          export function calculateCollectedTrim(
+            original: CollectedTiming,
+            offsets: Offsets
+          ): CollectedTiming {
+            const startSeconds = Math.max(
+              0,
+              original.startSeconds + offsets.startOffset
+            )
+
+            const endSeconds =
+              original.startSeconds +
+              original.duration +
+              offsets.endOffset
+
+            const duration = endSeconds - startSeconds
 
             if (
-              content.includes(
-                'SAMEE3_COLLECTED_MANUAL_TRIM_V2'
-              ) &&
-              content.includes('function replaceOne(') &&
-              content.includes("node <<'NODE'")
+              !Number.isFinite(startSeconds) ||
+              !Number.isFinite(endSeconds) ||
+              duration < 0.25 ||
+              duration > MAX_DURATION_SECONDS
             ) {
-              historicalWorkflow = content
-              historicalCommit = commit
-              break
+              throw new Error(
+                'حدود التلاوة غير صالحة. ' +
+                'اجعل النهاية بعد البداية ' +
+                'ولا تتجاوز الحد الأقصى للفيديو.'
+              )
+            }
+
+            const starts = original.starts.map(
+              relative => Math.max(
+                0,
+                Math.min(
+                  duration,
+                  original.startSeconds +
+                    relative -
+                    startSeconds
+                )
+              )
+            )
+
+            return {
+              startSeconds,
+              duration,
+              starts,
             }
           }
 
-          if (!historicalWorkflow) {
-            throw new Error(
-              'The previous V2 installer was not found ' +
-              'in the workflow Git history. ' +
-              'No source files have been modified.'
-            )
-          }
-
-          const match = historicalWorkflow.match(
-            /^[ \t]*node <<'NODE'[ \t]*\r?\n([\s\S]*?)^[ \t]*NODE[ \t]*$/m
-          )
-
-          if (!match) {
-            throw new Error(
-              'Cannot extract original V2 installer safely.'
-            )
-          }
-
-          const lines = match[1]
-            .replace(/\r\n/g, '\n')
-            .split('\n')
-
-          const nonempty = lines.filter(line => line.trim())
-
-          const indentation = Math.min(
-            ...nonempty.map(
-              line => (line.match(/^[ \t]*/) || [''])[0].length
-            )
-          )
-
-          let installer = lines
-            .map(line =>
-              line.trim()
-                ? line.slice(indentation)
-                : ''
-            )
-            .join('\n')
-
-          const matchStatement = 'const match = matches[0]'
-
-          if (
-            installer.split(matchStatement).length !== 2
+          export function applyStoredCollectedTrim<
+            T extends CollectedTiming
+          >(
+            clip: T,
+            surah: number,
+            from: number,
+            to: number
           ) {
-            throw new Error(
-              'The previous installer matching function ' +
-              'has changed. Refusing an unsafe patch.'
-            )
+            const saved = readSaved(surah, from, to)
+
+            try {
+              return {
+                ...clip,
+                ...calculateCollectedTrim(clip, saved),
+              }
+            } catch {
+              return {
+                ...clip,
+                ...calculateCollectedTrim(clip, EMPTY),
+              }
+            }
           }
 
-          // The old flexible matcher consumed newlines before
-          // declarations. Restore those line boundaries.
-          installer = installer.replace(
-            matchStatement,
-            [
-              matchStatement,
-              '',
-              '  const leadingWhitespace =',
-              "    (match[0].match(/^\\s*/) || [''])[0]",
-              '',
-              "  const lastNewline = leadingWhitespace.lastIndexOf('\\n')",
-              '',
-              '  if (lastNewline !== -1) {',
-              '    after =',
-              '      leadingWhitespace.slice(0, lastNewline + 1) +',
-              '      after',
-              '  }',
-            ].join('\n')
-          )
+          async function waitForMetadata(
+            audio: HTMLAudioElement
+          ) {
+            if (audio.readyState >= 1) return
 
-          // The real page uses "working", not the "busy"
-          // string used by the old V2 patch.
-          installer = installer.replaceAll(
-            "busy !== 'idle'",
-            'working'
-          )
+            await new Promise<void>((resolve, reject) => {
+              const cleanup = () => {
+                window.clearTimeout(timeout)
+                audio.removeEventListener(
+                  'loadedmetadata',
+                  success
+                )
+                audio.removeEventListener('error', failure)
+              }
 
-          fs.writeFileSync(
-            outputPath,
-            installer,
-            'utf8'
-          )
+              const success = () => {
+                cleanup()
+                resolve()
+              }
 
-          console.log(
-            'Recovered V2 installer from commit:',
-            historicalCommit
-          )
-          console.log(
-            'Corrected whitespace matching and busy state.'
-          )
-          NODE
+              const failure = () => {
+                cleanup()
+                reject(
+                  new Error(
+                    'تعذر تحميل التسجيل الصوتي للاختبار.'
+                  )
+                )
+              }
 
-      - name: Install precision trim into current Visual Ayahs
-        shell: bash
-        run: |
-          node /tmp/samee3-collected-trim-installer.cjs
+              const timeout = window.setTimeout(
+                failure,
+                15000
+              )
 
-      - name: Repair generated syntax and missing icon imports
+              audio.addEventListener(
+                'loadedmetadata',
+                success
+              )
+              audio.addEventListener('error', failure)
+
+              audio.load()
+            })
+          }
+
+          const button =
+            'inline-flex min-h-11 items-center justify-center ' +
+            'rounded-xl border border-[#d9cdb6] bg-white ' +
+            'px-3 py-2 text-sm font-bold text-[#245343] ' +
+            'disabled:opacity-40'
+
+          export function Samee3CollectedTrimEditor({
+            surah,
+            from,
+            to,
+            streamUrl,
+            original,
+            disabled,
+            onStop,
+            onApply,
+          }: EditorProps) {
+            const [offsets, setOffsets] = useState<Offsets>(
+              () => readSaved(surah, from, to)
+            )
+
+            const [message, setMessage] = useState('')
+            const [error, setError] = useState('')
+            const [preview, setPreview] = useState<
+              'start' | 'end' | null
+            >(null)
+
+            const audioRef = useRef<HTMLAudioElement>(null)
+            const intervalRef = useRef<number | null>(null)
+            const timeoutRef = useRef<number | null>(null)
+            const sequenceRef = useRef(0)
+
+            const stopPreview = useCallback(() => {
+              sequenceRef.current += 1
+
+              if (intervalRef.current !== null) {
+                window.clearInterval(intervalRef.current)
+                intervalRef.current = null
+              }
+
+              if (timeoutRef.current !== null) {
+                window.clearTimeout(timeoutRef.current)
+                timeoutRef.current = null
+              }
+
+              audioRef.current?.pause()
+              setPreview(null)
+            }, [])
+
+            useEffect(() => {
+              return () => {
+                sequenceRef.current += 1
+
+                if (intervalRef.current !== null) {
+                  window.clearInterval(intervalRef.current)
+                }
+
+                if (timeoutRef.current !== null) {
+                  window.clearTimeout(timeoutRef.current)
+                }
+
+                audioRef.current?.pause()
+              }
+            }, [stopPreview])
+
+            const current = (() => {
+              try {
+                return calculateCollectedTrim(
+                  original,
+                  offsets
+                )
+              } catch {
+                return calculateCollectedTrim(
+                  original,
+                  EMPTY
+                )
+              }
+            })()
+
+            function changeOffset(
+              kind: keyof Offsets,
+              value: number
+            ) {
+              if (disabled) return
+
+              const next: Offsets = {
+                ...offsets,
+                [kind]: normalize(value),
+              }
+
+              try {
+                const timing = calculateCollectedTrim(
+                  original,
+                  next
+                )
+
+                stopPreview()
+                onStop()
+                onApply(timing)
+                setOffsets(next)
+                setError('')
+                setMessage(
+                  'تم تطبيق الضبط على التشغيل والتصدير.'
+                )
+              } catch (cause) {
+                setError(
+                  cause instanceof Error
+                    ? cause.message
+                    : 'تعذر ضبط التوقيت.'
+                )
+              }
+            }
+
+            function save() {
+              try {
+                localStorage.setItem(
+                  storageKey(surah, from, to),
+                  JSON.stringify(offsets)
+                )
+
+                setError('')
+                setMessage(
+                  'تم حفظ الضبط لهذا المقطع على جهازك.'
+                )
+              } catch {
+                setError(
+                  'تعذر الحفظ على هذا الجهاز.'
+                )
+              }
+            }
+
+            function reset() {
+              if (disabled) return
+
+              try {
+                const timing = calculateCollectedTrim(
+                  original,
+                  EMPTY
+                )
+
+                stopPreview()
+                onStop()
+                onApply(timing)
+
+                localStorage.removeItem(
+                  storageKey(surah, from, to)
+                )
+
+                setOffsets({ ...EMPTY })
+                setError('')
+                setMessage(
+                  'تمت استعادة التوقيت الأصلي.'
+                )
+              } catch (cause) {
+                setError(
+                  cause instanceof Error
+                    ? cause.message
+                    : 'تعذرت استعادة التوقيت.'
+                )
+              }
+            }
+
+            async function listen(
+              side: 'start' | 'end'
+            ) {
+              if (disabled) return
+
+              stopPreview()
+              onStop()
+
+              const audio = audioRef.current
+
+              if (!audio) return
+
+              const sequence = ++sequenceRef.current
+
+              const begin =
+                side === 'start'
+                  ? current.startSeconds
+                  : Math.max(
+                      current.startSeconds,
+                      current.startSeconds +
+                        current.duration - 3
+                    )
+
+              const finish =
+                side === 'start'
+                  ? Math.min(
+                      current.startSeconds +
+                        current.duration,
+                      current.startSeconds + 3
+                    )
+                  : current.startSeconds +
+                    current.duration
+
+              try {
+                await waitForMetadata(audio)
+
+                if (sequence !== sequenceRef.current) {
+                  return
+                }
+
+                audio.currentTime = begin
+                await audio.play()
+
+                if (sequence !== sequenceRef.current) {
+                  audio.pause()
+                  return
+                }
+
+                setPreview(side)
+                setError('')
+
+                intervalRef.current = window.setInterval(
+                  () => {
+                    if (
+                      audio.paused ||
+                      audio.ended ||
+                      audio.currentTime >= finish - 0.03
+                    ) {
+                      stopPreview()
+                    }
+                  },
+                  35
+                )
+
+                timeoutRef.current = window.setTimeout(
+                  stopPreview,
+                  8000
+                )
+              } catch (cause) {
+                stopPreview()
+
+                setError(
+                  cause instanceof Error
+                    ? cause.message
+                    : 'تعذر الاستماع للطرف المحدد.'
+                )
+              }
+            }
+
+            return (
+              <section
+                className="mt-4 rounded-2xl border border-[#d9c8a5] bg-[#fffcf3] p-4"
+                dir="rtl"
+              >
+                <h3 className="text-base font-extrabold text-[#245343]">
+                  ضبط بداية ونهاية تلاوة العفاسي المجمع
+                </h3>
+
+                <p className="mt-2 text-xs leading-6 text-[#746d5b]">
+                  التحكم خاص بالمصحف المجمع فقط.
+                  الرقم الموجب يؤخر الموضع، والسالب يقدمه.
+                  مقدار الضبط 0.05 ثانية.
+                </p>
+
+                {([
+                  {
+                    key: 'startOffset' as const,
+                    title: 'ضبط بداية التلاوة',
+                  },
+                  {
+                    key: 'endOffset' as const,
+                    title: 'ضبط نهاية التلاوة',
+                  },
+                ]).map(item => (
+                  <div
+                    key={item.key}
+                    className="mt-4 rounded-xl border border-[#e7dfd0] bg-white p-3"
+                  >
+                    <label className="block text-sm font-bold text-[#245343]">
+                      {item.title}
+                    </label>
+
+                    <div className="mt-3 flex items-center gap-3">
+                      <input
+                        aria-label={item.title}
+                        type="range"
+                        min={-30}
+                        max={30}
+                        step={0.05}
+                        disabled={disabled}
+                        value={offsets[item.key]}
+                        onChange={event =>
+                          changeOffset(
+                            item.key,
+                            Number(event.target.value)
+                          )
+                        }
+                        className="min-w-0 flex-1 accent-[#245343]"
+                      />
+
+                      <input
+                        aria-label={item.title + ' بالثواني'}
+                        type="number"
+                        min={-30}
+                        max={30}
+                        step={0.05}
+                        disabled={disabled}
+                        value={offsets[item.key]}
+                        onChange={event =>
+                          changeOffset(
+                            item.key,
+                            Number(event.target.value)
+                          )
+                        }
+                        className="w-24 rounded-lg border border-[#d9cdb6] px-2 py-2 text-center text-sm"
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                <div className="mt-4 rounded-xl bg-white p-3 text-center text-xs leading-7 text-[#245343]">
+                  البداية: {current.startSeconds.toFixed(2)}
+                  {' '}ثانية
+                  {' · '}
+                  النهاية: {(
+                    current.startSeconds +
+                    current.duration
+                  ).toFixed(2)}
+                  {' '}ثانية
+                  {' · '}
+                  المدة: {current.duration.toFixed(2)}
+                  {' '}ثانية
+                </div>
+
+                <audio
+                  ref={audioRef}
+                  src={streamUrl}
+                  preload="auto"
+                  className="hidden"
+                />
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className={button}
+                    disabled={disabled}
+                    onClick={() => void listen('start')}
+                  >
+                    سماع أول 3 ثوانٍ
+                  </button>
+
+                  <button
+                    type="button"
+                    className={button}
+                    disabled={disabled}
+                    onClick={() => void listen('end')}
+                  >
+                    سماع آخر 3 ثوانٍ
+                  </button>
+                </div>
+
+                {preview && (
+                  <button
+                    type="button"
+                    className={button + ' mt-2 w-full'}
+                    onClick={stopPreview}
+                  >
+                    إيقاف الاستماع
+                  </button>
+                )}
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className={button}
+                    disabled={disabled}
+                    onClick={save}
+                  >
+                    حفظ الضبط
+                  </button>
+
+                  <button
+                    type="button"
+                    className={button}
+                    disabled={disabled}
+                    onClick={reset}
+                  >
+                    التوقيت الأصلي
+                  </button>
+                </div>
+
+                {message && (
+                  <p
+                    role="status"
+                    className="mt-3 text-xs text-[#245343]"
+                  >
+                    {message}
+                  </p>
+                )}
+
+                {error && (
+                  <p
+                    role="alert"
+                    className="mt-3 text-xs text-red-700"
+                  >
+                    {error}
+                  </p>
+                )}
+              </section>
+            )
+          }
+          TSX
+
+      - name: Integrate editor using TypeScript AST
         shell: bash
         run: |
           node <<'NODE'
           'use strict'
 
           const fs = require('node:fs')
+          const ts = require('typescript')
 
           const file = 'app/visual-ayahs/page.tsx'
+          const marker = 'SAMEE3_COLLECTED_MANUAL_TRIM_V3'
+          const component =
+            'app/visual-ayahs/Samee3CollectedTrimEditor.tsx'
 
           if (!fs.existsSync(file)) {
-            throw new Error('Visual Ayahs page was not found.')
+            throw new Error('Visual Ayahs source not found.')
+          }
+
+          if (!fs.existsSync(component)) {
+            throw new Error('Precision editor source not found.')
           }
 
           let source = fs.readFileSync(file, 'utf8')
-          const original = source
 
-          // Repair merged audio declarations, if present.
+          if (source.includes(marker)) {
+            console.log('V3 integration already exists.')
+            process.exit(0)
+          }
+
+          // Avoid the broken line joins from earlier attempts.
           source = source.replace(
             /(useRef<HTMLAudioElement\s*\|\s*null>\(null\))[ \t]+(const collectedAudioNodeRef\s*=)/g,
             '$1\n\n  $2'
           )
 
-          // Repair merged callback definitions, if present.
           source = source.replace(
             /(\},\s*\[\s*\]\s*\))[ \t]+(const stopCollectedEdge\s*=)/g,
             '$1\n\n  $2'
           )
 
-          // Correct any remaining state name from V2.
-          source = source.replaceAll(
-            "busy !== 'idle'",
-            'working'
+          const sf = ts.createSourceFile(
+            file,
+            source,
+            ts.ScriptTarget.Latest,
+            true,
+            ts.ScriptKind.TSX
           )
 
-          // Ensure icons used by the trim editor are imported.
-          const iconImport = source.match(
-            /import\s*\{([^}]+)\}\s*from\s*['"]lucide-react['"]/s
-          )
-
-          if (!iconImport) {
+          if (sf.parseDiagnostics.length) {
             throw new Error(
-              'Cannot find the existing lucide-react import.'
+              'Existing Visual Ayahs page has syntax errors. ' +
+              'No integration changes will be committed.'
             )
           }
 
-          const imported = new Set(
-            iconImport[1]
-              .split(',')
-              .map(item => item.trim().split(/\s+as\s+/)[0])
-              .filter(Boolean)
+          const edits = []
+
+          function insert(pos, text) {
+            edits.push({ start: pos, end: pos, text })
+          }
+
+          function replace(start, end, text) {
+            edits.push({ start, end, text })
+          }
+
+          // Extend the existing Prepared type.
+          let preparedType = null
+
+          for (const statement of sf.statements) {
+            if (
+              ts.isTypeAliasDeclaration(statement) &&
+              statement.name.text === 'Prepared' &&
+              ts.isTypeLiteralNode(statement.type)
+            ) {
+              preparedType = statement.type
+              break
+            }
+          }
+
+          if (!preparedType) {
+            throw new Error(
+              'Prepared type could not be identified.'
+            )
+          }
+
+          const existingOriginal = preparedType.members.some(
+            member =>
+              member.name?.getText(sf) ===
+              'collectedOriginal'
           )
 
-          const icons = [
-            'Play',
-            'Pause',
-            'Save',
-            'RefreshCcw',
-          ]
+          if (!existingOriginal) {
+            insert(
+              preparedType.getEnd() - 1,
+              '\n  collectedOriginal?: {' +
+              '\n    startSeconds: number' +
+              '\n    duration: number' +
+              '\n    starts: number[]' +
+              '\n  }\n'
+            )
+          }
 
-          const missingIcons = icons.filter(
-            name => !imported.has(name)
-          )
+          // Find the actual collected Alafasy preparation block.
+          let target = null
 
-          if (missingIcons.length > 0) {
-            const replacement = iconImport[0].replace(
-              '}',
-              ', ' + missingIcons.join(', ') + ' }'
+          function isVariableNamed(statement, name) {
+            return (
+              ts.isVariableStatement(statement) &&
+              statement.declarationList.declarations.some(
+                decl => decl.name.getText(sf) === name
+              )
+            )
+          }
+
+          function visit(node) {
+            if (ts.isBlock(node)) {
+              const statements = [...node.statements]
+
+              const clipIndex = statements.findIndex(
+                statement =>
+                  isVariableNamed(statement, 'clip') &&
+                  statement.getText(sf).includes(
+                    'loadCollectedVisualClip'
+                  )
+              )
+
+              if (clipIndex >= 0) {
+                const created = statements
+                  .slice(clipIndex + 1)
+                  .find(statement =>
+                    isVariableNamed(statement, 'created')
+                  )
+
+                if (created) {
+                  if (target) {
+                    throw new Error(
+                      'Multiple collected preparation blocks.'
+                    )
+                  }
+
+                  target = created
+                }
+              }
+            }
+
+            ts.forEachChild(node, visit)
+          }
+
+          visit(sf)
+
+          if (!target) {
+            throw new Error(
+              'Collected Alafasy preparation block missing. ' +
+              'Existing readers will not be modified.'
+            )
+          }
+
+          const declaration =
+            target.declarationList.declarations.find(
+              item => item.name.getText(sf) === 'created'
             )
 
-            source = source.replace(
-              iconImport[0],
-              replacement
+          const obj = declaration?.initializer
+
+          if (!obj || !ts.isObjectLiteralExpression(obj)) {
+            throw new Error(
+              'Collected Prepared object could not be parsed.'
+            )
+          }
+
+          const property = (object, name) =>
+            object.properties.find(
+              item =>
+                ts.isPropertyAssignment(item) &&
+                item.name.getText(sf) === name
+            )
+
+          const startsProperty = property(obj, 'starts')
+          const durationProperty = property(obj, 'duration')
+          const streamProperty = property(obj, 'stream')
+
+          if (
+            !startsProperty ||
+            !durationProperty ||
+            !streamProperty ||
+            !ts.isObjectLiteralExpression(
+              streamProperty.initializer
+            )
+          ) {
+            throw new Error(
+              'Collected Prepared fields do not match ' +
+              'the expected streaming structure.'
+            )
+          }
+
+          const startSecondsProperty = property(
+            streamProperty.initializer,
+            'startSeconds'
+          )
+
+          if (!startSecondsProperty) {
+            throw new Error(
+              'Collected stream startSeconds is missing.'
+            )
+          }
+
+          const expected = [
+            [startsProperty, 'clip.starts'],
+            [durationProperty, 'clip.duration'],
+            [startSecondsProperty, 'clip.startSeconds'],
+          ]
+
+          for (const [item, value] of expected) {
+            if (item.initializer.getText(sf) !== value) {
+              throw new Error(
+                'Unexpected collected timing expression: ' +
+                item.initializer.getText(sf)
+              )
+            }
+          }
+
+          const lineStart =
+            source.lastIndexOf(
+              '\n',
+              target.getStart(sf) - 1
+            ) + 1
+
+          const indentation = source.slice(
+            lineStart,
+            target.getStart(sf)
+          )
+
+          insert(
+            target.getStart(sf),
+            'const samee3AdjustedClip = ' +
+            'applyStoredCollectedTrim(' +
+            'clip, surah, from, to)\n' +
+            indentation
+          )
+
+          replace(
+            startsProperty.initializer.getStart(sf),
+            startsProperty.initializer.getEnd(),
+            'samee3AdjustedClip.starts'
+          )
+
+          replace(
+            durationProperty.initializer.getStart(sf),
+            durationProperty.initializer.getEnd(),
+            'samee3AdjustedClip.duration'
+          )
+
+          replace(
+            startSecondsProperty.initializer.getStart(sf),
+            startSecondsProperty.initializer.getEnd(),
+            'samee3AdjustedClip.startSeconds'
+          )
+
+          if (!property(obj, 'collectedOriginal')) {
+            const last = obj.properties[
+              obj.properties.length - 1
+            ]
+
+            const tail = source.slice(
+              last.getEnd(),
+              obj.getEnd() - 1
+            )
+
+            const comma = tail.includes(',') ? '' : ','
+
+            insert(
+              obj.getEnd() - 1,
+              comma +
+              '\n            collectedOriginal: {' +
+              '\n              startSeconds: clip.startSeconds,' +
+              '\n              duration: clip.duration,' +
+              '\n              starts: clip.starts,' +
+              '\n            },\n          '
+            )
+          }
+
+          // Insert the UI at the existing prepared-audio area.
+          const jsxLocations = []
+
+          function findPreparedUI(node) {
+            if (
+              ts.isJsxExpression(node) &&
+              node.expression &&
+              ts.isBinaryExpression(node.expression) &&
+              node.expression.operatorToken.kind ===
+                ts.SyntaxKind.AmpersandAmpersandToken &&
+              node.expression.left.getText(sf) === 'prepared'
+            ) {
+              jsxLocations.push(node.getStart(sf))
+            }
+
+            ts.forEachChild(node, findPreparedUI)
+          }
+
+          findPreparedUI(sf)
+
+          if (!jsxLocations.length) {
+            throw new Error(
+              'Prepared audio UI location was not found.'
+            )
+          }
+
+          const editorUI = `
+            {reader === 'alafasy-collected' &&
+              prepared?.stream &&
+              prepared.collectedOriginal && (
+                <Samee3CollectedTrimEditor
+                  key={reader + ':' + surah + ':' + from + ':' + to}
+                  surah={surah}
+                  from={from}
+                  to={to}
+                  streamUrl={prepared.stream.url}
+                  original={prepared.collectedOriginal}
+                  disabled={working}
+                  onStop={() => stopPlayback(true)}
+                  onApply={timing => {
+                    const current = preparedRef.current
+
+                    if (!current?.stream || working) return
+
+                    stopPlayback(true)
+                    clearResult()
+
+                    const updated: Prepared = {
+                      ...current,
+                      starts: timing.starts,
+                      duration: timing.duration,
+                      stream: {
+                        ...current.stream,
+                        startSeconds: timing.startSeconds,
+                      },
+                    }
+
+                    preparedRef.current = updated
+                    setPrepared(updated)
+                  }}
+                />
+              )}
+
+            `
+
+          insert(jsxLocations[0], editorUI)
+
+          // Import after 'use client', never inside JSX.
+          const firstLineEnd = source.indexOf('\n')
+
+          if (
+            firstLineEnd < 0 ||
+            !source.slice(0, firstLineEnd).includes(
+              "'use client'"
+            )
+          ) {
+            throw new Error(
+              'The Visual Ayahs client directive is missing.'
+            )
+          }
+
+          insert(
+            firstLineEnd + 1,
+            `// ${marker}\n` +
+            `import {\n` +
+            `  Samee3CollectedTrimEditor,\n` +
+            `  applyStoredCollectedTrim,\n` +
+            `} from './Samee3CollectedTrimEditor'\n`
+          )
+
+          // Apply changes from right to left, preserving offsets.
+          edits.sort((a, b) => b.start - a.start)
+
+          for (const edit of edits) {
+            source =
+              source.slice(0, edit.start) +
+              edit.text +
+              source.slice(edit.end)
+          }
+
+          const checked = ts.createSourceFile(
+            file,
+            source,
+            ts.ScriptTarget.Latest,
+            true,
+            ts.ScriptKind.TSX
+          )
+
+          if (checked.parseDiagnostics.length) {
+            const errors = checked.parseDiagnostics
+              .slice(0, 5)
+              .map(item =>
+                ts.flattenDiagnosticMessageText(
+                  item.messageText,
+                  '\n'
+                )
+              )
+
+            throw new Error(
+              'Generated TSX failed syntax verification:\n' +
+              errors.join('\n')
             )
           }
 
           const required = [
-            'SAMEE3_COLLECTED_MANUAL_TRIM_V2',
-            'const collectedAudioRef',
-            'const collectedAudioNodeRef',
-            'const stopCollectedEdge',
-            'const stopPlayback',
-            'function updateCollectedTrim',
-            'function saveCollectedTrim',
-            'function previewCollectedEdge',
+            marker,
+            'samee3AdjustedClip.starts',
+            'samee3AdjustedClip.duration',
+            'samee3AdjustedClip.startSeconds',
+            'collectedOriginal:',
+            '<Samee3CollectedTrimEditor',
           ]
 
-          for (const token of required) {
-            if (!source.includes(token)) {
+          for (const item of required) {
+            if (!source.includes(item)) {
               throw new Error(
-                'Missing trim integration: ' + token
+                'Incomplete integration: ' + item
               )
             }
           }
 
-          const invalid = [
-            /useRef<HTMLAudioElement\s*\|\s*null>\(null\)[ \t]+const/,
-            /\},\s*\[\s*\]\s*\)[ \t]+const stopCollectedEdge/,
-          ]
-
-          for (const pattern of invalid) {
-            if (pattern.test(source)) {
-              throw new Error(
-                'An invalid merged declaration remains.'
-              )
-            }
-          }
-
-          if (source !== original) {
-            fs.writeFileSync(file, source, 'utf8')
-          }
+          // Write only after every structural check passes.
+          fs.writeFileSync(file, source, 'utf8')
 
           console.log(
-            'Collected Alafasy trim integration checked.'
+            'Precision trim V3 integrated successfully.'
           )
           console.log(
-            'Other readers and templates were not targeted.'
+            'Other readers and video templates unchanged.'
           )
           NODE
 
-      - name: Check code changes
+      - name: Validate changed files
         shell: bash
         run: |
+          set -e
+
           git diff --check
 
-          echo "Visual Ayahs changed files:"
-          git diff --name-only
-
-          echo "Precision trim marker:"
-          grep -n \
-            'SAMEE3_COLLECTED_MANUAL_TRIM_V2' \
+          grep -Fq \
+            'SAMEE3_COLLECTED_MANUAL_TRIM_V3' \
             app/visual-ayahs/page.tsx
 
-      - name: Install dependencies
-        run: npm ci
+          grep -Fq \
+            'SAMEE3_COLLECTED_MANUAL_TRIM_V3' \
+            app/visual-ayahs/Samee3CollectedTrimEditor.tsx
 
-      - name: Build SAMEE3 production application
+          echo "Files changed:"
+          git status --short
+
+      - name: Verify production build
         run: npm run build
 
-      - name: Commit verified Visual Ayahs changes
+      - name: Commit only after successful build
         shell: bash
         run: |
           set -e
@@ -336,26 +1125,28 @@ jobs:
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add app/visual-ayahs/page.tsx
+          git add \
+            app/visual-ayahs/page.tsx \
+            app/visual-ayahs/Samee3CollectedTrimEditor.tsx
 
           if git diff --cached --quiet; then
-            echo "Precision trim already installed."
+            echo "No new changes to commit."
             exit 0
           fi
 
           git commit -m \
-            "feat: install verified Alafasy precision trim"
+            "feat: add isolated Alafasy collected trim V3"
 
           git push origin HEAD:main
 
-      - name: Final result
+      - name: Complete
         shell: bash
         run: |
           {
-            echo "## SAMEE3 - Collected Alafasy Trim"
+            echo "## SAMEE3 - Alafasy Precision Trim V3"
             echo ""
-            echo "- V2 installer recovered"
-            echo "- Syntax checks passed"
+            echo "- Independent trim editor created"
+            echo "- TypeScript syntax checked"
             echo "- Production build passed"
-            echo "- Verified page committed"
+            echo "- Changes committed to main"
           } >> "$GITHUB_STEP_SUMMARY"
