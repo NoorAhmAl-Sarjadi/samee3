@@ -1,321 +1,840 @@
 
 'use strict'
-/**
- * Carefully patches SAMEE3's existing surah index and visual-ayahs components.
- * Only writes after every expected anchor is present; never replaces whole pages.
- * For unknown/reworked page versions it FAILS without touching the originals.
+
+/*
+ * SAMEE3 — Collected Alafasy integration V2
+ * Based on the current index and visual-ayahs source.
+ * Updates existing files without replacing complete pages.
+ *
+ * The GitHub workflow must run npm run build
+ * BEFORE committing modified files.
  */
+
 const fs = require('node:fs')
 const path = require('node:path')
-const base = process.cwd()
-const FILES = {
+
+const ROOT = process.cwd()
+const MARK = 'SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V2'
+
+const paths = {
   index: 'app/surahs/page.tsx',
   config: 'lib/samee3-visual-config.ts',
   visual: 'app/visual-ayahs/page.tsx',
 }
-const MARK = 'SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V1'
 
-function must(src, match, desc) {
-  if (!src.includes(match)) {
+function read(file) {
+  const filename = path.join(ROOT, file)
+
+  if (!fs.existsSync(filename)) {
+    throw new Error('Missing required file: ' + file)
+  }
+
+  return fs.readFileSync(filename, 'utf8')
+    .replace(/\r\n/g, '\n')
+}
+
+function replaceOne(source, original, replacement, label) {
+  const first = source.indexOf(original)
+
+  if (first < 0) {
     throw new Error(
-      `${desc}: expected source anchor not found: ${match.slice(0, 85)}`
+      label + ': expected code not found. Nothing will be written.'
     )
+  }
+
+  if (source.indexOf(original, first + original.length) >= 0) {
+    throw new Error(
+      label + ': duplicate match. Nothing will be written.'
+    )
+  }
+
+  return source.slice(0, first) +
+    replacement +
+    source.slice(first + original.length)
+}
+
+function insertBefore(source, anchor, addition, label) {
+  return replaceOne(source, anchor, addition + anchor, label)
+}
+
+function patchIndex(source) {
+  if (source.includes(MARK)) return source
+
+  source = insertBefore(
+    source,
+    "const OFFLINE_PACKAGES_KEY =",
+    `// ${MARK}
+const COLLECTED_API_ID = 9000123
+const COLLECTED_MOSHAF_ID = 900012301
+
+function createCollectedReciter(): Reciter {
+  return {
+    id: '9000123-900012301',
+    apiId: COLLECTED_API_ID,
+    label: 'مشاري العفاسي – مصحف مجمع',
+    moshaf: {
+      id: COLLECTED_MOSHAF_ID,
+      name: 'حفص عن عاصم – مصحف مجمع',
+      rewaya_id: 1,
+      server: window.location.origin + '/api/alafasy-audio/',
+      surah_total: 114,
+      surah_list: Array.from(
+        { length: 114 },
+        (_, index) => index + 1
+      ).join(','),
+    },
   }
 }
 
-function once(src, search, replacement, desc) {
-  must(src, search, desc)
-  if (src.split(search).length !== 2) {
-    throw new Error(
-      `${desc}: ambiguous source anchor: ${search.slice(0, 65)}`
-    )
-  }
-  return src.replace(search, replacement)
-}
-
-function applyIndex(src) {
-  if (src.includes(MARK)) return src
-
-  const id = FILES.index
-
-  must(src, 'reciter=${encodeURIComponent(c)}', id)
-  must(src, "const[c,setC]", id)
-
-  src = once(
-    src,
-    '<option value="ar.alafasy">',
-    `{/* ${MARK}: The collected recording is available in Hafs only. */}{r === 'hafs' && <option value="9000123">مشاري العفاسي – مصحف مجمع</option>}<option value="ar.alafasy">`,
-    id
+`,
+    'Index reader definition'
   )
 
-  src = once(
-    src,
-    'reciter=${encodeURIComponent(c)}',
-    'reciter=${encodeURIComponent(r === \'hafs\' ? c : c === \'9000123\' ? \'ar.alafasy\' : c)}',
-    id
-  )
-
-  return src
-}
-
-function applyConfig(src) {
-  if (src.includes(MARK)) return src
-
-  const id = FILES.config
-
-  must(src, 'export const READERS:', id)
-
-  return once(
-    src,
-    "  { id: 'afasy', name: 'مشاري راشد العفاسي' },",
-    "  { id: 'afasy', name: 'مشاري راشد العفاسي' },\n" +
-    `  { id: 'alafasy-collected', name: 'مشاري العفاسي – مصحف مجمع' }, // ${MARK}`,
-    id
-  )
-}
-
-function applyVisual(src) {
-  if (src.includes(MARK)) return src
-
-  const id = FILES.visual
-
-  must(src, "'use client'", id)
-
-  src = once(
-    src,
-    "'use client'\n",
-    "'use client'\n" +
-    `// ${MARK}\n` +
-    "import { ALAFASY_COLLECTED_VISUAL_ID, loadCollectedVisualClip } from '@/lib/samee3-collected-visual'\n",
-    id
-  )
-
-  src = once(
-    src,
-    'type Prepared = {\n  verses: Verse[]\n  buffers: AudioBuffer[]\n  starts: number[]\n  duration: number\n}',
-    'type Prepared = {\n  verses: Verse[]\n  buffers: AudioBuffer[]\n  starts: number[]\n  duration: number\n  stream?: { url: string; startSeconds: number }\n}',
-    id
-  )
-
-  src = once(
-    src,
-    '  const audioContext = useRef<AudioContext | null>(null)',
-    '  const audioContext = useRef<AudioContext | null>(null)\n' +
-    '  const collectedAudioRef = useRef<HTMLAudioElement | null>(null)\n' +
-    '  const collectedAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null)',
-    id
-  )
-
-  src = once(
-    src,
-    '    if (player.playing && audioContext.current) {\n      player.position = Math.max(0, audioContext.current.currentTime - player.begin)\n    }',
-    '    if (player.playing && preparedRef.current?.stream && collectedAudioRef.current) {\n' +
-    '      const clip = preparedRef.current\n' +
-    '      player.position = Math.max(0, Math.min(clip.duration, collectedAudioRef.current.currentTime - clip.stream!.startSeconds))\n' +
-    '    } else if (player.playing && audioContext.current) {\n' +
-    '      player.position = Math.max(0, audioContext.current.currentTime - player.begin)\n' +
-    '    }',
-    id
-  )
-
-  src = once(
-    src,
-    '    playbackSources.current = []\n    if (reset)',
-    '    playbackSources.current = []\n    collectedAudioRef.current?.pause()\n    if (reset)',
-    id
-  )
-
-  src = once(
-    src,
-    '  async function prepareAudio() {',
-    `  // Shared streaming element: seek into the original surah instead of decoding it in RAM.\n` +
-    `  function collectedElement(prep: Prepared, context: AudioContext): HTMLAudioElement {\n` +
-    `    if (!prep.stream) throw new Error('لا توجد تلاوة مجمعة مجهزة.')\n` +
-    `    const target = new URL(prep.stream.url, window.location.href).href\n` +
-    `    if (!collectedAudioRef.current || collectedAudioRef.current.src !== target) {\n` +
-    `      collectedAudioRef.current?.pause()\n` +
-    `      collectedAudioSourceRef.current?.disconnect()\n` +
-    `      const audio = new Audio()\n` +
-    `      audio.crossOrigin = 'anonymous'\n` +
-    `      audio.preload = 'auto'\n` +
-    `      audio.src = prep.stream.url\n` +
-    `      collectedAudioRef.current = audio\n` +
-    `      const source = context.createMediaElementSource(audio)\n` +
-    `      source.connect(context.destination)\n` +
-    `      collectedAudioSourceRef.current = source\n` +
-    `    }\n` +
-    `    return collectedAudioRef.current\n` +
-    `  }\n\n` +
-    `  async function seekCollected(audio: HTMLAudioElement, target: number): Promise<void> {\n` +
-    `    if (audio.readyState < 1) {\n` +
-    `      await new Promise<void>((resolve, reject) => {\n` +
-    `        const done = () => { clearTimeout(timer); audio.removeEventListener('loadedmetadata', ok); audio.removeEventListener('error', bad) }\n` +
-    `        const ok = () => { done(); resolve() }\n` +
-    `        const bad = () => { done(); reject(new Error('تعذّر فتح ملف تسجيل العفاسي المجمع.')) }\n` +
-    `        const timer = window.setTimeout(bad, 20000)\n` +
-    `        audio.addEventListener('loadedmetadata', ok)\n` +
-    `        audio.addEventListener('error', bad)\n` +
-    `        audio.load()\n` +
-    `      })\n` +
-    `    }\n` +
-    `    audio.currentTime = target\n` +
-    `    if (audio.seeking) {\n` +
-    `      await new Promise<void>(resolve => {\n` +
-    `        const finish = () => { clearTimeout(timer); audio.removeEventListener('seeked', finish); resolve() }\n` +
-    `        const timer = window.setTimeout(finish, 8000)\n` +
-    `        audio.addEventListener('seeked', finish)\n` +
-    `      })\n` +
-    `    }\n` +
-    `  }\n\n` +
-    '  async function prepareAudio() {',
-    id
-  )
-
-  src = once(
-    src,
-    '      const buffers: AudioBuffer[] = []',
-    `      if (reader === ALAFASY_COLLECTED_VISUAL_ID) {\n` +
-    `        const clip = await loadCollectedVisualClip(surah, chosenVerses.map(v => v.number), controller.signal)\n` +
-    `        if (id !== requestId.current) return\n` +
-    `        const created: Prepared = {\n` +
-    `          verses: chosenVerses, buffers: [], starts: clip.starts, duration: clip.duration,\n` +
-    `          stream: { url: clip.url, startSeconds: clip.startSeconds },\n` +
-    `        }\n` +
-    `        preparedRef.current = created\n` +
-    `        setPrepared(created)\n` +
-    `        setPosition(0)\n` +
-    `        playback.current.position = 0\n` +
-    `        setTab(3)\n` +
-    `        return\n` +
-    `      }\n` +
-    `      const buffers: AudioBuffer[] = []`,
-    id
-  )
-
-  src = once(
-    src,
-    '      const offset = player.position\n      const base = context.currentTime + .08',
-    `      const offset = player.position\n` +
-    `      if (prep.stream) {\n` +
-    `        const audio = collectedElement(prep, context)\n` +
-    `        await seekCollected(audio, prep.stream.startSeconds + offset)\n` +
-    `        await audio.play()\n` +
-    `        player.begin = context.currentTime - offset\n` +
-    `        player.playing = true\n` +
-    `        setPlaying(true)\n` +
-    `        await videoRef.current?.play().catch(() => {})\n` +
-    `        return\n` +
-    `      }\n` +
-    `      const base = context.currentTime + .08`,
-    id
-  )
-
-  src = once(
-    src,
-    '          if (exportTime.current === null && player.playing && audioContext.current) {\n            second = Math.max(0, audioContext.current.currentTime - player.begin)\n          }',
-    `          if (exportTime.current === null && player.playing && prep?.stream && collectedAudioRef.current) {\n` +
-    `            second = Math.max(0, collectedAudioRef.current.currentTime - prep.stream.startSeconds)\n` +
-    `          } else if (exportTime.current === null && player.playing && audioContext.current) {\n` +
-    `            second = Math.max(0, audioContext.current.currentTime - player.begin)\n` +
-    `          }`,
-    id
-  )
-
-  src = once(
-    src,
-    `            verseProgress: prep && prep.buffers[index]?.duration\n              ? (second - prep.starts[index]) / prep.buffers[index].duration\n              : 0,`,
-    `            verseProgress: prep && prep.stream\n` +
-    `              ? Math.max(0, Math.min(1, (second - prep.starts[index]) /\n` +
-    `                Math.max(.01, (prep.starts[index + 1] ?? prep.duration) - prep.starts[index])))\n` +
-    `              : prep && prep.buffers[index]?.duration\n` +
-    `                ? (second - prep.starts[index]) / prep.buffers[index].duration\n` +
-    `                : 0,`,
-    id
-  )
-
-  src = once(
-    src,
-    `      destination = context.createMediaStreamDestination()\n      recordedStream`,
-    `      destination = context.createMediaStreamDestination()\n` +
-    `      if (prep.stream) {\n` +
-    `        const audio = collectedElement(prep, context)\n` +
-    `        await seekCollected(audio, prep.stream.startSeconds)\n` +
-    `        collectedAudioSourceRef.current?.connect(destination)\n` +
-    `      }\n` +
-    `      recordedStream`,
-    id
-  )
-
-  src = once(
-    src,
-    `        mediaRecorder.start(400)\n        const audioStart = context.currentTime + .12\n        prep.buffers.forEach((buffer, index) => {`,
-    `        mediaRecorder.start(400)\n` +
-    `        if (prep.stream) {\n` +
-    `          void collectedAudioRef.current!.play().catch(() => fail(new Error('تعذّر تشغيل صوت العفاسي أثناء التصدير.')))\n` +
-    `        }\n` +
-    `        const audioStart = context.currentTime + (prep.stream ? 0 : .12)\n` +
-    `        prep.buffers.forEach((buffer, index) => {`,
-    id
-  )
-
-  src = once(
-    src,
-    `          const seconds = Math.max(0, context.currentTime - audioStart)`,
-    `          const seconds = prep.stream && collectedAudioRef.current\n` +
-    `            ? Math.max(0, collectedAudioRef.current.currentTime - prep.stream.startSeconds)\n` +
-    `            : Math.max(0, context.currentTime - audioStart)`,
-    id
-  )
-
-  src = once(
-    src,
-    `      destination?.disconnect()\n      playback.current.position = 0`,
-    `      if (prep.stream) {\n` +
-    `        collectedAudioRef.current?.pause()\n` +
-    `        if (destination) {\n` +
-    `          try { collectedAudioSourceRef.current?.disconnect(destination) } catch { /* no connection */ }\n` +
-    `        }\n` +
-    `      }\n` +
-    `      destination?.disconnect()\n      playback.current.position = 0`,
-    id
-  )
-
-  return src
-}
-
-const originals = Object.fromEntries(
-  Object.entries(FILES).map(([key, name]) => {
-    const full = path.join(base, name)
-    if (!fs.existsSync(full)) {
-      throw new Error(`Missing ${name}; run from SAMEE3 repository root`)
+  source = replaceOne(
+    source,
+    `      } catch {}
+      return result
     }
-    return [key, fs.readFileSync(full, 'utf8')]
-  })
-)
 
-for (const f of [
-  'lib/samee3-collected-visual.ts',
-  'app/api/alafasy-timings/[surah]/route.ts',
-  'app/api/alafasy-audio/[surah]/route.ts'
-]) {
-  if (!fs.existsSync(path.join(base, f))) {
-    throw new Error(`Missing existing prerequisite: ${f}`)
+    // عند انقطاع الإنترنت`,
+    `      } catch {}
+
+      if (
+        riwayaId === 'hafs' &&
+        !result.some(
+          item => item.apiId === COLLECTED_API_ID &&
+          item.moshaf.id === COLLECTED_MOSHAF_ID
+        )
+      ) {
+        result.unshift(createCollectedReciter())
+      }
+
+      return result
+    }
+
+    // عند انقطاع الإنترنت`,
+    'Index offline reader list'
+  )
+
+  source = insertBefore(
+    source,
+    `      const uniqueReciters = Array.from(`,
+    `      // Keep the collected recording independent from MP3Quran.
+      if (riwayaId === 'hafs') {
+        nextReciters.unshift(createCollectedReciter())
+      }
+
+`,
+    'Index online reader list'
+  )
+
+  return source
+}
+
+function patchConfig(source) {
+  if (source.includes(MARK)) return source
+
+  const original =
+    "  { id: 'afasy', name: 'مشاري راشد العفاسي', folder: 'Alafasy_128kbps' },"
+
+  return replaceOne(
+    source,
+    original,
+    original + '\n' +
+      "  { id: 'alafasy-collected', name: 'مشاري العفاسي – مصحف مجمع', folder: 'ALAFASY_COLLECTED' }, // " +
+      MARK,
+    'Visual reciter configuration'
+  )
+}
+
+function patchVisual(source) {
+  if (source.includes(MARK)) return source
+
+  source = replaceOne(
+    source,
+    `type Prepared = {
+  verses: Verse[]
+  buffers: AudioBuffer[]
+  starts: number[]
+  duration: number
+}`,
+    `type Prepared = {
+  verses: Verse[]
+  buffers: AudioBuffer[]
+  starts: number[]
+  duration: number
+  stream?: {
+    url: string
+    startSeconds: number
   }
 }
 
-const updated = {
-  index: applyIndex(originals.index),
-  config: applyConfig(originals.config),
-  visual: applyVisual(originals.visual),
+// ${MARK}
+type CollectedClip = {
+  url: string
+  startSeconds: number
+  duration: number
+  starts: number[]
 }
 
-for (const [key, name] of Object.entries(FILES)) {
-  if (updated[key] !== originals[key]) {
-    fs.writeFileSync(path.join(base, name), updated[key], 'utf8')
-    console.log(`Updated ${name}`)
-  } else {
-    console.log(`Already integrated: ${name}`)
+async function loadCollectedVisualClip(
+  surah: number,
+  numbers: readonly number[],
+  signal: AbortSignal
+): Promise<CollectedClip> {
+  if (
+    !Number.isInteger(surah) ||
+    surah < 1 ||
+    surah > 114 ||
+    !numbers.length ||
+    numbers.length > MAX_AYAH_COUNT ||
+    numbers.some(
+      (number, index) =>
+        !Number.isInteger(number) ||
+        number < 1 ||
+        (
+          index > 0 &&
+          number !== numbers[index - 1] + 1
+        )
+    )
+  ) {
+    throw new Error('اختر آيات صحيحة ومتتابعة.')
   }
+
+  const response = await fetch(
+    '/api/alafasy-timings/' + surah,
+    {
+      signal,
+      cache: 'no-store',
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      'تعذر تحميل توقيتات العفاسي المجمع.'
+    )
+  }
+
+  const payload: unknown = await response.json()
+
+  if (!Array.isArray(payload)) {
+    throw new Error('صيغة ملف التوقيتات غير صحيحة.')
+  }
+
+  const rows = new Map<
+    number,
+    { start: number; end: number }
+  >()
+
+  for (const raw of payload) {
+    if (
+      !raw ||
+      typeof raw !== 'object' ||
+      Array.isArray(raw)
+    ) {
+      continue
+    }
+
+    const item = raw as Record<string, unknown>
+
+    const ayah = Number(item.ayah)
+    const start = Number(item.start_time)
+    const end = Number(item.end_time)
+
+    if (
+      !Number.isInteger(ayah) ||
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      end <= start
+    ) {
+      throw new Error('توقيتات التسجيل غير صالحة.')
+    }
+
+    if (rows.has(ayah)) {
+      throw new Error('يوجد توقيت مكرر للآية.')
+    }
+
+    rows.set(ayah, { start, end })
+  }
+
+  const selected = numbers.map(number => rows.get(number))
+
+  if (selected.some(item => !item)) {
+    throw new Error('لم يتم العثور على توقيت بعض الآيات.')
+  }
+
+  const times = selected as Array<{
+    start: number
+    end: number
+  }>
+
+  for (let index = 1; index < times.length; index++) {
+    if (
+      times[index].start <
+      times[index - 1].end - 1000
+    ) {
+      throw new Error('توقيتات الآيات غير متتابعة.')
+    }
+  }
+
+  const first = times[0].start
+  const last = times[times.length - 1].end
+  const duration = (last - first) / 1000
+
+  if (
+    !Number.isFinite(duration) ||
+    duration <= 0 ||
+    duration > MAX_DURATION_SECONDS
+  ) {
+    throw new Error(
+      'مدة التلاوة تتجاوز الحد المتاح. اختر آيات أقل.'
+    )
+  }
+
+  return {
+    url:
+      '/api/alafasy-audio/' +
+      String(surah).padStart(3, '0') +
+      '.mp3',
+    startSeconds: first / 1000,
+    duration,
+    starts: times.map(
+      item => (item.start - first) / 1000
+    ),
+  }
+}`,
+    'Visual prepared audio type'
+  )
+
+  source = replaceOne(
+    source,
+    `  const playbackSources =
+    useRef<AudioBufferSourceNode[]>([])`,
+    `  const playbackSources =
+    useRef<AudioBufferSourceNode[]>([])
+
+  const collectedAudioRef =
+    useRef<HTMLAudioElement | null>(null)
+
+  const collectedAudioNodeRef =
+    useRef<MediaElementAudioSourceNode | null>(null)`,
+    'Visual streaming references'
+  )
+
+  source = replaceOne(
+    source,
+    `      if (
+        player.playing &&
+        audioContext.current
+      ) {
+        player.position = Math.max(
+          0,
+          audioContext.current.currentTime -
+            player.begin
+        )
+      }`,
+    `      if (
+        player.playing &&
+        preparedRef.current?.stream &&
+        collectedAudioRef.current
+      ) {
+        const clip = preparedRef.current
+        player.position = Math.max(
+          0,
+          Math.min(
+            clip.duration,
+            collectedAudioRef.current.currentTime -
+              clip.stream.startSeconds
+          )
+        )
+      } else if (
+        player.playing &&
+        audioContext.current
+      ) {
+        player.position = Math.max(
+          0,
+          audioContext.current.currentTime -
+            player.begin
+        )
+      }`,
+    'Visual playback position'
+  )
+
+  source = replaceOne(
+    source,
+    `      playbackSources.current = []
+
+      if (reset)`,
+    `      playbackSources.current = []
+      collectedAudioRef.current?.pause()
+
+      if (reset)`,
+    'Visual playback pause'
+  )
+
+  source = insertBefore(
+    source,
+    `  async function prepareAudio() {`,
+    `  function collectedAudioElement(
+    prep: Prepared,
+    context: AudioContext
+  ): HTMLAudioElement {
+    if (!prep.stream) {
+      throw new Error('التسجيل المجمع غير مجهز.')
+    }
+
+    const url = new URL(
+      prep.stream.url,
+      window.location.href
+    ).href
+
+    if (
+      collectedAudioRef.current &&
+      collectedAudioRef.current.src === url
+    ) {
+      return collectedAudioRef.current
+    }
+
+    collectedAudioRef.current?.pause()
+    collectedAudioNodeRef.current?.disconnect()
+
+    const audio = new Audio()
+    audio.crossOrigin = 'anonymous'
+    audio.preload = 'auto'
+    audio.src = url
+
+    const node = context.createMediaElementSource(audio)
+    node.connect(context.destination)
+
+    collectedAudioRef.current = audio
+    collectedAudioNodeRef.current = node
+
+    return audio
+  }
+
+  async function seekCollectedAudio(
+    audio: HTMLAudioElement,
+    target: number
+  ): Promise<void> {
+    if (audio.readyState < 1) {
+      await new Promise<void>((resolve, reject) => {
+        let timer = 0
+
+        const cleanup = () => {
+          window.clearTimeout(timer)
+          audio.removeEventListener('loadedmetadata', ready)
+          audio.removeEventListener('error', failed)
+        }
+
+        const ready = () => {
+          cleanup()
+          resolve()
+        }
+
+        const failed = () => {
+          cleanup()
+          reject(
+            new Error('تعذر تحميل صوت العفاسي المجمع.')
+          )
+        }
+
+        timer = window.setTimeout(failed, 20000)
+
+        audio.addEventListener('loadedmetadata', ready)
+        audio.addEventListener('error', failed)
+
+        audio.load()
+      })
+    }
+
+    audio.currentTime = target
+
+    if (audio.seeking) {
+      await new Promise<void>((resolve, reject) => {
+        let timer = 0
+
+        const finish = () => {
+          window.clearTimeout(timer)
+          audio.removeEventListener('seeked', finish)
+          audio.removeEventListener('error', failed)
+          resolve()
+        }
+
+        const failed = () => {
+          window.clearTimeout(timer)
+          audio.removeEventListener('seeked', finish)
+          audio.removeEventListener('error', failed)
+          reject(
+            new Error('تعذر الانتقال إلى الآية المطلوبة.')
+          )
+        }
+
+        timer = window.setTimeout(failed, 12000)
+
+        audio.addEventListener('seeked', finish)
+        audio.addEventListener('error', failed)
+      })
+    }
+  }
+
+`,
+    'Visual stream helpers'
+  )
+
+  source = replaceOne(
+    source,
+    `      const buffers: AudioBuffer[] = []
+      const starts: number[] = []`,
+    `      if (reader === 'alafasy-collected') {
+        const clip = await loadCollectedVisualClip(
+          surah,
+          chosenVerses.map(verse => verse.number),
+          controller.signal
+        )
+
+        if (id !== requestId.current) return
+
+        const created: Prepared = {
+          verses: chosenVerses,
+          buffers: [],
+          starts: clip.starts,
+          duration: clip.duration,
+          stream: {
+            url: clip.url,
+            startSeconds: clip.startSeconds,
+          },
+        }
+
+        preparedRef.current = created
+        setPrepared(created)
+
+        setPosition(0)
+        playback.current.position = 0
+        setTab(3)
+        return
+      }
+
+      const buffers: AudioBuffer[] = []
+      const starts: number[] = []`,
+    'Visual prepare collected recording'
+  )
+
+  source = replaceOne(
+    source,
+    `      const offset =
+        player.position
+
+      const base =`,
+    `      const offset =
+        player.position
+
+      if (prep.stream) {
+        const audio = collectedAudioElement(prep, context)
+
+        await seekCollectedAudio(
+          audio,
+          prep.stream.startSeconds + offset
+        )
+
+        await audio.play()
+
+        player.begin = context.currentTime - offset
+        player.playing = true
+        setPlaying(true)
+
+        await loopEngine.current?.start()
+        return
+      }
+
+      const base =`,
+    'Visual streaming preview'
+  )
+
+  source = replaceOne(
+    source,
+    `          if (
+            exportTime.current === null &&
+            player.playing &&
+            audioContext.current
+          ) {
+            second = Math.max(
+              0,
+              audioContext.current.currentTime -
+                player.begin
+            )
+          }`,
+    `          if (
+            exportTime.current === null &&
+            player.playing &&
+            prep?.stream &&
+            collectedAudioRef.current
+          ) {
+            second = Math.max(
+              0,
+              collectedAudioRef.current.currentTime -
+                prep.stream.startSeconds
+            )
+          } else if (
+            exportTime.current === null &&
+            player.playing &&
+            audioContext.current
+          ) {
+            second = Math.max(
+              0,
+              audioContext.current.currentTime -
+                player.begin
+            )
+          }`,
+    'Visual streaming progress'
+  )
+
+  source = replaceOne(
+    source,
+    `              verseProgress:
+                prep &&
+                prep.buffers[index]?.duration
+                  ? (
+                      second -
+                      prep.starts[index]
+                    ) /
+                    prep.buffers[index].duration
+                  : 0,`,
+    `              verseProgress:
+                prep?.stream
+                  ? Math.max(
+                      0,
+                      Math.min(
+                        1,
+                        (second - prep.starts[index]) /
+                        Math.max(
+                          0.01,
+                          (
+                            prep.starts[index + 1] ??
+                            prep.duration
+                          ) - prep.starts[index]
+                        )
+                      )
+                    )
+                  : prep &&
+                    prep.buffers[index]?.duration
+                    ? (
+                        second -
+                        prep.starts[index]
+                      ) /
+                      prep.buffers[index].duration
+                    : 0,`,
+    'Visual verse highlighting'
+  )
+
+  source = replaceOne(
+    source,
+    `      destination =
+        context.createMediaStreamDestination()
+
+      recordedStream =`,
+    `      destination =
+        context.createMediaStreamDestination()
+
+      if (prep.stream) {
+        const audio = collectedAudioElement(
+          prep,
+          context
+        )
+
+        await seekCollectedAudio(
+          audio,
+          prep.stream.startSeconds
+        )
+
+        collectedAudioNodeRef.current?.disconnect()
+        collectedAudioNodeRef.current?.connect(destination)
+      }
+
+      recordedStream =`,
+    'Visual export audio routing'
+  )
+
+  source = replaceOne(
+    source,
+    `            mediaRecorder.start(250)
+
+            const startedAt =
+              context.currentTime +
+              0.12`,
+    `            mediaRecorder.start(250)
+
+            if (prep.stream) {
+              const audio = collectedAudioRef.current
+
+              if (!audio) {
+                fail('تسجيل العفاسي غير متاح.')
+                return
+              }
+
+              void audio.play().catch(() => {
+                fail('تعذر تشغيل العفاسي أثناء التصدير.')
+              })
+            }
+
+            const startedAt =
+              context.currentTime +
+              (prep.stream ? 0 : 0.12)`,
+    'Visual recorded audio start'
+  )
+
+  source = replaceOne(
+    source,
+    `                  const seconds =
+                    Math.max(
+                      0,
+                      context.currentTime -
+                        startedAt
+                    )`,
+    `                  const seconds =
+                    prep.stream &&
+                    collectedAudioRef.current
+                      ? Math.max(
+                          0,
+                          collectedAudioRef.current.currentTime -
+                            prep.stream.startSeconds
+                        )
+                      : Math.max(
+                          0,
+                          context.currentTime -
+                            startedAt
+                        )`,
+    'Visual export timeline'
+  )
+
+  source = replaceOne(
+    source,
+    `                  if (
+                    context.currentTime >=
+                    finishAt + 0.18
+                  ) {
+                    stopRecording()
+                  }`,
+    `                  if (
+                    prep.stream
+                      ? seconds >= prep.duration
+                      : context.currentTime >=
+                        finishAt + 0.18
+                  ) {
+                    stopRecording()
+                  }`,
+    'Visual export stopping'
+  )
+
+  source = replaceOne(
+    source,
+    `      destination?.disconnect()
+
+      playback.current.position = 0`,
+    `      if (prep.stream) {
+        collectedAudioRef.current?.pause()
+
+        if (collectedAudioNodeRef.current) {
+          try {
+            collectedAudioNodeRef.current.disconnect()
+            collectedAudioNodeRef.current.connect(
+              context.destination
+            )
+          } catch {}
+        }
+      }
+
+      destination?.disconnect()
+
+      playback.current.position = 0`,
+    'Visual export cleanup'
+  )
+
+  source = replaceOne(
+    source,
+    `      if (audioContext.current) {
+        void audioContext.current
+          .close()
+          .catch(() => {})
+      }`,
+    `      collectedAudioRef.current?.pause()
+      collectedAudioRef.current?.removeAttribute('src')
+      collectedAudioNodeRef.current?.disconnect()
+
+      if (audioContext.current) {
+        void audioContext.current
+          .close()
+          .catch(() => {})
+      }`,
+    'Visual unmount cleanup'
+  )
+
+  return source
 }
 
-console.log('SAMEE3 collected Alafasy index + visual ayahs patch applied.')
+function main() {
+  // Verify prerequisites BEFORE making any changes.
+  for (const filename of [
+    'app/api/alafasy-audio/[surah]/route.ts',
+    'app/api/alafasy-timings/[surah]/route.ts',
+  ]) {
+    if (!fs.existsSync(path.join(ROOT, filename))) {
+      throw new Error(
+        'Missing prerequisite: ' + filename
+      )
+    }
+  }
+
+  const originals = {
+    index: read(paths.index),
+    config: read(paths.config),
+    visual: read(paths.visual),
+  }
+
+  // Every transformation must succeed in memory first.
+  const updated = {
+    index: patchIndex(originals.index),
+    config: patchConfig(originals.config),
+    visual: patchVisual(originals.visual),
+  }
+
+  for (const [key, filename] of Object.entries(paths)) {
+    if (!updated[key].includes(MARK)) {
+      throw new Error(
+        'Integration marker missing: ' + filename
+      )
+    }
+  }
+
+  // Nothing is written if any expected source anchor differs.
+  for (const [key, filename] of Object.entries(paths)) {
+    if (updated[key] !== originals[key]) {
+      fs.writeFileSync(
+        path.join(ROOT, filename),
+        updated[key],
+        'utf8'
+      )
+
+      console.log('UPDATED: ' + filename)
+    } else {
+      console.log('ALREADY UPDATED: ' + filename)
+    }
+  }
+
+  console.log(
+    'SAMEE3 collected Alafasy integration V2 applied.'
+  )
+  console.log(
+    'Run npm run build before committing page changes.'
+  )
+}
+
+try {
+  main()
+} catch (error) {
+  console.error(
+    'INTEGRATION STOPPED: ' +
+    (error instanceof Error ? error.message : String(error))
+  )
+  process.exitCode = 1
+}
