@@ -1,5 +1,5 @@
 
-name: SAMEE3 - Repair Collected Alafasy Visual Ayahs
+name: SAMEE3 - Install and Repair Alafasy Precision Trim
 
 on:
   workflow_dispatch:
@@ -8,143 +8,329 @@ permissions:
   contents: write
 
 concurrency:
-  group: samee3-repair-collected-visual
+  group: samee3-alafasy-precision-install
   cancel-in-progress: false
 
 jobs:
-  repair-and-build:
-    name: Repair, Test and Save
+  install-and-verify:
+    name: Install, Repair, Build and Commit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
-      - name: Checkout SAMEE3 repository
+      - name: Checkout full repository history
         uses: actions/checkout@v4
         with:
+          ref: main
+          fetch-depth: 0
           persist-credentials: true
-          fetch-depth: 1
 
-      - name: Setup Node.js 24
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
 
-      - name: Repair Visual Ayahs syntax errors
+      - name: Recover and correct previous V2 installer
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+          node <<'NODE'
+          'use strict'
 
-          path = Path("app/visual-ayahs/page.tsx")
+          const fs = require('node:fs')
+          const { execFileSync } = require('node:child_process')
 
-          if not path.is_file():
-              raise SystemExit(
-                  "ERROR: app/visual-ayahs/page.tsx not found"
+          const workflowPath =
+            '.github/workflows/fix-alafasy-collected-visual-trim.yml'
+
+          const outputPath = '/tmp/samee3-collected-trim-installer.cjs'
+
+          const commits = execFileSync(
+            'git',
+            [
+              'log',
+              '--all',
+              '--format=%H',
+              '--',
+              workflowPath,
+            ],
+            { encoding: 'utf8' }
+          )
+            .trim()
+            .split(/\r?\n/)
+            .filter(Boolean)
+
+          let historicalWorkflow = ''
+          let historicalCommit = ''
+
+          for (const commit of commits) {
+            let content = ''
+
+            try {
+              content = execFileSync(
+                'git',
+                ['show', commit + ':' + workflowPath],
+                {
+                  encoding: 'utf8',
+                  stdio: ['ignore', 'pipe', 'ignore'],
+                }
               )
+            } catch {
+              continue
+            }
 
-          source = path.read_text(encoding="utf-8-sig")
-          source = source.replace("\r\n", "\n")
+            if (
+              content.includes(
+                'SAMEE3_COLLECTED_MANUAL_TRIM_V2'
+              ) &&
+              content.includes('function replaceOne(') &&
+              content.includes("node <<'NODE'")
+            ) {
+              historicalWorkflow = content
+              historicalCommit = commit
+              break
+            }
+          }
 
-          original = source
+          if (!historicalWorkflow) {
+            throw new Error(
+              'The previous V2 installer was not found ' +
+              'in the workflow Git history. ' +
+              'No source files have been modified.'
+            )
+          }
 
-          # Repair the two audio reference declarations.
-          source, count1 = re.subn(
-              r"(useRef<HTMLAudioElement\s*\|\s*null>\(null\))"
-              r"[ \t]+"
-              r"(const collectedAudioNodeRef\s*=)",
-              r"\1\n\n  \2",
-              source,
+          const match = historicalWorkflow.match(
+            /^[ \t]*node <<'NODE'[ \t]*\r?\n([\s\S]*?)^[ \t]*NODE[ \t]*$/m
           )
 
-          if count1 > 1:
-              raise SystemExit(
-                  "ERROR: Multiple audio reference matches."
-              )
+          if (!match) {
+            throw new Error(
+              'Cannot extract original V2 installer safely.'
+            )
+          }
 
-          # Repair the function definition merged with clearResult.
-          source, count2 = re.subn(
-              r"(\},\s*\[\s*\]\s*\))"
-              r"[ \t]+"
-              r"(const stopCollectedEdge\s*=)",
-              r"\1\n\n  \2",
-              source,
+          const lines = match[1]
+            .replace(/\r\n/g, '\n')
+            .split('\n')
+
+          const nonempty = lines.filter(line => line.trim())
+
+          const indentation = Math.min(
+            ...nonempty.map(
+              line => (line.match(/^[ \t]*/) || [''])[0].length
+            )
           )
 
-          if count2 > 1:
-              raise SystemExit(
-                  "ERROR: Multiple playback cleanup matches."
-              )
+          let installer = lines
+            .map(line =>
+              line.trim()
+                ? line.slice(indentation)
+                : ''
+            )
+            .join('\n')
 
-          # Validate that required definitions exist.
-          required = [
-              "const collectedAudioRef =",
-              "const collectedAudioNodeRef =",
-              "const stopCollectedEdge =",
-              "const stopPlayback =",
-          ]
+          const matchStatement = 'const match = matches[0]'
 
-          for token in required:
-              if source.count(token) != 1:
-                  raise SystemExit(
-                      "ERROR: Missing or duplicate definition: "
-                      + token
-                  )
+          if (
+            installer.split(matchStatement).length !== 2
+          ) {
+            throw new Error(
+              'The previous installer matching function ' +
+              'has changed. Refusing an unsafe patch.'
+            )
+          }
 
-          # Check that the two reported invalid joins are gone.
-          invalid_joins = [
-              re.compile(
-                  r"useRef<HTMLAudioElement\s*\|\s*null>"
-                  r"\(null\)[ \t]+const"
-              ),
-              re.compile(
-                  r"\},\s*\[\s*\]\s*\)"
-                  r"[ \t]+const stopCollectedEdge"
-              ),
-          ]
+          // The old flexible matcher consumed newlines before
+          // declarations. Restore those line boundaries.
+          installer = installer.replace(
+            matchStatement,
+            [
+              matchStatement,
+              '',
+              '  const leadingWhitespace =',
+              "    (match[0].match(/^\\s*/) || [''])[0]",
+              '',
+              "  const lastNewline = leadingWhitespace.lastIndexOf('\\n')",
+              '',
+              '  if (lastNewline !== -1) {',
+              '    after =',
+              '      leadingWhitespace.slice(0, lastNewline + 1) +',
+              '      after',
+              '  }',
+            ].join('\n')
+          )
 
-          for pattern in invalid_joins:
-              if pattern.search(source):
-                  raise SystemExit(
-                      "ERROR: Invalid merged declaration remains."
-                  )
+          // The real page uses "working", not the "busy"
+          // string used by the old V2 patch.
+          installer = installer.replaceAll(
+            "busy !== 'idle'",
+            'working'
+          )
 
-          if source != original:
-              path.write_text(source, encoding="utf-8")
-              print("SUCCESS: Visual Ayahs syntax repaired.")
-          else:
-              print("INFO: The reported syntax errors are already fixed.")
+          fs.writeFileSync(
+            outputPath,
+            installer,
+            'utf8'
+          )
 
-          print("Audio reference repairs:", count1)
-          print("Playback function repairs:", count2)
-          print("Other readers and visual templates preserved.")
-          PY
+          console.log(
+            'Recovered V2 installer from commit:',
+            historicalCommit
+          )
+          console.log(
+            'Corrected whitespace matching and busy state.'
+          )
+          NODE
 
-      - name: Show repaired code locations
+      - name: Install precision trim into current Visual Ayahs
         shell: bash
         run: |
-          grep -n -A 4 -B 2 \
-            'const collectedAudioRef =' \
-            app/visual-ayahs/page.tsx
+          node /tmp/samee3-collected-trim-installer.cjs
 
-          grep -n -A 5 -B 2 \
-            'const stopCollectedEdge =' \
+      - name: Repair generated syntax and missing icon imports
+        shell: bash
+        run: |
+          node <<'NODE'
+          'use strict'
+
+          const fs = require('node:fs')
+
+          const file = 'app/visual-ayahs/page.tsx'
+
+          if (!fs.existsSync(file)) {
+            throw new Error('Visual Ayahs page was not found.')
+          }
+
+          let source = fs.readFileSync(file, 'utf8')
+          const original = source
+
+          // Repair merged audio declarations, if present.
+          source = source.replace(
+            /(useRef<HTMLAudioElement\s*\|\s*null>\(null\))[ \t]+(const collectedAudioNodeRef\s*=)/g,
+            '$1\n\n  $2'
+          )
+
+          // Repair merged callback definitions, if present.
+          source = source.replace(
+            /(\},\s*\[\s*\]\s*\))[ \t]+(const stopCollectedEdge\s*=)/g,
+            '$1\n\n  $2'
+          )
+
+          // Correct any remaining state name from V2.
+          source = source.replaceAll(
+            "busy !== 'idle'",
+            'working'
+          )
+
+          // Ensure icons used by the trim editor are imported.
+          const iconImport = source.match(
+            /import\s*\{([^}]+)\}\s*from\s*['"]lucide-react['"]/s
+          )
+
+          if (!iconImport) {
+            throw new Error(
+              'Cannot find the existing lucide-react import.'
+            )
+          }
+
+          const imported = new Set(
+            iconImport[1]
+              .split(',')
+              .map(item => item.trim().split(/\s+as\s+/)[0])
+              .filter(Boolean)
+          )
+
+          const icons = [
+            'Play',
+            'Pause',
+            'Save',
+            'RefreshCcw',
+          ]
+
+          const missingIcons = icons.filter(
+            name => !imported.has(name)
+          )
+
+          if (missingIcons.length > 0) {
+            const replacement = iconImport[0].replace(
+              '}',
+              ', ' + missingIcons.join(', ') + ' }'
+            )
+
+            source = source.replace(
+              iconImport[0],
+              replacement
+            )
+          }
+
+          const required = [
+            'SAMEE3_COLLECTED_MANUAL_TRIM_V2',
+            'const collectedAudioRef',
+            'const collectedAudioNodeRef',
+            'const stopCollectedEdge',
+            'const stopPlayback',
+            'function updateCollectedTrim',
+            'function saveCollectedTrim',
+            'function previewCollectedEdge',
+          ]
+
+          for (const token of required) {
+            if (!source.includes(token)) {
+              throw new Error(
+                'Missing trim integration: ' + token
+              )
+            }
+          }
+
+          const invalid = [
+            /useRef<HTMLAudioElement\s*\|\s*null>\(null\)[ \t]+const/,
+            /\},\s*\[\s*\]\s*\)[ \t]+const stopCollectedEdge/,
+          ]
+
+          for (const pattern of invalid) {
+            if (pattern.test(source)) {
+              throw new Error(
+                'An invalid merged declaration remains.'
+              )
+            }
+          }
+
+          if (source !== original) {
+            fs.writeFileSync(file, source, 'utf8')
+          }
+
+          console.log(
+            'Collected Alafasy trim integration checked.'
+          )
+          console.log(
+            'Other readers and templates were not targeted.'
+          )
+          NODE
+
+      - name: Check code changes
+        shell: bash
+        run: |
+          git diff --check
+
+          echo "Visual Ayahs changed files:"
+          git diff --name-only
+
+          echo "Precision trim marker:"
+          grep -n \
+            'SAMEE3_COLLECTED_MANUAL_TRIM_V2' \
             app/visual-ayahs/page.tsx
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build SAMEE3
+      - name: Build SAMEE3 production application
         run: npm run build
 
-      - name: Commit repaired file after successful build
+      - name: Commit verified Visual Ayahs changes
         shell: bash
         run: |
-          if git diff --quiet -- app/visual-ayahs/page.tsx; then
-            echo "No file changes needed."
-            exit 0
-          fi
+          set -e
 
           git config user.name "github-actions[bot]"
           git config user.email \
@@ -152,22 +338,24 @@ jobs:
 
           git add app/visual-ayahs/page.tsx
 
+          if git diff --cached --quiet; then
+            echo "Precision trim already installed."
+            exit 0
+          fi
+
           git commit -m \
-            "fix: repair collected Alafasy visual ayahs syntax"
+            "feat: install verified Alafasy precision trim"
 
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin HEAD:main
 
-      - name: Final summary
+      - name: Final result
         shell: bash
         run: |
-          echo "### SAMEE3 Visual Ayahs Repair" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "- Syntax repair: completed" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "- Production build: passed" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "- Other reciters: unchanged" \
-            >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## SAMEE3 - Collected Alafasy Trim"
+            echo ""
+            echo "- V2 installer recovered"
+            echo "- Syntax checks passed"
+            echo "- Production build passed"
+            echo "- Verified page committed"
+          } >> "$GITHUB_STEP_SUMMARY"
