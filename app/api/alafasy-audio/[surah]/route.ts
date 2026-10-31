@@ -1,122 +1,104 @@
-/**
- * SAMEE3: streaming relay for the *collected* Alafasy recording only.
- * Requests are restricted to the 114 numbered MP3 assets from the pinned release.
- * Forwards byte ranges needed by mobile/Safari audio players and streams data
- * rather than buffering the entire surah in a serverless function.
- */
-import { ALAFASY_COLLECTED_RELEASE } from '@/lib/quran/alafasy-collected'
 
-export const runtime = 'edge'
+import { NextResponse } from 'next/server'
+import catalog from '@/lib/alafasy-riwayat-manifest.json'
+
 export const dynamic = 'force-dynamic'
 
-const ERROR_HEADERS = { 'Cache-Control': 'no-store' }
-
-function parseSurah(raw: string): number | null {
-  const match = /^(\d{1,3})(?:\.mp3)?$/i.exec(raw)
-  if (!match) return null
-  const number = Number(match[1])
-  return Number.isInteger(number) && number >= 1 && number <= 114 ? number : null
+type Entry = {
+  key: string
+  tracks?: Record<string, string>
 }
 
-function errorResponse(message: string, status: number): Response {
-  return Response.json({ error: message }, { status, headers: ERROR_HEADERS })
+type RouteParams = {
+  mushaf: string
+  file: string
 }
 
-type RouteContext = { params: Promise<{ surah: string }> }
-
-async function relay(request: Request, context: RouteContext): Promise<Response> {
-  const { surah: raw } = await context.params
-  const surah = parseSurah(raw)
-  if (surah === null) return errorResponse('Invalid surah number', 400)
-
-  const file = `${String(surah).padStart(3, '0')}.mp3`
-  const upstreamUrl = `${ALAFASY_COLLECTED_RELEASE}/${file}`
-  const incoming = new URL(request.url)
-  const isDiagnostic = incoming.searchParams.get('check') === '1'
-  const headers = new Headers()
-  // A tiny Range request lets the diagnostic test real upstream streaming.
-  if (isDiagnostic) {
-    headers.set('Range', 'bytes=0-1')
-  } else {
-    const range = request.headers.get('range')
-    if (range) {
-      if (!/^bytes=\d*-\d*(?:,\d*-\d*)*$/.test(range) || range.includes(',')) {
-        return errorResponse('Invalid or unsupported Range', 416)
-      }
-      headers.set('Range', range)
-    }
-    const ifRange = request.headers.get('if-range')
-    if (ifRange) headers.set('If-Range', ifRange)
+export async function GET(
+  _request: Request,
+  {
+    params,
+  }: {
+    params: Promise<RouteParams>
   }
+): Promise<NextResponse> {
+  // Next.js 16 requires awaiting route params
+  const { mushaf, file } = await params
 
-  let upstream: Response
-  try {
-    upstream = await fetch(upstreamUrl, {
-      method: 'GET',
-      headers,
-      redirect: 'follow',
-      cache: 'no-store',
-      signal: request.signal,
+  // Validate the requested audio filename
+  const match = /^(\d{3})\.mp3$/.exec(file)
+
+  if (!match) {
+    return new NextResponse('Not found', {
+      status: 404,
     })
-  } catch (error) {
-    console.error('Alafasy MP3 relay fetch failed', file, error)
-    return errorResponse('Recording host could not be reached', 502)
   }
 
-  const upstreamType = (upstream.headers.get('content-type') || '').toLowerCase()
-  const isHtml = upstreamType.includes('text/html')
-  const validStatus = upstream.status === 200 || upstream.status === 206
+  const surah = Number(match[1])
 
-  if (isDiagnostic) {
-    // Do not download a full chapter when GitHub ignores Range.
-    if (!validStatus || isHtml || upstream.status !== 206) {
-      await upstream.body?.cancel().catch(() => undefined)
-      return Response.json({
-        ok: false,
-        file,
-        upstreamStatus: upstream.status,
-        upstreamContentType: upstreamType,
-        upstreamAcceptRanges: upstream.headers.get('accept-ranges'),
-        upstreamContentRange: upstream.headers.get('content-range'),
-        issue: !validStatus ? 'Asset is unavailable' : isHtml ? 'Expected MP3, received HTML' : 'Host did not honor byte range',
-      }, { headers: ERROR_HEADERS })
+  // Only allow Quran surahs 1 through 114
+  if (
+    !Number.isInteger(surah) ||
+    surah < 1 ||
+    surah > 114
+  ) {
+    return new NextResponse('Not found', {
+      status: 404,
+    })
+  }
+
+  // Find the requested verified mushaf
+  const entries = catalog.entries as Entry[]
+
+  const entry = entries.find(
+    (item) => item.key === mushaf
+  )
+
+  if (!entry) {
+    return new NextResponse('Mushaf not found', {
+      status: 404,
+    })
+  }
+
+  // Find the exact surah audio URL
+  const target = entry.tracks?.[match[1]]
+
+  if (!target) {
+    return new NextResponse('Audio not found', {
+      status: 404,
+    })
+  }
+
+  try {
+    const url = new URL(target)
+
+    // Allow only secure public HTTPS URLs
+    if (
+      url.protocol !== 'https:' ||
+      !url.hostname ||
+      url.username ||
+      url.password
+    ) {
+      throw new Error('Invalid audio URL')
     }
-    const firstBytes = new Uint8Array(await upstream.arrayBuffer())
-    return Response.json({
-      ok: firstBytes.length === 2,
-      file,
-      upstreamStatus: upstream.status,
-      upstreamContentType: upstreamType,
-      upstreamContentRange: upstream.headers.get('content-range'),
-      receivedBytes: firstBytes.length,
-    }, { headers: ERROR_HEADERS })
-  }
 
-  if (!validStatus || isHtml || !upstream.body) {
-    await upstream.body?.cancel().catch(() => undefined)
-    return errorResponse(`Recording unavailable (upstream ${upstream.status})`, 502)
+    // Redirect player to the verified audio source
+    return NextResponse.redirect(
+      url.toString(),
+      {
+        status: 307,
+        headers: {
+          'Cache-Control':
+            'public, max-age=3600',
+        },
+      }
+    )
+  } catch {
+    return new NextResponse(
+      'Invalid audio source',
+      {
+        status: 502,
+      }
+    )
   }
-
-  const responseHeaders = new Headers()
-  responseHeaders.set('Content-Type', 'audio/mpeg')
-  responseHeaders.set('Content-Disposition', `inline; filename="${file}"`)
-  responseHeaders.set('Cache-Control', 'no-store')
-  responseHeaders.set('X-Content-Type-Options', 'nosniff')
-  for (const name of ['content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified']) {
-    const value = upstream.headers.get(name)
-    if (value) responseHeaders.set(name, value)
-  }
-  // Avoid falsely claiming byte-range support if the host ignored it.
-  if (upstream.status === 206 && !responseHeaders.has('Accept-Ranges')) {
-    responseHeaders.set('Accept-Ranges', 'bytes')
-  }
-
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: responseHeaders,
-  })
-}
-
-export async function GET(request: Request, context: RouteContext): Promise<Response> {
-  return relay(request, context)
 }
