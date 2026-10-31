@@ -72,6 +72,7 @@ export type TemplatePreset = {
 export const READERS: ReaderInfo[] = [
   { id: 'husary', name: 'محمود خليل الحصري', folder: 'Husary_128kbps' },
   { id: 'afasy', name: 'مشاري راشد العفاسي', folder: 'Alafasy_128kbps' },
+  { id: 'alafasy-collected', name: 'مشاري العفاسي – مصحف مجمع', folder: 'ALAFASY_COLLECTED' }, // SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V2
   { id: 'minshawy', name: 'محمد صديق المنشاوي', folder: 'Minshawy_Murattal_128kbps' },
   { id: 'basit', name: 'عبد الباسط عبد الصمد', folder: 'Abdul_Basit_Murattal_64kbps' },
   { id: 'maher', name: 'ماهر المعيقلي', folder: 'MaherAlMuaiqly128kbps' },

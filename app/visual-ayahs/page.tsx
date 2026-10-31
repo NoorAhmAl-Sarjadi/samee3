@@ -73,6 +73,146 @@ type Prepared = {
   buffers: AudioBuffer[]
   starts: number[]
   duration: number
+  stream?: {
+    url: string
+    startSeconds: number
+  }
+}
+
+// SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V2
+type CollectedClip = {
+  url: string
+  startSeconds: number
+  duration: number
+  starts: number[]
+}
+
+async function loadCollectedVisualClip(
+  surah: number,
+  numbers: readonly number[],
+  signal: AbortSignal
+): Promise<CollectedClip> {
+  if (
+    !Number.isInteger(surah) ||
+    surah < 1 ||
+    surah > 114 ||
+    !numbers.length ||
+    numbers.length > MAX_AYAH_COUNT ||
+    numbers.some(
+      (number, index) =>
+        !Number.isInteger(number) ||
+        number < 1 ||
+        (
+          index > 0 &&
+          number !== numbers[index - 1] + 1
+        )
+    )
+  ) {
+    throw new Error('اختر آيات صحيحة ومتتابعة.')
+  }
+
+  const response = await fetch(
+    '/api/alafasy-timings/' + surah,
+    {
+      signal,
+      cache: 'no-store',
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      'تعذر تحميل توقيتات العفاسي المجمع.'
+    )
+  }
+
+  const payload: unknown = await response.json()
+
+  if (!Array.isArray(payload)) {
+    throw new Error('صيغة ملف التوقيتات غير صحيحة.')
+  }
+
+  const rows = new Map<
+    number,
+    { start: number; end: number }
+  >()
+
+  for (const raw of payload) {
+    if (
+      !raw ||
+      typeof raw !== 'object' ||
+      Array.isArray(raw)
+    ) {
+      continue
+    }
+
+    const item = raw as Record<string, unknown>
+
+    const ayah = Number(item.ayah)
+    const start = Number(item.start_time)
+    const end = Number(item.end_time)
+
+    if (
+      !Number.isInteger(ayah) ||
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      end <= start
+    ) {
+      throw new Error('توقيتات التسجيل غير صالحة.')
+    }
+
+    if (rows.has(ayah)) {
+      throw new Error('يوجد توقيت مكرر للآية.')
+    }
+
+    rows.set(ayah, { start, end })
+  }
+
+  const selected = numbers.map(number => rows.get(number))
+
+  if (selected.some(item => !item)) {
+    throw new Error('لم يتم العثور على توقيت بعض الآيات.')
+  }
+
+  const times = selected as Array<{
+    start: number
+    end: number
+  }>
+
+  for (let index = 1; index < times.length; index++) {
+    if (
+      times[index].start <
+      times[index - 1].end - 1000
+    ) {
+      throw new Error('توقيتات الآيات غير متتابعة.')
+    }
+  }
+
+  const first = times[0].start
+  const last = times[times.length - 1].end
+  const duration = (last - first) / 1000
+
+  if (
+    !Number.isFinite(duration) ||
+    duration <= 0 ||
+    duration > MAX_DURATION_SECONDS
+  ) {
+    throw new Error(
+      'مدة التلاوة تتجاوز الحد المتاح. اختر آيات أقل.'
+    )
+  }
+
+  return {
+    url:
+      '/api/alafasy-audio/' +
+      String(surah).padStart(3, '0') +
+      '.mp3',
+    startSeconds: first / 1000,
+    duration,
+    starts: times.map(
+      item => (item.start - first) / 1000
+    ),
+  }
 }
 
 type ExportFile = {
@@ -558,6 +698,12 @@ export default function VisualAyahsPage() {
   const playbackSources =
     useRef<AudioBufferSourceNode[]>([])
 
+  const collectedAudioRef =
+    useRef<HTMLAudioElement | null>(null)
+
+  const collectedAudioNodeRef =
+    useRef<MediaElementAudioSourceNode | null>(null)
+
   const playback = useRef({
     playing: false,
     position: 0,
@@ -678,6 +824,20 @@ export default function VisualAyahsPage() {
 
       if (
         player.playing &&
+        preparedRef.current?.stream &&
+        collectedAudioRef.current
+      ) {
+        const clip = preparedRef.current
+        player.position = Math.max(
+          0,
+          Math.min(
+            clip.duration,
+            collectedAudioRef.current.currentTime -
+              clip.stream!.startSeconds
+          )
+        )
+      } else if (
+        player.playing &&
         audioContext.current
       ) {
         player.position = Math.max(
@@ -699,6 +859,7 @@ export default function VisualAyahsPage() {
       }
 
       playbackSources.current = []
+      collectedAudioRef.current?.pause()
 
       if (reset) player.position = 0
 
@@ -1299,6 +1460,17 @@ export default function VisualAyahsPage() {
           if (
             exportTime.current === null &&
             player.playing &&
+            prep?.stream &&
+            collectedAudioRef.current
+          ) {
+            second = Math.max(
+              0,
+              collectedAudioRef.current.currentTime -
+                prep.stream.startSeconds
+            )
+          } else if (
+            exportTime.current === null &&
+            player.playing &&
             audioContext.current
           ) {
             second = Math.max(
@@ -1375,14 +1547,29 @@ export default function VisualAyahsPage() {
                 frame?.mix || 0,
 
               verseProgress:
-                prep &&
-                prep.buffers[index]?.duration
-                  ? (
-                      second -
-                      prep.starts[index]
-                    ) /
-                    prep.buffers[index].duration
-                  : 0,
+                prep?.stream
+                  ? Math.max(
+                      0,
+                      Math.min(
+                        1,
+                        (second - prep.starts[index]) /
+                        Math.max(
+                          0.01,
+                          (
+                            prep.starts[index + 1] ??
+                            prep.duration
+                          ) - prep.starts[index]
+                        )
+                      )
+                    )
+                  : prep &&
+                    prep.buffers[index]?.duration
+                    ? (
+                        second -
+                        prep.starts[index]
+                      ) /
+                      prep.buffers[index].duration
+                    : 0,
 
               placeholder:
                 'اختر آية من السورة لتظهر هنا',
@@ -1468,6 +1655,10 @@ export default function VisualAyahsPage() {
           } catch {}
         }
       )
+
+      collectedAudioRef.current?.pause()
+      collectedAudioRef.current?.removeAttribute('src')
+      collectedAudioNodeRef.current?.disconnect()
 
       if (audioContext.current) {
         void audioContext.current
@@ -1624,6 +1815,108 @@ export default function VisualAyahsPage() {
     setRange(from, number)
   }
 
+  function collectedAudioElement(
+    prep: Prepared,
+    context: AudioContext
+  ): HTMLAudioElement {
+    if (!prep.stream) {
+      throw new Error('التسجيل المجمع غير مجهز.')
+    }
+
+    const url = new URL(
+      prep.stream.url,
+      window.location.href
+    ).href
+
+    if (
+      collectedAudioRef.current &&
+      collectedAudioRef.current.src === url
+    ) {
+      return collectedAudioRef.current
+    }
+
+    collectedAudioRef.current?.pause()
+    collectedAudioNodeRef.current?.disconnect()
+
+    const audio = new Audio()
+    audio.crossOrigin = 'anonymous'
+    audio.preload = 'auto'
+    audio.src = url
+
+    const node = context.createMediaElementSource(audio)
+    node.connect(context.destination)
+
+    collectedAudioRef.current = audio
+    collectedAudioNodeRef.current = node
+
+    return audio
+  }
+
+  async function seekCollectedAudio(
+    audio: HTMLAudioElement,
+    target: number
+  ): Promise<void> {
+    if (audio.readyState < 1) {
+      await new Promise<void>((resolve, reject) => {
+        let timer = 0
+
+        const cleanup = () => {
+          window.clearTimeout(timer)
+          audio.removeEventListener('loadedmetadata', ready)
+          audio.removeEventListener('error', failed)
+        }
+
+        const ready = () => {
+          cleanup()
+          resolve()
+        }
+
+        const failed = () => {
+          cleanup()
+          reject(
+            new Error('تعذر تحميل صوت العفاسي المجمع.')
+          )
+        }
+
+        timer = window.setTimeout(failed, 20000)
+
+        audio.addEventListener('loadedmetadata', ready)
+        audio.addEventListener('error', failed)
+
+        audio.load()
+      })
+    }
+
+    audio.currentTime = target
+
+    if (audio.seeking) {
+      await new Promise<void>((resolve, reject) => {
+        let timer = 0
+
+        const finish = () => {
+          window.clearTimeout(timer)
+          audio.removeEventListener('seeked', finish)
+          audio.removeEventListener('error', failed)
+          resolve()
+        }
+
+        const failed = () => {
+          window.clearTimeout(timer)
+          audio.removeEventListener('seeked', finish)
+          audio.removeEventListener('error', failed)
+          reject(
+            new Error('تعذر الانتقال إلى الآية المطلوبة.')
+          )
+        }
+
+        timer = window.setTimeout(failed, 12000)
+
+        audio.addEventListener('seeked', finish)
+        audio.addEventListener('error', failed)
+      })
+    }
+  }
+
   async function prepareAudio() {
     if (
       working ||
@@ -1678,6 +1971,35 @@ export default function VisualAyahsPage() {
         audioContext.current
 
       await context.resume()
+
+      if (reader === 'alafasy-collected') {
+        const clip = await loadCollectedVisualClip(
+          surah,
+          chosenVerses.map(verse => verse.number),
+          controller.signal
+        )
+
+        if (id !== requestId.current) return
+
+        const created: Prepared = {
+          verses: chosenVerses,
+          buffers: [],
+          starts: clip.starts,
+          duration: clip.duration,
+          stream: {
+            url: clip.url,
+            startSeconds: clip.startSeconds,
+          },
+        }
+
+        preparedRef.current = created
+        setPrepared(created)
+
+        setPosition(0)
+        playback.current.position = 0
+        setTab(3)
+        return
+      }
 
       const buffers: AudioBuffer[] = []
       const starts: number[] = []
@@ -1859,6 +2181,24 @@ export default function VisualAyahsPage() {
 
       const offset =
         player.position
+
+      if (prep.stream) {
+        const audio = collectedAudioElement(prep, context)
+
+        await seekCollectedAudio(
+          audio,
+          prep.stream.startSeconds + offset
+        )
+
+        await audio.play()
+
+        player.begin = context.currentTime - offset
+        player.playing = true
+        setPlaying(true)
+
+        await loopEngine.current?.start()
+        return
+      }
 
       const base =
         context.currentTime + 0.08
@@ -2093,6 +2433,21 @@ export default function VisualAyahsPage() {
       destination =
         context.createMediaStreamDestination()
 
+      if (prep.stream) {
+        const audio = collectedAudioElement(
+          prep,
+          context
+        )
+
+        await seekCollectedAudio(
+          audio,
+          prep.stream.startSeconds
+        )
+
+        collectedAudioNodeRef.current?.disconnect()
+        collectedAudioNodeRef.current?.connect(destination)
+      }
+
       recordedStream =
         new MediaStream([
           ...canvasStream.getVideoTracks(),
@@ -2218,9 +2573,22 @@ export default function VisualAyahsPage() {
 
             mediaRecorder.start(250)
 
+            if (prep.stream) {
+              const audio = collectedAudioRef.current
+
+              if (!audio) {
+                fail('تسجيل العفاسي غير متاح.')
+                return
+              }
+
+              void audio.play().catch(() => {
+                fail('تعذر تشغيل العفاسي أثناء التصدير.')
+              })
+            }
+
             const startedAt =
               context.currentTime +
-              0.12
+              (prep.stream ? 0 : 0.12)
 
             const finishAt =
               startedAt +
@@ -2265,11 +2633,18 @@ export default function VisualAyahsPage() {
               window.setInterval(
                 () => {
                   const seconds =
-                    Math.max(
-                      0,
-                      context.currentTime -
-                        startedAt
-                    )
+                    prep.stream &&
+                    collectedAudioRef.current
+                      ? Math.max(
+                          0,
+                          collectedAudioRef.current.currentTime -
+                            prep.stream.startSeconds
+                        )
+                      : Math.max(
+                          0,
+                          context.currentTime -
+                            startedAt
+                        )
 
                   exportTime.current =
                     Math.min(
@@ -2290,8 +2665,10 @@ export default function VisualAyahsPage() {
                   )
 
                   if (
-                    context.currentTime >=
-                    finishAt + 0.18
+                    prep.stream
+                      ? seconds >= prep.duration
+                      : context.currentTime >=
+                        finishAt + 0.18
                   ) {
                     stopRecording()
                   }
@@ -2399,6 +2776,19 @@ export default function VisualAyahsPage() {
         .forEach(
           (track) => track.stop()
         )
+
+      if (prep.stream) {
+        collectedAudioRef.current?.pause()
+
+        if (collectedAudioNodeRef.current) {
+          try {
+            collectedAudioNodeRef.current.disconnect()
+            collectedAudioNodeRef.current.connect(
+              context.destination
+            )
+          } catch {}
+        }
+      }
 
       destination?.disconnect()
 

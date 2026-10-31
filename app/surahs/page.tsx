@@ -202,6 +202,29 @@ type OfflinePackage = {
   downloadedAt: string
 }
 
+// SAMEE3_ALAFASY_COLLECTED_INDEX_VISUAL_V2
+const COLLECTED_API_ID = 9000123
+const COLLECTED_MOSHAF_ID = 900012301
+
+function createCollectedReciter(): Reciter {
+  return {
+    id: '9000123-900012301',
+    apiId: COLLECTED_API_ID,
+    label: 'مشاري العفاسي – مصحف مجمع',
+    moshaf: {
+      id: COLLECTED_MOSHAF_ID,
+      name: 'حفص عن عاصم – مصحف مجمع',
+      rewaya_id: 1,
+      server: window.location.origin + '/api/alafasy-audio/',
+      surah_total: 114,
+      surah_list: Array.from(
+        { length: 114 },
+        (_, index) => index + 1
+      ).join(','),
+    },
+  }
+}
+
 const OFFLINE_PACKAGES_KEY = 'samee3_offline_packages_v1'
 const OFFLINE_AUDIO_CACHE = 'samee3-audio-v2'
 const REMOTE_READING_IDS: Record<RiwayaId, number> = { hafs: 1, warsh: 2, qalun: 5, douri: 13, shubah: 15, sousi: 7, bazzi: 4 }
@@ -644,6 +667,17 @@ export default function QuranIndexPage() {
             surah_total: row.surahIds.length, surah_list: row.surahIds.join(',') } })
         }
       } catch {}
+
+      if (
+        riwayaId === 'hafs' &&
+        !result.some(
+          item => item.apiId === COLLECTED_API_ID &&
+          item.moshaf.id === COLLECTED_MOSHAF_ID
+        )
+      ) {
+        result.unshift(createCollectedReciter())
+      }
+
       return result
     }
 
@@ -721,6 +755,11 @@ export default function QuranIndexPage() {
             },
           })
         }
+      }
+
+      // Keep the collected recording independent from MP3Quran.
+      if (riwayaId === 'hafs') {
+        nextReciters.unshift(createCollectedReciter())
       }
 
       const uniqueReciters = Array.from(
