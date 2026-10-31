@@ -5,69 +5,76 @@ import catalog from '@/lib/alafasy-riwayat-manifest.json'
 export const dynamic = 'force-dynamic'
 
 type Entry = {
-  key: string
+  key?: string
   tracks?: Record<string, string>
+}
+
+type Context = {
+  params: Promise<{
+    mushaf: string
+    file: string
+  }>
 }
 
 export async function GET(
   _request: Request,
-  {
-    params,
-  }: {
-    params: {
-      mushaf: string
-      file: string
-    }
-  }
-) {
-  const match = /^(\d{3})\.mp3$/.exec(params.file)
+  { params }: Context
+): Promise<Response> {
+  const { mushaf, file } = await params
+
+  const match = /^(\d{3})\.mp3$/.exec(file)
 
   if (!match) {
-    return new NextResponse('Not found', {
-      status: 404,
-    })
+    return new NextResponse(
+      'Invalid surah file',
+      { status: 404 }
+    )
   }
 
   const surah = Number(match[1])
 
   if (surah < 1 || surah > 114) {
-    return new NextResponse('Not found', {
-      status: 404,
-    })
+    return new NextResponse(
+      'Invalid surah file',
+      { status: 404 }
+    )
   }
 
-  const entry = (catalog.entries as Entry[]).find(
-    item => item.key === params.mushaf
+  const items = catalog.entries as Entry[]
+
+  const entry = items.find(
+    (item) => item.key === mushaf
   )
 
   const target = entry?.tracks?.[match[1]]
 
   if (!target) {
-    return new NextResponse('Not found', {
-      status: 404,
-    })
+    return new NextResponse(
+      'Verified audio not available',
+      { status: 404 }
+    )
   }
 
   try {
-    const url = new URL(target)
+    const destination = new URL(target)
 
     if (
-      url.protocol !== 'https:' ||
-      url.username ||
-      url.password
+      destination.protocol !== 'https:' ||
+      destination.username ||
+      destination.password
     ) {
-      throw new Error('Unsafe URL')
+      return new NextResponse(
+        'Invalid audio source',
+        { status: 502 }
+      )
     }
 
-    return NextResponse.redirect(
-      url.toString(),
-      {
-        status: 307,
-        headers: {
-          'Cache-Control': 'public, max-age=3600',
-        },
-      }
-    )
+    return NextResponse.redirect(destination, {
+      status: 307,
+      headers: {
+        'Cache-Control': 'public, max-age=3600',
+      },
+    })
   } catch {
     return new NextResponse(
       'Invalid audio source',
