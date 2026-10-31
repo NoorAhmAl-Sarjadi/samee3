@@ -1,5 +1,5 @@
 
-name: SAMEE3 - Alafasy Precision Trim V3
+name: SAMEE3 - Alafasy Precision Trim V4
 
 on:
   workflow_dispatch:
@@ -8,23 +8,24 @@ permissions:
   contents: write
 
 concurrency:
-  group: samee3-alafasy-trim-v3
+  group: samee3-alafasy-precision-trim
   cancel-in-progress: false
 
 jobs:
   install:
-    name: Install, Test and Commit
+    name: Install, Repair, Build and Commit
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
     steps:
-      - name: Checkout main
+      - name: Checkout SAMEE3 main
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 1
           persist-credentials: true
 
-      - name: Setup Node.js
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -33,636 +34,34 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create independent precision editor
+      - name: Verify precision editor
         shell: bash
         run: |
-          cat > app/visual-ayahs/Samee3CollectedTrimEditor.tsx <<'TSX'
-          'use client'
+          set -euo pipefail
 
-          // SAMEE3_COLLECTED_MANUAL_TRIM_V3
-          // Only for the collected Alafasy recording.
+          FILE="app/visual-ayahs/Samee3CollectedTrimEditor.tsx"
 
-          import {
-            useCallback,
-            useEffect,
-            useRef,
-            useState,
-          } from 'react'
+          if [ ! -f "$FILE" ]; then
+            echo "::error::Precision editor file is missing."
+            echo "Expected: $FILE"
+            exit 1
+          fi
 
-          import {
-            MAX_DURATION_SECONDS,
-          } from '@/lib/samee3-visual-config'
+          grep -Fq \
+            'export function Samee3CollectedTrimEditor' \
+            "$FILE"
 
-          export type CollectedTiming = {
-            startSeconds: number
-            duration: number
-            starts: number[]
-          }
+          grep -Fq \
+            'export function applyStoredCollectedTrim' \
+            "$FILE"
 
-          type Offsets = {
-            startOffset: number
-            endOffset: number
-          }
+          grep -Fq \
+            'SAMEE3_COLLECTED_MANUAL_TRIM_V3' \
+            "$FILE"
 
-          type EditorProps = {
-            surah: number
-            from: number
-            to: number
-            streamUrl: string
-            original: CollectedTiming
-            disabled: boolean
-            onStop: () => void
-            onApply: (timing: CollectedTiming) => void
-          }
+          echo "Precision editor verified."
 
-          const EMPTY: Offsets = {
-            startOffset: 0,
-            endOffset: 0,
-          }
-
-          function storageKey(
-            surah: number,
-            from: number,
-            to: number
-          ) {
-            return (
-              'samee3_collected_visual_trim_v3:' +
-              surah + ':' + from + ':' + to
-            )
-          }
-
-          function normalize(value: number) {
-            if (!Number.isFinite(value)) return 0
-
-            return (
-              Math.round(
-                Math.max(-30, Math.min(30, value)) * 20
-              ) / 20
-            )
-          }
-
-          function readSaved(
-            surah: number,
-            from: number,
-            to: number
-          ): Offsets {
-            try {
-              const raw = localStorage.getItem(
-                storageKey(surah, from, to)
-              )
-
-              if (!raw) return { ...EMPTY }
-
-              const parsed: unknown = JSON.parse(raw)
-
-              if (
-                !parsed ||
-                typeof parsed !== 'object' ||
-                Array.isArray(parsed)
-              ) {
-                return { ...EMPTY }
-              }
-
-              const data = parsed as Record<string, unknown>
-
-              if (
-                typeof data.startOffset !== 'number' ||
-                typeof data.endOffset !== 'number' ||
-                !Number.isFinite(data.startOffset) ||
-                !Number.isFinite(data.endOffset)
-              ) {
-                return { ...EMPTY }
-              }
-
-              return {
-                startOffset: normalize(data.startOffset),
-                endOffset: normalize(data.endOffset),
-              }
-            } catch {
-              return { ...EMPTY }
-            }
-          }
-
-          export function calculateCollectedTrim(
-            original: CollectedTiming,
-            offsets: Offsets
-          ): CollectedTiming {
-            const startSeconds = Math.max(
-              0,
-              original.startSeconds + offsets.startOffset
-            )
-
-            const endSeconds =
-              original.startSeconds +
-              original.duration +
-              offsets.endOffset
-
-            const duration = endSeconds - startSeconds
-
-            if (
-              !Number.isFinite(startSeconds) ||
-              !Number.isFinite(endSeconds) ||
-              duration < 0.25 ||
-              duration > MAX_DURATION_SECONDS
-            ) {
-              throw new Error(
-                'حدود التلاوة غير صالحة. ' +
-                'اجعل النهاية بعد البداية ' +
-                'ولا تتجاوز الحد الأقصى للفيديو.'
-              )
-            }
-
-            const starts = original.starts.map(
-              relative => Math.max(
-                0,
-                Math.min(
-                  duration,
-                  original.startSeconds +
-                    relative -
-                    startSeconds
-                )
-              )
-            )
-
-            return {
-              startSeconds,
-              duration,
-              starts,
-            }
-          }
-
-          export function applyStoredCollectedTrim<
-            T extends CollectedTiming
-          >(
-            clip: T,
-            surah: number,
-            from: number,
-            to: number
-          ) {
-            const saved = readSaved(surah, from, to)
-
-            try {
-              return {
-                ...clip,
-                ...calculateCollectedTrim(clip, saved),
-              }
-            } catch {
-              return {
-                ...clip,
-                ...calculateCollectedTrim(clip, EMPTY),
-              }
-            }
-          }
-
-          async function waitForMetadata(
-            audio: HTMLAudioElement
-          ) {
-            if (audio.readyState >= 1) return
-
-            await new Promise<void>((resolve, reject) => {
-              const cleanup = () => {
-                window.clearTimeout(timeout)
-                audio.removeEventListener(
-                  'loadedmetadata',
-                  success
-                )
-                audio.removeEventListener('error', failure)
-              }
-
-              const success = () => {
-                cleanup()
-                resolve()
-              }
-
-              const failure = () => {
-                cleanup()
-                reject(
-                  new Error(
-                    'تعذر تحميل التسجيل الصوتي للاختبار.'
-                  )
-                )
-              }
-
-              const timeout = window.setTimeout(
-                failure,
-                15000
-              )
-
-              audio.addEventListener(
-                'loadedmetadata',
-                success
-              )
-              audio.addEventListener('error', failure)
-
-              audio.load()
-            })
-          }
-
-          const button =
-            'inline-flex min-h-11 items-center justify-center ' +
-            'rounded-xl border border-[#d9cdb6] bg-white ' +
-            'px-3 py-2 text-sm font-bold text-[#245343] ' +
-            'disabled:opacity-40'
-
-          export function Samee3CollectedTrimEditor({
-            surah,
-            from,
-            to,
-            streamUrl,
-            original,
-            disabled,
-            onStop,
-            onApply,
-          }: EditorProps) {
-            const [offsets, setOffsets] = useState<Offsets>(
-              () => readSaved(surah, from, to)
-            )
-
-            const [message, setMessage] = useState('')
-            const [error, setError] = useState('')
-            const [preview, setPreview] = useState<
-              'start' | 'end' | null
-            >(null)
-
-            const audioRef = useRef<HTMLAudioElement>(null)
-            const intervalRef = useRef<number | null>(null)
-            const timeoutRef = useRef<number | null>(null)
-            const sequenceRef = useRef(0)
-
-            const stopPreview = useCallback(() => {
-              sequenceRef.current += 1
-
-              if (intervalRef.current !== null) {
-                window.clearInterval(intervalRef.current)
-                intervalRef.current = null
-              }
-
-              if (timeoutRef.current !== null) {
-                window.clearTimeout(timeoutRef.current)
-                timeoutRef.current = null
-              }
-
-              audioRef.current?.pause()
-              setPreview(null)
-            }, [])
-
-            useEffect(() => {
-              return () => {
-                sequenceRef.current += 1
-
-                if (intervalRef.current !== null) {
-                  window.clearInterval(intervalRef.current)
-                }
-
-                if (timeoutRef.current !== null) {
-                  window.clearTimeout(timeoutRef.current)
-                }
-
-                audioRef.current?.pause()
-              }
-            }, [stopPreview])
-
-            const current = (() => {
-              try {
-                return calculateCollectedTrim(
-                  original,
-                  offsets
-                )
-              } catch {
-                return calculateCollectedTrim(
-                  original,
-                  EMPTY
-                )
-              }
-            })()
-
-            function changeOffset(
-              kind: keyof Offsets,
-              value: number
-            ) {
-              if (disabled) return
-
-              const next: Offsets = {
-                ...offsets,
-                [kind]: normalize(value),
-              }
-
-              try {
-                const timing = calculateCollectedTrim(
-                  original,
-                  next
-                )
-
-                stopPreview()
-                onStop()
-                onApply(timing)
-                setOffsets(next)
-                setError('')
-                setMessage(
-                  'تم تطبيق الضبط على التشغيل والتصدير.'
-                )
-              } catch (cause) {
-                setError(
-                  cause instanceof Error
-                    ? cause.message
-                    : 'تعذر ضبط التوقيت.'
-                )
-              }
-            }
-
-            function save() {
-              try {
-                localStorage.setItem(
-                  storageKey(surah, from, to),
-                  JSON.stringify(offsets)
-                )
-
-                setError('')
-                setMessage(
-                  'تم حفظ الضبط لهذا المقطع على جهازك.'
-                )
-              } catch {
-                setError(
-                  'تعذر الحفظ على هذا الجهاز.'
-                )
-              }
-            }
-
-            function reset() {
-              if (disabled) return
-
-              try {
-                const timing = calculateCollectedTrim(
-                  original,
-                  EMPTY
-                )
-
-                stopPreview()
-                onStop()
-                onApply(timing)
-
-                localStorage.removeItem(
-                  storageKey(surah, from, to)
-                )
-
-                setOffsets({ ...EMPTY })
-                setError('')
-                setMessage(
-                  'تمت استعادة التوقيت الأصلي.'
-                )
-              } catch (cause) {
-                setError(
-                  cause instanceof Error
-                    ? cause.message
-                    : 'تعذرت استعادة التوقيت.'
-                )
-              }
-            }
-
-            async function listen(
-              side: 'start' | 'end'
-            ) {
-              if (disabled) return
-
-              stopPreview()
-              onStop()
-
-              const audio = audioRef.current
-
-              if (!audio) return
-
-              const sequence = ++sequenceRef.current
-
-              const begin =
-                side === 'start'
-                  ? current.startSeconds
-                  : Math.max(
-                      current.startSeconds,
-                      current.startSeconds +
-                        current.duration - 3
-                    )
-
-              const finish =
-                side === 'start'
-                  ? Math.min(
-                      current.startSeconds +
-                        current.duration,
-                      current.startSeconds + 3
-                    )
-                  : current.startSeconds +
-                    current.duration
-
-              try {
-                await waitForMetadata(audio)
-
-                if (sequence !== sequenceRef.current) {
-                  return
-                }
-
-                audio.currentTime = begin
-                await audio.play()
-
-                if (sequence !== sequenceRef.current) {
-                  audio.pause()
-                  return
-                }
-
-                setPreview(side)
-                setError('')
-
-                intervalRef.current = window.setInterval(
-                  () => {
-                    if (
-                      audio.paused ||
-                      audio.ended ||
-                      audio.currentTime >= finish - 0.03
-                    ) {
-                      stopPreview()
-                    }
-                  },
-                  35
-                )
-
-                timeoutRef.current = window.setTimeout(
-                  stopPreview,
-                  8000
-                )
-              } catch (cause) {
-                stopPreview()
-
-                setError(
-                  cause instanceof Error
-                    ? cause.message
-                    : 'تعذر الاستماع للطرف المحدد.'
-                )
-              }
-            }
-
-            return (
-              <section
-                className="mt-4 rounded-2xl border border-[#d9c8a5] bg-[#fffcf3] p-4"
-                dir="rtl"
-              >
-                <h3 className="text-base font-extrabold text-[#245343]">
-                  ضبط بداية ونهاية تلاوة العفاسي المجمع
-                </h3>
-
-                <p className="mt-2 text-xs leading-6 text-[#746d5b]">
-                  التحكم خاص بالمصحف المجمع فقط.
-                  الرقم الموجب يؤخر الموضع، والسالب يقدمه.
-                  مقدار الضبط 0.05 ثانية.
-                </p>
-
-                {([
-                  {
-                    key: 'startOffset' as const,
-                    title: 'ضبط بداية التلاوة',
-                  },
-                  {
-                    key: 'endOffset' as const,
-                    title: 'ضبط نهاية التلاوة',
-                  },
-                ]).map(item => (
-                  <div
-                    key={item.key}
-                    className="mt-4 rounded-xl border border-[#e7dfd0] bg-white p-3"
-                  >
-                    <label className="block text-sm font-bold text-[#245343]">
-                      {item.title}
-                    </label>
-
-                    <div className="mt-3 flex items-center gap-3">
-                      <input
-                        aria-label={item.title}
-                        type="range"
-                        min={-30}
-                        max={30}
-                        step={0.05}
-                        disabled={disabled}
-                        value={offsets[item.key]}
-                        onChange={event =>
-                          changeOffset(
-                            item.key,
-                            Number(event.target.value)
-                          )
-                        }
-                        className="min-w-0 flex-1 accent-[#245343]"
-                      />
-
-                      <input
-                        aria-label={item.title + ' بالثواني'}
-                        type="number"
-                        min={-30}
-                        max={30}
-                        step={0.05}
-                        disabled={disabled}
-                        value={offsets[item.key]}
-                        onChange={event =>
-                          changeOffset(
-                            item.key,
-                            Number(event.target.value)
-                          )
-                        }
-                        className="w-24 rounded-lg border border-[#d9cdb6] px-2 py-2 text-center text-sm"
-                      />
-                    </div>
-                  </div>
-                ))}
-
-                <div className="mt-4 rounded-xl bg-white p-3 text-center text-xs leading-7 text-[#245343]">
-                  البداية: {current.startSeconds.toFixed(2)}
-                  {' '}ثانية
-                  {' · '}
-                  النهاية: {(
-                    current.startSeconds +
-                    current.duration
-                  ).toFixed(2)}
-                  {' '}ثانية
-                  {' · '}
-                  المدة: {current.duration.toFixed(2)}
-                  {' '}ثانية
-                </div>
-
-                <audio
-                  ref={audioRef}
-                  src={streamUrl}
-                  preload="auto"
-                  className="hidden"
-                />
-
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className={button}
-                    disabled={disabled}
-                    onClick={() => void listen('start')}
-                  >
-                    سماع أول 3 ثوانٍ
-                  </button>
-
-                  <button
-                    type="button"
-                    className={button}
-                    disabled={disabled}
-                    onClick={() => void listen('end')}
-                  >
-                    سماع آخر 3 ثوانٍ
-                  </button>
-                </div>
-
-                {preview && (
-                  <button
-                    type="button"
-                    className={button + ' mt-2 w-full'}
-                    onClick={stopPreview}
-                  >
-                    إيقاف الاستماع
-                  </button>
-                )}
-
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className={button}
-                    disabled={disabled}
-                    onClick={save}
-                  >
-                    حفظ الضبط
-                  </button>
-
-                  <button
-                    type="button"
-                    className={button}
-                    disabled={disabled}
-                    onClick={reset}
-                  >
-                    التوقيت الأصلي
-                  </button>
-                </div>
-
-                {message && (
-                  <p
-                    role="status"
-                    className="mt-3 text-xs text-[#245343]"
-                  >
-                    {message}
-                  </p>
-                )}
-
-                {error && (
-                  <p
-                    role="alert"
-                    className="mt-3 text-xs text-red-700"
-                  >
-                    {error}
-                  </p>
-                )}
-              </section>
-            )
-          }
-          TSX
-
-      - name: Integrate editor using TypeScript AST
+      - name: Integrate Alafasy trim safely
         shell: bash
         run: |
           node <<'NODE'
@@ -671,27 +70,33 @@ jobs:
           const fs = require('node:fs')
           const ts = require('typescript')
 
-          const file = 'app/visual-ayahs/page.tsx'
-          const marker = 'SAMEE3_COLLECTED_MANUAL_TRIM_V3'
-          const component =
-            'app/visual-ayahs/Samee3CollectedTrimEditor.tsx'
+          const filename = 'app/visual-ayahs/page.tsx'
+          const marker = 'SAMEE3_COLLECTED_MANUAL_TRIM_V4'
 
-          if (!fs.existsSync(file)) {
-            throw new Error('Visual Ayahs source not found.')
+          if (!fs.existsSync(filename)) {
+            throw new Error(
+              'Visual Ayahs page.tsx was not found.'
+            )
           }
 
-          if (!fs.existsSync(component)) {
-            throw new Error('Precision editor source not found.')
-          }
+          let source = fs
+            .readFileSync(filename, 'utf8')
+            .replace(/\r\n/g, '\n')
 
-          let source = fs.readFileSync(file, 'utf8')
-
-          if (source.includes(marker)) {
-            console.log('V3 integration already exists.')
+          if (
+            source.includes(marker) ||
+            source.includes(
+              'SAMEE3_COLLECTED_MANUAL_TRIM_V3'
+            )
+          ) {
+            console.log(
+              'Precision trim integration already exists.'
+            )
             process.exit(0)
           }
 
-          // Avoid the broken line joins from earlier attempts.
+          // Repair syntax left by earlier failed patches,
+          // without changing audio or timing calculations.
           source = source.replace(
             /(useRef<HTMLAudioElement\s*\|\s*null>\(null\))[ \t]+(const collectedAudioNodeRef\s*=)/g,
             '$1\n\n  $2'
@@ -702,35 +107,51 @@ jobs:
             '$1\n\n  $2'
           )
 
-          const sf = ts.createSourceFile(
-            file,
+          const file = ts.createSourceFile(
+            filename,
             source,
             ts.ScriptTarget.Latest,
             true,
             ts.ScriptKind.TSX
           )
 
-          if (sf.parseDiagnostics.length) {
+          function checkSyntax(parsed, label) {
+            if (!parsed.parseDiagnostics.length) return
+
+            const messages = parsed.parseDiagnostics
+              .slice(0, 5)
+              .map(item =>
+                ts.flattenDiagnosticMessageText(
+                  item.messageText,
+                  '\n'
+                )
+              )
+
             throw new Error(
-              'Existing Visual Ayahs page has syntax errors. ' +
-              'No integration changes will be committed.'
+              label + ':\n' + messages.join('\n')
             )
           }
 
+          checkSyntax(file, 'Existing TSX syntax error')
+
           const edits = []
 
-          function insert(pos, text) {
-            edits.push({ start: pos, end: pos, text })
+          function insert(position, text) {
+            edits.push({
+              start: position,
+              end: position,
+              text,
+            })
           }
 
           function replace(start, end, text) {
             edits.push({ start, end, text })
           }
 
-          // Extend the existing Prepared type.
+          // Locate the Prepared type through TypeScript AST.
           let preparedType = null
 
-          for (const statement of sf.statements) {
+          for (const statement of file.statements) {
             if (
               ts.isTypeAliasDeclaration(statement) &&
               statement.name.text === 'Prepared' &&
@@ -743,47 +164,51 @@ jobs:
 
           if (!preparedType) {
             throw new Error(
-              'Prepared type could not be identified.'
+              'Unable to find the Prepared type.'
             )
           }
 
-          const existingOriginal = preparedType.members.some(
-            member =>
-              member.name?.getText(sf) ===
-              'collectedOriginal'
-          )
+          const alreadyHasOriginal =
+            preparedType.members.some(
+              member =>
+                member.name?.getText(file) ===
+                'collectedOriginal'
+            )
 
-          if (!existingOriginal) {
+          if (!alreadyHasOriginal) {
             insert(
               preparedType.getEnd() - 1,
-              '\n  collectedOriginal?: {' +
-              '\n    startSeconds: number' +
-              '\n    duration: number' +
-              '\n    starts: number[]' +
-              '\n  }\n'
+              `
+                collectedOriginal?: {
+                  startSeconds: number
+                  duration: number
+                  starts: number[]
+                }
+              `
             )
           }
 
-          // Find the actual collected Alafasy preparation block.
-          let target = null
-
-          function isVariableNamed(statement, name) {
+          function isNamedVariable(statement, name) {
             return (
               ts.isVariableStatement(statement) &&
               statement.declarationList.declarations.some(
-                decl => decl.name.getText(sf) === name
+                declaration =>
+                  declaration.name.getText(file) === name
               )
             )
           }
 
-          function visit(node) {
+          // Find the collected Alafasy preparation block.
+          let preparedStatement = null
+
+          function findCollectedPreparation(node) {
             if (ts.isBlock(node)) {
               const statements = [...node.statements]
 
               const clipIndex = statements.findIndex(
                 statement =>
-                  isVariableNamed(statement, 'clip') &&
-                  statement.getText(sf).includes(
+                  isNamedVariable(statement, 'clip') &&
+                  statement.getText(file).includes(
                     'loadCollectedVisualClip'
                   )
               )
@@ -792,159 +217,195 @@ jobs:
                 const created = statements
                   .slice(clipIndex + 1)
                   .find(statement =>
-                    isVariableNamed(statement, 'created')
+                    isNamedVariable(statement, 'created')
                   )
 
                 if (created) {
-                  if (target) {
+                  if (preparedStatement) {
                     throw new Error(
-                      'Multiple collected preparation blocks.'
+                      'Multiple collected preparation blocks found.'
                     )
                   }
 
-                  target = created
+                  preparedStatement = created
                 }
               }
             }
 
-            ts.forEachChild(node, visit)
+            ts.forEachChild(
+              node,
+              findCollectedPreparation
+            )
           }
 
-          visit(sf)
+          findCollectedPreparation(file)
 
-          if (!target) {
+          if (!preparedStatement) {
             throw new Error(
-              'Collected Alafasy preparation block missing. ' +
-              'Existing readers will not be modified.'
+              'Collected Alafasy preparation block not found. ' +
+              'No changes have been saved.'
             )
           }
 
           const declaration =
-            target.declarationList.declarations.find(
-              item => item.name.getText(sf) === 'created'
-            )
+            preparedStatement.declarationList.declarations
+              .find(item =>
+                item.name.getText(file) === 'created'
+              )
 
-          const obj = declaration?.initializer
+          const object = declaration?.initializer
 
-          if (!obj || !ts.isObjectLiteralExpression(obj)) {
+          if (
+            !object ||
+            !ts.isObjectLiteralExpression(object)
+          ) {
             throw new Error(
-              'Collected Prepared object could not be parsed.'
+              'Unable to inspect the collected Prepared object.'
             )
           }
 
-          const property = (object, name) =>
-            object.properties.find(
-              item =>
-                ts.isPropertyAssignment(item) &&
-                item.name.getText(sf) === name
+          function findProperty(objectNode, name) {
+            return objectNode.properties.find(
+              property =>
+                ts.isPropertyAssignment(property) &&
+                property.name.getText(file) === name
             )
+          }
 
-          const startsProperty = property(obj, 'starts')
-          const durationProperty = property(obj, 'duration')
-          const streamProperty = property(obj, 'stream')
+          const starts = findProperty(
+            object,
+            'starts'
+          )
+
+          const duration = findProperty(
+            object,
+            'duration'
+          )
+
+          const stream = findProperty(
+            object,
+            'stream'
+          )
 
           if (
-            !startsProperty ||
-            !durationProperty ||
-            !streamProperty ||
+            !starts ||
+            !duration ||
+            !stream ||
             !ts.isObjectLiteralExpression(
-              streamProperty.initializer
+              stream.initializer
             )
           ) {
             throw new Error(
-              'Collected Prepared fields do not match ' +
-              'the expected streaming structure.'
+              'Collected audio timing fields are incomplete.'
             )
           }
 
-          const startSecondsProperty = property(
-            streamProperty.initializer,
+          const startSeconds = findProperty(
+            stream.initializer,
             'startSeconds'
           )
 
-          if (!startSecondsProperty) {
+          if (!startSeconds) {
             throw new Error(
-              'Collected stream startSeconds is missing.'
+              'Collected startSeconds field is missing.'
             )
           }
 
-          const expected = [
-            [startsProperty, 'clip.starts'],
-            [durationProperty, 'clip.duration'],
-            [startSecondsProperty, 'clip.startSeconds'],
+          const expectedValues = [
+            [starts, 'clip.starts'],
+            [duration, 'clip.duration'],
+            [startSeconds, 'clip.startSeconds'],
           ]
 
-          for (const [item, value] of expected) {
-            if (item.initializer.getText(sf) !== value) {
+          for (const [property, expected] of expectedValues) {
+            const actual = property.initializer.getText(
+              file
+            )
+
+            if (actual !== expected) {
               throw new Error(
-                'Unexpected collected timing expression: ' +
-                item.initializer.getText(sf)
+                'Unexpected original timing expression: ' +
+                actual
               )
             }
           }
 
-          const lineStart =
+          const statementStart =
+            preparedStatement.getStart(file)
+
+          const startOfLine =
             source.lastIndexOf(
               '\n',
-              target.getStart(sf) - 1
+              statementStart - 1
             ) + 1
 
-          const indentation = source.slice(
-            lineStart,
-            target.getStart(sf)
+          const indent = source.slice(
+            startOfLine,
+            statementStart
           )
 
+          // Adjust collected Alafasy timings only.
           insert(
-            target.getStart(sf),
+            statementStart,
             'const samee3AdjustedClip = ' +
             'applyStoredCollectedTrim(' +
             'clip, surah, from, to)\n' +
-            indentation
+            indent
           )
 
           replace(
-            startsProperty.initializer.getStart(sf),
-            startsProperty.initializer.getEnd(),
+            starts.initializer.getStart(file),
+            starts.initializer.getEnd(),
             'samee3AdjustedClip.starts'
           )
 
           replace(
-            durationProperty.initializer.getStart(sf),
-            durationProperty.initializer.getEnd(),
+            duration.initializer.getStart(file),
+            duration.initializer.getEnd(),
             'samee3AdjustedClip.duration'
           )
 
           replace(
-            startSecondsProperty.initializer.getStart(sf),
-            startSecondsProperty.initializer.getEnd(),
+            startSeconds.initializer.getStart(file),
+            startSeconds.initializer.getEnd(),
             'samee3AdjustedClip.startSeconds'
           )
 
-          if (!property(obj, 'collectedOriginal')) {
-            const last = obj.properties[
-              obj.properties.length - 1
+          if (
+            !findProperty(object, 'collectedOriginal')
+          ) {
+            const last = object.properties[
+              object.properties.length - 1
             ]
+
+            if (!last) {
+              throw new Error(
+                'Prepared object has no fields.'
+              )
+            }
 
             const tail = source.slice(
               last.getEnd(),
-              obj.getEnd() - 1
+              object.getEnd() - 1
             )
 
             const comma = tail.includes(',') ? '' : ','
 
             insert(
-              obj.getEnd() - 1,
+              object.getEnd() - 1,
               comma +
-              '\n            collectedOriginal: {' +
-              '\n              startSeconds: clip.startSeconds,' +
-              '\n              duration: clip.duration,' +
-              '\n              starts: clip.starts,' +
-              '\n            },\n          '
+              `
+                collectedOriginal: {
+                  startSeconds: clip.startSeconds,
+                  duration: clip.duration,
+                  starts: clip.starts,
+                },
+              `
             )
           }
 
-          // Insert the UI at the existing prepared-audio area.
-          const jsxLocations = []
+          // Locate an existing prepared-audio JSX region.
+          const uiLocations = []
 
           function findPreparedUI(node) {
             if (
@@ -953,19 +414,22 @@ jobs:
               ts.isBinaryExpression(node.expression) &&
               node.expression.operatorToken.kind ===
                 ts.SyntaxKind.AmpersandAmpersandToken &&
-              node.expression.left.getText(sf) === 'prepared'
+              node.expression.left.getText(file) ===
+                'prepared'
             ) {
-              jsxLocations.push(node.getStart(sf))
+              uiLocations.push(
+                node.getStart(file)
+              )
             }
 
             ts.forEachChild(node, findPreparedUI)
           }
 
-          findPreparedUI(sf)
+          findPreparedUI(file)
 
-          if (!jsxLocations.length) {
+          if (!uiLocations.length) {
             throw new Error(
-              'Prepared audio UI location was not found.'
+              'Prepared audio interface was not found.'
             )
           }
 
@@ -1006,26 +470,29 @@ jobs:
                 />
               )}
 
-            `
+          `
 
-          insert(jsxLocations[0], editorUI)
+          insert(
+            uiLocations[0],
+            editorUI
+          )
 
-          // Import after 'use client', never inside JSX.
-          const firstLineEnd = source.indexOf('\n')
+          // Add imports after the client directive.
+          const firstNewline = source.indexOf('\n')
 
           if (
-            firstLineEnd < 0 ||
-            !source.slice(0, firstLineEnd).includes(
-              "'use client'"
-            )
+            firstNewline < 0 ||
+            !source
+              .slice(0, firstNewline)
+              .includes("'use client'")
           ) {
             throw new Error(
-              'The Visual Ayahs client directive is missing.'
+              'Visual Ayahs client directive is missing.'
             )
           }
 
           insert(
-            firstLineEnd + 1,
+            firstNewline + 1,
             `// ${marker}\n` +
             `import {\n` +
             `  Samee3CollectedTrimEditor,\n` +
@@ -1033,8 +500,12 @@ jobs:
             `} from './Samee3CollectedTrimEditor'\n`
           )
 
-          // Apply changes from right to left, preserving offsets.
-          edits.sort((a, b) => b.start - a.start)
+          // Apply edits from the end to avoid shifting offsets.
+          edits.sort(
+            (a, b) =>
+              b.start - a.start ||
+              b.end - a.end
+          )
 
           for (const edit of edits) {
             source =
@@ -1043,29 +514,18 @@ jobs:
               source.slice(edit.end)
           }
 
-          const checked = ts.createSourceFile(
-            file,
+          const result = ts.createSourceFile(
+            filename,
             source,
             ts.ScriptTarget.Latest,
             true,
             ts.ScriptKind.TSX
           )
 
-          if (checked.parseDiagnostics.length) {
-            const errors = checked.parseDiagnostics
-              .slice(0, 5)
-              .map(item =>
-                ts.flattenDiagnosticMessageText(
-                  item.messageText,
-                  '\n'
-                )
-              )
-
-            throw new Error(
-              'Generated TSX failed syntax verification:\n' +
-              errors.join('\n')
-            )
-          }
+          checkSyntax(
+            result,
+            'Generated TSX syntax error'
+          )
 
           const required = [
             marker,
@@ -1076,53 +536,121 @@ jobs:
             '<Samee3CollectedTrimEditor',
           ]
 
-          for (const item of required) {
-            if (!source.includes(item)) {
+          for (const token of required) {
+            if (!source.includes(token)) {
               throw new Error(
-                'Incomplete integration: ' + item
+                'Incomplete integration: ' + token
               )
             }
           }
 
-          // Write only after every structural check passes.
-          fs.writeFileSync(file, source, 'utf8')
+          // Only write after all checks have passed.
+          fs.writeFileSync(
+            filename,
+            source,
+            'utf8'
+          )
 
           console.log(
-            'Precision trim V3 integrated successfully.'
+            'Alafasy Precision Trim V4 integrated.'
           )
+
           console.log(
-            'Other readers and video templates unchanged.'
+            'Other reciters and templates were not modified.'
           )
           NODE
 
-      - name: Validate changed files
+      - name: Remove generated trailing whitespace
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          paths = [
+              Path("app/visual-ayahs/page.tsx"),
+              Path(
+                  "app/visual-ayahs/"
+                  "Samee3CollectedTrimEditor.tsx"
+              ),
+          ]
+
+          for path in paths:
+              if not path.is_file():
+                  raise SystemExit(
+                      f"ERROR: Missing file: {path}"
+                  )
+
+              original = path.read_text(
+                  encoding="utf-8"
+              )
+
+              # Remove whitespace at line endings,
+              # including whitespace-only blank lines.
+              repaired = re.sub(
+                  r"(?m)[ \t]+$",
+                  "",
+                  original
+              )
+
+              if repaired != original:
+                  path.write_text(
+                      repaired,
+                      encoding="utf-8"
+                  )
+
+                  print(
+                      f"Whitespace cleaned: {path}"
+                  )
+              else:
+                  print(
+                      f"No whitespace problems: {path}"
+                  )
+          PY
+
+      - name: Validate all changed files
+        shell: bash
+        run: |
+          set -euo pipefail
 
           git diff --check
 
-          grep -Fq \
-            'SAMEE3_COLLECTED_MANUAL_TRIM_V3' \
+          grep -Eq \
+            'SAMEE3_COLLECTED_MANUAL_TRIM_V(3|4)' \
             app/visual-ayahs/page.tsx
 
           grep -Fq \
             'SAMEE3_COLLECTED_MANUAL_TRIM_V3' \
             app/visual-ayahs/Samee3CollectedTrimEditor.tsx
 
-          echo "Files changed:"
+          grep -Fq \
+            'applyStoredCollectedTrim' \
+            app/visual-ayahs/page.tsx
+
+          grep -Fq \
+            'Samee3CollectedTrimEditor' \
+            app/visual-ayahs/page.tsx
+
+          echo "Validation successful."
+          echo "Changed files:"
           git status --short
 
-      - name: Verify production build
+      - name: Build SAMEE3
         run: npm run build
 
-      - name: Commit only after successful build
+      - name: Commit verified files
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          git config user.name "github-actions[bot]"
-          git config user.email \
+          git config \
+            user.name \
+            "github-actions[bot]"
+
+          git config \
+            user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add \
@@ -1130,23 +658,24 @@ jobs:
             app/visual-ayahs/Samee3CollectedTrimEditor.tsx
 
           if git diff --cached --quiet; then
-            echo "No new changes to commit."
+            echo "No changes to commit."
             exit 0
           fi
 
           git commit -m \
-            "feat: add isolated Alafasy collected trim V3"
+            "feat: install verified Alafasy precision trim V4"
 
           git push origin HEAD:main
 
-      - name: Complete
+      - name: Final summary
         shell: bash
         run: |
           {
-            echo "## SAMEE3 - Alafasy Precision Trim V3"
+            echo "## SAMEE3 - Precision Trim V4"
             echo ""
-            echo "- Independent trim editor created"
-            echo "- TypeScript syntax checked"
+            echo "- Existing precision editor verified"
+            echo "- Visual Ayahs integration checked"
+            echo "- Trailing whitespace cleaned"
             echo "- Production build passed"
-            echo "- Changes committed to main"
+            echo "- Verified changes committed"
           } >> "$GITHUB_STEP_SUMMARY"
